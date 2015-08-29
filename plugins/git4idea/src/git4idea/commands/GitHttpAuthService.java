@@ -15,14 +15,14 @@
  */
 package git4idea.commands;
 
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.git4idea.http.GitAskPassApp;
 import org.jetbrains.git4idea.http.GitAskPassXmlRpcHandler;
 import org.jetbrains.git4idea.ssh.GitXmlRpcHandlerService;
 import org.jetbrains.git4idea.util.ScriptGenerator;
+
+import java.util.Collection;
 
 /**
  * Provides the authentication mechanism for Git HTTP connections.
@@ -47,8 +47,9 @@ public abstract class GitHttpAuthService extends GitXmlRpcHandlerService<GitHttp
    * Creates new {@link GitHttpAuthenticator} that will be requested to handle username and password requests from Git.
    */
   @NotNull
-  public abstract GitHttpAuthenticator createAuthenticator(@NotNull Project project, @Nullable ModalityState state,
-                                                           @NotNull GitCommand command, @NotNull String url);
+  public abstract GitHttpAuthenticator createAuthenticator(@NotNull Project project,
+                                                           @NotNull GitCommand command,
+                                                           @NotNull Collection<String> urls);
 
   /**
    * Internal handler implementation class, it is made public to be accessible via XML RPC.

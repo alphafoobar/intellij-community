@@ -16,6 +16,7 @@
 package com.intellij.debugger.ui.impl.watch;
 
 import com.sun.jdi.Method;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +27,7 @@ import java.util.Map;
  */
 public class MethodsTracker {
   private final Map<Method, Integer> myMethodToOccurrenceMap = new HashMap<Method, Integer>();
+  private final Map<Integer, Integer> myInitialOccurence = new HashMap<Integer, Integer>();
 
   public final class MethodOccurrence {
     private final Method myMethod;
@@ -49,8 +51,14 @@ public class MethodsTracker {
     }
   }
 
-  public MethodOccurrence getMethodOccurrence(Method method) {
-    return new MethodOccurrence(method, assignOccurrenceIndex(method));
+  public MethodOccurrence getMethodOccurrence(int frameIndex, @Nullable Method method) {
+    Integer initial = myInitialOccurence.get(frameIndex);
+    if (initial == null) {
+      initial = getOccurrenceCount(method);
+      myMethodToOccurrenceMap.put(method, initial + 1);
+      myInitialOccurence.put(frameIndex, initial);
+    }
+    return new MethodOccurrence(method, initial);
   }
 
   private int getOccurrenceCount(Method method) {
@@ -59,14 +67,5 @@ public class MethodsTracker {
     }
     final Integer integer = myMethodToOccurrenceMap.get(method);
     return integer != null? integer.intValue(): 0;
-  }
-
-  private int assignOccurrenceIndex(Method method) {
-    if (method == null) {
-      return 0;
-    }
-    final int count = getOccurrenceCount(method);
-    myMethodToOccurrenceMap.put(method, count + 1);
-    return count;
   }
 }

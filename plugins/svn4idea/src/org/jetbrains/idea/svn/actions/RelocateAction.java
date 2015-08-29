@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import com.intellij.util.WaitForProgressToShow;
 import org.jetbrains.idea.svn.SvnStatusUtil;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.dialogs.RelocateDialog;
-import org.tmatesoft.svn.core.wc.SVNInfo;
+import org.jetbrains.idea.svn.info.Info;
 
 import java.io.File;
 
@@ -49,11 +49,12 @@ public class RelocateAction extends BasicAction {
   }
 
   protected void perform(final Project project, final SvnVcs activeVcs, final VirtualFile file, DataContext context) throws VcsException {
-    SVNInfo info = activeVcs.getInfo(file);
+    Info info = activeVcs.getInfo(file);
     assert info != null;
     RelocateDialog dlg = new RelocateDialog(project, info.getURL());
-    dlg.show();
-    if (!dlg.isOK()) return;
+    if (!dlg.showAndGet()) {
+      return;
+    }
     final String beforeURL = dlg.getBeforeURL();
     final String afterURL = dlg.getAfterURL();
     if (beforeURL.equals(afterURL)) return;

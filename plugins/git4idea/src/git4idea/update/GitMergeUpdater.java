@@ -19,18 +19,23 @@ import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FilePathImpl;
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.openapi.vcs.changes.*;
+import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangeListManager;
+import com.intellij.openapi.vcs.changes.ContentRevision;
+import com.intellij.openapi.vcs.changes.LocalChangeList;
 import com.intellij.openapi.vcs.changes.ui.ChangeListViewerDialog;
 import com.intellij.openapi.vcs.update.UpdatedFiles;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.vcsUtil.VcsUtil;
 import git4idea.GitUtil;
-import git4idea.GitPlatformFacade;
 import git4idea.branch.GitBranchPair;
 import git4idea.commands.*;
 import git4idea.merge.GitConflictResolver;
@@ -120,15 +125,15 @@ public class GitMergeUpdater extends GitUpdater {
       LOG.info("Local changes would be overwritten by merge");
       final List<FilePath> paths = getFilesOverwrittenByMerge(mergeLineListener.getOutput());
       final Collection<Change> changes = getLocalChangesFilteredByFiles(paths);
-      final ChangeListViewerDialog dialog = new ChangeListViewerDialog(myProject, changes, false) {
-        @Override protected String getDescription() {
-          return "Your local changes to the following files would be overwritten by merge.<br/>" +
-                            "Please, commit your changes or stash them before you can merge.";
-        }
-      };
       UIUtil.invokeAndWaitIfNeeded(new Runnable() {
         @Override
         public void run() {
+          ChangeListViewerDialog dialog = new ChangeListViewerDialog(myProject, changes, false) {
+            @Override protected String getDescription() {
+              return "Your local changes to the following files would be overwritten by merge.<br/>" +
+                                "Please, commit your changes or stash them before you can merge.";
+            }
+          };
           dialog.show();
         }
       });
@@ -136,8 +141,9 @@ public class GitMergeUpdater extends GitUpdater {
     }
     else if (untrackedFilesWouldBeOverwrittenByMergeDetector.wasMessageDetected()) {
       LOG.info("handleMergeFailure: untracked files would be overwritten by merge");
-      UntrackedFilesNotifier.notifyUntrackedFilesOverwrittenBy(myProject, ServiceManager.getService(myProject, GitPlatformFacade.class),
-                                                               untrackedFilesWouldBeOverwrittenByMergeDetector.getFiles(), "merge", null);
+      UntrackedFilesNotifier.notifyUntrackedFilesOverwrittenBy(myProject, myRoot,
+                                                               untrackedFilesWouldBeOverwrittenByMergeDetector.getRelativeFilePaths(),
+                                                               "merge", null);
       return GitUpdateResult.ERROR;
     }
     else {
@@ -173,9 +179,14 @@ public class GitMergeUpdater extends GitUpdater {
       final Collection<String> remotelyChanged = GitUtil.getPathsDiffBetweenRefs(ServiceManager.getService(Git.class), repository,
                                                                                  currentBranch, remoteBranch);
       final List<File> locallyChanged = myChangeListManager.getAffectedPaths();
-      for (File localPath : locallyChanged) {
-        if (remotelyChanged.contains(FilePathsHelper.convertPath(localPath.getPath()))) {
-         // found a file which was changed locally and remotely => need to save
+      for (final File localPath : locallyChanged) {
+        if (ContainerUtil.exists(remotelyChanged, new Condition<String>() {
+          @Override
+          public boolean value(String remotelyChangedPath) {
+            return FileUtil.pathsEqual(localPath.getPath(), remotelyChangedPath);
+          }
+        })) {
+          // found a file which was changed locally and remotely => need to save
           return true;
         }
       }
@@ -214,7 +225,7 @@ public class GitMergeUpdater extends GitUpdater {
         path = myRoot.getPath() + "/" + GitUtil.unescapePath(line);
         final File file = new File(path);
         if (file.exists()) {
-          paths.add(new FilePathImpl(file, false));
+          paths.add(VcsUtil.getFilePath(file, false));
         }
       } catch (VcsException e) { // just continue
       }

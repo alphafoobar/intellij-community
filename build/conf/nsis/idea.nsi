@@ -12,6 +12,7 @@
 ; thus ${PRODUCT_WITH_VER} is used for uninstall registry information
 !define PRODUCT_REG_VER "${MUI_PRODUCT}\${VER_BUILD}"
 
+!define INSTALL_OPTION_ELEMENTS 4
 Name "${MUI_PRODUCT}"
 SetCompressor lzma
 ; http://nsis.sourceforge.net/Shortcuts_removal_fails_on_Windows_Vista
@@ -25,6 +26,8 @@ RequestExecutionLevel user
 !include UAC.nsh
 !include "InstallOptions.nsh"
 !include StrFunc.nsh
+!include LogicLib.nsh
+
 ${UnStrStr}
 ${UnStrLoc}
 ${UnStrRep}
@@ -55,8 +58,9 @@ Var IS_UPGRADE_60
 !define MUI_LANGDLL_REGISTRY_KEY "Software\JetBrains\${MUI_PRODUCT}\${VER_BUILD}\" 
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
-;check if the window is win7 or newer
+
 !macro INST_UNINST_SWITCH un
+  ;check if the window is win7 or newer
   Function ${un}winVersion
     ;The platform is returned into $0, minor version into $1.
     ;Windows 7 is equals values of 6 as platform and 1 as minor version.
@@ -97,6 +101,57 @@ Var IS_UPGRADE_60
     StrCpy $9 "Modified"
   complete:
 FunctionEnd
+
+Function ${un}SplitStr
+Exch $0 ; str
+Push $1 ; inQ
+Push $3 ; idx
+Push $4 ; tmp
+StrCpy $1 0
+StrCpy $3 0
+loop:
+    StrCpy $4 $0 1 $3
+    ${If} $4 == '"'
+        ${If} $1 <> 0
+            StrCpy $0 $0 "" 1
+            IntOp $3 $3 - 1
+        ${EndIf}
+        IntOp $1 $1 !
+    ${EndIf}
+    ${If} $4 == '' ; The end?
+        StrCpy $1 0
+        StrCpy $4 ','
+    ${EndIf}
+    ${If} $4 == ','
+    ${AndIf} $1 = 0
+        StrCpy $4 $0 $3
+        StrCpy $1 $4 "" -1
+        ${IfThen} $1 == '"' ${|} StrCpy $4 $4 -1 ${|}
+        killspace:
+            IntOp $3 $3 + 1
+            StrCpy $0 $0 "" $3
+            StrCpy $1 $0 1
+            StrCpy $3 0
+            StrCmp $1 ',' killspace
+        Push $0 ; Remaining
+        Exch 4
+        Pop $0
+        StrCmp $4 "" 0 moreleft
+            Pop $4
+            Pop $3
+            Pop $1
+            Return
+        moreleft:
+        Exch $4
+        Exch 2
+        Pop $1
+        Pop $3
+        Return
+    ${EndIf}
+    IntOp $3 $3 + 1
+    Goto loop
+FunctionEnd
+
 !macroend
 !insertmacro INST_UNINST_SWITCH ""
 !insertmacro INST_UNINST_SWITCH "un."
@@ -289,6 +344,8 @@ FunctionEnd
 !insertmacro MUI_PAGE_WELCOME
 
 Page custom uninstallOldVersionDialog
+
+Var productDir
 Var control_fields
 Var max_fields
 
@@ -312,7 +369,7 @@ Page custom ConfirmDesktopShortcut
 !insertmacro MUI_PAGE_FINISH
 
 !define MUI_UNINSTALLER
-!insertmacro MUI_UNPAGE_CONFIRM
+;!insertmacro MUI_UNPAGE_CONFIRM
 UninstPage custom un.ConfirmDeleteSettings
 !insertmacro MUI_UNPAGE_INSTFILES
 
@@ -418,13 +475,14 @@ remove_previous_installation:
   CopyFiles "$3\bin\${PRODUCT_EXE_FILE}_copy" "$3\bin\${PRODUCT_EXE_FILE}"
   Delete "$3\bin\${PRODUCT_EXE_FILE}_copy"
   IfErrors 0 +3
-  MessageBox MB_YESNOCANCEL|MB_ICONQUESTION|MB_TOPMOST "$(application_running)" IDYES remove_previous_installation IDNO complete
+  MessageBox MB_OKCANCEL|MB_ICONQUESTION|MB_TOPMOST "$(application_running)" IDOK remove_previous_installation IDCANCEL complete
   goto complete
+  ; uninstallation mode
   !insertmacro INSTALLOPTIONS_READ $9 "UninstallOldVersions.ini" "Field 2" "State"
   ${If} $9 == "1"
-    ExecWait '"$3\bin\Uninstall.exe" _?=$3\bin'
-  ${else}
     ExecWait '"$3\bin\Uninstall.exe" /S'
+  ${else}
+    ExecWait '"$3\bin\Uninstall.exe" _?=$3\bin'
   ${EndIf}
   IfFileExists $3\bin\${PRODUCT_EXE_FILE} 0 uninstall
   goto complete
@@ -462,14 +520,12 @@ FunctionEnd
 
 
 Function uninstallOldVersionDialog
-  StrCpy $control_fields 3
-  StrCpy $max_fields 11
+  StrCpy $control_fields 2
+  StrCpy $max_fields 13
   StrCpy $0 "HKLM"
   StrCpy $4 0
   ReserveFile "UninstallOldVersions.ini"
   !insertmacro INSTALLOPTIONS_EXTRACT "UninstallOldVersions.ini"
-  !insertmacro MUI_HEADER_TEXT "$(uninstall_previous_installations_title)" "$(uninstall_previous_installations)"
-  !insertmacro INSTALLOPTIONS_WRITE "UninstallOldVersions.ini" "Field 1" "Text" "$(uninstall_previous_installations_prompt)"
   StrCpy $8 $control_fields
 
 get_installation_info:
@@ -500,8 +556,19 @@ ${EndIf}
 complete:
 !insertmacro INSTALLOPTIONS_WRITE "UninstallOldVersions.ini" "Settings" "NumFields" "$8"
 ${If} $8 > $control_fields
+  ;$2 used in prompt text
+  StrCpy $2 "s"
+  StrCpy $7 $control_fields
+  IntOp $7 $7 + 1
+  StrCmp $8 $7 0 +2
+    StrCpy $2 ""
+  !insertmacro MUI_HEADER_TEXT "$(uninstall_previous_installations_title)" "$(uninstall_previous_installations)"
+  !insertmacro INSTALLOPTIONS_WRITE "UninstallOldVersions.ini" "Field 1" "Text" "$(uninstall_previous_installations_prompt)"
+  !insertmacro INSTALLOPTIONS_WRITE "UninstallOldVersions.ini" "Field 3" "Flags" "FOCUS"
   !insertmacro INSTALLOPTIONS_DISPLAY "UninstallOldVersions.ini"
   ;uninstall chosen installation(s)
+
+  ;no disabled controls. StrCmp $2 "OK" loop finish
 loop:
   !insertmacro INSTALLOPTIONS_READ $0 "UninstallOldVersions.ini" "Field $8" "State"
   !insertmacro INSTALLOPTIONS_READ $3 "UninstallOldVersions.ini" "Field $8" "Text"
@@ -614,9 +681,45 @@ skip_default_instdir:
   Pop $1
   Pop $0
   !insertmacro INSTALLOPTIONS_EXTRACT "Desktop.ini"
-
 FunctionEnd
 
+
+Function ProductRegistration
+  StrCmp "${PRODUCT_WITH_VER}" "${MUI_PRODUCT} ${VER_BUILD}" eapInfo releaseInfo
+eapInfo:  
+  StrCpy $3 "${PRODUCT_WITH_VER}(EAP)"
+  goto createRegistration  
+releaseInfo:
+  StrCpy $3 "${PRODUCT_WITH_VER}"
+createRegistration:
+  StrCpy $0 "HKCR"
+  StrCpy $1 "Applications\${PRODUCT_EXE_FILE}\shell\open"
+  StrCpy $2 "FriendlyAppName"
+  call OMWriteRegStr
+  StrCpy $1 "Applications\${PRODUCT_EXE_FILE}\shell\open\command"
+  StrCpy $2 ""
+  StrCpy $3 '$INSTDIR\bin\${PRODUCT_EXE_FILE} "%1"'
+  call OMWriteRegStr
+FunctionEnd
+
+Function ProductAssociation
+ ; back up old value of an association
+ ReadRegStr $1 HKCR $R4 ""
+  StrCmp $1 "" skip_backup
+    StrCmp $1 ${PRODUCT_PATHS_SELECTOR} skip_backup
+    WriteRegStr HKCR $R4 "backup_val" $1
+skip_backup:
+  WriteRegStr HKCR $R4 "" "${PRODUCT_PATHS_SELECTOR}"
+  ReadRegStr $0 HKCR ${PRODUCT_PATHS_SELECTOR} ""
+  StrCmp $0 "" 0 command_exists
+	WriteRegStr HKCR ${PRODUCT_PATHS_SELECTOR} "" "${PRODUCT_FULL_NAME}"
+	WriteRegStr HKCR "${PRODUCT_PATHS_SELECTOR}\shell" "" "open"
+	WriteRegStr HKCR "${PRODUCT_PATHS_SELECTOR}\DefaultIcon" "" "$INSTDIR\bin\${PRODUCT_EXE_FILE},0"
+command_exists:
+ WriteRegStr HKCR "${PRODUCT_PATHS_SELECTOR}\DefaultIcon" "" " $INSTDIR\bin\${PRODUCT_EXE_FILE},0"
+ WriteRegStr HKCR "${PRODUCT_PATHS_SELECTOR}\shell\open\command" "" \
+                  '$INSTDIR\bin\${PRODUCT_EXE_FILE} "%1"'
+FunctionEnd
 
 ;------------------------------------------------------------------------------
 ; Installer sections
@@ -646,7 +749,24 @@ skip_desktop_shortcut:
                    "$INSTDIR\bin\${PRODUCT_EXE_FILE}" "" "" "" SW_SHOWNORMAL
   ${EndIf}	
 skip_quicklaunch_shortcut:
+  !insertmacro INSTALLOPTIONS_READ $R1 "Desktop.ini" "Settings" "NumFields"
+  IntCmp $R1 ${INSTALL_OPTION_ELEMENTS} do_association done do_association
+do_association:
+  StrCpy $R2 ${INSTALL_OPTION_ELEMENTS}  
+get_user_choice:
+  !insertmacro INSTALLOPTIONS_READ $R3 "Desktop.ini" "Field $R2" "State"
+  StrCmp $R3 1 "" next_association
+  !insertmacro INSTALLOPTIONS_READ $R4 "Desktop.ini" "Field $R2" "Text"
+  call ProductAssociation
+next_association:  
+  IntOp $R2 $R2 + 1
+  IntCmp $R1 $R2 get_user_choice done get_user_choice
 
+done:
+  ;registration application to be presented in Open With list
+  call ProductRegistration
+  ;reset icon cache
+  System::Call 'shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'	
 !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
 ; $STARTMENU_FOLDER stores name of IDEA folder in Start Menu,
 ; save it name in the "MenuFolder" RegValue
@@ -677,33 +797,19 @@ skip_quicklaunch_shortcut:
   StrCmp $0 "" 0 "${Index}-Skip"
 	WriteRegStr HKCR "IntelliJIdeaProjectFile" "" "IntelliJ IDEA Project File"
 	WriteRegStr HKCR "IntelliJIdeaProjectFile\shell" "" "open"
-	WriteRegStr HKCR "IntelliJIdeaProjectFile\DefaultIcon" "" "$INSTDIR\bin\idea.exe,0"
 "${Index}-Skip:"
+  WriteRegStr HKCR "IntelliJIdeaProjectFile\DefaultIcon" "" "$INSTDIR\bin\${PRODUCT_EXE_FILE},0"
   WriteRegStr HKCR "IntelliJIdeaProjectFile\shell\open\command" "" \
     '$INSTDIR\bin\${PRODUCT_EXE_FILE} "%1"'
-
-  ; back up old value of .java
- StrCmp "${PRODUCT_FULL_NAME}" "IntelliJ IDEA Community Edition" java_association
- StrCmp "${PRODUCT_FULL_NAME}" "IntelliJ IDEA" 0 skip_ipr
-java_association: 
- ReadRegStr $1 HKCR ".java" ""
- StrCmp $1 "" skip_backup
-   StrCmp $1 "IntelliJIdeaProjectFile" skip_backup
-   WriteRegStr HKCR ".java" "backup_val" $1
-skip_backup:
-  WriteRegStr HKCR ".java" "" "IntelliJIdeaProjectFile"
 !undef Index
 
 skip_ipr:
-
-  ; Rest of script
-
 
 ; readonly section
   SectionIn RO
 !include "idea_win.nsh"
 
-  IntCmp $IS_UPGRADE_60 1 skip_properties 
+  IntCmp $IS_UPGRADE_60 1 skip_properties
   SetOutPath $INSTDIR\bin
   File "${PRODUCT_PROPERTIES_FILE}"
   File "${PRODUCT_VM_OPTIONS_FILE}"
@@ -733,7 +839,7 @@ skip_properties:
   WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}" \
               "Publisher" "JetBrains s.r.o."
   WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}" \
-              "URLInfoAbout" "http://www.jetbrains.com/products"
+              "URLInfoAbout" "https://www.jetbrains.com/products"
   WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}" \
               "InstallType" "$baseRegKey"
   WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}" \
@@ -746,10 +852,15 @@ skip_properties:
   ; set the current time for installation files under $INSTDIR\bin
   ExecCmd::exec 'copy "$INSTDIR\bin\*.*s" +,,'
   call winVersion
-  ${If} $0 == "1"  
+  ${If} $0 == "1"
     ;ExecCmd::exec 'icacls "$INSTDIR" /grant %username%:F /T >"$INSTDIR"\installation_log.txt 2>"$INSTDIR"\installation_error.txt'
     AccessControl::GrantOnFile \
       "$INSTDIR" "(S-1-5-32-545)" "GenericRead + GenericExecute"
+    AccessControl::GrantOnFile \
+      "$INSTDIR\bin\${PRODUCT_EXE_FILE}.vmoptions" "(S-1-5-32-545)" "GenericRead + GenericWrite"
+    ${StrRep} $0 ${PRODUCT_EXE_FILE} ".exe" "64.exe.vmoptions"
+    AccessControl::GrantOnFile \
+      "$INSTDIR\bin\$0" "(S-1-5-32-545)" "GenericRead + GenericWrite"
   ${EndIf}
 SectionEnd
 
@@ -766,13 +877,30 @@ Function ConfirmDesktopShortcut
   !insertmacro MUI_HEADER_TEXT "$(installation_options)" "$(installation_options_prompt)"
   !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field 1" "Text" "$(create_desktop_shortcut)"
   call winVersion
-  ${If} $0 == "1" 
-    ;do not ask user about creating quick launch under Windows 7  
-    !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Settings" "NumFields" "1"
+  ${If} $0 == "1"
+    !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field 2" "Type" "Label"
+    !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field 2" "Text" ""
   ${Else}
     !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field 2" "Text" "$(create_quick_launch_shortcut)"
-  ${EndIf}	
-;  !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field 3" "Text" "$(install_for_current_user_only)"
+  ${EndIf}
+  StrCmp "${ASSOCIATION}" "NoAssociation" skip_association
+  StrCpy $R0 3
+  push "${ASSOCIATION}"
+loop:
+  call SplitStr
+  Pop $0
+  StrCmp $0 "" done
+  IntOp $R0 $R0 + 1
+  !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Field $R0" "Text" "$0"
+  goto loop
+skip_association:
+  StrCpy $R0 2
+  call winVersion
+  ${If} $0 == "1"
+  IntOp $R0 $R0 - 1
+  ${EndIf}
+done:
+  !insertmacro INSTALLOPTIONS_WRITE "Desktop.ini" "Settings" "NumFields" "$R0"
   !insertmacro INSTALLOPTIONS_DISPLAY "Desktop.ini"
 FunctionEnd
 
@@ -782,75 +910,62 @@ FunctionEnd
 ;------------------------------------------------------------------------------
 
 Function un.onInit
+  StrCpy $baseRegKey "HKCU"
+  ;admin perm. is required to uninstall?
+  ${UnStrStr} $R0 $INSTDIR $PROGRAMFILES
+  StrCmp $R0 $INSTDIR requred_admin_perm UAC_Done
+
+requred_admin_perm:
+  ;the user has admin rights?
+  UserInfo::GetAccountType
+  Pop $R2
+  StrCmp $R2 "Admin" UAC_Admin uninstall_location
+
+uninstall_location:
+  ;check if the uninstallation is running from the product location
+  IfFileExists $APPDATA\${PRODUCT_PATHS_SELECTOR}_${VER_BUILD}_Uninstall.exe UAC_Elevate copy_uninstall
+
+copy_uninstall:
+  ;do copy for unistall.exe
+  CopyFiles "$OUTDIR\Uninstall.exe" "$APPDATA\${PRODUCT_PATHS_SELECTOR}_${VER_BUILD}_Uninstall.exe"
+  ExecWait '"$APPDATA\${PRODUCT_PATHS_SELECTOR}_${VER_BUILD}_Uninstall.exe" _?=$INSTDIR'
+  Delete "$APPDATA\${PRODUCT_PATHS_SELECTOR}_${VER_BUILD}_Uninstall.exe"
+  Quit
+
+UAC_Elevate:
+  !insertmacro UAC_RunElevated
+  StrCmp 1223 $0 UAC_ElevationAborted ; UAC dialog aborted by user? - continue install under user
+  StrCmp 0 $0 0 UAC_Err ; Error?
+  StrCmp 1 $1 0 UAC_Success ;Are we the real deal or just the wrapper?
+  Quit
+UAC_ElevationAborted:
+UAC_Err:
+  Abort
+UAC_Success:
+  StrCmp 1 $3 UAC_Admin ;Admin?
+  StrCmp 3 $1 0 UAC_ElevationAborted ;Try again?
+  goto UAC_Elevate
+UAC_Admin:
+  SetShellVarContext all
+  StrCpy $baseRegKey "HKLM"
+UAC_Done:
   !insertmacro MUI_UNGETLANGUAGE
   !insertmacro INSTALLOPTIONS_EXTRACT "DeleteSettings.ini"
 FunctionEnd
 
-Function OMEnumRegKey
-  StrCmp $0 "HKCU" hkcu
-    EnumRegKey $3 HKLM $1 $4
-    goto done
-hkcu:
-    EnumRegKey $3 HKCU $1 $4
-done:
-FunctionEnd
-
-Function un.OMReadRegStr
-  StrCmp $0 "HKCU" hkcu
-    ReadRegStr $3 HKLM $1 $2
-    goto done
-hkcu:
-    ReadRegStr $3 HKCU $1 $2
-done:
-FunctionEnd
-
-Function un.OMDeleteRegValue
-  StrCmp $0 "HKCU" hkcu
-    DeleteRegValue HKLM $1 $2
-    goto done
-hkcu:
-    DeleteRegValue HKCU $1 $2
-done:
-FunctionEnd
 
 Function un.ReturnBackupRegValue
   ;replace Default str with the backup value (if there is the one) and then delete backup
   ; $1 - key (for example ".java")
   ; $2 - name (for example "backup_val")
+  Push $0
   ReadRegStr $0 HKCR $1 $2
   StrCmp $0 "" "noBackup"
     WriteRegStr HKCR $1 "" $0
     DeleteRegValue HKCR $1 $2
 noBackup:  
+  Pop $0
 FunctionEnd
-
-Function un.OMDeleteRegKeyIfEmpty
-  StrCmp $0 "HKCU" hkcu
-    DeleteRegKey /ifempty HKLM $1
-    goto done
-hkcu:
-    DeleteRegKey /ifempty HKCU $1
-done:
-FunctionEnd
-
-Function un.OMDeleteRegKey
-  StrCmp $0 "HKCU" hkcu
-    DeleteRegKey /ifempty HKLM $1
-    goto done
-hkcu:
-    DeleteRegKey /ifempty HKCU $1
-done:
-FunctionEnd
-
-Function un.OMWriteRegStr
-  StrCmp $0 "HKCU" hkcu
-    WriteRegStr HKLM $1 $2 $3
-    goto done
-hkcu:
-    WriteRegStr HKCU $1 $2 $3
-done:
-FunctionEnd
-
 
 ;------------------------------------------------------------------------------
 ; custom uninstall pages
@@ -859,8 +974,22 @@ FunctionEnd
 Function un.ConfirmDeleteSettings
   !insertmacro MUI_HEADER_TEXT "$(uninstall_options)" "$(uninstall_options_prompt)"
   !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 1" "Text" "$(prompt_delete_settings)"
-  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 2" "Text" "$(confirm_delete_caches)"
-  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 3" "Text" "$(confirm_delete_settings)"
+  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 2" "Text" $INSTDIR
+  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 3" "Text" "$(text_delete_settings)"
+  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 4" "Text" "$(confirm_delete_caches)"
+  !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Field 5" "Text" "$(confirm_delete_settings)"
+  ;do not show feedback web page checkbox for EAP builds.
+  StrCmp "${PRODUCT_WITH_VER}" "${MUI_PRODUCT} ${VER_BUILD}" hide_feedback_checkbox feedback_web_page
+feedback_web_page:
+  StrCmp "${UNINSTALL_WEB_PAGE}" "feedback_web_page" hide_feedback_checkbox done
+hide_feedback_checkbox:
+    ; do not show feedback web page checkbox through products uninstall.
+    push $R1
+    !insertmacro INSTALLOPTIONS_READ $R1 "DeleteSettings.ini" "Settings" "NumFields"
+    IntOp $R1 $R1 - 1
+    !insertmacro INSTALLOPTIONS_WRITE "DeleteSettings.ini" "Settings" "NumFields" "$R1"
+    pop $R1
+done:
   !insertmacro INSTALLOPTIONS_DISPLAY "DeleteSettings.ini"
 FunctionEnd
 
@@ -934,11 +1063,11 @@ FunctionEnd
 
 
 Section "Uninstall"
-  StrCpy $baseRegKey "HKCU"
   ; Uninstaller is in the \bin directory, we need upper level dir
+  StrCpy $productDir $INSTDIR
   StrCpy $INSTDIR $INSTDIR\..
 
-  !insertmacro INSTALLOPTIONS_READ $R2 "DeleteSettings.ini" "Field 2" "State"
+  !insertmacro INSTALLOPTIONS_READ $R2 "DeleteSettings.ini" "Field 4" "State"
   DetailPrint "Data: $DOCUMENTS\..\${PRODUCT_SETTINGS_DIR}\"
   StrCmp $R2 1 "" skip_delete_caches
    ;find the path to caches (system) folder
@@ -952,7 +1081,7 @@ Section "Uninstall"
 ;   RmDir /r $DOCUMENTS\..\${PRODUCT_SETTINGS_DIR}\system
 skip_delete_caches:
 
-  !insertmacro INSTALLOPTIONS_READ $R3 "DeleteSettings.ini" "Field 3" "State"
+  !insertmacro INSTALLOPTIONS_READ $R3 "DeleteSettings.ini" "Field 5" "State"
   StrCmp $R3 1 "" skip_delete_settings
     ;find the path to settings (config) folder
     StrCpy $0 "config"
@@ -989,8 +1118,7 @@ skip_delete_settings:
   ReadRegStr $R9 HKCU "Software\${MANUFACTURER}\${PRODUCT_REG_VER}" "MenuFolder"
   StrCmp $R9 "" "" clear_shortcuts
   ReadRegStr $R9 HKLM "Software\${MANUFACTURER}\${PRODUCT_REG_VER}" "MenuFolder"
-  StrCmp $R9 "" clear_Registry
-  StrCpy $baseRegKey "HKLM"
+  StrCmp $R9 "" clear_registry
   StrCpy $5 "Software\${MANUFACTURER}"
 ;  call un.winVersion
 ; ${If} $0 == "1"
@@ -1013,35 +1141,36 @@ keep_current_user:
   Delete "$DESKTOP\${PRODUCT_FULL_NAME_WITH_VER}.lnk"
   Delete "$QUICKLAUNCH\${PRODUCT_FULL_NAME_WITH_VER}.lnk"
 
-clear_Registry:
+clear_registry:
   StrCpy $5 "Software\${MANUFACTURER}"
-; call un.winVersion
-; ${If} $0 == "1"
-;    StrCpy $5 "Software\Wow6432Node\${MANUFACTURER}"
-; ${EndIf}
+  call un.winVersion
+  ${If} $0 == "1"
+    StrCpy $5 "Software\Wow6432Node\${MANUFACTURER}"
+  ${EndIf}
 
   StrCpy $0 $baseRegKey
   StrCpy $1 "$5\${PRODUCT_REG_VER}"
   StrCpy $2 "MenuFolder"
   Call un.OMDeleteRegValue
 
-  StrCmp "${PRODUCT_FULL_NAME}" "IntelliJ IDEA Community Edition" restore_java_association
-  StrCmp "${PRODUCT_FULL_NAME}" "IntelliJ IDEA" 0 finish_uninstall
-restore_java_association:
-  StrCpy $1 ".java"
+  StrCmp "${ASSOCIATION}" "NoAssociation" finish_uninstall
+  push "${ASSOCIATION}"
+loop:
+  call un.SplitStr
+  Pop $0
+  StrCmp $0 "" finish_uninstall
+  StrCpy $1 $0
   StrCpy $2 "backup_val"
   Call un.ReturnBackupRegValue
-
+  goto loop
 finish_uninstall:
-
+  StrCpy $0 $baseRegKey
   StrCpy $1 "$5\${PRODUCT_REG_VER}"
   StrCpy $2 "Build"
-  Call un.OMDeleteRegValue
-  StrCpy $2 ""
-  Call un.OMDeleteRegValue
+  Call un.OMReadRegStr
 
   StrCpy $1 "$5\${PRODUCT_REG_VER}"
-  Call un.OMDeleteRegKeyIfEmpty
+  Call un.OMDeleteRegKey
 
   StrCpy $1 "$5\${MUI_PRODUCT}"
   Call un.OMDeleteRegKeyIfEmpty
@@ -1049,9 +1178,31 @@ finish_uninstall:
   StrCpy $1 "$5"
   Call un.OMDeleteRegKeyIfEmpty
 
+  StrCpy $0 "HKCR"
+  StrCpy $1 "Applications\${PRODUCT_EXE_FILE}"
+  StrCpy $2 ""
+  Call un.OMDeleteRegKey
+  StrCpy $0 "HKCR"
+  StrCpy $1 "${PRODUCT_PATHS_SELECTOR}"
+  StrCpy $2 ""
+  Call un.OMDeleteRegKey
+
+  StrCpy $0 "HKCR"
+  StrCpy $1 "IntelliJIdeaProjectFile\DefaultIcon"
+  StrCpy $2 ""
+  call un.OMReadRegStr
+  StrCmp $3 "$productDir\${PRODUCT_EXE_FILE},0" remove_IntelliJIdeaProjectFile done
+remove_IntelliJIdeaProjectFile:
+  StrCpy $1 "IntelliJIdeaProjectFile"
+  Call un.OMDeleteRegKey
+done:
   DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}"
-
-; UNCOMMENT THIS IN RELEASE BUILD
-; ExecShell "" "http://www.jetbrains.com/idea/uninstall/"
-
+  ;do not show feedback web page checkbox for EAP builds.
+  StrCmp "${PRODUCT_WITH_VER}" "${MUI_PRODUCT} ${VER_BUILD}" end_of_uninstall feedback_web_page
+feedback_web_page:
+  StrCmp "${UNINSTALL_WEB_PAGE}" "feedback_web_page" end_of_uninstall
+  !insertmacro INSTALLOPTIONS_READ $R3 "DeleteSettings.ini" "Field 6" "State"
+  StrCmp "$R3" "0" end_of_uninstall
+  ExecShell "" "${UNINSTALL_WEB_PAGE}"
+end_of_uninstall:
 SectionEnd

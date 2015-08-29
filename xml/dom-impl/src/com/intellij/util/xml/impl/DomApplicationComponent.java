@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ package com.intellij.util.xml.impl;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.extensions.Extensions;
-import com.intellij.util.NotNullFunction;
 import com.intellij.util.ReflectionAssignabilityCache;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.FactoryMap;
 import com.intellij.util.xml.DomElement;
@@ -30,13 +30,13 @@ import com.intellij.util.xml.highlighting.DomElementsAnnotator;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
 
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.intellij.util.containers.ContainerUtil.createConcurrentSoftValueMap;
 import static com.intellij.util.containers.ContainerUtil.newArrayList;
 
 /**
@@ -44,6 +44,7 @@ import static com.intellij.util.containers.ContainerUtil.newArrayList;
  */
 public class DomApplicationComponent {
   private final FactoryMap<String,Set<DomFileDescription>> myRootTagName2FileDescription = new FactoryMap<String, Set<DomFileDescription>>() {
+    @Override
     protected Set<DomFileDescription> create(final String key) {
       return new THashSet<DomFileDescription>();
     }
@@ -61,22 +62,32 @@ public class DomApplicationComponent {
     }
   };
 
-  private final SofterCache<Type, StaticGenericInfo> myGenericInfos = SofterCache.create(new NotNullFunction<Type, StaticGenericInfo>() {
-    @NotNull
+  private final FactoryMap<Class, StaticGenericInfo> myGenericInfos = new FactoryMap<Class, StaticGenericInfo>() {
     @Override
-    public StaticGenericInfo fun(Type type) {
+    protected Map<Class, StaticGenericInfo> createMap() {
+      return createConcurrentSoftValueMap();
+    }
+    @Nullable
+    @Override
+    protected StaticGenericInfo create(Class type) {
       return new StaticGenericInfo(type);
     }
-  });
-  private final SofterCache<Class, InvocationCache> myInvocationCaches = SofterCache.create(new NotNullFunction<Class, InvocationCache>() {
-    @NotNull
+  };
+  private final FactoryMap<Class, InvocationCache> myInvocationCaches = new FactoryMap<Class, InvocationCache>() {
     @Override
-    public InvocationCache fun(Class key) {
+    protected Map<Class, InvocationCache> createMap() {
+      return createConcurrentSoftValueMap();
+    }
+
+    @Nullable
+    @Override
+    protected InvocationCache create(Class key) {
       return new InvocationCache(key);
     }
-  });
+  };
   private final ConcurrentFactoryMap<Class<? extends DomElementVisitor>, VisitorDescription> myVisitorDescriptions =
     new ConcurrentFactoryMap<Class<? extends DomElementVisitor>, VisitorDescription>() {
+      @Override
       @NotNull
       protected VisitorDescription create(final Class<? extends DomElementVisitor> key) {
         return new VisitorDescription(key);
@@ -92,6 +103,23 @@ public class DomApplicationComponent {
 
   public static DomApplicationComponent getInstance() {
     return ServiceManager.getService(DomApplicationComponent.class);
+  }
+
+  public int getCumulativeVersion(boolean forStubs) {
+    int result = 0;
+    for (DomFileDescription description : getAllFileDescriptions()) {
+      if (forStubs) {
+        if (description.hasStubs()) {
+          result += description.getStubVersion();
+          result += description.getRootTagName().hashCode(); // so that a plugin enabling/disabling could trigger the reindexing
+        }
+      }
+      else {
+        result += description.getVersion();
+        result += description.getRootTagName().hashCode(); // so that a plugin enabling/disabling could trigger the reindexing
+      }
+    }
+    return result;
   }
 
   public final synchronized Set<DomFileDescription> getFileDescriptions(String rootTagName) {
@@ -164,11 +192,11 @@ public class DomApplicationComponent {
   }
 
   public final StaticGenericInfo getStaticGenericInfo(final Type type) {
-    return myGenericInfos.getCachedValue(type);
+    return myGenericInfos.get(ReflectionUtil.getRawType(type));
   }
 
   final InvocationCache getInvocationCache(final Class type) {
-    return myInvocationCaches.getCachedValue(type);
+    return myInvocationCaches.get(type);
   }
 
   public final VisitorDescription getVisitorDescription(Class<? extends DomElementVisitor> aClass) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,13 +77,12 @@ public class PyUnionType implements PyType {
   }
 
   /**
-   * @param context
    * @return true if all types in the union are built-in.
    */
   @Override
-  public boolean isBuiltin(TypeEvalContext context) {
+  public boolean isBuiltin() {
     for (PyType one : myMembers) {
-      if (one == null || !one.isBuiltin(context)) return false;
+      if (one == null || !one.isBuiltin()) return false;
     }
     return true;
   }
@@ -99,18 +98,6 @@ public class PyUnionType implements PyType {
 
   @Nullable
   public static PyType union(@Nullable PyType type1, @Nullable PyType type2) {
-    if (type1 instanceof PyTupleType && type2 instanceof PyTupleType) {
-      final PyTupleType tupleType1 = (PyTupleType)type1;
-      final PyTupleType tupleType2 = (PyTupleType)type2;
-      if (tupleType1.getElementCount() == tupleType2.getElementCount()) {
-        int count = tupleType1.getElementCount();
-        PyType[] members = new PyType[count];
-        for (int i = 0; i < count; i++) {
-          members[i] = union(tupleType1.getElementType(i), tupleType2.getElementType(i));
-        }
-        return new PyTupleType(tupleType1, members);
-      }
-    }
     Set<PyType> members = new LinkedHashSet<PyType>();
     if (type1 instanceof PyUnionType) {
       members.addAll(((PyUnionType)type1).myMembers);
@@ -185,7 +172,7 @@ public class PyUnionType implements PyType {
    * @return union with excluded types
    */
   @Nullable
-  public PyType exclude(PyType type, TypeEvalContext context) {
+  public PyType exclude(@Nullable PyType type, @NotNull TypeEvalContext context) {
     final List<PyType> members = new ArrayList<PyType>();
     for (PyType m : getMembers()) {
       if (type == null) {
@@ -203,8 +190,8 @@ public class PyUnionType implements PyType {
   }
 
   @Nullable
-  public PyType excludeNull() {
-    return exclude(null, null);
+  public PyType excludeNull(@NotNull TypeEvalContext context) {
+    return exclude(null, context);
   }
 
   private static PyType unit(@Nullable PyType type) {

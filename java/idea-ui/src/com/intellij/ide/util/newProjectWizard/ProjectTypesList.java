@@ -23,7 +23,7 @@ import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.ui.popup.ListItemDescriptor;
+import com.intellij.openapi.ui.popup.ListItemDescriptorAdapter;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.platform.ProjectTemplate;
@@ -68,7 +68,7 @@ public class ProjectTypesList implements Disposable {
       }
     }.setComparator(new SpeedSearchComparator(false));
     List<TemplateItem> items = buildItems(map);
-    final TemplatesGroup samplesGroup = new TemplatesGroup("Loading Templates...", "", null, 0);
+    final TemplatesGroup samplesGroup = new TemplatesGroup("Loading Templates...", "", null, 0, null, null, null);
     myLoadingItem = new TemplateItem(new LoadingProjectTemplate(), samplesGroup) {
       @Override
       Icon getIcon() {
@@ -92,7 +92,7 @@ public class ProjectTypesList implements Disposable {
           String[] groups = factory.getGroups();
           final List<TemplateItem> items = new ArrayList<TemplateItem>();
           for (String group : groups) {
-            TemplatesGroup templatesGroup = new TemplatesGroup(group, "", factory.getGroupIcon(group), 0);
+            TemplatesGroup templatesGroup = new TemplatesGroup(group, "", factory.getGroupIcon(group), 0, null, null, null);
             ProjectTemplate[] templates = factory.createTemplates(group, context);
             for (ProjectTemplate template : templates) {
               items.add(new TemplateItem(template, templatesGroup));
@@ -114,17 +114,11 @@ public class ProjectTypesList implements Disposable {
       }
     });
 
-    myList.setCellRenderer(new GroupedItemsListRenderer(new ListItemDescriptor() {
+    myList.setCellRenderer(new GroupedItemsListRenderer(new ListItemDescriptorAdapter() {
       @Nullable
       @Override
       public String getTextFor(Object value) {
         return ((TemplateItem)value).getName();
-      }
-
-      @Nullable
-      @Override
-      public String getTooltipFor(Object value) {
-        return null;
       }
 
       @Nullable

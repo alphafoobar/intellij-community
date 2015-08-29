@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,16 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 
 import javax.swing.*;
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
 
 @SuppressWarnings({"ConstantConditions"})
 public class MavenExecutionTest extends MavenImportingTestCase {
@@ -47,10 +50,11 @@ public class MavenExecutionTest extends MavenImportingTestCase {
     if (!hasMavenInstallation()) return;
 
     VfsUtil.saveText(createProjectSubFile("src/main/java/A.java"), "public class A {}");
+    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
 
     new WriteAction<Object>() {
       @Override
-      protected void run(Result<Object> objectResult) throws Throwable {
+      protected void run(@NotNull Result<Object> objectResult) throws Throwable {
         createProjectPom("<groupId>test</groupId>" +
                          "<artifactId>project</artifactId>" +
                          "<version>1</version>");
@@ -59,7 +63,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
 
     assertFalse(new File(getProjectPath(), "target").exists());
 
-    execute(new MavenRunnerParameters(true, getProjectPath(), Arrays.asList("compile"), null));
+    execute(new MavenRunnerParameters(true, getProjectPath(), Arrays.asList("compile"), Collections.<String>emptyList()));
 
     assertTrue(new File(getProjectPath(), "target").exists());
   }
@@ -69,7 +73,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
 
     new WriteAction<Object>() {
       @Override
-      protected void run(Result<Object> objectResult) throws Throwable {
+      protected void run(@NotNull Result<Object> objectResult) throws Throwable {
         createStdProjectFolders();
 
         importProject("<groupId>test</groupId>" +
@@ -84,7 +88,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
     assertModules("project");
     assertExcludes("project", "target");
 
-    MavenRunnerParameters params = new MavenRunnerParameters(true, getProjectPath(), Arrays.asList("compile"), null);
+    MavenRunnerParameters params = new MavenRunnerParameters(true, getProjectPath(), Arrays.asList("compile"), Collections.<String>emptyList());
     execute(params);
 
     SwingUtilities.invokeAndWait(new Runnable() {

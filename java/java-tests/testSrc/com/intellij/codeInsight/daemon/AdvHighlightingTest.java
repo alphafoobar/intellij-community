@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.codeInsight.daemon;
 import com.intellij.analysis.PackagesScopesProvider;
 import com.intellij.application.options.colors.ScopeAttributesUtil;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspectionBase;
 import com.intellij.openapi.application.ex.PathManagerEx;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -49,7 +50,7 @@ import java.io.File;
 import java.util.Collection;
 
 /**
- * This class intended for "heavily-loaded" tests only, e.g. those need to setup separate project directory structure to run.
+ * This class intended for "heavy-loaded" tests only, e.g. those need to setup separate project directory structure to run.
  * For "lightweight" tests use LightAdvHighlightingTest.
  */
 public class AdvHighlightingTest extends DaemonAnalyzerTestCase {
@@ -317,5 +318,19 @@ public class AdvHighlightingTest extends DaemonAnalyzerTestCase {
 
   public void testPackageObscuring() throws Exception {
     doTest(BASE_PATH + "/packageObscuring/main/Main.java", BASE_PATH + "/packageObscuring", false, false);
+  }
+  public void testPublicClassInRightFile() throws Exception {
+    doTest(BASE_PATH + "/publicClassInRightFile/x/X.java", BASE_PATH + "/publicClassInRightFile", false, false);
+  }
+  public void testPublicClassInRightFile2() throws Exception {
+    doTest(BASE_PATH + "/publicClassInRightFile/x/Y.java", BASE_PATH + "/publicClassInRightFile", false, false);
+  }
+
+  public void testUnusedPublicMethodReferencedViaSubclass() throws Exception {
+    UnusedDeclarationInspectionBase deadCodeInspection = new UnusedDeclarationInspectionBase(true);
+    enableInspectionTool(deadCodeInspection);
+    allowTreeAccessForAllFiles();
+
+    doTest(BASE_PATH + "/unusedPublicMethodRefViaSubclass/x/I.java", BASE_PATH + "/unusedPublicMethodRefViaSubclass", true, false);
   }
 }

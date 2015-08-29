@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2013 Bas Leijdekkers
+ * Copyright 2006-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
  */
 package com.siyeh.ig.abstraction;
 
+import com.intellij.codeInsight.daemon.impl.analysis.JavaHighlightUtil;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
-import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.OverridingMethodsSearch;
 import com.intellij.util.Query;
 import com.siyeh.InspectionGadgetsBundle;
@@ -63,9 +64,9 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
     @NonNls final StringBuilder builder = new StringBuilder();
     final Iterator<PsiClass> iterator = weakerClasses.iterator();
     if (iterator.hasNext()) {
-      builder.append('\'').append(iterator.next().getQualifiedName()).append('\'');
+      builder.append('\'').append(getClassName(iterator.next())).append('\'');
       while (iterator.hasNext()) {
-        builder.append(", '").append(iterator.next().getQualifiedName()).append('\'');
+        builder.append(", '").append(getClassName(iterator.next())).append('\'');
       }
     }
     final Object info = infos[0];
@@ -82,6 +83,14 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
         builder.toString());
     }
     return InspectionGadgetsBundle.message("type.may.be.weakened.problem.descriptor", builder.toString());
+  }
+
+  private static String getClassName(PsiClass aClass) {
+    final String qualifiedName = aClass.getQualifiedName();
+    if (qualifiedName == null) {
+      return aClass.getName();
+    }
+    return qualifiedName;
   }
 
   @Override
@@ -105,11 +114,11 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
     final Iterable<PsiClass> weakerClasses = (Iterable<PsiClass>)infos[1];
     final Collection<InspectionGadgetsFix> fixes = new ArrayList();
     for (PsiClass weakestClass : weakerClasses) {
-      final String qualifiedName = weakestClass.getQualifiedName();
-      if (qualifiedName == null) {
+      final String className = getClassName(weakestClass);
+      if (className == null) {
         continue;
       }
-      fixes.add(new TypeMayBeWeakenedFix(qualifiedName));
+      fixes.add(new TypeMayBeWeakenedFix(className));
     }
     return fixes.toArray(new InspectionGadgetsFix[fixes.size()]);
   }
@@ -161,31 +170,30 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
       if (!(oldType instanceof PsiClassType)) {
         return;
       }
-      final PsiClassType classType = (PsiClassType)oldType;
-      final PsiType[] parameterTypes = classType.getParameters();
-      final GlobalSearchScope scope = element.getResolveScope();
+      final PsiClassType oldClassType = (PsiClassType)oldType;
+      final PsiType[] parameterTypes = oldClassType.getParameters();
       final JavaPsiFacade facade = JavaPsiFacade.getInstance(project);
-      final PsiClass aClass = facade.findClass(fqClassName, scope);
-      if (aClass == null) {
+      final PsiElementFactory factory = facade.getElementFactory();
+      final PsiType type = factory.createTypeFromText(fqClassName, element);
+      if (!(type instanceof PsiClassType)) {
         return;
       }
-      final PsiTypeParameter[] typeParameters = aClass.getTypeParameters();
-      final PsiElementFactory factory = facade.getElementFactory();
-      final PsiClassType type;
-      if (typeParameters.length != 0 && typeParameters.length == parameterTypes.length) {
-        final Map<PsiTypeParameter, PsiType> typeParameterMap = new HashMap();
-        for (int i = 0; i < typeParameters.length; i++) {
-          final PsiTypeParameter typeParameter = typeParameters[i];
-          final PsiType parameterType = parameterTypes[i];
-          typeParameterMap.put(typeParameter, parameterType);
+      PsiClassType classType = (PsiClassType)type;
+      final PsiClass aClass = classType.resolve();
+      if (aClass != null) {
+        final PsiTypeParameter[] typeParameters = aClass.getTypeParameters();
+        if (typeParameters.length != 0 && typeParameters.length == parameterTypes.length) {
+          final Map<PsiTypeParameter, PsiType> typeParameterMap = new HashMap();
+          for (int i = 0; i < typeParameters.length; i++) {
+            final PsiTypeParameter typeParameter = typeParameters[i];
+            final PsiType parameterType = parameterTypes[i];
+            typeParameterMap.put(typeParameter, parameterType);
+          }
+          final PsiSubstitutor substitutor = factory.createSubstitutor(typeParameterMap);
+          classType = factory.createType(aClass, substitutor);
         }
-        final PsiSubstitutor substitutor = factory.createSubstitutor(typeParameterMap);
-        type = factory.createType(aClass, substitutor);
       }
-      else {
-        type = factory.createTypeByFQClassName(fqClassName, scope);
-      }
-      final PsiJavaCodeReferenceElement referenceElement = factory.createReferenceElementByType(type);
+      final PsiJavaCodeReferenceElement referenceElement = factory.createReferenceElementByType(classType);
       final PsiElement replacement = componentReferenceElement.replace(referenceElement);
       final JavaCodeStyleManager javaCodeStyleManager = JavaCodeStyleManager.getInstance(project);
       javaCodeStyleManager.shortenClassReferences(replacement);
@@ -217,6 +225,9 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
           final PsiClass containingClass = method.getContainingClass();
           if (containingClass == null ||
               containingClass.isInterface()) {
+            return;
+          }
+          if (JavaHighlightUtil.isSerializationRelatedMethod(method, containingClass)) {
             return;
           }
           if (MethodUtils.hasSuper(method)) {
@@ -284,7 +295,7 @@ public class TypeMayBeWeakenedInspection extends BaseInspection {
     @Override
     public void visitMethod(PsiMethod method) {
       super.visitMethod(method);
-      if (isOnTheFly() && !method.hasModifierProperty(PsiModifier.PRIVATE)) {
+      if (isOnTheFly() && !method.hasModifierProperty(PsiModifier.PRIVATE) && !ApplicationManager.getApplication().isUnitTestMode()) {
         // checking methods with greater visibility is too expensive.
         // for error checking in the editor
         return;

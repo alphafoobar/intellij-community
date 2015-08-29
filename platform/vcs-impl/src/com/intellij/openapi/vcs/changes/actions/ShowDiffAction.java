@@ -20,18 +20,22 @@ import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.*;
 import com.intellij.openapi.diff.impl.external.BinaryDiffTool;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsDataKeys;
+import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.*;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.BeforeAfter;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,6 +46,8 @@ import java.util.*;
  * @author max
  */
 public class ShowDiffAction extends AnAction implements DumbAware {
+  private static final Logger LOG = Logger.getInstance(ShowDiffAction.class);
+
   private static final String ourText = ActionsBundle.actionText("ChangesView.Diff");
 
   public ShowDiffAction() {
@@ -58,7 +64,10 @@ public class ShowDiffAction extends AnAction implements DumbAware {
 
   protected static boolean canShowDiff(Change[] changes) {
     if (changes == null || changes.length == 0) return false;
-    return !ChangesUtil.getFilePath(changes [0]).isDirectory() || changes[0].hasOtherLayers();
+    for (Change change : changes) {
+      if (!ChangesUtil.getFilePath(change).isDirectory() || change.hasOtherLayers()) return true;
+    }
+    return false;
   }
 
   public void actionPerformed(final AnActionEvent e) {
@@ -102,12 +111,7 @@ public class ShowDiffAction extends AnAction implements DumbAware {
               });
             }
             convertedChanges = changesInListCopy.toArray(new Change[changesInListCopy.size()]);
-            for(int i=0; i<convertedChanges.length; i++) {
-              if (convertedChanges [i] == selectedChange) {
-                index = i;
-                break;
-              }
-            }
+            index = Math.max(0, ContainerUtil.indexOfIdentity(changesInListCopy, selectedChange));
           }
         }
 
@@ -126,21 +130,21 @@ public class ShowDiffAction extends AnAction implements DumbAware {
     showDiffForChange(changes, index, project, new ShowDiffUIContext(true));
   }
 
-  private boolean checkIfThereAreFakeRevisions(final Project project, final Change[] changes) {
-    boolean needsConvertion = false;
+  private static boolean checkIfThereAreFakeRevisions(final Project project, final Change[] changes) {
+    boolean needsConversion = false;
     for(Change change: changes) {
       final ContentRevision beforeRevision = change.getBeforeRevision();
       final ContentRevision afterRevision = change.getAfterRevision();
       if (beforeRevision instanceof FakeRevision) {
         VcsDirtyScopeManager.getInstance(project).fileDirty(beforeRevision.getFile());
-        needsConvertion = true;
+        needsConversion = true;
       }
       if (afterRevision instanceof FakeRevision) {
         VcsDirtyScopeManager.getInstance(project).fileDirty(afterRevision.getFile());
-        needsConvertion = true;
+        needsConversion = true;
       }
     }
-    return needsConvertion;
+    return needsConversion;
   }
 
   @Nullable
@@ -154,16 +158,18 @@ public class ShowDiffAction extends AnAction implements DumbAware {
 
   public static void showDiffForChange(final Iterable<Change> changes, final Condition<Change> selectionChecker,
                                        final Project project, @NotNull ShowDiffUIContext context) {
-    int cnt = 0;
     int newIndex = -1;
-    final List<Change> changeList = new ArrayList<Change>();
+    ChangeForDiffConvertor convertor = new ChangeForDiffConvertor(project, true);
+    final List<DiffRequestPresentable> changeList = ContainerUtil.newArrayList();
     for (Change change : changes) {
       if (! directoryOrBinary(change)) {    //todo
-        changeList.add(change);
-        if ((newIndex == -1) && selectionChecker.value(change)) {
-          newIndex = cnt;
+        DiffRequestPresentable presentable = convertor.convert(change);
+        if (presentable != null) {
+          if ((newIndex == -1) && selectionChecker.value(change)) {
+            newIndex = changeList.size();
+          }
+          changeList.add(presentable);
         }
-        ++ cnt;
       }
     }
     if (changeList.isEmpty()) {
@@ -173,7 +179,7 @@ public class ShowDiffAction extends AnAction implements DumbAware {
       newIndex = 0;
     }
 
-    showDiffImpl(project, ObjectsConvertor.convert(changeList, new ChangeForDiffConvertor(project, true), ObjectsConvertor.NOT_NULL), newIndex, context);
+    showDiffImpl(project, changeList, newIndex, context);
   }
 
   public static void showDiffForChange(final Change[] changes, int index, final Project project, @NotNull ShowDiffUIContext context) {
@@ -185,7 +191,7 @@ public class ShowDiffAction extends AnAction implements DumbAware {
     showDiffForChange(Arrays.asList(changes), new Condition<Change>() {
                         @Override
                         public boolean value(final Change change) {
-                          return selected == null ? false : selected.equals(change);
+                          return selected != null && selected.equals(change);
                         }
                       }, project, context);
   }
@@ -241,6 +247,7 @@ public class ShowDiffAction extends AnAction implements DumbAware {
     }
     catch (VcsException e) {
       Messages.showWarningDialog(e.getMessage(), "Show Diff");
+      LOG.info(e);
     }
   }
 
@@ -277,6 +284,7 @@ public class ShowDiffAction extends AnAction implements DumbAware {
     }
     catch (VcsException e) {
       Messages.showWarningDialog(e.getMessage(), "Show Diff");
+      LOG.info(e);
       return;
     }
 
@@ -304,18 +312,6 @@ public class ShowDiffAction extends AnAction implements DumbAware {
       return true;
     }*/
     return false;
-  }
-
-  private static List<Change> filterDirectoryAndBinaryChanges(final Change[] changes) {
-    final ArrayList<Change> changesList = new ArrayList<Change>();
-    Collections.addAll(changesList, changes);
-    for(int i=changesList.size()-1; i >= 0; i--) {
-      final Change change = changesList.get(i);
-      if (directoryOrBinary(change)) {
-        changesList.remove(i);
-      }
-    }
-    return changesList;
   }
 
   private static boolean checkNotifyBinaryDiff(final Change selectedChange) {

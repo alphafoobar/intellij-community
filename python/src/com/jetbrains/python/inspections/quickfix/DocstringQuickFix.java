@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -122,7 +122,7 @@ public class DocstringQuickFix implements LocalQuickFix {
         .generateDocstringForFunction(project, getEditor(project, docStringOwner.getContainingFile()), (PyFunction)docStringOwner);
     }
     if (docStringOwner instanceof PyClass) {
-      PyFunction init = ((PyClass)docStringOwner).findInitOrNew(false);
+      PyFunction init = ((PyClass)docStringOwner).findInitOrNew(false, null);
       if (init == null) return;
       PythonDocumentationProvider.insertDocStub(init, ((PyClass)docStringOwner).getStatementList(),
                                                 project, getEditor(project, docStringOwner.getContainingFile()));

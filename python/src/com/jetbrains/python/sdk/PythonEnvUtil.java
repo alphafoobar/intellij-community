@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.jetbrains.python.sdk;
 
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -23,7 +22,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.Collection;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,6 +32,8 @@ public class PythonEnvUtil {
   @SuppressWarnings("SpellCheckingInspection") public static final String PYTHONPATH = "PYTHONPATH";
   @SuppressWarnings("SpellCheckingInspection") public static final String PYTHONUNBUFFERED = "PYTHONUNBUFFERED";
   @SuppressWarnings("SpellCheckingInspection") public static final String PYTHONIOENCODING = "PYTHONIOENCODING";
+  @SuppressWarnings("SpellCheckingInspection") public static final String IPYTHONENABLE = "IPYTHONENABLE";
+  @SuppressWarnings("SpellCheckingInspection") public static final String PYTHONDONTWRITEBYTECODE = "PYTHONDONTWRITEBYTECODE";
 
   private PythonEnvUtil() { }
 
@@ -86,8 +86,9 @@ public class PythonEnvUtil {
     addPathToEnv(env, PYTHONPATH, value);
   }
 
-  public static List<String> getPathListFromEnv(@NotNull Map<String, String> env, String envKey) {
-    String pythonPath = env.get(envKey);
-    return pythonPath != null ? Lists.newArrayList(pythonPath.split(File.pathSeparator)) : null;
+  @NotNull
+  public static Map<String, String> setPythonDontWriteBytecode(@NotNull Map<String, String> env) {
+    env.put(PYTHONDONTWRITEBYTECODE, "1");
+    return env;
   }
 }

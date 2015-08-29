@@ -17,9 +17,10 @@ package com.intellij.codeInsight.daemon;
 
 import com.intellij.codeInspection.LocalInspectionTool;
 import com.intellij.codeInspection.compiler.JavacQuirksInspection;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.codeInspection.redundantCast.RedundantCastInspection;
 import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
-import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
+import com.intellij.pom.java.LanguageLevel;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -30,6 +31,12 @@ import org.jetbrains.annotations.NotNull;
 public class AmbiguousMethodCallTest extends LightDaemonAnalyzerTestCase {
   @NonNls static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/ambiguousCalls";
 
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    enableInspectionTool(new UnusedDeclarationInspection());
+  }
+
   private void doTest(boolean checkWarnings, boolean checkInfos) throws Exception {
     doTest(BASE_PATH + "/" + getTestName(false) + ".java", checkWarnings, checkInfos);
   }
@@ -38,7 +45,6 @@ public class AmbiguousMethodCallTest extends LightDaemonAnalyzerTestCase {
   @Override
   protected LocalInspectionTool[] configureLocalInspectionTools() {
     return new LocalInspectionTool[]{
-      new UnusedSymbolLocalInspection(),
       new UncheckedWarningLocalInspection(),
       new JavacQuirksInspection(),
       new RedundantCastInspection()
@@ -51,5 +57,10 @@ public class AmbiguousMethodCallTest extends LightDaemonAnalyzerTestCase {
 
   public void testMultipleInheritance() throws Exception {
     doTest(false, false);
+  }
+
+  @Override
+  protected LanguageLevel getLanguageLevel() {
+    return LanguageLevel.JDK_1_7;
   }
 }

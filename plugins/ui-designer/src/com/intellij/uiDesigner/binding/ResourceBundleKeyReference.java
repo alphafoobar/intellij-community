@@ -16,7 +16,8 @@
 package com.intellij.uiDesigner.binding;
 
 import com.intellij.lang.properties.IProperty;
-import com.intellij.lang.properties.PropertiesUtil;
+import com.intellij.lang.properties.PropertiesUtilBase;
+import com.intellij.lang.properties.ResourceBundleManager;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
@@ -52,7 +53,7 @@ public final class ResourceBundleKeyReference extends ReferenceInForm {
     if (module == null) {
       return null;
     }
-    final PropertiesFile propertiesFile = PropertiesUtil.getPropertiesFile(myBundleName, module, null);
+    final PropertiesFile propertiesFile = PropertiesUtilBase.getPropertiesFile(myBundleName, module, null);
     if (propertiesFile == null) {
       return null;
     }
@@ -73,7 +74,7 @@ public final class ResourceBundleKeyReference extends ReferenceInForm {
       return false;
     }
     IProperty property = (IProperty) element;
-    String baseName = PropertiesUtil.getFullName(property.getPropertiesFile());
+    String baseName = ResourceBundleManager.getInstance(element.getProject()).getFullName(property.getPropertiesFile());
     return baseName != null && myBundleName.equals(baseName.replace('.', '/')) && getRangeText().equals(property.getUnescapedKey());
   }
 }

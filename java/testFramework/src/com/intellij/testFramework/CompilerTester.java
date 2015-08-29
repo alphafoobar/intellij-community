@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.testFramework;
 
-import com.intellij.compiler.CompilerManagerImpl;
 import com.intellij.compiler.CompilerTestUtil;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.Result;
@@ -30,6 +29,7 @@ import com.intellij.openapi.roots.CompilerProjectExtension;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiFile;
@@ -40,6 +40,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.Assert;
 
@@ -47,44 +48,42 @@ import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * @author peter
  */
 public class CompilerTester {
-  private final boolean myExternalMake;
-  private final Module myModule;
+  private Project myProject;
+  private List<Module> myModules;
   private TempDirTestFixture myMainOutput;
 
-  public CompilerTester(boolean externalMake, Module module) throws Exception {
-    myExternalMake = externalMake;
-    myModule = module;
+  public CompilerTester(Module module) throws Exception {
+    this(module.getProject(), Collections.singletonList(module));
+  }
+
+  public CompilerTester(Project project, List<Module> modules) throws Exception {
+    myProject = project;
+    myModules = modules;
     myMainOutput = new TempDirTestFixtureImpl();
     myMainOutput.setUp();
 
-    CompilerManagerImpl.testSetup();
+    CompilerTestUtil.enableExternalCompiler();
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         //noinspection ConstantConditions
         CompilerProjectExtension.getInstance(getProject()).setCompilerOutputUrl(myMainOutput.findOrCreateDir("out").getUrl());
-        if (myExternalMake) {
-          CompilerTestUtil.enableExternalCompiler(getProject());
-          ModuleRootModificationUtil.setModuleSdk(myModule, JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk());
-        }
-        else {
-          CompilerTestUtil.disableExternalCompiler(getProject());
+        for (Module module : myModules) {
+          ModuleRootModificationUtil.setModuleSdk(module, JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk());
         }
       }
     }.execute();
-
   }
 
   public void tearDown() {
-    if (myExternalMake) {
-      CompilerTestUtil.disableExternalCompiler(getProject());
-    }
+    CompilerTestUtil.disableExternalCompiler(getProject());
 
     try {
       myMainOutput.tearDown();
@@ -92,25 +91,21 @@ public class CompilerTester {
     catch (Exception e) {
       throw new RuntimeException(e);
     }
-    myMainOutput = null;
+    finally {
+      myMainOutput = null;
+      myModules = null;
+    }
   }
 
   private Project getProject() {
-    return myModule.getProject();
+    return myProject;
   }
 
   public void deleteClassFile(final String className) throws IOException {
     AccessToken token = WriteAction.start();
     try {
-      if (myExternalMake) {
         //noinspection ConstantConditions
-        touch(
-          JavaPsiFacade.getInstance(getProject()).findClass(className, GlobalSearchScope.allScope(getProject())).getContainingFile().getVirtualFile());
-      }
-      else {
-        //noinspection ConstantConditions
-        findClassFile(className, myModule).delete(this);
-      }
+        touch(JavaPsiFacade.getInstance(getProject()).findClass(className, GlobalSearchScope.allScope(getProject())).getContainingFile().getVirtualFile());
     }
     finally {
       token.finish();
@@ -119,46 +114,44 @@ public class CompilerTester {
 
   @Nullable
   public VirtualFile findClassFile(String className, Module module) {
-    //noinspection ConstantConditions
     VirtualFile path = ModuleRootManager.getInstance(module).getModuleExtension(CompilerModuleExtension.class).getCompilerOutputPath();
-    path.getChildren();
     assert path != null;
+    path.getChildren();
     path.refresh(false, true);
-    return path.findChild(className.replace('.', '/') + ".class");
+    return path.findFileByRelativePath(className.replace('.', '/') + ".class");
   }
 
-  public void touch(VirtualFile file) throws IOException {
-    file.setBinaryContent(file.contentsToByteArray(), -1, file.getTimeStamp() + 1);
-    File ioFile = VfsUtil.virtualToIoFile(file);
-    assert ioFile.setLastModified(ioFile.lastModified() - 100000);
-    file.refresh(false, false);
+  public void touch(final VirtualFile file) throws IOException {
+    new WriteAction() {
+      @Override
+      protected void run(@NotNull Result result) throws Throwable {
+        file.setBinaryContent(file.contentsToByteArray(), -1, file.getTimeStamp() + 1);
+        File ioFile = VfsUtilCore.virtualToIoFile(file);
+        assert ioFile.setLastModified(ioFile.lastModified() - 100000);
+        file.refresh(false, false);
+      }
+    }.execute().throwException();
   }
 
   public void setFileText(final PsiFile file, final String text) throws IOException {
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
+    new WriteAction() {
       @Override
-      public void run() {
-        try {
-          final VirtualFile virtualFile = file.getVirtualFile();
-          VfsUtil.saveText(ObjectUtils.assertNotNull(virtualFile), text);
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
-        }
+      protected void run(@NotNull Result result) throws Throwable {
+        final VirtualFile virtualFile = file.getVirtualFile();
+        VfsUtil.saveText(ObjectUtils.assertNotNull(virtualFile), text);
       }
-    });
+    }.execute().throwException();
     touch(file.getVirtualFile());
   }
 
   public void setFileName(final PsiFile file, final String name) {
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         file.setName(name);
       }
     }.execute();
   }
-
 
   public List<CompilerMessage> make() {
     return runCompiler(new Consumer<ErrorReportingCallback>() {
@@ -187,6 +180,15 @@ public class CompilerTester {
     });
   }
 
+  public List<CompilerMessage> make(final CompileScope scope) {
+    return runCompiler(new Consumer<ErrorReportingCallback>() {
+      @Override
+      public void consume(ErrorReportingCallback callback) {
+        CompilerManager.getInstance(getProject()).make(scope, callback);
+      }
+    });
+  }
+
   public List<CompilerMessage> compileFiles(final VirtualFile... files) {
     return runCompiler(new Consumer<ErrorReportingCallback>() {
       @Override
@@ -199,15 +201,18 @@ public class CompilerTester {
   private List<CompilerMessage> runCompiler(final Consumer<ErrorReportingCallback> runnable) {
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
+
     final ErrorReportingCallback callback = new ErrorReportingCallback(semaphore);
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
         try {
-          if (myExternalMake) {
-            getProject().save();
-            CompilerTestUtil.saveApplicationSettings();
-            File ioFile = VfsUtil.virtualToIoFile(myModule.getModuleFile());
+          getProject().save();
+          CompilerTestUtil.saveApplicationSettings();
+          for (Module module : myModules) {
+            VirtualFile moduleFile = module.getModuleFile();
+            assert moduleFile != null;
+            File ioFile = VfsUtilCore.virtualToIoFile(moduleFile);
             if (!ioFile.exists()) {
               getProject().save();
               assert ioFile.exists() : "File does not exist: " + ioFile.getPath();
@@ -224,9 +229,11 @@ public class CompilerTester {
     //tests run in awt
     while (!semaphore.waitFor(100)) {
       if (SwingUtilities.isEventDispatchThread()) {
+        //noinspection TestOnlyProblems
         UIUtil.dispatchAllInvocationEvents();
       }
     }
+
     callback.throwException();
     return callback.getMessages();
   }
@@ -247,7 +254,10 @@ public class CompilerTester {
           CompilerMessage[] messages = compileContext.getMessages(category);
           for (CompilerMessage message : messages) {
             final String text = message.getMessage();
-            if (category != CompilerMessageCategory.INFORMATION || !(text.startsWith("Compilation completed successfully") || text.startsWith("Using javac"))) {
+            if (category != CompilerMessageCategory.INFORMATION ||
+                !(text.contains("Compilation completed successfully") ||
+                  text.startsWith("Using javac") ||
+                  text.startsWith("Using Groovy-Eclipse"))) {
               myMessages.add(message);
             }
           }

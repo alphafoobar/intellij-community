@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,13 @@
  */
 package com.intellij.psi.impl.source.codeStyle.javadoc;
 
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.javadoc.PsiDocComment;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,6 +42,8 @@ public class JDParser {
   private static final String P_START_TAG = "<p>";
   private static final String SELF_CLOSED_P_TAG = "<p/>";
 
+  private static final char lineSeparator = '\n';
+
   private final CodeStyleSettings mySettings;
   private final LanguageLevel myLanguageLevel;
 
@@ -47,11 +52,74 @@ public class JDParser {
     myLanguageLevel = languageLevel;
   }
 
-  private static final char lineSeparator = '\n';
+  public void formatCommentText(@NotNull PsiElement element, @NotNull CommentFormatter formatter) {
+    CommentInfo info = getElementsCommentInfo(element);
+    JDComment comment = info != null ? parse(info, formatter) : null;
+    if (comment != null) {
+      String indent = formatter.getIndent(info.getCommentOwner());
+      String commentText = comment.generate(indent);
+      formatter.replaceCommentText(commentText, (PsiDocComment)info.psiComment);
+    }
+  }
+
+  private CommentInfo getElementsCommentInfo(@Nullable PsiElement psiElement) {
+    CommentInfo info = null;
+    if (psiElement instanceof PsiDocComment) {
+      final PsiDocComment docComment = (PsiDocComment)psiElement;
+      if (docComment.getOwner() == null && docComment.getParent() instanceof PsiJavaFile) {
+        info = CommentFormatter.getCommentInfo(docComment);
+        if (info != null) {
+          info.setCommentOwner(docComment);
+          info.setComment(docComment);
+        }
+      }
+      else {
+        return getElementsCommentInfo(psiElement.getParent());
+      }
+    }
+    else if (psiElement instanceof PsiDocCommentOwner) {
+      PsiDocCommentOwner owner = (PsiDocCommentOwner)psiElement;
+      info = CommentFormatter.getOrigCommentInfo(owner);
+      if (info != null) {
+        info.setCommentOwner(owner);
+        info.setComment(owner.getDocComment());
+      }
+    }
+    return info;
+  }
+
+  private JDComment parse(@NotNull CommentInfo info, @NotNull CommentFormatter formatter) {
+    PsiElement owner = info.getCommentOwner();
+    JDComment comment = createComment(owner, formatter);
+    if (comment == null) return null;
+
+    parse(info.comment, comment);
+    if (info.commentHeader != null) {
+      comment.setFirstCommentLine(info.commentHeader);
+    }
+    if (info.commentFooter != null) {
+      comment.setLastCommentLine(info.commentFooter);
+    }
+
+    return comment;
+  }
+
+  private JDComment createComment(@NotNull PsiElement psiElement, @NotNull CommentFormatter formatter) {
+    if (psiElement instanceof PsiClass) {
+      return new JDClassComment(formatter);
+    }
+    else if (psiElement instanceof PsiMethod) {
+      return new JDMethodComment(formatter);
+    }
+    else if (psiElement instanceof PsiField || psiElement instanceof PsiDocComment) {
+      return new JDComment(formatter);
+    }
+    return null;
+  }
 
   @NotNull
-  public JDComment parse(@Nullable String text, @NotNull JDComment comment) {
-    if (text == null) return comment;
+  private void parse(@Nullable String text, @NotNull JDComment comment) {
+    if (text == null) return;
 
     List<Boolean> markers = new ArrayList<Boolean>();
     List<String> l = toArray(text, "\n", markers);
@@ -65,9 +133,9 @@ public class JDParser {
       comment.setMultiLine(true);
     }
 
-    if (l == null) return comment;
+    if (l == null) return;
     int size = l.size();
-    if (size == 0) return comment;
+    if (size == 0) return;
 
     // preprocess strings - removes first '*'
     for (int i = 0; i < size; i++) {
@@ -93,10 +161,12 @@ public class JDParser {
 
     StringBuilder sb = new StringBuilder();
     String tag = null;
+    boolean isInsidePreTag = false;
+
     for (int i = 0; i <= size; i++) {
       String line = i == size ? null : l.get(i);
       if (i == size || !line.isEmpty()) {
-        if (i == size || line.charAt(0) == '@') {
+        if (i == size || line.charAt(0) == '@' && !isInsidePreTag) {
           if (tag == null) {
             comment.setDescription(sb.toString());
           }
@@ -138,9 +208,13 @@ public class JDParser {
           sb.append(lineSeparator);
         }
       }
-    }
 
-    return comment;
+      if (line != null) {
+        isInsidePreTag = isInsidePreTag
+                         ? !lineHasClosingPreTag(line)
+                         : lineHasUnclosedPreTag(line);
+      }
+    }
   }
 
   /**
@@ -302,7 +376,7 @@ public class JDParser {
           result.add(new Pair<String, Boolean>(sb.toString(), false));
           sb.setLength(0);
         }
-        result.add(new Pair<String, Boolean>(s1, marks[i]));
+        result.add(Pair.create(s1, marks[i]));
       }
       else {
         if (s1.isEmpty()) {
@@ -310,10 +384,10 @@ public class JDParser {
             result.add(new Pair<String, Boolean>(sb.toString(), false));
             sb.setLength(0);
           }
-          result.add(new Pair<String, Boolean>("", marks[i]));
+          result.add(Pair.create("", marks[i]));
         }
         else if (mySettings.JD_PRESERVE_LINE_FEEDS) {
-          result.add(new Pair<String, Boolean>(s1, marks[i]));
+          result.add(Pair.create(s1, marks[i]));
         }
         else {
           if (sb.length() != 0) sb.append(' ');
@@ -455,6 +529,10 @@ public class JDParser {
     return StringUtil.getOccurrenceCount(line, PRE_TAG_START) > StringUtil.getOccurrenceCount(line, PRE_TAG_END);
   }
 
+  private static boolean lineHasClosingPreTag(@NotNull String line) {
+    return StringUtil.getOccurrenceCount(line, PRE_TAG_END) > StringUtil.getOccurrenceCount(line, PRE_TAG_START);
+  }
+
   /**
    * Returns formatted JavaDoc tag description, according to selected configuration
    * @param str JavaDoc tag description
@@ -469,20 +547,21 @@ public class JDParser {
                                                  boolean firstLineShorter,
                                                  int firstLinePrefixLength)
   {
+    int rightMargin = mySettings.getRightMargin(JavaLanguage.INSTANCE);
     StringBuilder sb = new StringBuilder();
     List<String> list;
 
     //If wrap comments selected, comments should be wrapped by the right margin
     if (mySettings.WRAP_COMMENTS) {
-      list = toArrayWrapping(str, mySettings.RIGHT_MARGIN - prefix.length());
+      list = toArrayWrapping(str, rightMargin - prefix.length());
 
       if (firstLineShorter
           && list != null && !list.isEmpty()
-          && list.get(0).length() > mySettings.RIGHT_MARGIN - firstLinePrefixLength)
+          && list.get(0).length() > rightMargin - firstLinePrefixLength)
       {
         list = new ArrayList<String>();
         //want the first line to be shorter, according to it's prefix
-        String firstLine = toArrayWrapping(str, mySettings.RIGHT_MARGIN - firstLinePrefixLength).get(0);
+        String firstLine = toArrayWrapping(str, rightMargin - firstLinePrefixLength).get(0);
         //so now first line is exactly same width we need
         list.add(firstLine);
         str = str.substring(firstLine.length());
@@ -493,7 +572,7 @@ public class JDParser {
         }
 
         //getting all another lines according to their prefix
-        List<String> subList = toArrayWrapping(str, mySettings.RIGHT_MARGIN - prefix.length());
+        List<String> subList = toArrayWrapping(str, rightMargin - prefix.length());
 
         //removing pre tag
         if (unclosedPreTag && subList != null && !subList.isEmpty()) {
@@ -529,10 +608,10 @@ public class JDParser {
           sb.append(line);
 
           // We want to track if we're inside <pre>...</pre> in order to not generate <p/> there.
-          if (PRE_TAG_START.equals(line)) {
+          if (line.startsWith(PRE_TAG_START)) {
             insidePreTag = true;
           }
-          else if (PRE_TAG_END.equals(line)) {
+          else if (line.endsWith(PRE_TAG_END)) {
             insidePreTag = false;
           }
         }
@@ -541,5 +620,36 @@ public class JDParser {
     }
 
     return sb;
+  }
+
+  public static class CommentInfo {
+    public final String commentHeader;
+    public final String comment;
+    public final String commentFooter;
+
+    private PsiComment psiComment;
+    private PsiElement myCommentOwner;
+
+    public CommentInfo(String commentHeader, String comment, String commentFooter) {
+      this.commentHeader = commentHeader;
+      this.comment = comment;
+      this.commentFooter = commentFooter;
+    }
+
+    public void setCommentOwner(PsiElement commentOwner) {
+      myCommentOwner = commentOwner;
+    }
+
+    public PsiElement getCommentOwner() {
+      return myCommentOwner;
+    }
+
+    public void setComment(PsiDocComment comment) {
+      psiComment = comment;
+    }
+
+    public PsiComment getComment() {
+      return psiComment;
+    }
   }
 }

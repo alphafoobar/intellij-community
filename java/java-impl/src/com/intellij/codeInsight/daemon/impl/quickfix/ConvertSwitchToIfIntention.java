@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.siyeh.ig.psiutils.ParenthesesUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -32,6 +33,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import static com.intellij.psi.CommonClassNames.JAVA_LANG_STRING;
 
 /**
 * User: anna
@@ -82,7 +85,7 @@ public class ConvertSwitchToIfIntention implements IntentionAction {
       return;
     }
     final boolean isSwitchOnString =
-      switchExpressionType.equalsToText("java.lang.String");
+      switchExpressionType.equalsToText(JAVA_LANG_STRING);
     boolean useEquals = isSwitchOnString;
     if (!useEquals) {
       final PsiClass aClass = PsiUtil.resolveClassInType(switchExpressionType);
@@ -115,7 +118,9 @@ public class ConvertSwitchToIfIntention implements IntentionAction {
     else {
       hadSideEffects = false;
       declarationString = null;
-      expressionText = switchExpression.getText();
+      expressionText = ParenthesesUtils.getPrecedence(switchExpression) > ParenthesesUtils.EQUALITY_PRECEDENCE
+                       ? '(' + switchExpression.getText() + ')'
+                       : switchExpression.getText();
     }
     final PsiCodeBlock body = switchStatement.getBody();
     if (body == null) {

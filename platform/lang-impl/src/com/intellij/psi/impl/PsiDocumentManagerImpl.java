@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ package com.intellij.psi.impl;
 
 import com.intellij.AppTopics;
 import com.intellij.injected.editor.DocumentWindow;
-import com.intellij.injected.editor.EditorWindow;
-import com.intellij.openapi.application.ApplicationAdapter;
+import com.intellij.injected.editor.DocumentWindowImpl;
+import com.intellij.injected.editor.EditorWindowImpl;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.SettingsSavingComponent;
 import com.intellij.openapi.editor.Document;
@@ -31,13 +31,20 @@ import com.intellij.openapi.fileEditor.FileDocumentManagerAdapter;
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectLocator;
+import com.intellij.openapi.project.impl.ProjectImpl;
 import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.pom.core.impl.PomModelImpl;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
+import com.intellij.psi.impl.source.tree.injected.MultiHostRegistrarImpl;
 import com.intellij.util.FileContentUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.messages.MessageBus;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -50,53 +57,42 @@ import java.util.List;
 //todo listen & notifyListeners readonly events?
 public class PsiDocumentManagerImpl extends PsiDocumentManagerBase implements SettingsSavingComponent {
   private final DocumentCommitThread myDocumentCommitThread;
+  private final boolean myUnitTestMode = ApplicationManager.getApplication().isUnitTestMode();
 
   public PsiDocumentManagerImpl(@NotNull final Project project,
                                 @NotNull PsiManager psiManager,
-                                @NotNull SmartPointerManager smartPointerManager,
                                 @NotNull EditorFactory editorFactory,
                                 @NotNull MessageBus bus,
                                 @NonNls @NotNull final DocumentCommitThread documentCommitThread) {
-    super(project, psiManager, smartPointerManager, bus, documentCommitThread);
+    super(project, psiManager, bus, documentCommitThread);
     myDocumentCommitThread = documentCommitThread;
     editorFactory.getEventMulticaster().addDocumentListener(this, project);
-    bus.connect().subscribe(AppTopics.FILE_DOCUMENT_SYNC, new FileDocumentManagerAdapter() {
+    MessageBusConnection busConnection = bus.connect();
+    busConnection.subscribe(AppTopics.FILE_DOCUMENT_SYNC, new FileDocumentManagerAdapter() {
       @Override
       public void fileContentLoaded(@NotNull final VirtualFile virtualFile, @NotNull Document document) {
         PsiFile psiFile = ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>() {
           @Override
           public PsiFile compute() {
-            return myProject.isDisposed() ? null : getCachedPsiFile(virtualFile);
+            return myProject.isDisposed() || !virtualFile.isValid() ? null : getCachedPsiFile(virtualFile);
           }
         });
         fireDocumentCreated(document, psiFile);
       }
     });
-    bus.connect().subscribe(DocumentBulkUpdateListener.TOPIC, new DocumentBulkUpdateListener.Adapter() {
+    busConnection.subscribe(DocumentBulkUpdateListener.TOPIC, new DocumentBulkUpdateListener.Adapter() {
       @Override
       public void updateFinished(@NotNull Document doc) {
-        documentCommitThread.queueCommit(project, doc, "Bulk update finished");
+        documentCommitThread.queueCommit(project, doc, "Bulk update finished", ApplicationManager.getApplication().getCurrentModalityState());
       }
     });
-    ApplicationManager.getApplication().addApplicationListener(new ApplicationAdapter() {
-      @Override
-      public void beforeWriteActionStart(Object action) {
-        documentCommitThread.disable("Write action started: " + action);
-      }
-
-      @Override
-      public void writeActionFinished(Object action) {
-        documentCommitThread.enable("Write action finished: " + action);
-      }
-    }, project);
-    documentCommitThread.enable("project open");
   }
 
   @Nullable
   @Override
   public PsiFile getPsiFile(@NotNull Document document) {
     final PsiFile psiFile = super.getPsiFile(document);
-    if (ApplicationManager.getApplication().isUnitTestMode()) {
+    if (myUnitTestMode) {
       final VirtualFile virtualFile = FileDocumentManager.getInstance().getFile(document);
       if (virtualFile != null && virtualFile.isValid()) {
         Collection<Project> projects = ProjectLocator.getInstance().getProjectsForFile(virtualFile);
@@ -113,17 +109,23 @@ public class PsiDocumentManagerImpl extends PsiDocumentManagerBase implements Se
   @Override
   public void documentChanged(DocumentEvent event) {
     super.documentChanged(event);
-    // avoid documents piling up during batch processing
+    // optimisation: avoid documents piling up during batch processing
     if (FileDocumentManagerImpl.areTooManyDocumentsInTheQueue(myUncommittedDocuments)) {
-      if (ApplicationManager.getApplication().isUnitTestMode()) {
+      if (myUnitTestMode) {
+        myStopTrackingDocuments = true;
         try {
-          LOG.error("Too many uncommitted documents for " + myProject + ":\n" + myUncommittedDocuments);
+          LOG.error("Too many uncommitted documents for " + myProject + ":\n" + StringUtil.join(myUncommittedDocuments, "\n") + 
+                    "\n\n Project creation trace: " + myProject.getUserData(ProjectImpl.CREATION_TRACE));
         }
         finally {
+          //noinspection TestOnlyProblems
           clearUncommittedDocuments();
         }
       }
-      commitAllDocuments();
+      // must not commit during document save
+      if (PomModelImpl.isAllowPsiModification()) {
+        commitAllDocuments();
+      }
     }
   }
 
@@ -137,7 +139,7 @@ public class PsiDocumentManagerImpl extends PsiDocumentManagerBase implements Se
   protected boolean finishCommitInWriteAction(@NotNull Document document,
                                               @NotNull List<Processor<Document>> finishProcessors,
                                               boolean synchronously) {
-    EditorWindow.disposeInvalidEditors();  // in write action
+    EditorWindowImpl.disposeInvalidEditors();  // in write action
     return super.finishCommitInWriteAction(document, finishProcessors, synchronously);
   }
 
@@ -187,5 +189,11 @@ public class PsiDocumentManagerImpl extends PsiDocumentManagerBase implements Se
   @Override
   public void reparseFiles(@NotNull Collection<VirtualFile> files, boolean includeOpenFiles) {
     FileContentUtil.reparseFiles(myProject, files, includeOpenFiles);
+  }
+
+  @NotNull
+  @Override
+  protected DocumentWindow freezeWindow(@NotNull DocumentWindow document) {
+    return MultiHostRegistrarImpl.freezeWindow((DocumentWindowImpl)document);
   }
 }

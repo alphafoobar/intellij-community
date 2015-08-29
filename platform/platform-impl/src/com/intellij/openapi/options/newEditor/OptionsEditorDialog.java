@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurableGroup;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
+import com.intellij.openapi.options.ex.Settings;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.ActionCallback;
@@ -111,19 +112,19 @@ public class OptionsEditorDialog extends DialogWrapper implements DataProvider{
       @Override
       public ActionCallback onModifiedAdded(final Configurable configurable) {
         updateStatus();
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
 
       @Override
       public ActionCallback onModifiedRemoved(final Configurable configurable) {
         updateStatus();
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
 
       @Override
       public ActionCallback onErrorsChanged() {
         updateStatus();
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     });
     Disposer.register(myDisposable, myEditor);
@@ -278,6 +279,9 @@ public class OptionsEditorDialog extends DialogWrapper implements DataProvider{
   }
 
   public Object getData(@NonNls String dataId) {
+    if (Settings.KEY.is(dataId)) {
+      return myEditor.mySettings;
+    }
     if (OptionsEditor.KEY.is(dataId)) {
       return myEditor;
     }

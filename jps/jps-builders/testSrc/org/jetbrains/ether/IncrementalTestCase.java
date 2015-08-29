@@ -23,9 +23,9 @@ import com.intellij.util.Processor;
 import org.jetbrains.jps.builders.BuildResult;
 import org.jetbrains.jps.builders.CompileScopeTestBuilder;
 import org.jetbrains.jps.builders.JpsBuildTestCase;
-import org.jetbrains.jps.cmdline.ProjectDescriptor;
-import org.jetbrains.jps.builders.logging.BuildLoggingManager;
 import org.jetbrains.jps.builders.impl.logging.ProjectBuilderLoggerBase;
+import org.jetbrains.jps.builders.logging.BuildLoggingManager;
+import org.jetbrains.jps.cmdline.ProjectDescriptor;
 import org.jetbrains.jps.model.JpsDummyElement;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
 import org.jetbrains.jps.model.java.JpsJavaExtensionService;
@@ -37,7 +37,9 @@ import org.jetbrains.jps.model.module.JpsModule;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
 import org.jetbrains.jps.util.JpsPathUtil;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileFilter;
+import java.io.IOException;
 
 /**
  * @author db
@@ -169,69 +171,33 @@ public abstract class IncrementalTestCase extends JpsBuildTestCase {
     StringBuilder log = new StringBuilder();
     String rootPath = FileUtil.toSystemIndependentName(workDir.getAbsolutePath()) + "/";
     final ProjectDescriptor pd = createProjectDescriptor(new BuildLoggingManager(new StringProjectBuilderLogger(rootPath, log)));
+    BuildResult result = null;
     try {
       doBuild(pd, CompileScopeTestBuilder.rebuild().allModules()).assertSuccessful();
-
-      BuildResult result = null;
 
       for (int idx = 0; idx < makesCount; idx++) {
         modify(idx);
         result = doBuild(pd, CompileScopeTestBuilder.make().allModules());
       }
 
-      assertNotNull(result);
-      
-      final ByteArrayOutputStream makeDump = new ByteArrayOutputStream();
-
-      if (result.isSuccessful()) {
-        final PrintStream stream = new PrintStream(makeDump);
-        try {
-          pd.dataManager.getMappings().toStream(stream);
-        }
-        finally {
-          stream.close();
-        }
-      }
-
-      makeDump.close();
-
       File logFile = new File(baseDir.getAbsolutePath() + ".log");
       if (!logFile.exists()) {
         logFile = new File(baseDir, "build.log");
       }
-      final String expected = StringUtil.convertLineSeparators(FileUtil.loadFile(logFile));
-      final String actual = log.toString();
-
-      assertEquals(expected, actual);
-
-      if (result.isSuccessful()) {
-        doBuild(pd, CompileScopeTestBuilder.rebuild().allModules()).assertSuccessful();
-  
-        final ByteArrayOutputStream rebuildDump = new ByteArrayOutputStream();
-
-        final PrintStream stream = new PrintStream(rebuildDump);
-        try {
-          pd.dataManager.getMappings().toStream(stream);
-        }
-        finally {
-          stream.close();
-        }
-
-        rebuildDump.close();
-  
-        assertEquals(rebuildDump.toString(), makeDump.toString());
-      }
-      return result;
-    }
-    catch (IOException e) {
-      throw new RuntimeException(e);
+      assertSameLinesWithFile(logFile.getAbsolutePath(), log.toString());
     }
     finally {
       pd.release();
     }
+
+    assertNotNull(result);
+    if (result.isSuccessful()) {
+      checkMappingsAreSameAfterRebuild(result);
+    }
+    return result;
   }
 
-  private JpsSdk<JpsDummyElement> getOrCreateJdk() {
+  protected JpsSdk<JpsDummyElement> getOrCreateJdk() {
     if (myJdk == null) {
       myJdk = addJdk("IDEA jdk");
     }

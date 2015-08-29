@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.editor.ex;
 
 import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.impl.EditorTextRepresentationHelper;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapDrawingType;
 import org.jetbrains.annotations.NotNull;
 
@@ -48,6 +49,14 @@ public interface SoftWrapModelEx extends SoftWrapModel {
    */
   @NotNull
   LogicalPosition offsetToLogicalPosition(int offset);
+
+  /**
+   * Asks current model to map given logical position to document offset
+   *
+   * @param logicalPosition target editor logical position
+   * @return                document offset for the given editor logical position
+   */
+  int logicalPositionToOffset(@NotNull LogicalPosition logicalPosition);
 
   /**
    * Asks current model to adjust visual position that corresponds to the given logical position if necessary.
@@ -111,42 +120,17 @@ public interface SoftWrapModelEx extends SoftWrapModel {
    * amount of space to be used during editor component's width calculation (IJ editor perform 'preventive UI component expansion'
    * when user types near the right edge).
    * <p/>
-   * The main idea of soft wraps is to avoid horizontal scrolling, however, there is a possible case that particular line
-   * of text can't be soft-wrapped, i.e. we need to show horizontal scroll bar. So, we have the following use-cases:
-   * <pre>
-   * <ol>
-   *   <li>
-   *     <b>Long line is soft-wrapped</b>.
-   *     <p/>
-   *     Example:
-   *     <p/>
-   *     this a long lin[caret] |&lt;-- viewport's edge
-   *     <p/>
-   *     As soon as 'e' is typed, soft wrapping is performed and 'line' word is displayed at the next visual line, we need
-   *     not to consider {@link EditorSettings#getAdditionalColumnsCount() additional columns} during width recalculation;
-   *   </li>
-   *   <li>
-   *     <b>Long line can't be soft-wrapped</b>
-   *     <p/>
-   *     <code>Example:</code>
-   *     thisisaratherlonglin[caret]|&lt;-- viewport's edge
-   *     <p/>
-   *     When 'e' is typed we need to increase component's width and use
-   *     {@link EditorSettings#getAdditionalColumnsCount() additional columns} for its calculation;
-   *   </li>
-   * </ol>
-   * </pre>
-   * This method allows to answer if {@link EditorSettings#getAdditionalColumnsCount() additional columns} should be used
-   * during editor component's width calculation.
-   * 
-   * @return      <code>true</code> if {@link EditorSettings#getAdditionalColumnsCount() additional columns} should be used
-   *              during editor component's width recalculation;
-   *              <code>false</code> otherwise
+   * The main idea of soft wraps is to avoid horizontal scrolling, so, when soft wrapping is enabled and succeeds (so that resulting
+   * text layout fits view area's width), additional columns wont be added to the preferred editor width.
+   * This method answers whether the above behaviour should be overridden, and additional columns setting should be respected regardless of 
+   * soft wrapping success. This happens when {@link #forceAdditionalColumnsUsage()} has been invoked previously.
    */
   boolean isRespectAdditionalColumns();
 
   /**
-   * Allows to instruct current model to always return <code>'true'</code> from {@link #isRespectAdditionalColumns()}.
+   * Allows to instruct current model to return <code>'true'</code> from {@link #isRespectAdditionalColumns()}.
    */
   void forceAdditionalColumnsUsage();
+
+  EditorTextRepresentationHelper getEditorTextRepresentationHelper();
 }

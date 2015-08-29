@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
  */
 package com.intellij.debugger.ui.impl;
 
-import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.ide.FrameStateListener;
 import com.intellij.ide.FrameStateManager;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CustomShortcutSet;
+import com.intellij.openapi.actionSystem.CommonShortcuts;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Weighted;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeGlassPane;
 import com.intellij.openapi.wm.IdeGlassPaneUtil;
@@ -31,6 +31,7 @@ import com.intellij.util.Alarm;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import com.intellij.xdebugger.settings.XDebuggerSettingsManager;
 
 import javax.swing.*;
 import javax.swing.event.PopupMenuEvent;
@@ -80,7 +81,7 @@ public class TipManager implements Disposable, PopupMenuListener {
 
   boolean myInsideComponent;
 
-  private class MyMouseListener extends MouseAdapter {
+  private class MyMouseListener extends MouseAdapter implements Weighted{
     @Override
     public void mouseExited(final MouseEvent e) {
       myInsideComponent = false;
@@ -91,6 +92,11 @@ public class TipManager implements Disposable, PopupMenuListener {
       if (myInsideComponent) {
         hideTooltip(true);
       }
+    }
+
+    @Override
+    public double getWeight() {
+      return 0;
     }
 
     @Override
@@ -111,14 +117,17 @@ public class TipManager implements Disposable, PopupMenuListener {
     return menu;
   }
 
+  @Override
   public void popupMenuWillBecomeVisible(final PopupMenuEvent e) {
     myPopupShown = true;
   }
 
+  @Override
   public void popupMenuWillBecomeInvisible(final PopupMenuEvent e) {
     onPopupClosed(e);
   }
 
+  @Override
   public void popupMenuCanceled(final PopupMenuEvent e) {
     onPopupClosed(e);
   }
@@ -130,7 +139,7 @@ public class TipManager implements Disposable, PopupMenuListener {
     }
   }
 
-  private class MyMouseMotionListener extends MouseMotionAdapter {
+  private class MyMouseMotionListener extends MouseMotionAdapter implements Weighted{
     @Override
     public void mouseMoved(final MouseEvent e) {
       myLastMouseEvent = e;
@@ -150,10 +159,14 @@ public class TipManager implements Disposable, PopupMenuListener {
       }
     }
 
+    @Override
+    public double getWeight() {
+      return 0;
+    }
   }
 
   private boolean isInsideComponent(final MouseEvent e) {
-    final Rectangle compBounds = myComponent.getBounds();
+    final Rectangle compBounds = myComponent.getVisibleRect();
     final Point compPoint = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), myComponent);
 
     return compBounds.contains(compPoint);
@@ -164,12 +177,13 @@ public class TipManager implements Disposable, PopupMenuListener {
     myShowAlarm.cancelAllRequests();
     myHideAlarm.cancelAllRequests();
     myShowAlarm.addRequest(new Runnable() {
+      @Override
       public void run() {
         if (!myIsDisposed && !myPopupShown) {
           showTooltip(e, auto);
         }
       }
-    }, auto ? DebuggerSettings.getInstance().VALUE_LOOKUP_DELAY : 10);
+    }, auto ? XDebuggerSettingsManager.getInstance().getDataViewSettings().getValueLookupDelay() : 10);
   }
 
   private void showTooltip(InputEvent e, boolean auto) {
@@ -235,6 +249,7 @@ public class TipManager implements Disposable, PopupMenuListener {
       myCurrentTooltip = null;
     } else {
       myHideAlarm.addRequest(new Runnable() {
+        @Override
         public void run() {
           if (myInsideComponent) {
             hideTooltip(true);
@@ -263,17 +278,20 @@ public class TipManager implements Disposable, PopupMenuListener {
     myComponent = component;
 
     new UiNotifyConnector.Once(component, new Activatable() {
+      @Override
       public void showNotify() {
         installListeners();
       }
 
+      @Override
       public void hideNotify() {
       }
     });
 
     final HideTooltipAction hide = new HideTooltipAction();
-    hide.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)), myComponent);
+    hide.registerCustomShortcutSet(CommonShortcuts.ESCAPE, myComponent);
     Disposer.register(this, new Disposable() {
+      @Override
       public void dispose() {
         hide.unregisterCustomShortcutSet(myComponent);
       }
@@ -282,6 +300,7 @@ public class TipManager implements Disposable, PopupMenuListener {
 
 
   private class HideTooltipAction extends AnAction {
+    @Override
     public void actionPerformed(AnActionEvent e) {
       hideTooltip(true);
     }
@@ -306,6 +325,7 @@ public class TipManager implements Disposable, PopupMenuListener {
     FrameStateManager.getInstance().addListener(myFrameStateListener);
   }
 
+  @Override
   public void dispose() {
     Disposer.dispose(this);
 
@@ -323,6 +343,7 @@ public class TipManager implements Disposable, PopupMenuListener {
 
   private class MyAwtPreprocessor implements AWTEventListener {
 
+    @Override
     public void eventDispatched(AWTEvent event) {
       if (event.getID() == MouseEvent.MOUSE_MOVED) {
         preventFromHideIfInsideTooltip(event);

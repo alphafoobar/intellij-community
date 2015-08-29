@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.components.StorageScheme;
+import com.intellij.openapi.components.impl.stores.StorageUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
@@ -37,6 +38,7 @@ import com.intellij.openapi.project.impl.ProjectLifecycleListener;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.messages.MessageHandler;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -82,7 +84,7 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
   }
 
   @Override
-  protected void showUnknownModuleTypeNotification(List<Module> modulesWithUnknownTypes) {
+  protected void showUnknownModuleTypeNotification(@NotNull List<Module> modulesWithUnknownTypes) {
     if (!ApplicationManager.getApplication().isHeadlessEnvironment() && !modulesWithUnknownTypes.isEmpty()) {
       String message;
       if (modulesWithUnknownTypes.size() == 1) {
@@ -109,29 +111,35 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
     }
   }
 
+  @NotNull
   @Override
-  protected ModuleEx createModule(String filePath) {
+  protected ModuleEx createModule(@NotNull String filePath) {
     return new ModuleImpl(filePath, myProject);
   }
 
+  @NotNull
   @Override
-  protected ModuleEx createAndLoadModule(String filePath) throws IOException {
+  protected ModuleEx createAndLoadModule(@NotNull String filePath) throws IOException {
     ModuleImpl module = new ModuleImpl(filePath, myProject);
-    module.getStateStore().load();
+    StorageUtil.checkUnknownMacros(module, myProject);
     return module;
   }
 
   @Override
-  protected boolean isUnknownModuleType(Module module) {
+  protected boolean isUnknownModuleType(@NotNull Module module) {
     return ModuleType.get(module) instanceof UnknownModuleType;
   }
 
   @Override
   protected void fireModulesAdded() {
+    if (myModuleModel.myModules.isEmpty()) {
+      return;
+    }
+
     Runnable runnableWithProgress = new Runnable() {
       @Override
       public void run() {
-        for (final Module module : myModuleModel.myPathToModule.values()) {
+        for (final Module module : myModuleModel.myModules) {
           final Application app = ApplicationManager.getApplication();
           final Runnable swingRunnable = new Runnable() {
             @Override
@@ -139,7 +147,7 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
               fireModuleAddedInWriteAction(module);
             }
           };
-          if (app.isDispatchThread() || app.isHeadlessEnvironment()) {
+          if (app.isDispatchThread()) {
             swingRunnable.run();
           }
           else {

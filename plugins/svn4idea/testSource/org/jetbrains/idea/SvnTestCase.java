@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,7 @@ package org.jetbrains.idea;
 
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.ide.startup.impl.StartupManagerImpl;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
-import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.PluginPathManager;
@@ -53,6 +49,7 @@ import com.intellij.testFramework.vcs.MockChangeListManagerGate;
 import com.intellij.testFramework.vcs.MockChangelistBuilder;
 import com.intellij.testFramework.vcs.TestClientRunner;
 import com.intellij.util.Processor;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.io.ZipUtil;
 import com.intellij.util.ui.UIUtil;
@@ -71,9 +68,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 /**
  * @author yole
@@ -99,7 +94,6 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
   protected File myPluginRoot;
 
   protected SvnTestCase(@NotNull String testDataDir) {
-    PlatformTestCase.initPlatformLangPrefix();
     myTestDataDir = testDataDir;
     myWcRootName = "wcroot";
   }
@@ -116,11 +110,6 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
     final List<VFileContentChangeEvent> events = Collections.singletonList(event);
     listener.before(events);
     listener.after(events);
-  }
-
-  @Override
-  protected String getPluginName() {
-    return "Subversion";
   }
 
   @Before
@@ -218,10 +207,9 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
 
   @Override
   protected void projectCreated() {
-    if (isUseNativeAcceleration()) {
-      SvnConfiguration.getInstance(myProject).myUseAcceleration = SvnConfiguration.UseAcceleration.commandLine;
+    SvnConfiguration.getInstance(myProject).setUseAcceleration(
+      isUseNativeAcceleration() ? SvnConfiguration.UseAcceleration.commandLine : SvnConfiguration.UseAcceleration.nothing);
       SvnApplicationSettings.getInstance().setCommandLinePath(myClientBinaryPath + File.separator + "svn");
-    }
   }
 
   @After
@@ -385,10 +373,7 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
   }
 
   protected static void sleep(final int millis) {
-    try {
-      Thread.sleep(millis);
-    }
-    catch (InterruptedException ignore) { }
+    TimeoutUtil.sleep(millis);
   }
 
   public String prepareBranchesStructure() throws Exception {
@@ -509,7 +494,7 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
                                                  }
                                                  return null;
                                                }
-                                             }, "test", new Presentation(), null, 0));
+                                             }, "test", new Presentation(), ActionManager.getInstance(), 0));
 
     final ChangeListManager clManager = ChangeListManager.getInstance(project);
     clManager.ensureUpToDate(false);
@@ -618,8 +603,8 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase  {
 
   protected void setNativeAcceleration(final boolean value) {
     System.out.println("Set native acceleration to " + value);
-    SvnConfiguration.getInstance(myProject).myUseAcceleration =
-      value ? SvnConfiguration.UseAcceleration.commandLine : SvnConfiguration.UseAcceleration.nothing;
+    SvnConfiguration.getInstance(myProject).setUseAcceleration(
+      value ? SvnConfiguration.UseAcceleration.commandLine : SvnConfiguration.UseAcceleration.nothing);
     SvnApplicationSettings.getInstance().setCommandLinePath(myClientBinaryPath + File.separator + "svn");
   }
 }

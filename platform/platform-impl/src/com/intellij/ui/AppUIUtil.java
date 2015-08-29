@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.util.PlatformUtils;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -36,11 +37,11 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.io.IOException;
+import java.io.File;
 import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.net.URL;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * @author yole
@@ -55,7 +56,7 @@ public class AppUIUtil {
   @SuppressWarnings({"UnnecessaryFullyQualifiedName", "deprecation"})
   private static List<Image> getAppIconImages() {
     ApplicationInfoEx appInfo = ApplicationInfoImpl.getShadowInstance();
-    List<Image> images = ContainerUtil.newArrayListWithExpectedSize(3);
+    List<Image> images = ContainerUtil.newArrayListWithCapacity(3);
 
     if (SystemInfo.isXWindow) {
       String bigIconUrl = appInfo.getBigIconUrl();
@@ -89,16 +90,19 @@ public class AppUIUtil {
     invokeOnEdt(runnable, null);
   }
 
-  public static void invokeOnEdt(Runnable runnable, @Nullable Condition condition) {
+  public static void invokeOnEdt(Runnable runnable, @Nullable Condition expired) {
     Application application = ApplicationManager.getApplication();
     if (application.isDispatchThread()) {
-      runnable.run();
+      //noinspection unchecked
+      if (expired == null || !expired.value(null)) {
+        runnable.run();
+      }
     }
-    else if (condition == null) {
+    else if (expired == null) {
       application.invokeLater(runnable);
     }
     else {
-      application.invokeLater(runnable, condition);
+      application.invokeLater(runnable, expired);
     }
   }
 
@@ -107,21 +111,19 @@ public class AppUIUtil {
       final Toolkit toolkit = Toolkit.getDefaultToolkit();
       final Class<? extends Toolkit> aClass = toolkit.getClass();
       if ("sun.awt.X11.XToolkit".equals(aClass.getName())) {
-        final Field awtAppClassName = aClass.getDeclaredField("awtAppClassName");
-        awtAppClassName.setAccessible(true);
-        awtAppClassName.set(toolkit, getFrameClass());
+        ReflectionUtil.setField(aClass, toolkit, null, "awtAppClassName", getFrameClass());
       }
     }
     catch (Exception ignore) { }
   }
 
   public static String getFrameClass() {
-    String name = ApplicationNamesInfo.getInstance().getProductName().toLowerCase();
+    String name = ApplicationNamesInfo.getInstance().getProductName().toLowerCase(Locale.US);
     String wmClass = VENDOR_PREFIX + StringUtil.replaceChar(name, ' ', '-');
     if ("true".equals(System.getProperty("idea.debug.mode"))) {
       wmClass += "-debug";
     }
-    return PlatformUtils.isCommunity() ? wmClass + "-ce" : wmClass;
+    return PlatformUtils.isCommunityEdition() ? wmClass + "-ce" : wmClass;
   }
 
   public static void registerBundledFonts() {
@@ -133,12 +135,13 @@ public class AppUIUtil {
   }
 
   private static void registerFont(@NonNls String name) {
-    try {
-      URL url = AppUIUtil.class.getResource(name);
-      if (url == null) {
-        throw new IOException("Resource missing: " + name);
-      }
+    URL url = AppUIUtil.class.getResource(name);
+    if (url == null) {
+      Logger.getInstance(AppUIUtil.class).warn("Resource missing: " + name);
+      return;
+    }
 
+    try {
       InputStream is = url.openStream();
       try {
         Font font = Font.createFont(Font.TRUETYPE_FONT, is);
@@ -148,8 +151,8 @@ public class AppUIUtil {
         is.close();
       }
     }
-    catch (Exception e) {
-      Logger.getInstance(AppUIUtil.class).error("Cannot register font: " + name, e);
+    catch (Throwable t) {
+      Logger.getInstance(AppUIUtil.class).warn("Cannot register font: " + url, t);
     }
   }
 
@@ -165,9 +168,33 @@ public class AppUIUtil {
     });
   }
 
-  public static JTextField createUndoableTextField() {
-    JTextField field = new JTextField();
-    new TextComponentUndoProvider(field);
-    return field;
+  private static final int MIN_ICON_SIZE = 32;
+
+  @Nullable
+  public static String findIcon(final String iconsPath) {
+    final File iconsDir = new File(iconsPath);
+
+    // 1. look for .svg icon
+    for (String child : iconsDir.list()) {
+      if (child.endsWith(".svg")) {
+        return iconsPath + '/' + child;
+      }
+    }
+
+    // 2. look for .png icon of max size
+    int max = 0;
+    String iconPath = null;
+    for (String child : iconsDir.list()) {
+      if (!child.endsWith(".png")) continue;
+      final String path = iconsPath + '/' + child;
+      final Icon icon = new ImageIcon(path);
+      final int size = icon.getIconHeight();
+      if (size >= MIN_ICON_SIZE && size > max && size == icon.getIconWidth()) {
+        max = size;
+        iconPath = path;
+      }
+    }
+
+    return iconPath;
   }
 }

@@ -16,13 +16,14 @@
  */
 package com.intellij.refactoring.inline;
 
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.lang.StdLanguages;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.HelpID;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
@@ -54,7 +55,7 @@ class InlineMethodHandler extends JavaInlineActionHandler {
       return;
     }
 
-    PsiReference reference = editor != null ? TargetElementUtilBase.findReference(editor, editor.getCaretModel().getOffset()) : null;
+    PsiReference reference = editor != null ? TargetElementUtil.findReference(editor, editor.getCaretModel().getOffset()) : null;
     if (reference != null) {
       final PsiElement refElement = reference.getElement();
       if (refElement != null && !isEnabledForLanguage(refElement.getLanguage())) {
@@ -122,12 +123,23 @@ class InlineMethodHandler extends JavaInlineActionHandler {
       }
     }
 
+    if (reference != null && PsiTreeUtil.getParentOfType(reference.getElement(), PsiImportStaticStatement.class) != null) {
+      reference = null;
+    }
+
     final boolean invokedOnReference = reference != null;
     if (!invokedOnReference) {
       final VirtualFile vFile = method.getContainingFile().getVirtualFile();
       ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(vFile);
     }
-    PsiJavaCodeReferenceElement refElement = reference != null ? (PsiJavaCodeReferenceElement)reference.getElement() : null;
+
+    PsiJavaCodeReferenceElement refElement = null;
+    if (reference != null) {
+      final PsiElement referenceElement = reference.getElement();
+      if (referenceElement instanceof PsiJavaCodeReferenceElement) {
+        refElement = (PsiJavaCodeReferenceElement)referenceElement;
+      }
+    }
     InlineMethodDialog dialog = new InlineMethodDialog(project, method, refElement, editor, allowInlineThisOnly);
     dialog.show();
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,134 +13,120 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.xmlb;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.xmlb.annotations.OptionTag;
 import org.jdom.Attribute;
-import org.jdom.Content;
 import org.jdom.Element;
-import org.jdom.Text;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 
-class OptionTagBinding implements Binding {
-  private static final Logger LOG = Logger.getInstance("#" + OptionTagBinding.class.getName());
-
-  private final Accessor accessor;
-  private final String myName;
-  private final Binding myBinding;
+class OptionTagBinding extends BasePrimitiveBinding {
   private final String myTagName;
   private final String myNameAttribute;
   private final String myValueAttribute;
 
-  public OptionTagBinding(Accessor accessor, @Nullable OptionTag optionTag) {
-    this.accessor = accessor;
-    myBinding = XmlSerializerImpl.getBinding(accessor);
-    if (optionTag != null) {
-      String name = optionTag.value();
-      myName = name.isEmpty() ? accessor.getName() : name;
-      myTagName = optionTag.tag();
-      myNameAttribute = optionTag.nameAttribute();
-      myValueAttribute = optionTag.valueAttribute();
-    }
-    else {
-      myName = accessor.getName();
+  public OptionTagBinding(@NotNull MutableAccessor accessor, @Nullable OptionTag optionTag) {
+    super(accessor, optionTag == null ? null : optionTag.value(), optionTag == null ? null : optionTag.converter());
+
+    if (optionTag == null) {
       myTagName = Constants.OPTION;
       myNameAttribute = Constants.NAME;
       myValueAttribute = Constants.VALUE;
     }
+    else {
+      myNameAttribute = optionTag.nameAttribute();
+      myValueAttribute = optionTag.valueAttribute();
+
+      String tagName = optionTag.tag();
+      if (StringUtil.isEmpty(myNameAttribute) && Constants.OPTION.equals(tagName)) {
+        tagName = myAccessor.getName();
+      }
+      myTagName = tagName;
+    }
   }
 
   @Override
-  public Object serialize(Object o, Object context, SerializationFilter filter) {
+  @Nullable
+  public Object serialize(@NotNull Object o, @Nullable Object context, @NotNull SerializationFilter filter) {
+    Object value = myAccessor.read(o);
     Element targetElement = new Element(myTagName);
-    Object value = accessor.read(o);
 
     if (!StringUtil.isEmpty(myNameAttribute)) {
       targetElement.setAttribute(myNameAttribute, myName);
     }
 
-    if (value == null) return targetElement;
-
-    Object node = myBinding.serialize(value, targetElement, filter);
-    if (node instanceof Text) {
-      Text text = (Text)node;
-      targetElement.setAttribute(myValueAttribute, text.getText());
+    if (value == null) {
+      return targetElement;
     }
-    else {
-      if (targetElement != node) {
-        JDOMUtil.addContent(targetElement, node);
+
+    if (myConverter == null) {
+      if (myBinding == null) {
+        targetElement.setAttribute(myValueAttribute, XmlSerializerImpl.convertToString(value));
+      }
+      else if (myBinding instanceof BeanBinding && myValueAttribute.isEmpty()) {
+        ((BeanBinding)myBinding).serializeInto(value, targetElement, filter);
+      }
+      else {
+        Object node = myBinding.serialize(value, targetElement, filter);
+        if (node != null && targetElement != node) {
+          JDOMUtil.addContent(targetElement, node);
+        }
       }
     }
-
+    else {
+      targetElement.setAttribute(myValueAttribute, myConverter.toString(value));
+    }
     return targetElement;
   }
 
   @Override
-  public Object deserialize(Object o, @NotNull Object... nodes) {
-    if (nodes.length > 1) {
-      LOG.info("Duplicate options for " + o + " will be ignored");
-    }
-    assert nodes.length != 0 : "Empty nodes passed to: " + this;
-
-    Element element = ((Element)nodes[0]);
-    Attribute valueAttr = element.getAttribute(myValueAttribute);
-
-    if (valueAttr != null) {
-      Object value = myBinding.deserialize(o, valueAttr);
-      accessor.write(o, value);
-    }
-    else {
-      final Content[] childElements = JDOMUtil.getContent(element);
-      List<Object> children = new ArrayList<Object>();
-
-      for (final Content child : childElements) {
-        if (XmlSerializerImpl.isIgnoredNode(child)) continue;
-        children.add(child);
-      }
-
-      if (!children.isEmpty()) {
-        Object value = myBinding.deserialize(accessor.read(o), ArrayUtil.toObjectArray(children));
-        accessor.write(o, value);
+  public Object deserialize(Object context, @NotNull Element element) {
+    Attribute valueAttribute = element.getAttribute(myValueAttribute);
+    if (valueAttribute == null) {
+      if (myValueAttribute.isEmpty()) {
+        assert myBinding != null;
+        myAccessor.set(context, myBinding.deserialize(context, element));
       }
       else {
-        accessor.write(o, null);
+        List<Element> children = element.getChildren();
+        if (children.isEmpty()) {
+          myAccessor.set(context, null);
+        }
+        else {
+          assert myBinding != null;
+          myAccessor.set(context, Binding.deserializeList(myBinding, myAccessor.read(context), children));
+        }
       }
     }
-
-    return o;
+    else if (myConverter == null) {
+      XmlSerializerImpl.doSet(context, valueAttribute.getValue(), myAccessor, XmlSerializerImpl.typeToClass(myAccessor.getGenericType()));
+    }
+    else {
+      myAccessor.set(context, myConverter.fromString(valueAttribute.getValue()));
+    }
+    return context;
   }
 
   @Override
-  public boolean isBoundTo(Object node) {
-    if (!(node instanceof Element)) return false;
-    Element e = (Element)node;
-    if (!e.getName().equals(myTagName)) return false;
-    String name = e.getAttributeValue(myNameAttribute);
+  public boolean isBoundTo(@NotNull Element element) {
+    if (!element.getName().equals(myTagName)) {
+      return false;
+    }
+
+    String name = element.getAttributeValue(myNameAttribute);
     if (StringUtil.isEmpty(myNameAttribute)) {
       return name == null || name.equals(myName);
     }
-    return name != null && name.equals(myName);
+    else {
+      return name != null && name.equals(myName);
+    }
   }
-
-  @Override
-  public Class getBoundNodeType() {
-    throw new UnsupportedOperationException("Method getBoundNodeType is not supported in " + getClass());
-  }
-
-  @Override
-  public void init() {
-  }
-
 
   @NonNls
   public String toString() {

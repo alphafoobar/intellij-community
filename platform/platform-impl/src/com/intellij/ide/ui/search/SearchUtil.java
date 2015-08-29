@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@
 package com.intellij.ide.ui.search;
 
 import com.intellij.application.options.SkipSelfSearchComponent;
+import com.intellij.ide.actions.ShowSettingsUtilImpl;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurableGroup;
 import com.intellij.openapi.options.MasterDetails;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.options.ex.GlassPanel;
-import com.intellij.openapi.options.ex.IdeConfigurablesGroup;
-import com.intellij.openapi.options.ex.ProjectConfigurablesGroup;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -42,8 +41,6 @@ import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.*;
@@ -66,8 +63,7 @@ public class SearchUtil {
   }
 
   public static void processProjectConfigurables(Project project, HashMap<SearchableConfigurable, TreeSet<OptionDescription>> options) {
-    processConfigurables(new ProjectConfigurablesGroup(project).getConfigurables(), options);
-    processConfigurables(new IdeConfigurablesGroup().getConfigurables(), options);
+    processConfigurables(ShowSettingsUtilImpl.getConfigurables(project, false), options);
   }
 
   private static void processConfigurables(final Configurable[] configurables,
@@ -316,18 +312,6 @@ public class SearchUtil {
     }
   }
 
-  public static Runnable lightOptions(final SearchableConfigurable configurable,
-                                      final JComponent component,
-                                      final String option,
-                                      final GlassPanel glassPanel,
-                                      final boolean forceSelect) {
-    return new Runnable() {
-      public void run() {
-        traverseComponentsTree(configurable, glassPanel, component, option, forceSelect);
-      }
-    };
-  }
-
   public static String markup(@NonNls @NotNull String textToMarkup, @Nullable String filter) {
     if (filter == null || filter.length() == 0) {
       return textToMarkup;
@@ -361,6 +345,7 @@ public class SearchUtil {
       }
     }
     for (String stripped : quoted) {
+      if (registrar.isStopWord(stripped)) continue;
       textToMarkup = markup(textToMarkup, insideHtmlTagPattern, stripped);
     }
     return head + textToMarkup + foot;
@@ -381,15 +366,12 @@ public class SearchUtil {
   }
 
   private static String markup(@NonNls String textToMarkup, final Pattern insideHtmlTagPattern, final String option) {
-    @NonNls String result = "";
     final int styleIdx = textToMarkup.indexOf("<style");
     final int styleEndIdx = textToMarkup.indexOf("</style>");
     if (styleIdx < 0 || styleEndIdx < 0) {
-      result = markupInText(textToMarkup, insideHtmlTagPattern, option);
-    } else {
-      result = markup(textToMarkup.substring(0, styleIdx), insideHtmlTagPattern, option) + markup(textToMarkup.substring(styleEndIdx + STYLE_END.length()), insideHtmlTagPattern, option);
+      return markupInText(textToMarkup, insideHtmlTagPattern, option);
     }
-    return result;
+    return  markup(textToMarkup.substring(0, styleIdx), insideHtmlTagPattern, option) + markup(textToMarkup.substring(styleEndIdx + STYLE_END.length()), insideHtmlTagPattern, option);
   }
 
   private static String markupInText(String textToMarkup, Pattern insideHtmlTagPattern, String option) {
@@ -575,80 +557,6 @@ public class SearchUtil {
       return popup;
     }
     return null;
-  }
-
-  public static void showHintPopup(final ConfigurableSearchTextField searchField,
-                                   final JBPopup[] activePopup,
-                                   final Alarm showHintAlarm,
-                                   final Consumer<String> selectConfigurable,
-                                   final Project project) {
-    for (JBPopup aPopup : activePopup) {
-      if (aPopup != null) {
-        aPopup.cancel();
-      }
-    }
-
-    final JBPopup popup = createPopup(searchField, activePopup, showHintAlarm, selectConfigurable, project, 0); //no selection
-    if (popup != null) {
-      popup.showUnderneathOf(searchField);
-      searchField.requestFocusInWindow();
-    }
-
-    activePopup[0] = popup;
-    activePopup[1] = null;
-  }
-
-
-  public static void registerKeyboardNavigation(final ConfigurableSearchTextField searchField,
-                                                final JBPopup[] activePopup,
-                                                final Alarm showHintAlarm,
-                                                final Consumer<String> selectConfigurable,
-                                                final Project project) {
-    final Consumer<Integer> shower = new Consumer<Integer>() {
-      public void consume(final Integer direction) {
-        if (activePopup[0] != null) {
-          activePopup[0].cancel();
-        }
-
-        if (activePopup[1] != null && activePopup[1].isVisible()) {
-          return;
-        }
-
-        final JBPopup popup = createPopup(searchField, activePopup, showHintAlarm, selectConfigurable, project, direction.intValue());
-        if (popup != null) {
-          popup.showUnderneathOf(searchField);
-        }
-        activePopup[0] = null;
-        activePopup[1] = popup;
-      }
-    };
-    searchField.registerKeyboardAction(new ActionListener() {
-      public void actionPerformed(ActionEvent e) {
-        shower.consume(1);
-      }
-    }, KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
-    searchField.registerKeyboardAction(new ActionListener() {
-      public void actionPerformed(ActionEvent e) {
-        shower.consume(-1);
-      }
-    }, KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
-
-    searchField.addKeyboardListener(new KeyAdapter() {
-      public void keyPressed(KeyEvent e) {
-        if (e.getKeyCode() == KeyEvent.VK_ESCAPE && searchField.getText().length() > 0) {
-          e.consume();
-          if (cancelPopups(activePopup)) return;
-          searchField.setText("");
-        }
-        else if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-          searchField.addCurrentTextToHistory();
-          cancelPopups(activePopup);
-          if (e.getModifiers() == 0) {
-            e.consume();
-          }
-        }
-      }
-    });
   }
 
   private static boolean cancelPopups(final JBPopup[] activePopup) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.editor.ex;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.openapi.editor.FoldingGroup;
 import com.intellij.openapi.editor.FoldingModel;
@@ -35,8 +36,15 @@ public interface FoldingModelEx extends FoldingModel {
 
   boolean intersectsRegion(int startOffset, int endOffset);
 
+  /**
+   * @deprecated Use an equivalent method {@link FoldingModel#getCollapsedRegionAtOffset(int)} instead. To be removed in IDEA 16.
+   */
   FoldRegion fetchOutermost(int offset);
 
+  /**
+   * Returns an index in an array returned by {@link #fetchTopLevel()} method, for the last folding region lying entirely before given
+   * offset (region can touch given offset at its right edge).
+   */
   int getLastCollapsedRegionBefore(int offset);
 
   TextAttributes getPlaceholderAttributes();
@@ -47,9 +55,7 @@ public interface FoldingModelEx extends FoldingModel {
   FoldRegion createFoldRegion(int startOffset, int endOffset, @NotNull String placeholder, @Nullable FoldingGroup group,
                               boolean neverExpands);
 
-  boolean addListener(@NotNull FoldingListener listener);
-
-  boolean removeListener(@NotNull FoldingListener listener);
+  void addListener(@NotNull FoldingListener listener, @NotNull Disposable parentDisposable);
 
   void clearFoldRegions();
 

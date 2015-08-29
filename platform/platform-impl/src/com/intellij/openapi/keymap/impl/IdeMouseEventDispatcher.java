@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package com.intellij.openapi.keymap.impl;
 
 import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.ide.DataManager;
+import com.intellij.ide.IdeEventQueue;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.PresentationFactory;
 import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
@@ -28,6 +30,7 @@ import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.impl.FocusManagerImpl;
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
@@ -36,7 +39,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -54,9 +56,11 @@ import static java.awt.event.MouseEvent.*;
 public final class IdeMouseEventDispatcher {
   private final PresentationFactory myPresentationFactory = new PresentationFactory();
   private final ArrayList<AnAction> myActions = new ArrayList<AnAction>(1);
-  private final Map<Container, Integer> myRootPane2BlockedId = new HashMap<Container, Integer>();
+  private final Map<Container, BlockState> myRootPane2BlockedId = new HashMap<Container, BlockState>();
   private int myLastHorScrolledComponentHash = 0;
-  private MouseEvent myPreviousMouseEvent;
+  private boolean myPressedModifiersStored;
+  private int myModifiers;
+  private int myModifiersEx;
 
   // Don't compare MouseEvent ids. Swing has wrong sequence of events: first is mouse_clicked(500)
   // then mouse_pressed(501), mouse_released(502) etc. Here, mouse events sorted so we can compare
@@ -78,21 +82,16 @@ public final class IdeMouseEventDispatcher {
 
     // here we try to find "local" shortcuts
     if (component instanceof JComponent) {
-      @SuppressWarnings("unchecked")
-      final ArrayList<AnAction> listOfActions = (ArrayList<AnAction>)((JComponent)component).getClientProperty(AnAction.ourClientProperty);
-      if (listOfActions != null) {
-        for (AnAction action : listOfActions) {
-          final Shortcut[] shortcuts = action.getShortcutSet().getShortcuts();
-          for (Shortcut shortcut : shortcuts) {
-            if (mouseShortcut.equals(shortcut) && !myActions.contains(action)) {
-              myActions.add(action);
-            }
+      for (AnAction action : ActionUtil.getActions((JComponent)component)) {
+        for (Shortcut shortcut : action.getShortcutSet().getShortcuts()) {
+          if (mouseShortcut.equals(shortcut) && !myActions.contains(action)) {
+            myActions.add(action);
           }
         }
-        // once we've found a proper local shortcut(s), we exit
-        if (! myActions.isEmpty()) {
-          return;
-        }
+      }
+      // once we've found a proper local shortcut(s), we exit
+      if (!myActions.isEmpty()) {
+        return;
       }
     }
 
@@ -126,9 +125,6 @@ public final class IdeMouseEventDispatcher {
    *         to normal event dispatching.
    */
   public boolean dispatchMouseEvent(MouseEvent e) {
-    MouseEvent previousEvent = myPreviousMouseEvent;
-    myPreviousMouseEvent = e;
-
     Component c = e.getComponent();
 
     //frame activation by mouse click
@@ -164,17 +160,33 @@ public final class IdeMouseEventDispatcher {
       ignore = true;
     }
 
-    if (e.getID() == MOUSE_RELEASED && previousEvent != null && previousEvent.getID() == MOUSE_DRAGGED) {
-      ignore = true; // we don't want to process action bindings on mouse release at the end of drag operation
+    int modifiers = e.getModifiers();
+    int modifiersEx = e.getModifiersEx();
+    if (e.getID() == MOUSE_PRESSED) {
+      myPressedModifiersStored = true;
+      myModifiers = modifiers;
+      myModifiersEx = modifiersEx;
+    }
+    else if (e.getID() == MOUSE_RELEASED) {
+      if (myPressedModifiersStored) {
+        myPressedModifiersStored = false;
+        modifiers = myModifiers;
+        modifiersEx = myModifiersEx;
+      }
     }
 
-   final JRootPane root = findRoot(e);
+    final JRootPane root = findRoot(e);
     if (root != null) {
-      final Integer lastId = myRootPane2BlockedId.get(root);
-      if (lastId != null) {
-        if (SWING_EVENTS_PRIORITY.indexOf(lastId) < SWING_EVENTS_PRIORITY.indexOf(e.getID())) {
-          myRootPane2BlockedId.put(root, e.getID());
-          return true;
+      BlockState blockState = myRootPane2BlockedId.get(root);
+      if (blockState != null) {
+        if (SWING_EVENTS_PRIORITY.indexOf(blockState.currentEventId) < SWING_EVENTS_PRIORITY.indexOf(e.getID())) {
+          blockState.currentEventId = e.getID();
+          if (blockState.blockMode == IdeEventQueue.BlockMode.COMPLETE) {
+            return true;
+          }
+          else {
+            ignore = true;
+          }
         } else {
           myRootPane2BlockedId.remove(root);
         }
@@ -206,7 +218,7 @@ public final class IdeMouseEventDispatcher {
       return false;
     }
 
-    final MouseShortcut shortcut = new MouseShortcut(e.getButton(), e.getModifiersEx(), e.getClickCount());
+    final MouseShortcut shortcut = new MouseShortcut(e.getButton(), modifiersEx, e.getClickCount());
     fillActionsList(c, shortcut, IdeKeyEventDispatcher.isModalContext(c));
     ActionManagerEx actionManager = ActionManagerEx.getInstanceEx();
     if (actionManager != null) {
@@ -216,7 +228,7 @@ public final class IdeMouseEventDispatcher {
         Presentation presentation = myPresentationFactory.getPresentation(action);
         AnActionEvent actionEvent = new AnActionEvent(e, dataContext, ActionPlaces.MAIN_MENU, presentation,
                                                       ActionManager.getInstance(),
-                                                      e.getModifiers());
+                                                      modifiers);
         action.beforeActionPerformedUpdate(actionEvent);
 
         if (presentation.isEnabled()) {
@@ -236,12 +248,7 @@ public final class IdeMouseEventDispatcher {
   }
 
   private static void resetPopupTrigger(final MouseEvent e) {
-    try {
-      final Field popupTrigger = e.getClass().getDeclaredField("popupTrigger");
-      popupTrigger.setAccessible(true);
-      popupTrigger.set(e, false);
-    }
-    catch (Exception ignored) { }
+    ReflectionUtil.setField(MouseEvent.class, e, boolean.class, "popupTrigger", false);
   }
 
   /**
@@ -253,14 +260,7 @@ public final class IdeMouseEventDispatcher {
    */
   public static boolean patchClickCount(final MouseEvent e) {
     if (e.getClickCount() != 1 && e.getButton() > 3) {
-      try {
-        final Field clickCount = e.getClass().getDeclaredField("clickCount");
-        clickCount.setAccessible(true);
-        clickCount.set(e, 1);
-        return true;
-      }
-      catch (Exception ignored) {
-      }
+      ReflectionUtil.setField(MouseEvent.class, e, int.class, "clickCount", 1);
     }
     return false;
   }
@@ -326,11 +326,11 @@ public final class IdeMouseEventDispatcher {
     return c != null && "y.view.Graph2DView".equals(c.getClass().getName());
   }
 
-  public void blockNextEvents(final MouseEvent e) {
+  public void blockNextEvents(final MouseEvent e, IdeEventQueue.BlockMode blockMode) {
     final JRootPane root = findRoot(e);
     if (root == null) return;
 
-    myRootPane2BlockedId.put(root, e.getID());
+    myRootPane2BlockedId.put(root, new BlockState(e.getID(), blockMode));
   }
 
   @Nullable
@@ -349,5 +349,15 @@ public final class IdeMouseEventDispatcher {
     }
 
     return root;
+  }
+
+  private static class BlockState {
+    private int currentEventId;
+    private final IdeEventQueue.BlockMode blockMode;
+
+    private BlockState(int id, IdeEventQueue.BlockMode mode) {
+      currentEventId = id;
+      blockMode = mode;
+    }
   }
 }

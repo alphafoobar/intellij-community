@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,34 +16,23 @@
 package com.intellij.application.options.editor;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.*;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import com.intellij.xml.XmlBundle;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-
-/**
- * @author spleaner
- */
 @State(
-  name="XmlEditorOptions",
-  storages= {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/editor.xml"
-    )}
+  name = "XmlEditorOptions",
+  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/editor.xml")
 )
-public class WebEditorOptions implements PersistentStateComponent<WebEditorOptions>, ExportableComponent {
-  private boolean myBreadcrumbsEnabled = true;
-  private boolean myBreadcrumbsEnabledInXml = false;
+public class WebEditorOptions implements PersistentStateComponent<WebEditorOptions> {
   private boolean myShowCssColorPreviewInGutter = true;
-  private boolean mySelectWholeCssSelectorSuffixOnDoubleClick = true;
+  private boolean mySelectWholeCssIdentifierOnDoubleClick = true;
   private boolean myShowCssInlineColorPreview = false;
   private boolean myAutomaticallyInsertClosingTag = true;
   private boolean myAutomaticallyInsertRequiredAttributes = true;
   private boolean myAutomaticallyInsertRequiredSubTags = true;
+  private boolean myAutoCloseTag = true;
+  private boolean mySyncTagEditing = true;
   private boolean myAutomaticallyStartAttribute = true;
   private boolean myInsertQuotesForAttributeValue = true;
 
@@ -51,28 +40,12 @@ public class WebEditorOptions implements PersistentStateComponent<WebEditorOptio
   private int myTagTreeHighlightingLevelCount = 6;
   private int myTagTreeHighlightingOpacity = 10;
 
-  public static WebEditorOptions getInstance() {
-    return ServiceManager.getService(WebEditorOptions.class);
-  }
-
   public WebEditorOptions() {
     setTagTreeHighlightingEnabled(!ApplicationManager.getApplication().isUnitTestMode());
   }
 
-  public void setBreadcrumbsEnabled(boolean b) {
-    myBreadcrumbsEnabled = b;
-  }
-
-  public boolean isBreadcrumbsEnabled() {
-    return myBreadcrumbsEnabled;
-  }
-
-  public void setBreadcrumbsEnabledInXml(boolean b) {
-    myBreadcrumbsEnabledInXml = b;
-  }
-
-  public boolean isBreadcrumbsEnabledInXml() {
-    return myBreadcrumbsEnabledInXml;
+  public static WebEditorOptions getInstance() {
+    return ServiceManager.getService(WebEditorOptions.class);
   }
 
   public boolean isShowCssInlineColorPreview() {
@@ -121,40 +94,28 @@ public class WebEditorOptions implements PersistentStateComponent<WebEditorOptio
     myAutomaticallyInsertRequiredSubTags = automaticallyInsertRequiredSubTags;
   }
 
-  public void setTagTreeHighlightingLevelCount(int tagTreeHighlightingLevelCount) {
-    myTagTreeHighlightingLevelCount = tagTreeHighlightingLevelCount;
-  }
-
   public int getTagTreeHighlightingLevelCount() {
     return myTagTreeHighlightingLevelCount;
   }
 
-  public void setTagTreeHighlightingOpacity(int tagTreeHighlightingOpacity) {
-    myTagTreeHighlightingOpacity = tagTreeHighlightingOpacity;
+  public void setTagTreeHighlightingLevelCount(int tagTreeHighlightingLevelCount) {
+    myTagTreeHighlightingLevelCount = tagTreeHighlightingLevelCount;
   }
 
   public int getTagTreeHighlightingOpacity() {
     return myTagTreeHighlightingOpacity;
   }
 
-  public void setTagTreeHighlightingEnabled(boolean tagTreeHighlightingEnabled) {
-    myTagTreeHighlightingEnabled = tagTreeHighlightingEnabled;
+  public void setTagTreeHighlightingOpacity(int tagTreeHighlightingOpacity) {
+    myTagTreeHighlightingOpacity = tagTreeHighlightingOpacity;
   }
 
   public boolean isTagTreeHighlightingEnabled() {
     return myTagTreeHighlightingEnabled;
   }
 
-  @Override
-  @NotNull
-  public File[] getExportFiles() {
-    return new File[]{PathManager.getOptionsFile("editor")};
-  }
-
-  @Override
-  @NotNull
-  public String getPresentableName() {
-    return XmlBundle.message("xml.options");
+  public void setTagTreeHighlightingEnabled(boolean tagTreeHighlightingEnabled) {
+    myTagTreeHighlightingEnabled = tagTreeHighlightingEnabled;
   }
 
   @Override
@@ -178,12 +139,12 @@ public class WebEditorOptions implements PersistentStateComponent<WebEditorOptio
     XmlSerializerUtil.copyBean(state, this);
   }
 
-  public boolean isSelectWholeCssSelectorSuffixOnDoubleClick() {
-    return mySelectWholeCssSelectorSuffixOnDoubleClick;
+  public boolean isSelectWholeCssIdentifierOnDoubleClick() {
+    return mySelectWholeCssIdentifierOnDoubleClick;
   }
 
-  public void setSelectWholeCssSelectorSuffixOnDoubleClick(boolean selectWholeCssSelectorSuffixOnDoubleClick) {
-    mySelectWholeCssSelectorSuffixOnDoubleClick = selectWholeCssSelectorSuffixOnDoubleClick;
+  public void setSelectWholeCssIdentifierOnDoubleClick(boolean selectWholeCssIdentifiersOnDoubleClick) {
+    mySelectWholeCssIdentifierOnDoubleClick = selectWholeCssIdentifiersOnDoubleClick;
   }
 
   public boolean isInsertQuotesForAttributeValue() {
@@ -192,5 +153,21 @@ public class WebEditorOptions implements PersistentStateComponent<WebEditorOptio
 
   public void setInsertQuotesForAttributeValue(boolean insertQuotesForAttributeValue) {
     myInsertQuotesForAttributeValue = insertQuotesForAttributeValue;
+  }
+
+  public boolean isAutoCloseTag() {
+    return myAutoCloseTag;
+  }
+
+  public void setAutoCloseTag(boolean autoCloseTag) {
+    myAutoCloseTag = autoCloseTag;
+  }
+
+  public boolean isSyncTagEditing() {
+    return mySyncTagEditing;
+  }
+
+  public void setSyncTagEditing(boolean syncTagEditing) {
+    mySyncTagEditing = syncTagEditing;
   }
 }

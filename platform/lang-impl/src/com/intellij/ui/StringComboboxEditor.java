@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.ui;
 
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.command.undo.UndoConstants;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -30,6 +29,7 @@ import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
@@ -39,18 +39,26 @@ import javax.swing.*;
  */
 public class StringComboboxEditor extends EditorComboBoxEditor {
   public static final Key<JComboBox> COMBO_BOX_KEY = Key.create("COMBO_BOX_KEY");
+  public static final Key<Boolean> USE_PLAIN_PREFIX_MATCHER = Key.create("USE_PLAIN_PREFIX_MATCHER");
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.StringComboboxEditor");
   private final Project myProject;
 
   public StringComboboxEditor(final Project project, final FileType fileType, ComboBox comboBox) {
+    this(project, fileType, comboBox, false);
+  }
+
+  public StringComboboxEditor(final Project project, final FileType fileType, ComboBox comboBox, boolean usePlainMatcher) {
     super(project, fileType);
     myProject = project;
     final PsiFile file = PsiFileFactory.getInstance(project).createFileFromText("a.dummy", StdFileTypes.PLAIN_TEXT, "", 0, true);
     final Document document = PsiDocumentManager.getInstance(project).getDocument(file);
     assert document != null;
     document.putUserData(COMBO_BOX_KEY, comboBox);
-    document.putUserData(UndoConstants.DONT_RECORD_UNDO, true);
+    if (usePlainMatcher) {
+      document.putUserData(USE_PLAIN_PREFIX_MATCHER, true);
+    }
+
     super.setItem(document);
   }
 
@@ -68,7 +76,7 @@ public class StringComboboxEditor extends EditorComboBoxEditor {
     final String s = (String)anObject;
     new WriteCommandAction(myProject) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         getDocument().setText(s);
       }
     }.execute();

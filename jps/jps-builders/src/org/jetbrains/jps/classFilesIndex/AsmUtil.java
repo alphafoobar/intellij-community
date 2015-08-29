@@ -17,7 +17,7 @@ package org.jetbrains.jps.classFilesIndex;
 
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.asm4.Type;
+import org.jetbrains.org.objectweb.asm.Type;
 
 import java.util.Set;
 
@@ -46,10 +46,12 @@ public class AsmUtil {
   private static final Set<String> ASM_PRIMITIVE_TYPES = ContainerUtil
     .newHashSet("C", "D", "F", "I", "J", "S", "Z", "B", "V", "Ljava/lang/Object;", "Ljava/lang/String;", "Ljava/lang/Class;");
 
-  public static boolean isPrimitiveOrArray(final String asmType) {
-    if (asmType.startsWith("[")) {
-      return true;
+  public static boolean isPrimitiveOrArrayOfPrimitives(final String asmType) {
+    for (int i = 0; i < asmType.length(); i++) {
+      if (asmType.charAt(i) != '[') {
+        return ASM_PRIMITIVE_TYPES.contains(asmType.substring(i));
+      }
     }
-    return ASM_PRIMITIVE_TYPES.contains(asmType);
+    throw new AssertionError("Illegal string: " + asmType);
   }
 }

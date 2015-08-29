@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ public abstract class CreateFileFromTemplateAction extends CreateFromTemplateAct
   }
 
   protected PsiFile createFileFromTemplate(String name, FileTemplate template, PsiDirectory dir) {
-    return createFileFromTemplate(name, template, dir, getDefaultTemplateProperty());
+    return createFileFromTemplate(name, template, dir, getDefaultTemplateProperty(), true);
   }
 
   @SuppressWarnings("DialogTitleCapitalization")
@@ -51,20 +51,25 @@ public abstract class CreateFileFromTemplateAction extends CreateFromTemplateAct
   public static PsiFile createFileFromTemplate(@Nullable String name,
                                                @NotNull FileTemplate template,
                                                @NotNull PsiDirectory dir,
-                                               @Nullable String defaultTemplateProperty) {
-    CreateFileAction.MkDirs mkdirs = new CreateFileAction.MkDirs(name, dir);
-    name = mkdirs.newName;
-    dir = mkdirs.directory;
+                                               @Nullable String defaultTemplateProperty,
+                                               boolean openFile) {
+    if (name != null) {
+      CreateFileAction.MkDirs mkdirs = new CreateFileAction.MkDirs(name, dir);
+      name = mkdirs.newName;
+      dir = mkdirs.directory;
+    }
+    
     PsiElement element;
     Project project = dir.getProject();
     try {
-      element = FileTemplateUtil
-        .createFromTemplate(template, name, FileTemplateManager.getInstance().getDefaultProperties(project), dir);
+      element = FileTemplateUtil.createFromTemplate(template, name, FileTemplateManager.getInstance(dir.getProject()).getDefaultProperties(project), dir);
       final PsiFile psiFile = element.getContainingFile();
 
       final VirtualFile virtualFile = psiFile.getVirtualFile();
       if (virtualFile != null) {
-        FileEditorManager.getInstance(project).openFile(virtualFile, true);
+        if (openFile) {
+          FileEditorManager.getInstance(project).openFile(virtualFile, true);
+        }
         if (defaultTemplateProperty != null) {
           PropertiesComponent.getInstance(project).setValue(defaultTemplateProperty, template.getName());
         }
@@ -87,7 +92,7 @@ public abstract class CreateFileFromTemplateAction extends CreateFromTemplateAct
 
   @Override
   protected PsiFile createFile(String name, String templateName, PsiDirectory dir) {
-    final FileTemplate template = FileTemplateManager.getInstance().getInternalTemplate(templateName);
+    final FileTemplate template = FileTemplateManager.getInstance(dir.getProject()).getInternalTemplate(templateName);
     return createFileFromTemplate(name, template, dir);
   }
 }

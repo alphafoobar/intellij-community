@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ public abstract class PropertyBunch<MType> {
       PyExpression callee = call.getCallee();
       if (callee instanceof PyReferenceExpression) {
         PyReferenceExpression ref = (PyReferenceExpression)callee;
-        if (ref.getQualifier() != null) return null;
+        if (ref.isQualified()) return null;
         if (PyNames.PROPERTY.equals(callee.getName())) {
           PsiFile file = source.getContainingFile();
           if (isBuiltinFile(file) || !resolvesLocally(ref)) {

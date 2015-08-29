@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,57 +15,44 @@
  */
 package com.intellij.openapi.options;
 
-public class ExternalInfo {
-  private boolean myIsImported = false;
-  private String myOriginalPath = null;
-  private String myCurrentFileName = null;
-  private String myPreviouslySavedName = null;
-  private Long mySavedHash = null;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-  public void setIsImported(final boolean isImported) {
-    myIsImported = isImported;
-  }
+@Deprecated
+public final class ExternalInfo {
+  // we keep it to detect rename
+  private String myPreviouslySavedName;
+  private String myCurrentFileName;
 
-  public void setOriginalPath(final String originalPath) {
-    myOriginalPath = originalPath;
-  }
-
-  public boolean isIsImported() {
-    return myIsImported;
-  }
-
-  public String getOriginalPath() {
-    return myOriginalPath;
-  }
+  private int myContentHash;
 
   public String getCurrentFileName() {
     return myCurrentFileName;
   }
 
+  public void setCurrentFileName(@Nullable String currentFileName) {
+    myCurrentFileName = currentFileName;
+  }
+
+  @Nullable
   public String getPreviouslySavedName() {
     return myPreviouslySavedName;
   }
 
-  public void setCurrentFileName(final String currentFileName) {
-    myCurrentFileName = currentFileName;
-  }
-
-  public void setPreviouslySavedName(final String previouslySavedName) {
+  public void setPreviouslySavedName(@NotNull String previouslySavedName) {
     myPreviouslySavedName = previouslySavedName;
   }
 
-  public void copy(final ExternalInfo externalInfo) {
-    myCurrentFileName = externalInfo.myCurrentFileName;
-    myIsImported = externalInfo.isIsImported();
-    myOriginalPath = externalInfo.myOriginalPath;
-    myPreviouslySavedName = externalInfo.myPreviouslySavedName;
+  public int getHash() {
+    return myContentHash;
   }
 
-  public Long getHash() {
-    return mySavedHash;
+  public void setHash(int newHash) {
+    myContentHash = newHash;
   }
 
-  public void setHash(final long newHash) {
-    mySavedHash = newHash;
+  @Override
+  public String toString() {
+    return "file: " + myCurrentFileName;
   }
 }

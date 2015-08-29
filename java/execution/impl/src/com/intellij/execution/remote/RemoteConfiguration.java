@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,8 +41,8 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 
-public class RemoteConfiguration extends ModuleBasedConfiguration<JavaRunConfigurationModule> implements
-                                                                                              RunConfigurationWithSuppressedDefaultRunAction {
+public class RemoteConfiguration extends ModuleBasedConfiguration<JavaRunConfigurationModule>
+                                 implements RunConfigurationWithSuppressedDefaultRunAction, RemoteRunProfile {
 
   @Override
   public void writeExternal(final Element element) throws WriteExternalException {
@@ -77,10 +77,13 @@ public class RemoteConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
 
   @Override
   public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
-    GenericDebuggerRunnerSettings debuggerSettings = (GenericDebuggerRunnerSettings)env.getRunnerSettings();
-    debuggerSettings.LOCAL = false;
-    debuggerSettings.setDebugPort(USE_SOCKET_TRANSPORT ? PORT : SHMEM_ADDRESS);
-    debuggerSettings.setTransport(USE_SOCKET_TRANSPORT ? DebuggerSettings.SOCKET_TRANSPORT : DebuggerSettings.SHMEM_TRANSPORT);
+    final GenericDebuggerRunnerSettings debuggerSettings = (GenericDebuggerRunnerSettings)env.getRunnerSettings();
+    if (debuggerSettings != null) {
+      // sync self state with execution environment's state if available
+      debuggerSettings.LOCAL = false;
+      debuggerSettings.setDebugPort(USE_SOCKET_TRANSPORT ? PORT : SHMEM_ADDRESS);
+      debuggerSettings.setTransport(USE_SOCKET_TRANSPORT ? DebuggerSettings.SOCKET_TRANSPORT : DebuggerSettings.SHMEM_TRANSPORT);
+    }
     return new RemoteStateState(getProject(), createRemoteConnection());
   }
 

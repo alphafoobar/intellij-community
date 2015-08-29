@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,17 +23,15 @@ import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.OptionalConfigurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.Function;
-import com.intellij.util.PlatformUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -42,19 +40,19 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.nio.charset.Charset;
+import java.util.HashMap;
 import java.util.Map;
 
-public class FileEncodingConfigurable implements SearchableConfigurable, OptionalConfigurable, Configurable.NoScroll {
+public class FileEncodingConfigurable implements SearchableConfigurable, Configurable.NoScroll {
   private final Project myProject;
   private EncodingFileTreeTable myTreeView;
   private JScrollPane myTreePanel;
   private JPanel myPanel;
-  private JCheckBox myAutodetectUTFEncodedFilesCheckBox;
   private JCheckBox myTransparentNativeToAsciiCheckBox;
   private JPanel myPropertiesFilesEncodingCombo;
   private final Ref<Charset> mySelectedCharsetForPropertiesFiles = new Ref<Charset>();
-  private final Ref<Charset> mySelectedIdeCharset = new Ref<Charset>();
-  private final Ref<Charset> mySelectedProjectCharset = new Ref<Charset>();
+  private final Ref<Charset> mySelectedIdeCharset = new Ref<Charset>();           // IDE encoding or null if "System Default"
+  private final Ref<Charset> mySelectedProjectCharset = new Ref<Charset>(); // Project encoding or null if "System Default"
   private JLabel myTitleLabel;
   private JPanel myIdeEncodingsListCombo;
   private JPanel myProjectEncodingListCombo;
@@ -91,13 +89,14 @@ public class FileEncodingConfigurable implements SearchableConfigurable, Optiona
     return null;
   }
 
+  @NotNull
   private static ChooseFileEncodingAction installChooseEncodingCombo(@NotNull JPanel parentPanel, @NotNull final Ref<Charset> selected) {
     ChooseFileEncodingAction myAction = new ChooseFileEncodingAction(null) {
       @Override
       public void update(final AnActionEvent e) {
         getTemplatePresentation().setEnabled(true);
         Charset charset = selected.get();
-        getTemplatePresentation().setText(charset == null ? IdeBundle.message("encoding.name.system.default") : charset.displayName());
+        getTemplatePresentation().setText(charset == null ? IdeBundle.message("encoding.name.system.default", CharsetToolkit.getDefaultSystemCharset().displayName()) : charset.displayName());
       }
 
       @Override
@@ -142,44 +141,48 @@ public class FileEncodingConfigurable implements SearchableConfigurable, Optiona
     EncodingProjectManager encodingManager = EncodingProjectManager.getInstance(myProject);
 
     Map<VirtualFile, Charset> editing = myTreeView.getValues();
-    Map<VirtualFile, Charset> mapping = EncodingProjectManager.getInstance(myProject).getAllMappings();
-    boolean same = editing.equals(mapping)
+    Map<VirtualFile, Charset> existingMapping = getExistingMappingIncludingDefault(myProject);
+    boolean same = editing.equals(existingMapping)
        && Comparing.equal(encodingManager.getDefaultCharsetForPropertiesFiles(null), mySelectedCharsetForPropertiesFiles.get())
-       && encodingManager.isUseUTFGuessing(null) == myAutodetectUTFEncodedFilesCheckBox.isSelected()
        && encodingManager.isNative2AsciiForPropertiesFiles() == myTransparentNativeToAsciiCheckBox.isSelected()
       ;
     return !same;
   }
 
-  private boolean isIdeEncodingModified() {
-    Charset charset = mySelectedIdeCharset.get();
-    if (null == charset) {
-      return !StringUtil.isEmpty(EncodingManager.getInstance().getDefaultCharsetName());
-    }
+  @NotNull
+  static Map<VirtualFile, Charset> getExistingMappingIncludingDefault(@NotNull Project project) {
+    Map<VirtualFile, Charset> existingMapping = new HashMap<VirtualFile, Charset>();
+    EncodingProjectManagerImpl encodingProjectManager = (EncodingProjectManagerImpl)EncodingProjectManager.getInstance(project);
+    existingMapping.putAll(encodingProjectManager.getAllMappings());
+    existingMapping.put(null, encodingProjectManager.getDefaultCharset());
+    return existingMapping;
+  }
 
-    return !Comparing.equal(charset, EncodingManager.getInstance().getDefaultCharset());
+  private boolean isIdeEncodingModified() {
+    String charsetName = getSelectedCharsetName(mySelectedIdeCharset);
+    return !charsetName.equals(EncodingManager.getInstance().getDefaultCharsetName());
   }
   private boolean isProjectEncodingModified() {
-    Charset charset = mySelectedProjectCharset.get();
-    return !Comparing.equal(charset, EncodingProjectManager.getInstance(myProject).getEncoding(null, false));
+    String charsetName = getSelectedCharsetName(mySelectedProjectCharset);
+    return !charsetName.equals(EncodingProjectManager.getInstance(myProject).getDefaultCharsetName());
+  }
+
+  @NotNull // charset name or empty for System Default
+  private static String getSelectedCharsetName(@NotNull Ref<Charset> selectedCharset) {
+    Charset charset = selectedCharset.get();
+    return charset == null ? "" : charset.name();
   }
 
   @Override
   public void apply() throws ConfigurationException {
-    Charset projectCharset = mySelectedProjectCharset.get();
+    String projectCharsetName = getSelectedCharsetName(mySelectedProjectCharset);
 
     Map<VirtualFile,Charset> result = myTreeView.getValues();
-    if (projectCharset == null) {
-      result.remove(null);
-    }
-    else {
-      result.put(null, projectCharset);
-    }
-    EncodingProjectManager encodingManager = EncodingProjectManager.getInstance(myProject);
-    encodingManager.setMapping(result);
-    encodingManager.setDefaultCharsetForPropertiesFiles(null, mySelectedCharsetForPropertiesFiles.get());
-    encodingManager.setNative2AsciiForPropertiesFiles(null, myTransparentNativeToAsciiCheckBox.isSelected());
-    encodingManager.setUseUTFGuessing(null, myAutodetectUTFEncodedFilesCheckBox.isSelected());
+    EncodingProjectManagerImpl encodingProjectManager = ((EncodingProjectManagerImpl)EncodingProjectManager.getInstance(myProject));
+    encodingProjectManager.setMapping(result);
+    encodingProjectManager.setDefaultCharsetName(projectCharsetName);
+    encodingProjectManager.setDefaultCharsetForPropertiesFiles(null, mySelectedCharsetForPropertiesFiles.get());
+    encodingProjectManager.setNative2AsciiForPropertiesFiles(null, myTransparentNativeToAsciiCheckBox.isSelected());
 
     Charset ideCharset = mySelectedIdeCharset.get();
     EncodingManager.getInstance().setDefaultCharsetName(ideCharset == null ? "" : ideCharset.name());
@@ -188,13 +191,12 @@ public class FileEncodingConfigurable implements SearchableConfigurable, Optiona
   @Override
   public void reset() {
     EncodingProjectManager encodingManager = EncodingProjectManager.getInstance(myProject);
-    myTreeView.reset(encodingManager.getAllMappings());
-    myAutodetectUTFEncodedFilesCheckBox.setSelected(encodingManager.isUseUTFGuessing(null));
+    myTreeView.reset(getExistingMappingIncludingDefault(myProject));
     myTransparentNativeToAsciiCheckBox.setSelected(encodingManager.isNative2AsciiForPropertiesFiles());
     mySelectedCharsetForPropertiesFiles.set(encodingManager.getDefaultCharsetForPropertiesFiles(null));
 
     mySelectedIdeCharset.set(EncodingManager.getInstance().getDefaultCharsetName().isEmpty() ? null : EncodingManager.getInstance().getDefaultCharset());
-    mySelectedProjectCharset.set(EncodingProjectManager.getInstance(myProject).getEncoding(null, false));
+    mySelectedProjectCharset.set(EncodingProjectManager.getInstance(myProject).getDefaultCharsetName().isEmpty() ? null : EncodingProjectManager.getInstance(myProject).getDefaultCharset());
     myPropertiesEncodingAction.update(null);
     myIdeEncodingAction.update(null);
     myProjectEncodingAction.update(null);
@@ -210,11 +212,5 @@ public class FileEncodingConfigurable implements SearchableConfigurable, Optiona
 
   private void createUIComponents() {
     myTreePanel = ScrollPaneFactory.createScrollPane(new JBTable());
-  }
-
-  @Override
-  public boolean needDisplay() {
-    // TODO[yole] cleaner API
-    return !PlatformUtils.isRubyMine();
   }
 }

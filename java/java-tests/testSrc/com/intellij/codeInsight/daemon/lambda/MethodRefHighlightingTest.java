@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,19 @@
 package com.intellij.codeInsight.daemon.lambda;
 
 import com.intellij.codeInsight.daemon.LightDaemonAnalyzerTestCase;
-import com.intellij.codeInspection.LocalInspectionTool;
-import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.testFramework.IdeaTestUtil;
 import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
 
 public class MethodRefHighlightingTest extends LightDaemonAnalyzerTestCase {
   @NonNls static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/lambda/methodRef";
 
-  @NotNull
   @Override
-  protected LocalInspectionTool[] configureLocalInspectionTools() {
-    return new LocalInspectionTool[]{
-      new UnusedSymbolLocalInspection(),
-    };
+  protected void setUp() throws Exception {
+    super.setUp();
+    enableInspectionTool(new UnusedDeclarationInspection());
   }
 
   public void testValidContext() { doTest(); }
@@ -48,6 +44,7 @@ public class MethodRefHighlightingTest extends LightDaemonAnalyzerTestCase {
   public void testConstructorRefsInnerClasses() { doTest(); }
   public void testVarargs() { doTest(); }
   public void testVarargs1() { doTest(); }
+  public void testVarargs2() { doTest(); }
   public void testConstructorRefInnerFromSuper() { doTest(); }
   public void testReferenceParameters() { doTest(); }
   public void testRawQualifier() { doTest(); }
@@ -98,13 +95,24 @@ public class MethodRefHighlightingTest extends LightDaemonAnalyzerTestCase {
     doTest();
   }
 
+  public void testQualifiersInStaticContext() throws Exception {
+    doTest();
+  }
+  public void testInvalidFunctionalTypeInReturnStmt() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA127765() throws Exception {
+    doTest();
+  }
+
   private void doTest() {
     doTest(false);
   }
 
   private void doTest(boolean warnings) {
     IdeaTestUtil.setTestVersion(JavaSdkVersion.JDK_1_8, getModule(), getTestRootDisposable());
-    doTestNewInference(BASE_PATH + "/" + getTestName(false) + ".java", warnings, false);
+    doTest(BASE_PATH + "/" + getTestName(false) + ".java", warnings, false);
   }
 
   @Override

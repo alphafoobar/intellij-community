@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
     final PsiMethod myMethod = (PsiMethod)startElement;
 
     if (!FileModificationService.getInstance().prepareFileForWrite(myMethod.getContainingFile())) return;
-    PsiType myReturnType = myReturnTypePointer.getType();
+    final PsiType myReturnType = myReturnTypePointer.getType();
     if (myReturnType == null) return;
     if (myFixWholeHierarchy) {
       final PsiMethod superMethod = myMethod.findDeepestSuperMethod();
@@ -202,12 +202,17 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
   }
 
   @Nullable
-  private PsiMethod[] getChangeRoots(final PsiMethod method) {
+  private PsiMethod[] getChangeRoots(final PsiMethod method, @NotNull PsiType returnType) {
     if (!myFixWholeHierarchy) return new PsiMethod[]{method};
 
     final PsiMethod[] methods = method.findDeepestSuperMethods();
 
     if (methods.length > 0) {
+      for (PsiMethod psiMethod : methods) {
+        if (returnType.equals(psiMethod.getReturnType())) {
+          return new PsiMethod[] {method};
+        }
+      }
       return methods;
     }
     // no - only base
@@ -215,8 +220,8 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
   }
 
   @NotNull
-  private List<PsiMethod> changeReturnType(final PsiMethod method, final PsiType returnType) {
-    final PsiMethod[] methods = getChangeRoots(method);
+  private List<PsiMethod> changeReturnType(final PsiMethod method, @NotNull final PsiType returnType) {
+    final PsiMethod[] methods = getChangeRoots(method, returnType);
     if (methods == null) {
       // canceled
       return Collections.emptyList();
@@ -229,7 +234,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
                                                                         false, null,
                                                                         myName,
                                                                         returnType,
-                                                                        RemoveUnusedParameterFix.getNewParametersInfo(method, null),
+                                                                        RemoveUnusedParameterFix.getNewParametersInfo(targetMethod, null),
                                                                         methodSignatureChangeVisitor);
       processor.run();
     }
@@ -251,7 +256,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
     @Override
     public void visit(final UsageInfo usage) {
       if (usage instanceof OverriderUsageInfo) {
-        myAffectedMethods.add(((OverriderUsageInfo) usage).getElement());
+        myAffectedMethods.add(((OverriderUsageInfo) usage).getOverridingMethod());
       }
     }
 
@@ -265,7 +270,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
         final UsageInfo info = usageInfoIterator.next();
         if (info instanceof OverriderUsageInfo) {
           final OverriderUsageInfo overrideUsage = (OverriderUsageInfo) info;
-          if (myAffectedMethods.contains(overrideUsage.getElement())) {
+          if (myAffectedMethods.contains(overrideUsage.getOverridingMethod())) {
             usageInfoIterator.remove();
           }
         }
@@ -294,7 +299,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
     }
 
     @Override
-    protected void performRefactoring(final UsageInfo[] usages) {
+    protected void performRefactoring(@NotNull final UsageInfo[] usages) {
       super.performRefactoring(usages);
 
       for (UsageInfo usage : usages) {

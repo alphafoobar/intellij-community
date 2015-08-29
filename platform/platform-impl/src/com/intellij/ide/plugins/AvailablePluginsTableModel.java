@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,43 +22,31 @@
  */
 package com.intellij.ide.plugins;
 
+import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ui.ColumnInfo;
 
 import javax.swing.*;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 
 /**
- * Created by IntelliJ IDEA.
- * User: stathik
- * Date: Dec 26, 2003
- * Time: 3:51:58 PM
- * To change this template use Options | File Templates.
+ * @author stathik
+ * @since Dec 26, 2003
  */
 public class AvailablePluginsTableModel extends PluginTableModel {
-
   public static final String ALL = "All";
+  public static final String JETBRAINS_REPO = "JetBrains Plugin Repository";
+  public static final String BUILTIN_REPO = "Built-in Plugin Repository";
+
   private String myCategory = ALL;
   private TreeSet<String> myAvailableCategories = new TreeSet<String>();
-
-  protected static final String STATUS = "Status";
-
-  public static final String JETBRAINS_REPO = "JetBrains";
   private String myRepository = ALL;
   private String myVendor = null;
 
   public AvailablePluginsTableModel() {
-    super.columns = new ColumnInfo[] {
-      new AvailablePluginColumnInfo(this),
-      new PluginManagerColumnInfo(PluginManagerColumnInfo.COLUMN_DOWNLOADS, this),
-      new PluginManagerColumnInfo(PluginManagerColumnInfo.COLUMN_RATE, this),
-      new PluginManagerColumnInfo(PluginManagerColumnInfo.COLUMN_DATE, this)/*,
-      new PluginManagerColumnInfo(PluginManagerColumnInfo.COLUMN_CATEGORY, this)*/};
-
+    columns = new ColumnInfo[]{new AvailablePluginColumnInfo(this)};
     setSortKey(new RowSorter.SortKey(getNameColumn(), SortOrder.ASCENDING));
-    view = new ArrayList<IdeaPluginDescriptor>();
   }
 
   public String getCategory() {
@@ -94,10 +82,19 @@ public class AvailablePluginsTableModel extends PluginTableModel {
       }
     }
 
-    final String repositoryName = ((PluginNode)descriptor).getRepositoryName();
+    return isHostAccepted(((PluginNode)descriptor).getRepositoryName());
+  }
+
+  public boolean isHostAccepted(String repositoryName) {
     if (repositoryName != null) {
-      if (!ALL.equals(myRepository) && !repositoryName.equals(myRepository)) return false;
-    } else {
+      if (repositoryName.equals(ApplicationInfoEx.getInstanceEx().getBuiltinPluginsUrl()) && myRepository.equals(BUILTIN_REPO)) {
+        return true;
+      }
+      else if (!ALL.equals(myRepository) && !repositoryName.equals(myRepository)) {
+        return false;
+      }
+    }
+    else {
       return ALL.equals(myRepository) || JETBRAINS_REPO.equals(myRepository);
     }
     return true;
@@ -113,9 +110,9 @@ public class AvailablePluginsTableModel extends PluginTableModel {
 
   private static void updateStatus(final IdeaPluginDescriptor descr) {
     if (descr instanceof PluginNode) {
-      final PluginNode node = (PluginNode)descr;
       IdeaPluginDescriptor existing = PluginManager.getPlugin(descr.getPluginId());
       if (existing != null) {
+        PluginNode node = (PluginNode)descr;
         node.setStatus(PluginNode.STATUS_INSTALLED);
         node.setInstalledVersion(existing.getVersion());
       }
@@ -136,7 +133,8 @@ public class AvailablePluginsTableModel extends PluginTableModel {
       final String category = descr.getCategory();
       if (category != null) {
         myAvailableCategories.add(category);
-      } else {
+      }
+      else {
         myAvailableCategories.add(AvailablePluginsManagerMain.N_A);
       }
     }
@@ -144,17 +142,7 @@ public class AvailablePluginsTableModel extends PluginTableModel {
     fireTableDataChanged();
   }
 
-  @Override
-  public void filter(final List<IdeaPluginDescriptor> filtered) {
-    view.clear();
-    for (IdeaPluginDescriptor descriptor : filtered) {
-      view.add(descriptor);
-    }
-    super.filter(filtered);
-  }
-
   public int getNameColumn() {
     return 0;
   }
-
 }

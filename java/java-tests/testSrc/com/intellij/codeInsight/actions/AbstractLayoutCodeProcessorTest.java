@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,10 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.file.PsiDirectoryFactory;
+import com.intellij.psi.search.SearchScope;
 import com.intellij.testFramework.PsiTestCase;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -97,8 +97,8 @@ public abstract class AbstractLayoutCodeProcessorTest extends PsiTestCase {
 
   @Override
   public void tearDown() throws Exception {
-    super.tearDown();
     delete(myWorkingDirectory.getVirtualFile());
+    super.tearDown();
   }
 
   @NotNull
@@ -138,10 +138,10 @@ public abstract class AbstractLayoutCodeProcessorTest extends PsiTestCase {
 
   protected void performReformatActionOnSelectedFile(PsiFile file) {
     final AnAction action = getReformatCodeAction();
-    action.actionPerformed(createEventFor(action, ContainerUtil.newArrayList(file), getProject(), new AdditionalEventInfo().setPsiElement(file)));
+    action.actionPerformed(createEventFor(action, ContainerUtil.newArrayList(file.getVirtualFile()), getProject(), new AdditionalEventInfo().setPsiElement(file)));
   }
 
-  protected void performReformatActionOnModule(Module module, List<PsiFile> files) {
+  protected void performReformatActionOnModule(Module module, List<VirtualFile> files) {
     final AnAction action = getReformatCodeAction();
     action.actionPerformed(createEventFor(action, files, getProject(), new AdditionalEventInfo().setModule(module)));
   }
@@ -155,7 +155,7 @@ public abstract class AbstractLayoutCodeProcessorTest extends PsiTestCase {
     final AnAction action = getReformatCodeAction();
     Document document = PsiDocumentManager.getInstance(getProject()).getDocument(file);
     Editor editor = EditorFactory.getInstance().createEditor(document);
-    action.actionPerformed(createEventFor(action, ContainerUtil.newArrayList(file), getProject(), new AdditionalEventInfo().setEditor(editor)));
+    action.actionPerformed(createEventFor(action, ContainerUtil.newArrayList(file.getVirtualFile()), getProject(), new AdditionalEventInfo().setEditor(editor)));
     EditorFactory.getInstance().releaseEditor(editor);
   }
 
@@ -187,31 +187,22 @@ public abstract class AbstractLayoutCodeProcessorTest extends PsiTestCase {
   }
 
   protected AnActionEvent createEventFor(AnAction action, final VirtualFile[] files, final Project project) {
-    return new AnActionEvent(null, new DataContext() {
-      @Nullable
-      @Override
-      public Object getData(@NonNls String dataId) {
-        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return files;
-        if (CommonDataKeys.PROJECT.is(dataId)) return project;
-        return null;
-      }
-    }, "", action.getTemplatePresentation(), ActionManager.getInstance(), 0);
+    return AnActionEvent.createFromAnAction(action, null, "", dataId -> {
+      if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return files;
+      if (CommonDataKeys.PROJECT.is(dataId)) return project;
+      return null;
+    });
   }
 
-  protected AnActionEvent createEventFor(AnAction action, List<PsiFile> files, final Project project, @NotNull final AdditionalEventInfo eventInfo) {
-    final VirtualFile[] vFilesArray = getVirtualFileArrayFrom(files);
-    return new AnActionEvent(null, new DataContext() {
-      @Nullable
-      @Override
-      public Object getData(@NonNls String dataId) {
-        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return vFilesArray;
-        if (CommonDataKeys.PROJECT.is(dataId)) return project;
-        if (CommonDataKeys.EDITOR.is(dataId)) return eventInfo.getEditor();
-        if (LangDataKeys.MODULE_CONTEXT.is(dataId)) return eventInfo.getModule();
-        if (CommonDataKeys.PSI_ELEMENT.is(dataId)) return eventInfo.getElement();
-        return null;
-      }
-    }, "", action.getTemplatePresentation(), ActionManager.getInstance(), 0);
+  protected AnActionEvent createEventFor(AnAction action, final List<VirtualFile> files, final Project project, @NotNull final AdditionalEventInfo eventInfo) {
+    return AnActionEvent.createFromAnAction(action, null, "", dataId -> {
+      if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return files.toArray(new VirtualFile[files.size()]);
+      if (CommonDataKeys.PROJECT.is(dataId)) return project;
+      if (CommonDataKeys.EDITOR.is(dataId)) return eventInfo.getEditor();
+      if (LangDataKeys.MODULE_CONTEXT.is(dataId)) return eventInfo.getModule();
+      if (CommonDataKeys.PSI_ELEMENT.is(dataId)) return eventInfo.getElement();
+      return null;
+    });
   }
 
 
@@ -277,45 +268,6 @@ public abstract class AbstractLayoutCodeProcessorTest extends PsiTestCase {
     PsiTestUtil.addSourceRoot(module, src.getVirtualFile());
     return module;
   }
-
-  class TestFileStructure {
-      private int myLevel;
-      @NotNull private PsiDirectory myRoot;
-      @NotNull private PsiDirectory myCurrentLevelDirectory;
-      private List<List<PsiFile>> myFilesForLevel = new ArrayList<List<PsiFile>>();
-
-      TestFileStructure(@NotNull PsiDirectory root) {
-        myRoot = root;
-        myCurrentLevelDirectory = root;
-        myFilesForLevel.add(new ArrayList<PsiFile>());
-        myLevel = 0;
-      }
-
-      TestFileStructure addTestFilesToCurrentDirectory(String[] names) throws IOException {
-        getFilesAtLevel(myLevel).addAll(createTestFiles(myCurrentLevelDirectory, names));
-        return this;
-      }
-
-      TestFileStructure createDirectoryAndMakeItCurrent(String name) {
-        myLevel++;
-        myFilesForLevel.add(new ArrayList<PsiFile>());
-        myCurrentLevelDirectory = createDirectory(myCurrentLevelDirectory.getVirtualFile(), name);
-        return this;
-      }
-
-      List<PsiFile> getFilesAtLevel(int level) {
-        assert (myLevel >= level);
-        return myFilesForLevel.get(level);
-      }
-
-      List<PsiFile> getAllFiles() {
-        List<PsiFile> all = new ArrayList<PsiFile>();
-        for (List<PsiFile> files: myFilesForLevel) {
-          all.addAll(files);
-        }
-        return all;
-      }
-    }
 }
 
 
@@ -355,43 +307,30 @@ class AdditionalEventInfo {
   }
 }
 
-class MockReformatFileSettings implements LayoutCodeOptions {
-  private boolean myProcessWholeFile;
-  private boolean myProcessDirectories;
-  private boolean myRearrange;
-  private boolean myIncludeSubdirs;
+class MockReformatFileSettings implements ReformatFilesOptions {
   private boolean myOptimizeImports;
-  private boolean myProcessOnlyChangedText;
-  private boolean myIsOK = true;
+  private boolean myIncludeSubdirs;
 
+  @Nullable
   @Override
-  public boolean isProcessWholeFile() {
-    return myProcessWholeFile;
+  public SearchScope getSearchScope() {
+    return null;
   }
 
-  MockReformatFileSettings setProcessWholeFile(boolean processWholeFile) {
-    myProcessWholeFile = processWholeFile;
-    return this;
-  }
-
+  @Nullable
   @Override
-  public boolean isProcessDirectory() {
-    return myProcessDirectories;
-  }
-
-  MockReformatFileSettings setProcessDirectory(boolean processDirectories) {
-    myProcessDirectories = processDirectories;
-    return this;
+  public String getFileTypeMask() {
+    return null;
   }
 
   @Override
-  public boolean isRearrangeEntries() {
-    return myRearrange;
+  public TextRangeType getTextRangeType() {
+    return TextRangeType.WHOLE_FILE;
   }
 
   @Override
-  public boolean isIncludeSubdirectories() {
-    return myIncludeSubdirs;
+  public boolean isRearrangeCode() {
+    return false;
   }
 
   @Override
@@ -402,23 +341,6 @@ class MockReformatFileSettings implements LayoutCodeOptions {
   @NotNull
   MockReformatFileSettings setOptimizeImports(boolean optimizeImports) {
     myOptimizeImports = optimizeImports;
-    return this;
-  }
-
-  @Override
-  public boolean isProcessOnlyChangedText() {
-    return myProcessOnlyChangedText;
-  }
-
-  @NotNull
-  MockReformatFileSettings setProcessOnlyChangedText(boolean processOnlyChangedText) {
-    myProcessOnlyChangedText = processOnlyChangedText;
-    return this;
-  }
-
-  @NotNull
-  MockReformatFileSettings setRearrange(boolean rearrange) {
-    myRearrange = rearrange;
     return this;
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package org.jetbrains.plugins.groovy.refactoring.inline
 
-import com.intellij.codeInsight.TargetElementUtilBase
+import com.intellij.codeInsight.TargetElementUtil
 import com.intellij.lang.ASTNode
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
@@ -30,7 +30,7 @@ import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElement
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression
-import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringUtil
+import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil
 import org.jetbrains.plugins.groovy.util.TestUtils
 /**
  * @author ilyas
@@ -97,9 +97,9 @@ public class InlineVariableTest extends LightCodeInsightFixtureTestCase {
     editor.caretModel.moveToOffset(endOffset);
 
     GroovyPsiElement selectedArea =
-      GroovyRefactoringUtil.findElementInRange(file, startOffset, endOffset, GrReferenceExpression.class);
+      PsiImplUtil.findElementInRange(file, startOffset, endOffset, GrReferenceExpression.class);
     if (selectedArea == null) {
-      PsiElement identifier = GroovyRefactoringUtil.findElementInRange(file, startOffset, endOffset, PsiElement.class);
+      PsiElement identifier = PsiImplUtil.findElementInRange(file, startOffset, endOffset, PsiElement.class);
       if (identifier != null) {
         assertTrue("Selected area doesn't point to var", identifier.parent instanceof GrVariable);
         selectedArea = (GroovyPsiElement)identifier.parent;
@@ -125,15 +125,15 @@ public class InlineVariableTest extends LightCodeInsightFixtureTestCase {
   }
 
   public static void performInline(Project project, Editor editor) {
-    PsiElement element = TargetElementUtilBase.findTargetElement(editor, TargetElementUtilBase.ELEMENT_NAME_ACCEPTED |
-                                                                         TargetElementUtilBase.REFERENCED_ELEMENT_ACCEPTED);
+    PsiElement element = TargetElementUtil.findTargetElement(editor, TargetElementUtil.ELEMENT_NAME_ACCEPTED |
+                                                                         TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED);
     assertInstanceOf(element, GrVariable);
 
     GroovyInlineLocalHandler.invoke(project, editor, element as GrVariable);
   }
 
   public static void performDefInline(Project project, Editor editor) {
-    PsiReference reference = TargetElementUtilBase.findReference(editor);
+    PsiReference reference = TargetElementUtil.findReference(editor);
     assertTrue(reference instanceof PsiReferenceExpression);
     final PsiElement local = reference.resolve();
     assertTrue(local instanceof PsiLocalVariable);

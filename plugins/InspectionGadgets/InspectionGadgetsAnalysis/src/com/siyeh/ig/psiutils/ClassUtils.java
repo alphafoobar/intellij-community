@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashSet;
@@ -80,7 +82,7 @@ public class ClassUtils {
   private ClassUtils() {}
 
   @Nullable
-  public static PsiClass findClass(String fqClassName, PsiElement context) {
+  public static PsiClass findClass(@NonNls String fqClassName, PsiElement context) {
     return JavaPsiFacade.getInstance(context.getProject()).findClass(fqClassName, context.getResolveScope());
   }
 
@@ -131,7 +133,7 @@ public class ClassUtils {
     return packageName1.equals(packageName2);
   }
 
-  public static boolean isFieldVisible(PsiField field, PsiClass fromClass) {
+  public static boolean isFieldVisible(@NotNull PsiField field, PsiClass fromClass) {
     final PsiClass fieldClass = field.getContainingClass();
     if (fieldClass == null) {
       return false;
@@ -205,22 +207,5 @@ public class ClassUtils {
     }
     final PsiClass parentClass = (PsiClass)parent;
     return !parentClass.isInterface();
-  }
-
-  public static boolean isClassVisibleFromClass(PsiClass baseClass,
-                                                PsiClass referencedClass) {
-    if (referencedClass.hasModifierProperty(PsiModifier.PUBLIC)) {
-      return true;
-    }
-    else if (referencedClass.hasModifierProperty(PsiModifier.PROTECTED)) {
-      return inSamePackage(baseClass, referencedClass);
-    }
-    else if (referencedClass.hasModifierProperty(PsiModifier.PRIVATE)) {
-      return PsiTreeUtil.findCommonParent(baseClass, referencedClass) !=
-             null;
-    }
-    else {
-      return inSamePackage(baseClass, referencedClass);
-    }
   }
 }

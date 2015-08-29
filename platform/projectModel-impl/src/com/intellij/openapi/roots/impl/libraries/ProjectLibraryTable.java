@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,22 +23,19 @@ import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.roots.libraries.LibraryTablePresentation;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
 import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.util.text.UniqueNameGenerator;
 import org.jdom.Element;
-import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- *  @author dsl
+ * @author dsl
  */
 @State(
   name = "libraryTable",
   storages = {
     @Storage(file = StoragePathMacros.PROJECT_FILE),
-    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/libraries/", scheme = StorageScheme.DIRECTORY_BASED, stateSplitter = ProjectLibraryTable.LibraryStateSplitter.class)
+    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/libraries", scheme = StorageScheme.DIRECTORY_BASED, stateSplitter = ProjectLibraryTable.LibraryStateSplitter.class)
   }
 )
 public class ProjectLibraryTable extends LibraryTableBase {
@@ -78,30 +75,10 @@ public class ProjectLibraryTable extends LibraryTableBase {
     return true;
   }
 
-
-  public static class LibraryStateSplitter implements StateSplitter {
-
+  public final static class LibraryStateSplitter extends StateSplitterEx {
     @Override
-    public List<Pair<Element, String>> splitState(Element e) {
-      final UniqueNameGenerator generator = new UniqueNameGenerator();
-
-      List<Pair<Element, String>> result = new ArrayList<Pair<Element, String>>();
-
-      final List list = e.getChildren();
-      for (final Object o : list) {
-        Element library = (Element)o;
-        @NonNls final String name = generator.generateUniqueName(FileUtil.sanitizeFileName(library.getAttributeValue(LibraryImpl.LIBRARY_NAME_ATTR))) + ".xml";
-        result.add(new Pair<Element, String>(library, name));
-      }
-
-      return result;
-    }
-
-    @Override
-    public void mergeStatesInto(Element target, Element[] elements) {
-      for (Element e : elements) {
-        target.addContent(e);
-      }
+    public List<Pair<Element, String>> splitState(@NotNull Element state) {
+      return splitState(state, LibraryImpl.LIBRARY_NAME_ATTR);
     }
   }
 }

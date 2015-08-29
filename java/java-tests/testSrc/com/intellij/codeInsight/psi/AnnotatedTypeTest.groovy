@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,49 +15,91 @@
  */
 package com.intellij.codeInsight.psi
 
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiFile
-import com.intellij.testFramework.LightIdeaTestCase
+import com.intellij.pom.java.LanguageLevel
+import com.intellij.psi.*
+import com.intellij.psi.impl.source.PsiImmediateClassType
+import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
 
-@SuppressWarnings(["GrUnresolvedAccess", "GroovyAssignabilityCheck"])
-class AnnotatedTypeTest extends LightIdeaTestCase {
+class AnnotatedTypeTest extends LightCodeInsightFixtureTestCase {
+  private PsiElementFactory factory
+  private PsiElement context
 
-  public void testTypeComposition() {
-    PsiFile context = createFile("typeCompositionTest.java", """
-import java.lang.annotation.*;
-import static java.lang.annotation.ElementType.*;
+  public void setUp() {
+    super.setUp()
 
-@interface A { }
-@Target({TYPE_USE}) @interface TA { int value() default 42; }
+    factory = myFixture.javaFacade.elementFactory
+    context = myFixture.addClass("""\
+      package pkg;
 
-class E1 extends Exception { }
-class E2 extends Exception { }
-""")
-    PsiElement psi
+      import java.lang.annotation.*;
 
-    psi = javaFacade.elementFactory.createStatementFromText("@A @TA(1) int @TA(2) [] a", context)
-    assertEquals("@TA(1) int @TA(2) []", psi.declaredElements[0].type.presentableText)
+      @interface A { }
+      @Target(ElementType.TYPE_USE) @interface TA { int value() default 42; }
 
-    psi = javaFacade.elementFactory.createStatementFromText("try { } catch (@A @TA(1) E1 | @TA(2) E2 e) { }", context)
-    assertEquals("@TA(1) E1 | @TA(2) E2", psi.catchBlockParameters[0].type.presentableText)
+      class O {
+        class I { }
+      }
 
-    psi = javaFacade.elementFactory.createStatementFromText("@A @TA(1) String @TA(2) [] f @TA(3) []", context)
-    assertEquals("@TA(1) String @TA(2) [] @TA(3) []", psi.declaredElements[0].type.presentableText)
-
-    psi = javaFacade.elementFactory.createStatementFromText("Class<@TA(1) ?> c", context)
-    assertEquals("Class<@TA(1) ?>", psi.declaredElements[0].type.presentableText)
-
-    psi = javaFacade.elementFactory.createStatementFromText("Class<@TA String> cs = new Class<>()", context)
-    assertEquals("Class<@TA String>", psi.declaredElements[0].initializer.type.presentableText)
-
-    psi = javaFacade.elementFactory.createStatementFromText("@A @TA(1) String s", context)
-    assertEquals("@TA(1) String", psi.declaredElements[0].type.presentableText)
-
-    psi = javaFacade.elementFactory.createStatementFromText("@A java.lang.@TA(1) String s", context)
-    assertEquals("@TA(1) String", psi.declaredElements[0].type.presentableText)
-
-    psi = javaFacade.elementFactory.createStatementFromText("Collection<? extends> s", context)
-    assertEquals("Collection<?>", psi.declaredElements[0].type.presentableText)
+      class E1 extends Exception { }
+      class E2 extends Exception { }""".stripIndent())
   }
 
+  public void testPrimitiveArrayType() {
+    doTest("@A @TA(1) int @TA(2) [] a", "@pkg.TA(1) int @pkg.TA(2) []", "int[]")
+  }
+
+  public void testEllipsisType() {
+    doTest("@TA int @TA ... p", "@pkg.TA int @pkg.TA ...", "int...")
+  }
+
+  public void testClassReferenceType() {
+    doTest("@A @TA(1) String s", "java.lang.@pkg.TA(1) String", "java.lang.String")
+  }
+
+  public void testQualifiedClassReferenceType() {
+    doTest("@A java.lang.@TA(1) String s", "java.lang.@pkg.TA(1) String", "java.lang.String")
+  }
+
+  public void testQualifiedPackageClassReferenceType() {
+    doTest("@A @TA java.lang.String s", "java.lang.String", "java.lang.String")  // packages cannot have type annotations
+  }
+
+  public void testPartiallyQualifiedClassReferenceType() {
+    doTest("@TA(1) O.@TA(2) I i", "pkg.@pkg.TA(1) O.@pkg.TA(2) I", "pkg.O.I")
+  }
+
+  public void testCStyleArrayType() {
+    doTest("@A @TA(1) String @TA(2) [] f @TA(3) []", "java.lang.@pkg.TA(1) String @pkg.TA(2) [] @pkg.TA(3) []", "java.lang.String[][]")
+  }
+
+  public void testWildcardType() {
+    doTest("Class<@TA(1) ?> c", "java.lang.Class<@pkg.TA(1) ?>", "java.lang.Class<?>")
+  }
+
+  public void testDisjunctionType() {
+    def psi = factory.createStatementFromText("try { } catch (@A @TA(1) E1 | @TA(2) E2 e) { }", context) as PsiTryStatement
+    assertTypeText(psi.catchBlockParameters[0].type, "pkg.@pkg.TA(1) E1 | pkg.@pkg.TA(2) E2", "pkg.E1 | pkg.E2")
+  }
+
+  public void testDiamondType() {
+    def psi = factory.createStatementFromText("Class<@TA String> cs = new Class<>()", context) as PsiDeclarationStatement
+    def var = psi.declaredElements[0] as PsiVariable
+    assertTypeText(var.initializer.type, "java.lang.Class<java.lang.@pkg.TA String>", "java.lang.Class<java.lang.String>")
+  }
+
+  public void testImmediateClassType() {
+    def aClass = myFixture.javaFacade.findClass(CommonClassNames.JAVA_LANG_OBJECT)
+    def annotations = factory.createParameterFromText("@TA int x", context).modifierList.annotations
+    def type = new PsiImmediateClassType(aClass, PsiSubstitutor.EMPTY, LanguageLevel.JDK_1_8, annotations)
+    assertTypeText(type, "java.lang.@pkg.TA Object", CommonClassNames.JAVA_LANG_OBJECT)
+  }
+
+  private void doTest(String text, String annotated, String canonical) {
+    assertTypeText(factory.createParameterFromText(text, context).type, annotated, canonical)
+  }
+
+  private static void assertTypeText(PsiType type, String annotated, String canonical) {
+    assert type.getCanonicalText(true) == annotated
+    assert type.getCanonicalText(false) == canonical
+  }
 }

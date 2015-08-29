@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,7 @@ package com.intellij.openapi.wm.impl.status;
 
 import com.intellij.ide.util.GotoLineNumberDialog;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.LogicalPosition;
-import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.event.*;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
@@ -124,6 +121,16 @@ public class PositionPanel extends EditorBasedWidget implements StatusBarWidget.
     updatePosition(e.getEditor());
   }
 
+  @Override
+  public void caretAdded(CaretEvent e) {
+    updatePosition(e.getEditor());
+  }
+
+  @Override
+  public void caretRemoved(CaretEvent e) {
+    updatePosition(e.getEditor());
+  }
+
   private void updatePosition(final Editor editor) {
     if (editor == null) {
       myText = "";
@@ -140,21 +147,9 @@ public class PositionPanel extends EditorBasedWidget implements StatusBarWidget.
       StringBuilder message = new StringBuilder();
 
       SelectionModel selectionModel = editor.getSelectionModel();
-      if (selectionModel.hasBlockSelection()) {
-        LogicalPosition start = selectionModel.getBlockStart();
-        LogicalPosition end = selectionModel.getBlockEnd();
-        if (start == null || end == null) {
-          throw new IllegalStateException(String.format(
-            "Invalid selection model state detected: 'blockSelection' property is 'true' but selection start position (%s) or "
-            + "selection end position (%s) is undefined", start, end
-          ));
-        }
-        appendLogicalPosition(start, message);
-        message.append("-");
-        appendLogicalPosition(
-          new LogicalPosition(Math.abs(end.line - start.line), Math.max(0, Math.abs(end.column - start.column) - 1)),
-          message
-        );
+      int caretCount = editor.getCaretModel().getCaretCount();
+      if (caretCount > 1) {
+        message.append(caretCount).append(" carets");
       }
       else {
         LogicalPosition caret = editor.getCaretModel().getLogicalPosition();

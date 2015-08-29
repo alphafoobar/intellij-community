@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ public class PyWithWhileSurrounder extends PyStatementSurrounder{
       PyElementGenerator.getInstance(project).createFromText(LanguageLevel.getDefault(), PyWhileStatement.class, "while True:\n    ");
     final PsiElement parent = elements[0].getParent();
     final PyStatementList statementList = whileStatement.getWhilePart().getStatementList();
-    assert statementList != null;
     statementList.addRange(elements[0], elements[elements.length - 1]);
     whileStatement = (PyWhileStatement) parent.addBefore(whileStatement, elements[0]);
     parent.deleteChildRange(elements[0], elements[elements.length - 1]);

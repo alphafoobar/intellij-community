@@ -17,19 +17,18 @@ package com.intellij.psi.codeStyle.arrangement
 
 import com.intellij.psi.codeStyle.arrangement.match.StdArrangementMatchRule
 
-import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.*;
-import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.*;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.*
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.*
 
 class JavaRearrangerFieldReferenceTest extends AbstractJavaRearrangerTest {
 
   private List<StdArrangementMatchRule> defaultFieldsArrangement = [
-    rule(CLASS),
+    rule(FIELD, STATIC, FINAL),
     rule(FIELD, PUBLIC),
     rule(FIELD, PROTECTED),
     rule(FIELD, PACKAGE_PRIVATE),
     rule(FIELD, PRIVATE)
   ]
-
 
   void "test keep referenced package private field before public one which has reference through binary expression"() {
     doTest(initial: '''\
@@ -252,5 +251,258 @@ public class Alfa {
            rules: defaultFieldsArrangement
     );
   }
+
+  void "test field references work ok with enums"() {
+    doTest(
+      initial: '''\
+public class Q {
+    private static final Q A = new Q(Q.E.EC);
+    private static final Q B = new Q(Q.E.EB);
+    private static final Q C = new Q(Q.E.EA);
+    private static final Q D = new Q(Q.E.EA);
+    private final E e;
+    private static final int seven = 7;
+
+    private Q(final Q.E e) {
+        this.e = e;
+    }
+
+    public static enum E {
+        EA,
+        EB,
+        EC,
+    }
+}
+''',
+      expected: '''\
+public class Q {
+    private static final Q A = new Q(Q.E.EC);
+    private static final Q B = new Q(Q.E.EB);
+    private static final Q C = new Q(Q.E.EA);
+    private static final Q D = new Q(Q.E.EA);
+    private static final int seven = 7;
+    private final E e;
+
+    private Q(final Q.E e) {
+        this.e = e;
+    }
+
+    public static enum E {
+        EA,
+        EB,
+        EC,
+    }
+}
+''',
+      rules: defaultFieldsArrangement
+    )
+  }
+
+  void "test IDEA-123733"() {
+    doTest(
+      initial: '''\
+class First {
+    protected int test = 12;
+}
+
+class Second extends First {
+    void test() {}
+
+    private int q = test;
+    public int t = q;
+}
+''',
+      expected: '''\
+class First {
+    protected int test = 12;
+}
+
+class Second extends First {
+    private int q = test;
+    public int t = q;
+
+    void test() {}
+}
+''',
+      rules: defaultFieldsArrangement
+    )
+  }
+
+  void "test IDEA-123875"() {
+    doTest(
+      initial: '''\
+public class RearrangeFail {
+
+    public static final byte[] ENTITIES_END = "</entities>".getBytes();
+    private final Element entitiesEndElement = new Element(ENTITIES_END);
+
+    public static final byte[] ENTITIES_START = "<entities>".getBytes();
+    private final Element entitiesStartElement = new Element(ENTITIES_START);
+
+}
+''',
+      expected: '''\
+public class RearrangeFail {
+
+    public static final byte[] ENTITIES_END = "</entities>".getBytes();
+    public static final byte[] ENTITIES_START = "<entities>".getBytes();
+    private final Element entitiesEndElement = new Element(ENTITIES_END);
+    private final Element entitiesStartElement = new Element(ENTITIES_START);
+
+}
+''',
+      rules: [
+        rule(PUBLIC, STATIC, FINAL),
+        rule(PRIVATE),
+      ]
+    )
+  }
+
+  void "test IDEA-125099"() {
+    doTest(
+      initial: '''\
+public class test {
+
+    private int a = 2;
+
+    public static final String TEST = "1";
+    public static final String SHOULD_BE_IN_BETWEEN = "2";
+    public static final String USERS_ROLE_ID_COLUMN = TEST;
+}
+''',
+      expected: '''\
+public class test {
+
+    public static final String TEST = "1";
+    public static final String SHOULD_BE_IN_BETWEEN = "2";
+    public static final String USERS_ROLE_ID_COLUMN = TEST;
+    private int a = 2;
+}
+''',
+      rules: [
+        rule(PUBLIC, STATIC, FINAL),
+        rule(PRIVATE)
+      ]
+    )
+  }
+  
+  void "test IDEA-128071"() {
+    doTest(
+      initial: '''
+public class FormatTest {
+    public int a = 3;
+    private static final String FACEBOOK_CLIENT_ID = "";
+    public static final String FACEBOOK_OAUTH_URL = "".concat(FACEBOOK_CLIENT_ID).concat("");
+}
+''',
+      expected: '''
+public class FormatTest {
+    private static final String FACEBOOK_CLIENT_ID = "";
+    public static final String FACEBOOK_OAUTH_URL = "".concat(FACEBOOK_CLIENT_ID).concat("");
+    public int a = 3;
+}
+''',
+      rules: [
+        rule(PUBLIC, STATIC, FINAL),
+        rule(PRIVATE, STATIC, FINAL),
+        rule(PUBLIC)
+      ]
+    )
+  }
+
+  void "test field dependency through method call"() {
+    doTest(
+      initial: '''
+public class TmpTest {
+    private static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
+    static final String SUB_MESSAGE_REQUEST_SNAPSHOT = create(1);
+
+    private static String create(int i) {
+        return Integer.toString(i + EMPTY_OBJECT_ARRAY.length);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(SUB_MESSAGE_REQUEST_SNAPSHOT);
+    }
+}
+''',
+      expected: '''
+public class TmpTest {
+    private static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
+    static final String SUB_MESSAGE_REQUEST_SNAPSHOT = create(1);
+
+    public static void main(String[] args) {
+        System.out.println(SUB_MESSAGE_REQUEST_SNAPSHOT);
+    }
+
+    private static String create(int i) {
+        return Integer.toString(i + EMPTY_OBJECT_ARRAY.length);
+    }
+}
+''',
+      rules: [
+        rule(FIELD),
+        rule(PRIVATE, FIELD),
+        rule(PUBLIC, METHOD),
+        rule(PRIVATE, METHOD)
+      ]
+    );
+  }
+
+  void "test only dependencies withing same initialization scope"() {
+    doTest(
+      initial: '''
+public class TestArrangementBuilder {
+    private String theString = "";
+    private static final TestArrangement DEFAULT = new TestArrangementBuilder().build();
+
+    public TestArrangement build() {
+        return new TestArrangement(theString);
+    }
+
+    public class TestArrangement {
+        private final String theString;
+
+        public TestArrangement() {
+            this("");
+        }
+
+        public TestArrangement(@NotNull String aString) {
+            theString = aString;
+        }
+    }
+}
+''',
+      expected: '''
+public class TestArrangementBuilder {
+    private static final TestArrangement DEFAULT = new TestArrangementBuilder().build();
+    private String theString = "";
+
+    public TestArrangement build() {
+        return new TestArrangement(theString);
+    }
+
+    public class TestArrangement {
+        private final String theString;
+
+        public TestArrangement() {
+            this("");
+        }
+
+        public TestArrangement(@NotNull String aString) {
+            theString = aString;
+        }
+    }
+}
+''',
+      rules: [
+        rule(PUBLIC, STATIC, FINAL),
+        rule(PRIVATE, STATIC, FINAL),
+        rule(PRIVATE, FINAL),
+        rule(PRIVATE)
+      ]
+    )
+  }
+
 
 }

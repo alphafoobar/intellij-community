@@ -107,12 +107,36 @@ public class InplaceIntroduceFieldTest extends AbstractJavaInplaceIntroduceTest 
     });
   }
 
+  public void testLocalResource() throws Exception {
+    doTest(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+        inplaceIntroduceFieldPopup.setReplaceAllOccurrences(true);
+      }
+    });
+  }
+  
+  public void testNormalizeDeclarationWithDisabledFormatting() throws Exception {
+    doTest(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+      }
+    });
+  }
+
   public void testEscapePosition() throws Exception {
     doTestEscape();
   }
 
   public void testEscapePositionOnLocal() throws Exception {
     doTestEscape();
+  }
+
+  public void testExtractNearAnotherDeclaration() throws Exception {
+    doTest(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer introducer) {}
+    });
   }
 
   @Override

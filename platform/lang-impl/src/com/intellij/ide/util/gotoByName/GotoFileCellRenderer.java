@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,6 @@ import com.intellij.ide.util.PlatformModuleRendererFactory;
 import com.intellij.ide.util.PsiElementListCellRenderer;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.navigation.NavigationItem;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
-import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
@@ -60,11 +58,7 @@ public class GotoFileCellRenderer extends PsiElementListCellRenderer<PsiFileSyst
       return ChooseByNameBase.renderNonPrefixSeparatorComponent(getBackgroundColor(previousElement));
     }
     else {
-      Component component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-      EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-      Font editorFont = new Font(scheme.getEditorFontName(), Font.PLAIN, scheme.getEditorFontSize());
-      setFont(editorFont);
-      return component;
+      return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
     }
   }
 
@@ -82,7 +76,7 @@ public class GotoFileCellRenderer extends PsiElementListCellRenderer<PsiFileSyst
   }
 
   @Nullable
-  private static String getRelativePath(final VirtualFile virtualFile, final Project project) {
+  static String getRelativePath(final VirtualFile virtualFile, final Project project) {
     String url = virtualFile.getPresentableUrl();
     if (project == null) {
       return url;

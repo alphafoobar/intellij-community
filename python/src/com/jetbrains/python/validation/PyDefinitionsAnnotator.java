@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ public class PyDefinitionsAnnotator extends PyAnnotator {
         if (PyNames.NEW.equals(name)) {
           boolean new_style_class = false;
           try {
-            if (cls != null) new_style_class = cls.isNewStyleClass();
+            if (cls != null) new_style_class = cls.isNewStyleClass(null);
           }
           catch (IndexNotReadyException ignored) {
           }

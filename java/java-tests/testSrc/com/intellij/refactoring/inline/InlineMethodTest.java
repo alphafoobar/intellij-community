@@ -16,7 +16,8 @@
 package com.intellij.refactoring.inline;
 
 import com.intellij.JavaTestUtil;
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
@@ -26,6 +27,7 @@ import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.LightRefactoringTestCase;
 import com.intellij.refactoring.MockInlineMethodOptions;
 import com.intellij.refactoring.util.InlineUtil;
+import com.intellij.testFramework.IdeaTestUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -258,6 +260,26 @@ public class InlineMethodTest extends LightRefactoringTestCase {
     doTest(true);
   }
 
+  public void testMethodInsideChangeIfStatement() throws Exception {
+    doTest();
+  }
+
+  public void testSameVarMethodNames() throws Exception {
+    doTest();
+  }
+
+  public void testThisNameConflict() throws Exception {
+    doTest();
+  }
+
+  public void testReturnStatementWithoutBraces() throws Exception {
+    doTestInlineThisOnly();
+  }
+
+  public void testUnresolvedArgPassedToSameNameParameter() throws Exception {
+    doTestInlineThisOnly();
+  }
+
   private void doTestInlineThisOnly() {
     @NonNls String fileName = "/refactoring/inlineMethod/" + getTestName(false) + ".java";
     configureByFile(fileName);
@@ -287,8 +309,8 @@ public class InlineMethodTest extends LightRefactoringTestCase {
   }
 
   private void performAction(final InlineOptions options, final boolean nonCode) {
-    PsiElement element = TargetElementUtilBase
-      .findTargetElement(myEditor, TargetElementUtilBase.ELEMENT_NAME_ACCEPTED | TargetElementUtilBase.REFERENCED_ELEMENT_ACCEPTED);
+    PsiElement element = TargetElementUtil
+      .findTargetElement(myEditor, TargetElementUtil.ELEMENT_NAME_ACCEPTED | TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED);
     final PsiReference ref = myFile.findReferenceAt(myEditor.getCaretModel().getOffset());
     PsiReferenceExpression refExpr = ref instanceof PsiReferenceExpression ? (PsiReferenceExpression)ref : null;
     assertTrue(element instanceof PsiMethod);
@@ -298,5 +320,10 @@ public class InlineMethodTest extends LightRefactoringTestCase {
     final InlineMethodProcessor processor =
       new InlineMethodProcessor(getProject(), method, refExpr, myEditor, options.isInlineThisOnly(), nonCode, nonCode);
     processor.run();
+  }
+
+  @Override
+  protected Sdk getProjectJDK() {
+    return IdeaTestUtil.getMockJdk18();
   }
 }

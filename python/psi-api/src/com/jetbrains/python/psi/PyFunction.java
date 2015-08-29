@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ import com.jetbrains.python.psi.types.PyType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * Function declaration in source (the <code>def</code> and everything within).
  *
@@ -34,7 +36,8 @@ import org.jetbrains.annotations.Nullable;
 public interface PyFunction
 extends
   PsiNamedElement, StubBasedPsiElement<PyFunctionStub>,
-  PsiNameIdentifierOwner, PyStatement, Callable, NameDefiner, PyDocStringOwner, ScopeOwner, PyDecoratable, PyTypedElement {
+  PsiNameIdentifierOwner, PyStatement, PyCallable, NameDefiner, PyDocStringOwner, ScopeOwner, PyDecoratable, PyTypedElement,
+  PyStatementListContainer{
 
   PyFunction[] EMPTY_ARRAY = new PyFunction[0];
   ArrayFactory<PyFunction> ARRAY_FACTORY = new ArrayFactory<PyFunction>() {
@@ -53,9 +56,6 @@ extends
    */
   @Nullable
   ASTNode getNameNode();
-
-  @Nullable
-  PyStatementList getStatementList();
 
   @Nullable
   PyClass getContainingClass();
@@ -103,4 +103,46 @@ extends
 
   @Nullable
   PyAnnotation getAnnotation();
+
+
+  /**
+   * Searches for function attributes.
+   * See <a href="http://legacy.python.org/dev/peps/pep-0232/">PEP-0232</a>
+   * @return assignment statements for function attributes
+   */
+  @NotNull
+  List<PyAssignmentStatement> findAttributes();
+
+  /**
+   * @return function protection level (underscore based)
+   */
+  @NotNull
+  ProtectionLevel getProtectionLevel();
+
+  enum ProtectionLevel {
+    /**
+     * public members
+     */
+    PUBLIC(0),
+    /**
+     * _protected_memebers
+     */
+    PROTECTED(1),
+    /**
+     * __private_memebrs
+     */
+    PRIVATE(2);
+    private final int myUnderscoreLevel;
+
+    ProtectionLevel(final int underscoreLevel) {
+      myUnderscoreLevel = underscoreLevel;
+    }
+
+    /**
+     * @return number of underscores
+     */
+    public int getUnderscoreLevel() {
+      return myUnderscoreLevel;
+    }
+  }
 }

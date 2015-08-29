@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 package org.jetbrains.idea.maven.dom.references;
 
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReference;
@@ -44,7 +46,7 @@ public class MavenPathReferenceConverter extends PathReferenceConverter {
   private final Condition<PsiFileSystemItem> myCondition;
 
   public MavenPathReferenceConverter() {
-    this(Condition.TRUE);
+    this(Conditions.<PsiFileSystemItem>alwaysTrue());
   }
 
   public MavenPathReferenceConverter(@NotNull Condition<PsiFileSystemItem> condition) {
@@ -147,12 +149,7 @@ public class MavenPathReferenceConverter extends PathReferenceConverter {
             return FileReferenceSet.ABSOLUTE_TOP_LEVEL.fun(file);
           }
 
-          while (true) {
-            VirtualFile parent = virtualFile.getParent();
-            if (parent == null) break;
-            virtualFile = parent;
-          }
-
+          virtualFile = VfsUtil.getRootFile(virtualFile);
           PsiDirectory root = file.getManager().findDirectory(virtualFile);
 
           if (root == null) {

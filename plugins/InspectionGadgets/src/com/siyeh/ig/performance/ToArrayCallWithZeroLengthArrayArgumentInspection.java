@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2012 Bas Leijdekkers
+ * Copyright 2007-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.HighlightUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -79,11 +80,8 @@ public class ToArrayCallWithZeroLengthArrayArgumentInspection extends ToArrayCal
       final String typeText = componentType.getCanonicalText();
       if (!(qualifier instanceof PsiMethodCallExpression)) {
         @NonNls final String replacementText = "new " + typeText + '[' + collectionText + ".size()]";
-        final String newExpressionText = getElementText(methodCallExpression, argument, replacementText);
-        if (newExpressionText == null) {
-          return;
-        }
-        replaceExpression(methodCallExpression, newExpressionText);
+        final String newExpressionText = PsiReplacementUtil.getElementText(methodCallExpression, argument, replacementText);
+        PsiReplacementUtil.replaceExpression(methodCallExpression, newExpressionText);
         return;
       }
       // need to introduce a variable to prevent calling a method twice

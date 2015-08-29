@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,13 +29,13 @@ import com.intellij.psi.PsiElementVisitor;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.QualifiedName;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
-import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.psi.types.PyClassType;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.PyTypeChecker;
@@ -200,9 +200,7 @@ public class PyCompatibilityInspection extends PyInspection {
           }
           for (int i = 0; i != myVersionsToProcess.size(); ++i) {
             LanguageLevel languageLevel = myVersionsToProcess.get(i);
-            PsiFile file = resolved.getContainingFile();
-            VirtualFile virtualFile = file.getVirtualFile();
-            if (virtualFile != null && ind.isInLibraryClasses(virtualFile)) {
+            if (PyBuiltinCache.getInstance(resolved).isBuiltin(resolved)) {
               if (!"print".equals(name) && !myUsedImports.contains(name) && UnsupportedFeaturesUtil.BUILTINS.get(languageLevel).contains(name)) {
                 len = appendLanguageLevel(message, len, languageLevel);
               }
@@ -234,9 +232,20 @@ public class PyCompatibilityInspection extends PyInspection {
         }
       }
 
-      PyFromImportStatement fromImportStatement = PsiTreeUtil.getParentOfType(importElement, PyFromImportStatement.class);
-      if (fromImportStatement != null)
+      final PyFromImportStatement fromImportStatement = PsiTreeUtil.getParentOfType(importElement, PyFromImportStatement.class);
+      if (fromImportStatement != null) {
+        for (int i = 0; i != myVersionsToProcess.size(); ++i) {
+          LanguageLevel languageLevel = myVersionsToProcess.get(i);
+          final QualifiedName qName = importElement.getImportedQName();
+          final QualifiedName sourceQName = fromImportStatement.getImportSourceQName();
+          if (qName != null && sourceQName != null && qName.matches("unicode_literals") &&
+              sourceQName.matches("__future__") && languageLevel.isOlderThan(LanguageLevel.PYTHON26)) {
+            len = appendLanguageLevel(message, len, languageLevel);
+          }
+        }
+        commonRegisterProblem(message, " not have unicode_literals in __future__ module", len, importElement, null);
         return;
+      }
 
       for (int i = 0; i != myVersionsToProcess.size(); ++i) {
         LanguageLevel languageLevel = myVersionsToProcess.get(i);
@@ -293,7 +302,7 @@ public class PyCompatibilityInspection extends PyInspection {
     public void visitPyReferenceExpression(PyReferenceExpression node) {
       super.visitPyElement(node);
       if (shouldBeCompatibleWithPy3()) {
-        final TypeEvalContext context = TypeEvalContext.codeAnalysis(node.getContainingFile());
+        final TypeEvalContext context = TypeEvalContext.codeAnalysis(node.getProject(), node.getContainingFile());
         final String nodeText = node.getText();
         if (nodeText.endsWith("iteritems") || nodeText.endsWith("iterkeys") || nodeText.endsWith("itervalues")) {
           final PyExpression qualifier = node.getQualifier();

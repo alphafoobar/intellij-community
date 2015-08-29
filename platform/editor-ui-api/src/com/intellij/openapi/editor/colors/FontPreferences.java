@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -195,7 +195,7 @@ public class FontPreferences {
   @NotNull
   private static String getDefaultFontName() {
     if (SystemInfo.isMacOSSnowLeopard) return "Menlo";
-    if (SystemInfo.isXWindow) {
+    if (SystemInfo.isXWindow && !GraphicsEnvironment.isHeadless()) {
       for (Font font : GraphicsEnvironment.getLocalGraphicsEnvironment().getAllFonts()) {
         if ("DejaVu Sans Mono".equals(font.getName())) {
           return font.getFontName();
@@ -221,9 +221,14 @@ public class FontPreferences {
   @Nullable
   public static String getFallbackName(@NotNull String fontName, int fontSize, @Nullable EditorColorsScheme fallbackScheme) {
     Font plainFont = new Font(fontName, Font.PLAIN, fontSize);
-    if (plainFont.getFamily().equals("Dialog") && !"Dialog".equals(fontName)) {
+    if (plainFont.getFamily().equals("Dialog") && !("Dialog".equals(fontName) || fontName.startsWith("Dialog."))) {
       return fallbackScheme == null ? DEFAULT_FONT_NAME : fallbackScheme.getEditorFontName();
     }
     return null;
+  }
+
+  @Override
+  public String toString() {
+    return "Effective font families: " + myEffectiveFontFamilies;
   }
 }

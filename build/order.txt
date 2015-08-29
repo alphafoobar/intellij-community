@@ -1164,7 +1164,6 @@ com/intellij/ide/ui/LafManagerImpl$1.class:/lib/idea.jar
 com/intellij/ide/ui/LafManagerImpl$2.class:/lib/idea.jar
 com/intellij/diagnostic/PerformanceWatcher.class:/lib/idea.jar
 com/intellij/openapi/options/SchemesManagerFactory.class:/lib/openapi.jar
-com/intellij/openapi/options/SchemesManagerFactoryImpl.class:/lib/idea.jar
 com/intellij/openapi/components/SettingsSavingComponent.class:/lib/openapi.jar
 com/intellij/openapi/options/SchemesManager.class:/lib/openapi.jar
 com/intellij/ide/XmlRpcServer.class:/lib/openapi.jar
@@ -1563,7 +1562,6 @@ com/intellij/openapi/project/impl/ProjectManagerImpl$1.class:/lib/idea.jar
 com/intellij/openapi/project/impl/ProjectManagerImpl$2.class:/lib/idea.jar
 com/intellij/openapi/project/impl/ProjectManagerImpl$6.class:/lib/idea.jar
 idea/IdeaApplicationInfo.xml:/lib/resources.jar
-idea/PropertiesComponent.xml:/lib/resources.jar
 com/intellij/openapi/fileTypes/impl/FileTypeAssocTable.class:/lib/idea.jar
 com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl$2.class:/lib/idea.jar
 com/intellij/ide/highlighter/custom/impl/ReadFileType.class:/lib/idea.jar
@@ -1579,7 +1577,7 @@ gnu/trove/THashIterator.class:/lib/trove4j.jar
 gnu/trove/TIterator.class:/lib/trove4j.jar
 com/intellij/openapi/vfs/VfsUtil.class:/lib/openapi.jar
 com/intellij/util/containers/Convertor.class:/lib/util.jar
-FileTypeManager.xml:/lib/resources.jar
+defaultFileTypes.xml:/lib/resources.jar
 com/intellij/util/PatternUtil.class:/lib/util.jar
 com/intellij/openapi/options/SettingsEditor.class:/lib/openapi.jar
 com/intellij/ide/highlighter/custom/impl/CustomFileTypeEditor.class:/lib/idea.jar
@@ -4148,7 +4146,6 @@ com/intellij/psi/search/scope/packageSet/ParsingException.class:/lib/openapi.jar
 com/intellij/packageDependencies/DependencyValidationManagerImpl.class:/lib/idea.jar
 com/intellij/psi/search/scope/packageSet/NamedScope.class:/lib/openapi.jar
 com/intellij/psi/search/scope/packageSet/NamedScope$UnnamedScope.class:/lib/openapi.jar
-ide/sharedScope.png:/lib/icons.jar
 com/intellij/packageDependencies/DependencyValidationManagerImpl$1.class:/lib/idea.jar
 com/intellij/ide/startup/impl/StartupManagerImpl$4.class:/lib/idea.jar
 com/intellij/psi/search/scope/packageSet/PackageSetFactory.class:/lib/openapi.jar
@@ -9083,7 +9080,6 @@ inspectionDescriptions/ReplaceAssignmentWithOperatorAssignment.html:/plugins/Ins
 inspectionDescriptions/IncompatibleMask.html:/plugins/InspectionGadgets/lib/resources_en.jar
 inspectionDescriptions/PointlessBitwiseExpression.html:/plugins/InspectionGadgets/lib/resources_en.jar
 inspectionDescriptions/ShiftOutOfRange.html:/plugins/InspectionGadgets/lib/resources_en.jar
-inspectionDescriptions/ArchaicSystemPropertyAccess.html:/plugins/InspectionGadgets/lib/resources_en.jar
 inspectionDescriptions/ArrayEquals.html:/plugins/InspectionGadgets/lib/resources_en.jar
 inspectionDescriptions/AssertWithSideEffects.html:/plugins/InspectionGadgets/lib/resources_en.jar
 inspectionDescriptions/ConstantAssertCondition.html:/plugins/InspectionGadgets/lib/resources_en.jar
@@ -11714,7 +11710,6 @@ org/jetbrains/idea/maven/tasks/MavenCompilerTask.class:/plugins/maven/lib/maven.
 org/jetbrains/idea/maven/project/MavenGeneralSettings$Listener.class:/plugins/maven/lib/maven.jar
 com/intellij/ide/actions/ShowModulePropertiesAction.class:/lib/idea.jar
 org/jetbrains/idea/maven/execution/MavenRunnerSettings$1.class:/plugins/maven/lib/maven.jar
-com/intellij/openapi/components/StorageId.class:/lib/openapi.jar
 com/intellij/openapi/module/impl/ModuleManagerImpl$ModuleSaveItem.class:/lib/idea.jar
 com/intellij/openapi/module/impl/ModuleManagerImpl$SaveItem.class:/lib/idea.jar
 com/intellij/openapi/module/impl/ModuleManagerImpl$ModulePathSaveItem.class:/lib/idea.jar

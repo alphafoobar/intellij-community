@@ -26,8 +26,6 @@ import com.intellij.execution.testframework.ui.BaseTestsOutputConsoleView;
 import com.intellij.execution.testframework.ui.TestResultsPanel;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-
 public class JUnitTreeConsoleView extends BaseTestsOutputConsoleView {
   private ConsolePanel myConsolePanel;
   private final JUnitConsoleProperties myProperties;
@@ -41,25 +39,23 @@ public class JUnitTreeConsoleView extends BaseTestsOutputConsoleView {
     myEnvironment = environment;
   }
 
+  @Override
   protected TestResultsPanel createTestResultsPanel() {
-    myConsolePanel = new ConsolePanel(getConsole().getComponent(), getPrinter(), myProperties, myEnvironment,
+    myConsolePanel = new ConsolePanel(getConsole().getComponent(), getPrinter(), myProperties,
                                       getConsole().createConsoleActions());
     return myConsolePanel;
   }
 
+  @Override
   public void attachToProcess(final ProcessHandler processHandler) {
     super.attachToProcess(processHandler);
     myConsolePanel.onProcessStarted(processHandler);
   }
 
+  @Override
   public void dispose() {
     super.dispose();
     myConsolePanel = null;
-  }
-
-  @Override
-  public JComponent getPreferredFocusableComponent() {
-    return myConsolePanel.getTreeView();
   }
 
   public void attachToModel(@NotNull JUnitRunningModel model) {

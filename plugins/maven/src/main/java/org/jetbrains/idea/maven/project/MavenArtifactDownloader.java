@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class MavenArtifactDownloader {
   private static final ThreadPoolExecutor EXECUTOR =
-    new ThreadPoolExecutor(5, Integer.MAX_VALUE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
+    new ThreadPoolExecutor(5, Integer.MAX_VALUE, 1, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
       AtomicInteger num = new AtomicInteger();
 
       @NotNull
@@ -185,6 +185,8 @@ public class MavenArtifactDownloader {
           futures.add(EXECUTOR.submit(new Runnable() {
             public void run() {
               try {
+                if (myProject.isDisposed()) return;
+
                 myProgress.checkCanceled();
                 myProgress.setFraction(((double)downloaded.getAndIncrement()) / finalTotal);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,13 @@ package com.intellij.testFramework;
 import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.components.ComponentsPackage;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.module.StdModuleTypes;
 import com.intellij.openapi.module.impl.ModuleImpl;
+import com.intellij.openapi.project.ex.ProjectEx;
 import com.intellij.openapi.project.impl.ProjectImpl;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.util.Computable;
@@ -39,6 +41,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 
 public abstract class ModuleTestCase extends IdeaTestCase {
   protected final Collection<Module> myModulesToDispose = new ArrayList<Module>();
@@ -95,16 +98,29 @@ public abstract class ModuleTestCase extends IdeaTestCase {
   }
 
   protected Module loadModule(final File moduleFile) {
+    return loadModule(moduleFile, false);
+  }
+
+  protected Module loadModule(final File moduleFile, final boolean loadComponentStates) {
     Module module = ApplicationManager.getApplication().runWriteAction(
       new Computable<Module>() {
         @Override
         public Module compute() {
+          ProjectImpl project = (ProjectImpl)myProject;
+          boolean oldOptimiseTestLoadSpeed = project.isOptimiseTestLoadSpeed();
+          if (loadComponentStates) {
+            project.setOptimiseTestLoadSpeed(false);
+          }
           try {
+            LocalFileSystem.getInstance().refreshIoFiles(Collections.singletonList(moduleFile));
             return ModuleManager.getInstance(myProject).loadModule(moduleFile.getAbsolutePath());
           }
           catch (Exception e) {
             LOG.error(e);
             return null;
+          }
+          finally {
+            project.setOptimiseTestLoadSpeed(oldOptimiseTestLoadSpeed);
           }
         }
       }
@@ -137,20 +153,19 @@ public abstract class ModuleTestCase extends IdeaTestCase {
     return result.get();
   }
 
-  protected void readJdomExternalizables(final ModuleImpl module) {
+  protected void readJdomExternalizables(@NotNull Module module) {
     loadModuleComponentState(module, ModuleRootManager.getInstance(module));
   }
 
-  protected final void loadModuleComponentState(final Module module, final Object component) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        final ProjectImpl project = (ProjectImpl)myProject;
-        project.setOptimiseTestLoadSpeed(false);
-        ((ModuleImpl)module).getStateStore().initComponent(component, false);
-        project.setOptimiseTestLoadSpeed(true);
-      }
-    });
+  protected final void loadModuleComponentState(@NotNull Module module, @NotNull Object component) {
+    ProjectEx project = (ProjectEx)myProject;
+    project.setOptimiseTestLoadSpeed(false);
+    try {
+      ComponentsPackage.getStateStore(module).initComponent(component, false);
+    }
+    finally {
+      project.setOptimiseTestLoadSpeed(true);
+    }
   }
 
   protected Module createModuleFromTestData(final String dirInTestData, final String newModuleFileName, final ModuleType moduleType,
@@ -162,6 +177,7 @@ public abstract class ModuleTestCase extends IdeaTestCase {
     FileUtil.copyDir(dirInTestDataFile, moduleDir);
     final Module module = createModule(moduleDir + "/" + newModuleFileName, moduleType);
     final VirtualFile root = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(moduleDir);
+    assertNotNull(root);
     new WriteCommandAction.Simple(module.getProject()) {
       @Override
       protected void run() throws Throwable {

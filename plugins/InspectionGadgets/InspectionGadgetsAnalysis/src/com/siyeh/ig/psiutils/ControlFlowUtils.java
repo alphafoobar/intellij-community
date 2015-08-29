@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,16 @@ public class ControlFlowUtils {
 
   private ControlFlowUtils() {}
 
+  public static boolean isElseIf(PsiIfStatement ifStatement) {
+    final PsiElement parent = ifStatement.getParent();
+    if (!(parent instanceof PsiIfStatement)) {
+      return false;
+    }
+    final PsiIfStatement parentStatement = (PsiIfStatement)parent;
+    final PsiStatement elseBranch = parentStatement.getElseBranch();
+    return ifStatement.equals(elseBranch);
+  }
+
   public static boolean statementMayCompleteNormally(@Nullable PsiStatement statement) {
     if (statement == null) {
       return true;
@@ -35,7 +45,7 @@ public class ControlFlowUtils {
     }
     else if (statement instanceof PsiExpressionListStatement || statement instanceof PsiEmptyStatement ||
              statement instanceof PsiAssertStatement || statement instanceof PsiDeclarationStatement ||
-             statement instanceof PsiSwitchLabelStatement) {
+             statement instanceof PsiSwitchLabelStatement || statement instanceof PsiForeachStatement) {
       return true;
     }
     else if (statement instanceof PsiExpressionStatement) {
@@ -62,9 +72,6 @@ public class ControlFlowUtils {
     }
     else if (statement instanceof PsiForStatement) {
       return forStatementMayCompleteNormally((PsiForStatement)statement);
-    }
-    else if (statement instanceof PsiForeachStatement) {
-      return foreachStatementMayCompleteNormally((PsiForeachStatement)statement);
     }
     else if (statement instanceof PsiWhileStatement) {
       return whileStatementMayCompleteNormally((PsiWhileStatement)statement);
@@ -130,10 +137,6 @@ public class ControlFlowUtils {
     return Boolean.TRUE != value;
   }
 
-  private static boolean foreachStatementMayCompleteNormally(@NotNull PsiForeachStatement loopStatement) {
-    return true;
-  }
-
   private static boolean switchStatementMayCompleteNormally(@NotNull PsiSwitchStatement switchStatement) {
     if (statementIsBreakTarget(switchStatement)) {
       return true;
@@ -167,7 +170,7 @@ public class ControlFlowUtils {
     if (!hasDefaultCase && !isEnum) {
       return true;
     }
-    if (!hasDefaultCase && isEnum) {
+    if (!hasDefaultCase) {
       final PsiExpression expression = switchStatement.getExpression();
       if (expression == null) {
         return true;
@@ -208,10 +211,7 @@ public class ControlFlowUtils {
       return false;
     }
     final PsiClass aClass = ((PsiClassType)type).resolve();
-    if (aClass == null) {
-      return false;
-    }
-    return aClass.isEnum();
+    return aClass != null && aClass.isEnum();
   }
 
   private static boolean tryStatementMayCompleteNormally(@NotNull PsiTryStatement tryStatement) {
@@ -238,16 +238,25 @@ public class ControlFlowUtils {
     final PsiExpression condition = ifStatement.getCondition();
     final Object value = ExpressionUtils.computeConstantExpression(condition);
     final PsiStatement thenBranch = ifStatement.getThenBranch();
-    final boolean thenCompletesNormally = statementMayCompleteNormally(thenBranch);
     if (value == Boolean.TRUE) {
-      return thenCompletesNormally;
+      return statementMayCompleteNormally(thenBranch);
     }
     final PsiStatement elseBranch = ifStatement.getElseBranch();
-    final boolean elseCompletesNormally = statementMayCompleteNormally(elseBranch);
     if (value == Boolean.FALSE) {
-      return elseCompletesNormally;
+      return statementMayCompleteNormally(elseBranch);
     }
-    return thenCompletesNormally || elseCompletesNormally;
+    // process branch with fewer statements first
+    PsiStatement branch1;
+    PsiStatement branch2;
+    if ((thenBranch == null ? 0 : thenBranch.getTextLength()) < (elseBranch == null ? 0 : elseBranch.getTextLength())) {
+      branch1 = thenBranch;
+      branch2 = elseBranch;
+    }
+    else {
+      branch2 = thenBranch;
+      branch1 = elseBranch;
+    }
+    return statementMayCompleteNormally(branch1) || statementMayCompleteNormally(branch2);
   }
 
   private static boolean labeledStatementMayCompleteNormally(@NotNull PsiLabeledStatement labeledStatement) {
@@ -319,29 +328,42 @@ public class ControlFlowUtils {
       return false;
     }
     final PsiStatement body = loopStatement.getBody();
-    if (body == null) {
-      return false;
-    }
-    return PsiTreeUtil.isAncestor(body, element, true);
+    return body != null && PsiTreeUtil.isAncestor(body, element, true);
   }
 
   public static boolean isInFinallyBlock(@NotNull PsiElement element) {
+    final PsiType type;
+    if (element instanceof PsiThrowStatement) {
+      final PsiThrowStatement throwStatement = (PsiThrowStatement)element;
+      final PsiExpression exception = throwStatement.getException();
+      type = exception != null ? exception.getType() : null;
+    }
+    else {
+      type = null;
+    }
     PsiElement currentElement = element;
     while (true) {
-      final PsiTryStatement tryStatement = PsiTreeUtil.getParentOfType(currentElement, PsiTryStatement.class, true, PsiClass.class);
+      final PsiTryStatement tryStatement = PsiTreeUtil.getParentOfType(currentElement, PsiTryStatement.class, true, PsiClass.class, PsiLambdaExpression.class);
       if (tryStatement == null) {
         return false;
       }
       final PsiCodeBlock finallyBlock = tryStatement.getFinallyBlock();
-      if (finallyBlock != null) {
-        if (PsiTreeUtil.isAncestor(finallyBlock, currentElement, true)) {
-          final PsiMethod elementMethod = PsiTreeUtil.getParentOfType(currentElement, PsiMethod.class);
-          final PsiMethod finallyMethod = PsiTreeUtil.getParentOfType(finallyBlock, PsiMethod.class);
-          return elementMethod != null && elementMethod.equals(finallyMethod);
-        }
+      if (PsiTreeUtil.isAncestor(finallyBlock, currentElement, true)) {
+        return true;
+      }
+      if (type != null && isCaught(tryStatement, type)) {
+        return false;
       }
       currentElement = tryStatement;
     }
+  }
+
+  public static boolean isCaught(PsiTryStatement tryStatement, PsiType exceptionType) {
+    for (PsiParameter parameter : tryStatement.getCatchBlockParameters()) {
+      final PsiType type = parameter.getType();
+      if (type.isAssignableFrom(exceptionType)) return true;
+    }
+    return false;
   }
 
   public static boolean isInCatchBlock(@NotNull PsiElement element) {
@@ -434,9 +456,11 @@ public class ControlFlowUtils {
   }
 
   private static boolean statementIsLastInBlock(@NotNull PsiCodeBlock block, @NotNull PsiStatement statement) {
-    final PsiStatement[] statements = block.getStatements();
-    for (int i = statements.length - 1; i >= 0; i--) {
-      final PsiStatement childStatement = statements[i];
+    for (PsiElement child = block.getLastChild(); child != null; child = child.getPrevSibling()) {
+      if (!(child instanceof PsiStatement)) {
+        continue;
+      }
+      final PsiStatement childStatement = (PsiStatement)child;
       if (statement.equals(childStatement)) {
         return true;
       }
@@ -454,10 +478,7 @@ public class ControlFlowUtils {
     }
     final ReturnFinder returnFinder = new ReturnFinder();
     body.accept(returnFinder);
-    if (returnFinder.returnFound()) {
-      return false;
-    }
-    return !codeBlockMayCompleteNormally(body);
+    return !returnFinder.returnFound() && !codeBlockMayCompleteNormally(body);
   }
 
   public static boolean statementContainsNakedBreak(PsiStatement statement) {
@@ -470,10 +491,9 @@ public class ControlFlowUtils {
   }
 
   private static class NakedBreakFinder extends JavaRecursiveElementWalkingVisitor {
+    private boolean m_found;
 
-    private boolean m_found = false;
-
-    public boolean breakFound() {
+    private boolean breakFound() {
       return m_found;
     }
 
@@ -524,11 +544,11 @@ public class ControlFlowUtils {
     }
   }
 
-  private static class SystemExitFinder extends JavaRecursiveElementVisitor {
+  private static class SystemExitFinder extends JavaRecursiveElementWalkingVisitor {
 
-    private boolean m_found = false;
+    private boolean m_found;
 
-    public boolean exitFound() {
+    private boolean exitFound() {
       return m_found;
     }
 
@@ -564,17 +584,21 @@ public class ControlFlowUtils {
     }
   }
 
-  private static class ReturnFinder extends JavaRecursiveElementVisitor {
+  private static class ReturnFinder extends JavaRecursiveElementWalkingVisitor {
 
-    private boolean m_found = false;
+    private boolean m_found;
 
-    public boolean returnFound() {
+    private boolean returnFound() {
       return m_found;
     }
 
     @Override
     public void visitClass(@NotNull PsiClass psiClass) {
       // do nothing, to keep drilling into inner classes
+    }
+
+    @Override
+    public void visitLambdaExpression(PsiLambdaExpression expression) {
     }
 
     @Override
@@ -587,16 +611,16 @@ public class ControlFlowUtils {
     }
   }
 
-  private static class BreakFinder extends JavaRecursiveElementVisitor {
+  private static class BreakFinder extends JavaRecursiveElementWalkingVisitor {
 
-    private boolean m_found = false;
+    private boolean m_found;
     private final PsiStatement m_target;
 
     private BreakFinder(@NotNull PsiStatement target) {
       m_target = target;
     }
 
-    public boolean breakFound() {
+    private boolean breakFound() {
       return m_found;
     }
 
@@ -637,16 +661,16 @@ public class ControlFlowUtils {
     }
   }
 
-  private static class ContinueFinder extends JavaRecursiveElementVisitor {
+  private static class ContinueFinder extends JavaRecursiveElementWalkingVisitor {
 
-    private boolean m_found = false;
+    private boolean m_found;
     private final PsiStatement m_target;
 
     private ContinueFinder(@NotNull PsiStatement target) {
       m_target = target;
     }
 
-    public boolean continueFound() {
+    private boolean continueFound() {
       return m_found;
     }
 
@@ -687,15 +711,15 @@ public class ControlFlowUtils {
     }
   }
 
-  private static class MethodCallFinder extends JavaRecursiveElementVisitor {
+  private static class MethodCallFinder extends JavaRecursiveElementWalkingVisitor {
 
     private final String containingClassName;
     private final PsiType returnType;
     private final String methodName;
     private final PsiType[] parameterTypeNames;
-    private boolean containsCallToMethod = false;
+    private boolean containsCallToMethod;
 
-    MethodCallFinder(String containingClassName, PsiType returnType, String methodName, PsiType... parameterTypeNames) {
+    private MethodCallFinder(String containingClassName, PsiType returnType, String methodName, PsiType... parameterTypeNames) {
       this.containingClassName = containingClassName;
       this.returnType = returnType;
       this.methodName = methodName;
@@ -723,17 +747,17 @@ public class ControlFlowUtils {
       containsCallToMethod = true;
     }
 
-    public boolean containsCallToMethod() {
+    private boolean containsCallToMethod() {
       return containsCallToMethod;
     }
   }
 
-  private static class ContinueToAncestorFinder extends JavaRecursiveElementVisitor {
+  private static class ContinueToAncestorFinder extends JavaRecursiveElementWalkingVisitor {
 
     private final PsiStatement statement;
-    private boolean found = false;
+    private boolean found;
 
-    public ContinueToAncestorFinder(PsiStatement statement) {
+    private ContinueToAncestorFinder(PsiStatement statement) {
       this.statement = statement;
     }
 
@@ -765,7 +789,7 @@ public class ControlFlowUtils {
       }
     }
 
-    public boolean continueToAncestorFound() {
+    private boolean continueToAncestorFound() {
       return found;
     }
   }

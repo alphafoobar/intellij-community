@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.introduceVariable.IntroduceVariableBase;
 import com.intellij.testFramework.PlatformTestCase;
+import org.jetbrains.annotations.NotNull;
 
 /**
  *  @author dsl
@@ -39,6 +40,7 @@ public class IntroduceVariableMultifileTest extends MultiFileTestCase {
     LanguageLevelProjectExtension.getInstance(myJavaFacade.getProject()).setLanguageLevel(LanguageLevel.JDK_1_5);
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/introduceVariable/";
@@ -92,20 +94,17 @@ public class IntroduceVariableMultifileTest extends MultiFileTestCase {
   }
 
   PerformAction createAction(final String className, final IntroduceVariableBase testMe) {
-    return new PerformAction() {
-      @Override
-      public void performAction(VirtualFile vroot, VirtualFile rootAfter) {
-        final JavaPsiFacade psiManager = getJavaFacade();
-        final PsiClass aClass = psiManager.findClass(className, GlobalSearchScope.allScope(myProject));
-        assertTrue(className + " class not found", aClass != null);
-        final PsiFile containingFile = aClass.getContainingFile();
-        final VirtualFile virtualFile = containingFile.getVirtualFile();
-        assertTrue(virtualFile != null);
-        final Editor editor = createEditor(virtualFile);
-        setupCursorAndSelection(editor);
-        testMe.invoke(myProject, editor, containingFile, null);
-        FileDocumentManager.getInstance().saveAllDocuments();
-      }
+    return (vroot, rootAfter) -> {
+      final JavaPsiFacade psiManager = getJavaFacade();
+      final PsiClass aClass = psiManager.findClass(className, GlobalSearchScope.allScope(myProject));
+      assertTrue(className + " class not found", aClass != null);
+      final PsiFile containingFile = aClass.getContainingFile();
+      final VirtualFile virtualFile = containingFile.getVirtualFile();
+      assertTrue(virtualFile != null);
+      final Editor editor = createEditor(virtualFile);
+      setupCursorAndSelection(editor);
+      testMe.invoke(myProject, editor, containingFile, null);
+      FileDocumentManager.getInstance().saveAllDocuments();
     };
   }
 }

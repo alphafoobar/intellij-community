@@ -4,6 +4,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.UnfairTextRange;
 import com.intellij.openapi.util.text.CharFilter;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -54,7 +55,7 @@ public class ParagraphFillHandler {
         document.replaceString(textRange.getStartOffset(), textRange.getEndOffset(),
                                replacementText);
         final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(
-                                        CodeStyleSettingsManager.getSettings(element.getProject()));
+                                        CodeStyleSettingsManager.getSettings(element.getProject()), element.getLanguage());
         codeFormatter.doWrapLongLinesIfNecessary(editor, element.getProject(), document,
                                                  textRange.getStartOffset(),
                                                  textRange.getStartOffset() + replacementText.length() + 1);
@@ -82,7 +83,7 @@ public class ParagraphFillHandler {
   private TextRange getTextRange(@NotNull final PsiElement element, @NotNull final Editor editor) {
     int startOffset = getStartOffset(element, editor);
     int endOffset = getEndOffset(element, editor);
-    return TextRange.create(startOffset, endOffset);
+    return new UnfairTextRange(startOffset, endOffset);
   }
 
   private int getStartOffset(@NotNull final PsiElement element, @NotNull final Editor editor) {
@@ -105,7 +106,7 @@ public class ParagraphFillHandler {
       }
       lineNumber -= 1;
     }
-    final int lineStartOffset = document.getLineStartOffset(lineNumber);
+    final int lineStartOffset = lineNumber == document.getLineNumber(elementTextOffset) ? elementTextOffset : document.getLineStartOffset(lineNumber);
     final String lineText = document
       .getText(TextRange.create(lineStartOffset, document.getLineEndOffset(lineNumber)));
     int shift = StringUtil.findFirst(lineText, CharFilter.NOT_WHITESPACE_FILTER);

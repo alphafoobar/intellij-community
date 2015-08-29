@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@ import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PythonFileType;
 import com.jetbrains.python.inspections.quickfix.AddEncodingQuickFix;
 import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyReferenceExpression;
 import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.psi.PyTargetExpression;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -69,7 +71,7 @@ public class PyNonAsciiCharInspection extends PyInspection {
       if (LanguageLevel.forElement(node).isPy3K()) return;
       PsiFile file = node.getContainingFile(); // can't cache this in the instance, alas
       if (file == null) return;
-      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(file.getText());
+      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(file);
 
       boolean hasNonAscii = false;
 
@@ -93,6 +95,16 @@ public class PyNonAsciiCharInspection extends PyInspection {
 
     @Override
     public void visitPyStringLiteralExpression(PyStringLiteralExpression node) {
+      checkString(node, node.getText());
+    }
+
+    @Override
+    public void visitPyReferenceExpression(PyReferenceExpression node) {
+      checkString(node, node.getText());
+    }
+
+    @Override
+    public void visitPyTargetExpression(PyTargetExpression node) {
       checkString(node, node.getText());
     }
   }

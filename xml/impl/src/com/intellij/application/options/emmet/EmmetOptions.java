@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,46 +15,38 @@
  */
 package com.intellij.application.options.emmet;
 
+import com.intellij.codeInsight.template.emmet.filters.ZenCodingFilter;
 import com.intellij.codeInsight.template.impl.TemplateSettings;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import com.intellij.xml.XmlBundle;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-import java.util.Map;
+import java.util.Set;
 
-/**
- * User: zolotov
- * Date: 2/20/13
- */
 @State(
   name = "EmmetOptions",
-  storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/emmet.xml"
-    )}
+  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/emmet.xml")
 )
-public class EmmetOptions implements PersistentStateComponent<EmmetOptions>, ExportableComponent {
-  private boolean myBemFilterEnabledByDefault = false;
+public class EmmetOptions implements PersistentStateComponent<EmmetOptions> {
   private boolean myEmmetEnabled = true;
   private int myEmmetExpandShortcut = TemplateSettings.TAB_CHAR;
-  private boolean myFuzzySearchEnabled = true;
-  private boolean myAutoInsertCssPrefixedEnabled = true;
   private boolean myPreviewEnabled = false;
+  private Set<String> myFiltersEnabledByDefault = ContainerUtil.newHashSet();
+  private boolean myHrefAutoDetectEnabled = true;
+
   @NotNull
-  private Map<String, Integer> prefixes = ContainerUtil.newHashMap();
-
-
-  public boolean isBemFilterEnabledByDefault() {
-    return myBemFilterEnabledByDefault;
+  public Set<String> getFiltersEnabledByDefault() {
+    return myFiltersEnabledByDefault;
   }
 
-  public void setBemFilterEnabledByDefault(boolean enableBemFilterByDefault) {
-    myBemFilterEnabledByDefault = enableBemFilterByDefault;
+  public void setFiltersEnabledByDefault(@NotNull Set<String> filtersEnabledByDefault) {
+    myFiltersEnabledByDefault = filtersEnabledByDefault;
+  }
+
+  public boolean isFilterEnabledByDefault(@NotNull ZenCodingFilter filter) {
+    return myFiltersEnabledByDefault.contains(filter.getSuffix());
   }
 
   public void setEmmetExpandShortcut(int emmetExpandShortcut) {
@@ -72,7 +64,7 @@ public class EmmetOptions implements PersistentStateComponent<EmmetOptions>, Exp
   public void setPreviewEnabled(boolean previewEnabled) {
     myPreviewEnabled = previewEnabled;
   }
-  
+
   public boolean isEmmetEnabled() {
     return myEmmetEnabled;
   }
@@ -80,41 +72,13 @@ public class EmmetOptions implements PersistentStateComponent<EmmetOptions>, Exp
   public void setEmmetEnabled(boolean emmetEnabled) {
     myEmmetEnabled = emmetEnabled;
   }
-
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public boolean isAutoInsertCssPrefixedEnabled() {
-    return myAutoInsertCssPrefixedEnabled;
+  
+  public void setHrefAutoDetectEnabled(boolean hrefAutoDetectEnabled) {
+    myHrefAutoDetectEnabled = hrefAutoDetectEnabled;
   }
 
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public void setAutoInsertCssPrefixedEnabled(boolean autoInsertCssPrefixedEnabled) {
-    myAutoInsertCssPrefixedEnabled = autoInsertCssPrefixedEnabled;
-  }
-
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public void setFuzzySearchEnabled(boolean fuzzySearchEnabled) {
-    myFuzzySearchEnabled = fuzzySearchEnabled;
-  }
-
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public boolean isFuzzySearchEnabled() {
-    return myFuzzySearchEnabled;
-  }
-
-  @NotNull
-  @Override
-  public File[] getExportFiles() {
-    return new File[]{PathManager.getOptionsFile("emmet")};
-  }
-
-  @NotNull
-  @Override
-  public String getPresentableName() {
-    return XmlBundle.message("emmet.configuration.title");
+  public boolean isHrefAutoDetectEnabled() {
+    return myHrefAutoDetectEnabled;
   }
 
   @Nullable
@@ -130,19 +94,5 @@ public class EmmetOptions implements PersistentStateComponent<EmmetOptions>, Exp
 
   public static EmmetOptions getInstance() {
     return ServiceManager.getService(EmmetOptions.class);
-  }
-
-  @NotNull
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public Map<String, Integer> getPrefixes() {
-    return prefixes;
-  }
-
-  @SuppressWarnings("UnusedDeclaration")
-  @Deprecated
-  //use {@link CssEmmetOptions}
-  public void setPrefixes(@NotNull Map<String, Integer> prefixes) {
-    this.prefixes = prefixes;
   }
 }

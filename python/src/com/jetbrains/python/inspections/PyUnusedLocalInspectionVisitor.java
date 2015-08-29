@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.Scope;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.inspections.quickfix.AddFieldQuickFix;
+import com.jetbrains.python.inspections.quickfix.PyRemoveParameterQuickFix;
+import com.jetbrains.python.inspections.quickfix.PyRemoveStatementQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyAugAssignmentStatementNavigator;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
@@ -42,7 +44,6 @@ import com.jetbrains.python.psi.impl.PyImportStatementNavigator;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.search.PyOverridingMethodsSearch;
 import com.jetbrains.python.psi.search.PySuperMethodsSearch;
-import com.jetbrains.python.psi.types.PyClassTypeImpl;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -100,6 +101,9 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
     for (Instruction instruction : instructions) {
       final PsiElement element = instruction.getElement();
       if (element instanceof PyFunction && owner instanceof PyFunction) {
+        if (PyKnownDecoratorUtil.hasUnknownDecorator((PyFunction)element, myTypeEvalContext)) {
+          continue;
+        }
         if (!myUsedElements.contains(element)) {
           myUnusedElements.add(element);
         }
@@ -122,6 +126,9 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
         }
         // Ignore arguments of import statement
         if (PyImportStatementNavigator.getImportStatementByElement(element) != null) {
+          continue;
+        }
+        if (PyAugAssignmentStatementNavigator.getStatementByTarget(element) != null) {
           continue;
         }
         if (!myUsedElements.contains(element)) {
@@ -207,7 +214,8 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
       owner.acceptChildren(new PyRecursiveElementVisitor(){
         @Override
         public void visitPyCallExpression(final PyCallExpression node) {
-          if ("locals".equals(node.getCallee().getName())){
+          final PyExpression callee = node.getCallee();
+          if (callee != null && "locals".equals(callee.getName())){
             throw new DontPerformException();
           }
           node.acceptChildren(this); // look at call expr in arguments
@@ -246,14 +254,14 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
         final PsiElement nameIdentifier = ((PyFunction)element).getNameIdentifier();
         registerWarning(nameIdentifier == null ? element : nameIdentifier,
                         PyBundle.message("INSP.unused.locals.local.function.isnot.used",
-                        ((PyFunction)element).getName()));
+                        ((PyFunction)element).getName()), new PyRemoveStatementQuickFix());
       }
       else if (element instanceof PyClass) {
         // Local class
         final PyClass cls = (PyClass)element;
         final PsiElement name = cls.getNameIdentifier();
         registerWarning(name != null ? name : element,
-                        PyBundle.message("INSP.unused.locals.local.class.isnot.used", cls.getName()));
+                        PyBundle.message("INSP.unused.locals.local.class.isnot.used", cls.getName()), new PyRemoveStatementQuickFix());
       }
       else {
         // Local variable or parameter
@@ -267,7 +275,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
           if (namedParameter.isSelf()) {
             continue;
           }
-          if (myIgnoreLambdaParameters && PsiTreeUtil.getParentOfType(element, Callable.class) instanceof PyLambdaExpression) {
+          if (myIgnoreLambdaParameters && PsiTreeUtil.getParentOfType(element, PyCallable.class) instanceof PyLambdaExpression) {
             continue;
           }
           boolean mayBeField = false;
@@ -290,15 +298,22 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
                 isEmpty = isEmptyFunction(func);
                 emptyFunctions.put(func, isEmpty);
               }
-              if (isEmpty) {
+              if (isEmpty && !mayBeField) {
                 continue;
               }
             }
           }
-          final LocalQuickFix[] fixes = mayBeField
-                                  ? new LocalQuickFix[] { new AddFieldQuickFix(name, new PyClassTypeImpl(containingClass, false), name) }
-                                  : LocalQuickFix.EMPTY_ARRAY;
-          registerWarning(element, PyBundle.message("INSP.unused.locals.parameter.isnot.used", name), fixes);
+          boolean canRemove = !(PsiTreeUtil.getPrevSiblingOfType(element, PyParameter.class) instanceof PySingleStarParameter) ||
+            PsiTreeUtil.getNextSiblingOfType(element, PyParameter.class) != null;
+
+          final List<LocalQuickFix> fixes = new ArrayList<LocalQuickFix>();
+          if (mayBeField) {
+            fixes.add(new AddFieldQuickFix(name, name, containingClass.getName(), false));
+          }
+          if (canRemove) {
+            fixes.add(new PyRemoveParameterQuickFix());
+          }
+          registerWarning(element, PyBundle.message("INSP.unused.locals.parameter.isnot.used", name), fixes.toArray(new LocalQuickFix[fixes.size()]));
         }
         else {
           if (myIgnoreTupleUnpacking && isTupleUnpacking(element)) {
@@ -312,7 +327,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
             }
           }
           else {
-            registerWarning(element, PyBundle.message("INSP.unused.locals.local.variable.isnot.used", name));
+            registerWarning(element, PyBundle.message("INSP.unused.locals.local.variable.isnot.used", name), new PyRemoveStatementQuickFix());
           }
         }
       }
@@ -326,8 +341,8 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
     }
     PyCallExpression expr = (PyCallExpression) source;
     if (expr.isCalleeText("range", "xrange")) {
-      final Callable callee = expr.resolveCalleeFunction(PyResolveContext.noImplicits().withTypeEvalContext(myTypeEvalContext));
-      if (callee != null && PyBuiltinCache.getInstance(forStatement).hasInBuiltins(callee)) {
+      final PyCallable callee = expr.resolveCalleeFunction(PyResolveContext.noImplicits().withTypeEvalContext(myTypeEvalContext));
+      if (callee != null && PyBuiltinCache.getInstance(forStatement).isBuiltin(callee)) {
         return true;
       }
     }
@@ -415,9 +430,6 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
 
   private static boolean isEmptyFunction(@NotNull PyFunction f) {
     final PyStatementList statementList = f.getStatementList();
-    if (statementList == null) {
-      return true;
-    }
     final PyStatement[] statements = statementList.getStatements();
     if (statements.length == 0) {
       return true;

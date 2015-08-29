@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.sun.jdi.Method;
 import com.sun.jdi.PrimitiveValue;
 import com.sun.jdi.Value;
 
@@ -40,14 +41,21 @@ public class ArgumentValueDescriptorImpl extends ValueDescriptorImpl{
   private String myName;
   private boolean myParameterNameCalcutated;
   private final String myDefaultName;
+  private final boolean myIsParam;
 
   public ArgumentValueDescriptorImpl(Project project, int index, Value value, String name) {
     super(project);
     myIndex = index;
     myValue = value;
+    myIsParam = name == null;
     myDefaultName = name != null ? name : "arg" + String.valueOf(index);
     myName = myDefaultName;
     setLvalue(true);
+  }
+
+  @Override
+  public boolean canSetValue() {
+    return false;
   }
 
   public boolean isPrimitive() {
@@ -73,8 +81,7 @@ public class ArgumentValueDescriptorImpl extends ValueDescriptorImpl{
               if (body != null) {
                 final StringBuilder nameBuilder = new StringBuilder();
                 try {
-                  final int startSlot = params.getParametersCount() + (method.hasModifierProperty(PsiModifier.STATIC)? 0 : 1);
-                  body.accept(new LocalVariableNameFinder(startSlot, nameBuilder));
+                  body.accept(new LocalVariableNameFinder(getFirstLocalsSlot(method), nameBuilder));
                 }
                 finally {
                   myName = nameBuilder.length() > 0? myDefaultName + ": " + nameBuilder.toString() : myDefaultName;
@@ -88,12 +95,42 @@ public class ArgumentValueDescriptorImpl extends ValueDescriptorImpl{
     return myValue;
   }
 
+  private static int getFirstLocalsSlot(PsiMethod method) {
+    int startSlot = method.hasModifierProperty(PsiModifier.STATIC) ? 0 : 1;
+    for (PsiParameter parameter : method.getParameterList().getParameters()) {
+      startSlot += getTypeSlotSize(parameter.getType());
+    }
+    return startSlot;
+  }
+
+  private static int getTypeSlotSize(PsiType varType) {
+    if (varType == PsiType.DOUBLE || varType == PsiType.LONG) {
+      return 2;
+    }
+    return 1;
+  }
+
+  public static int getFirstLocalsSlot(Method method) {
+    int firstLocalVariableSlot = method.isStatic() ? 0 : 1;
+    for (String type : method.argumentTypeNames()) {
+      firstLocalVariableSlot += getTypeSlotSize(type);
+    }
+    return firstLocalVariableSlot;
+  }
+
+  private static int getTypeSlotSize(String name) {
+    if (PsiKeyword.DOUBLE.equals(name) || PsiKeyword.LONG.equals(name)) {
+      return 2;
+    }
+    return 1;
+  }
+
   public String getName() {
     return myName;
   }
 
-  public String calcValueName() {
-    return getName();
+  public boolean isParameter() {
+    return myIsParam;
   }
 
   public PsiExpression getDescriptorEvaluation(DebuggerContext context) throws EvaluateException {
@@ -126,14 +163,19 @@ public class ArgumentValueDescriptorImpl extends ValueDescriptorImpl{
     @Override
     public void visitLocalVariable(PsiLocalVariable variable) {
       appendName(variable.getName());
-      final PsiType varType = variable.getType();
-      myCurrentSlotIndex += (varType == PsiType.DOUBLE || varType == PsiType.LONG)? 2 : 1;
+      myCurrentSlotIndex += getTypeSlotSize(variable.getType());
     }
 
     public void visitSynchronizedStatement(PsiSynchronizedStatement statement) {
-      appendName("<monitor>");
-      myCurrentSlotIndex++;
-      super.visitSynchronizedStatement(statement);
+      myIndexStack.push(myCurrentSlotIndex);
+      try {
+        appendName("<monitor>");
+        myCurrentSlotIndex++;
+        super.visitSynchronizedStatement(statement);
+      }
+      finally {
+        myCurrentSlotIndex = myIndexStack.pop();
+      }
     }
 
     private void appendName(String varName) {

@@ -919,6 +919,7 @@ ihave
 ilog
 imagetext
 imagnumber
+imatmul
 imode
 impls
 importfile
@@ -1072,6 +1073,7 @@ itemcget
 itemconfigure
 itemgetter
 itemre
+iter
 iterable
 iterdecode
 iterdump
@@ -1241,6 +1243,7 @@ mapdict
 mapstar
 markedsectionclose
 markobject
+matmul
 maxamount
 maxbinsize
 maxcache
@@ -1264,6 +1267,7 @@ memp
 memset
 menubutton
 menudefs
+metaclass
 metas
 metastrings
 metavar
@@ -1700,6 +1704,7 @@ ripemd
 rlecoderengine
 rledecoderengine
 rlshift
+rmatmul
 rmcolorizer
 rmenu
 rmod

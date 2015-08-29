@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,35 +20,27 @@ import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiModifier;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.GroovyBundle;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression;
 import org.jetbrains.plugins.groovy.lang.psi.expectedTypes.GroovyExpectedTypesProvider;
 import org.jetbrains.plugins.groovy.lang.psi.expectedTypes.TypeConstraint;
-import org.jetbrains.plugins.groovy.lang.psi.util.StaticChecker;
+import org.jetbrains.plugins.groovy.lang.psi.util.GrStaticChecker;
 
 /**
  * @author ven
  */
 public class CreateFieldFromUsageFix extends GrCreateFromUsageBaseFix {
 
-  public CreateFieldFromUsageFix(GrReferenceExpression refExpression) {
+  private final @NotNull String myReferenceName;
+
+  public CreateFieldFromUsageFix(GrReferenceExpression refExpression, @NotNull String referenceName) {
     super(refExpression);
-  }
-
-  @NotNull
-  public String getFamilyName() {
-    return GroovyBundle.message("create.from.usage.family.name");
-  }
-
-  @Nullable
-  private String getFieldName() {
-    return getRefExpr().getReferenceName();
+    myReferenceName = referenceName;
   }
 
   private String[] generateModifiers(@NotNull PsiClass targetClass) {
     final GrReferenceExpression myRefExpression = getRefExpr();
-    if (myRefExpression != null && StaticChecker.isInStaticContext(myRefExpression, targetClass)) {
+    if (myRefExpression != null && GrStaticChecker.isInStaticContext(myRefExpression, targetClass)) {
       return new String[]{PsiModifier.STATIC};
     }
     return ArrayUtil.EMPTY_STRING_ARRAY;
@@ -58,15 +50,16 @@ public class CreateFieldFromUsageFix extends GrCreateFromUsageBaseFix {
     return GroovyExpectedTypesProvider.calculateTypeConstraints(getRefExpr());
   }
 
+  @Override
   @NotNull
   public String getText() {
-    return GroovyBundle.message("create.field.from.usage", getFieldName());
+    return GroovyBundle.message("create.field.from.usage", myReferenceName);
   }
 
   @Override
   protected void invokeImpl(Project project, @NotNull PsiClass targetClass) {
     final CreateFieldFix fix = new CreateFieldFix(targetClass);
-    fix.doFix(targetClass.getProject(), generateModifiers(targetClass), getFieldName(), calculateTypeConstrains(), getRefExpr());
+    fix.doFix(targetClass.getProject(), generateModifiers(targetClass), myReferenceName, calculateTypeConstrains(), getRefExpr());
   }
 
   @Override

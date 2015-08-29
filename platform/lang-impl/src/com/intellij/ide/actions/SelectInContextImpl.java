@@ -16,6 +16,7 @@
 
 package com.intellij.ide.actions;
 
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.ide.FileEditorProvider;
 import com.intellij.ide.SelectInContext;
 import com.intellij.ide.structureView.StructureView;
@@ -25,6 +26,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
 import com.intellij.openapi.project.Project;
@@ -61,9 +63,7 @@ public abstract class SelectInContextImpl implements SelectInContext {
   @Override
   @NotNull
   public VirtualFile getVirtualFile() {
-    final VirtualFile vFile = myPsiFile.getVirtualFile();
-    assert vFile != null;
-    return vFile;
+    return myPsiFile.getViewProvider().getVirtualFile();
   }
 
   @Override
@@ -206,12 +206,10 @@ public abstract class SelectInContextImpl implements SelectInContext {
       if (myPsiFile.getViewProvider() instanceof TemplateLanguageFileViewProvider) {
         return super.getSelectorInFile();
       }
-      final int offset = myEditor.getEditor().getCaretModel().getOffset();
-
-      if (offset >= 0 && offset < myPsiFile.getTextLength()) {
-        return myPsiFile.findElementAt(offset);
-      }
-      return super.getSelectorInFile();
+      Editor editor = myEditor.getEditor();
+      int offset = TargetElementUtil.adjustOffset(myPsiFile, editor.getDocument(), editor.getCaretModel().getOffset());
+      PsiElement element = myPsiFile.findElementAt(offset);
+      return element != null ? element : super.getSelectorInFile();
     }
   }
 

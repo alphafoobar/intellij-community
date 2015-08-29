@@ -18,6 +18,7 @@ package com.intellij.openapi.roots;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NotNull;
@@ -44,6 +45,7 @@ public abstract class FileIndexFacade {
 
   public abstract boolean isInLibrarySource(@NotNull VirtualFile file);
   public abstract boolean isExcludedFile(@NotNull VirtualFile file);
+  public abstract boolean isUnderIgnored(@NotNull VirtualFile file);
 
   @Nullable
   public abstract Module getModuleForFile(@NotNull VirtualFile file);
@@ -59,6 +61,8 @@ public abstract class FileIndexFacade {
   public abstract boolean isValidAncestor(@NotNull VirtualFile baseDir, @NotNull VirtualFile child);
 
   public boolean shouldBeFound(GlobalSearchScope scope, VirtualFile virtualFile) {
-    return (scope.isSearchOutsideRootModel() || isInContent(virtualFile) || isInLibrarySource(virtualFile)) && !virtualFile.getFileType().isBinary();
+    return scope.isSearchOutsideRootModel() || isInContent(virtualFile) || isInLibrarySource(virtualFile);
   }
+
+  @NotNull public abstract ModificationTracker getRootModificationTracker();
 }

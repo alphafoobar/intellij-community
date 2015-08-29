@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,11 @@ import org.jetbrains.jps.api.RequestFuture;
 import org.jetbrains.jps.javac.JavacRemoteProto;
 
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 
 /**
@@ -34,7 +37,7 @@ import java.util.concurrent.Executor;
 */
 @ChannelHandler.Sharable
 final class ProtobufClientMessageHandler<T extends ProtobufResponseHandler> extends SimpleChannelInboundHandler<MessageLite> {
-  private final ConcurrentHashMap<UUID, RequestFuture<T>> myHandlers = new ConcurrentHashMap<UUID, RequestFuture<T>>(16, 0.75f, 1);
+  private final ConcurrentMap<UUID, RequestFuture<T>> myHandlers = new ConcurrentHashMap<UUID, RequestFuture<T>>(16, 0.75f, 1);
   @NotNull
   private final UUIDGetter myUuidGetter;
   private final SimpleProtobufClient myClient;
@@ -47,7 +50,7 @@ final class ProtobufClientMessageHandler<T extends ProtobufResponseHandler> exte
   }
 
   @Override
-  public final void messageReceived(ChannelHandlerContext context, MessageLite message) throws Exception {
+  public final void channelRead0(ChannelHandlerContext context, MessageLite message) throws Exception {
     final UUID messageUUID = myUuidGetter.getSessionUUID((JavacRemoteProto.Message)message);
     final RequestFuture<T> future = myHandlers.get(messageUUID);
     final T handler = future != null ? future.getMessageHandler() : null;
@@ -99,7 +102,10 @@ final class ProtobufClientMessageHandler<T extends ProtobufResponseHandler> exte
     }
     finally {
       try {
-        for (UUID uuid : new ArrayList<UUID>(myHandlers.keySet())) {
+        //invoke 'keySet()' method via 'Map' class because ConcurrentHashMap#keySet() has return type ('KeySetView') which doesn't exist in JDK 1.6/1.7
+        Set<UUID> keys = ((Map<UUID, RequestFuture<T>>)myHandlers).keySet();
+
+        for (UUID uuid : new ArrayList<UUID>(keys)) {
           terminateSession(uuid);
         }
       }

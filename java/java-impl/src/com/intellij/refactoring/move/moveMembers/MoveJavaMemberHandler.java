@@ -180,7 +180,7 @@ public class MoveJavaMemberHandler implements MoveMemberHandler {
         }
         else {
           final PsiReferenceParameterList parameterList = refExpr.getParameterList();
-          if (parameterList != null && parameterList.getTypeArguments().length == 0){
+          if (parameterList != null && parameterList.getTypeArguments().length == 0 && !(refExpr instanceof PsiMethodReferenceExpression)){
             refExpr.setQualifierExpression(null);
           } else {
             final Project project = element.getProject();
@@ -203,10 +203,10 @@ public class MoveJavaMemberHandler implements MoveMemberHandler {
   }
 
   protected static void changeQualifier(PsiReferenceExpression refExpr, PsiClass aClass, PsiMember member) throws IncorrectOperationException {
-    if (RefactoringUtil.hasOnDemandStaticImport(refExpr, aClass)) {
+    if (RefactoringUtil.hasOnDemandStaticImport(refExpr, aClass) && !(refExpr instanceof PsiMethodReferenceExpression)) {
       refExpr.setQualifierExpression(null);
     }
-    else if (!RefactoringUtil.hasStaticImportOn(refExpr, member)){
+    else if (!ImportsUtil.hasStaticImportOn(refExpr, member, false)){
       PsiElementFactory factory = JavaPsiFacade.getInstance(refExpr.getProject()).getElementFactory();
       refExpr.setQualifierExpression(factory.createReferenceExpression(aClass));
     }

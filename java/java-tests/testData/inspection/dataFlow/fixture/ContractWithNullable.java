@@ -2,7 +2,7 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public class Foo {
+class Foo {
 
   public void main(@NotNull Object nn) {
     foo(nn).hashCode();
@@ -41,3 +41,21 @@ public class Foo {
 
 }
 
+class Test {
+  @NotNull
+  String getName() {
+    return "";
+  }
+
+  @Nullable
+  @Contract("!null -> !null")
+  String convert(@Nullable String name) {
+    return name;
+  }
+
+
+  @NotNull
+  String test() {
+    return convert(getName());
+  }
+}

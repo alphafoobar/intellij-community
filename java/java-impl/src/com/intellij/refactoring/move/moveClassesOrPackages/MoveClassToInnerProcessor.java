@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.refactoring.move.moveClassesOrPackages;
 
+import com.intellij.ide.util.EditorHelper;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -24,7 +25,10 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ReferencesSearch;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.PsiElementFilter;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.PackageWrapper;
 import com.intellij.refactoring.RefactoringBundle;
@@ -39,6 +43,7 @@ import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.util.VisibilityUtil;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 
@@ -60,6 +65,7 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
   private final boolean mySearchInNonJavaFiles;
   private NonCodeUsageInfo[] myNonCodeUsages;
   private final MoveCallback myMoveCallback;
+  private boolean myOpenInEditor;
 
   public MoveClassToInnerProcessor(Project project,
                                    final PsiClass[] classesToMove,
@@ -88,7 +94,7 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new MoveMultipleElementsViewDescriptor(myClassesToMove, myTargetClass.getQualifiedName());
   }
 
@@ -102,12 +108,12 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
     return usages.toArray(new UsageInfo[usages.size()]);
   }
 
-  protected boolean preprocessUsages(final Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull final Ref<UsageInfo[]> refUsages) {
     final UsageInfo[] usages = refUsages.get();
     return showConflicts(getConflicts(usages), usages);
   }
 
-  protected void refreshElements(final PsiElement[] elements) {
+  protected void refreshElements(@NotNull final PsiElement[] elements) {
     ApplicationManager.getApplication().runReadAction(new Runnable() {
       public void run() {
         final PsiClass[] classesToMove = new PsiClass[elements.length];
@@ -119,7 +125,7 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
     });
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     if (!prepareWritable(usages)) return;
 
     MoveClassToInnerHandler[] handlers = MoveClassToInnerHandler.EP_NAME.getExtensions();
@@ -165,6 +171,13 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
       for (PsiElement element : importStatements) {
         if (element.isValid()) {
           element.delete();
+        }
+      }
+
+      if (myOpenInEditor && !oldToNewElementsMapping.isEmpty()) {
+        final PsiElement item = ContainerUtil.getFirstItem(oldToNewElementsMapping.values());
+        if (item != null) {
+          EditorHelper.openInEditor(item);
         }
       }
     }
@@ -322,6 +335,10 @@ public class MoveClassToInnerProcessor extends BaseRefactoringProcessor {
         return false;
       }
     });
+  }
+
+  public void setOpenInEditor(boolean openInEditor) {
+    myOpenInEditor = openInEditor;
   }
 
   private static class ConflictsCollector {

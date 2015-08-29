@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ import com.intellij.openapi.vcs.impl.CurrentRevisionProvider;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.svn.status.Status;
 import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNStatus;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 
 import java.io.File;
@@ -40,35 +40,39 @@ import java.io.IOException;
  * @author yole
 */
 public class SvnContentRevision implements ContentRevision, MarkerVcsContentRevision {
-  private final SvnVcs myVcs;
-  protected final FilePath myFile;
-  private final SVNRevision myRevision;
+
+  @NotNull private final SvnVcs myVcs;
+  @NotNull protected final FilePath myFile;
+  @NotNull private final SVNRevision myRevision;
   /**
    * this flag is necessary since SVN would not do remote request only if constant SVNRevision.BASE
    * -> usual current revision content class can't be used
    */
   private final boolean myUseBaseRevision;
 
-  protected SvnContentRevision(SvnVcs vcs, @NotNull final FilePath file, final SVNRevision revision, final boolean useBaseRevision) {
+  protected SvnContentRevision(@NotNull SvnVcs vcs, @NotNull FilePath file, @NotNull SVNRevision revision, boolean useBaseRevision) {
     myVcs = vcs;
     myRevision = revision;
     myUseBaseRevision = useBaseRevision;
     myFile = file;
   }
 
-  public static SvnContentRevision createBaseRevision(@NotNull SvnVcs vcs, @NotNull final FilePath file, final SVNStatus status) {
+  @NotNull
+  public static SvnContentRevision createBaseRevision(@NotNull SvnVcs vcs, @NotNull FilePath file, @NotNull Status status) {
     SVNRevision revision = status.getRevision().isValid() ? status.getRevision() : status.getCommittedRevision();
     return createBaseRevision(vcs, file, revision);
   }
 
-  public static SvnContentRevision createBaseRevision(SvnVcs vcs, FilePath file, SVNRevision revision) {
+  @NotNull
+  public static SvnContentRevision createBaseRevision(@NotNull SvnVcs vcs, @NotNull FilePath file, @NotNull SVNRevision revision) {
     if (file.getFileType().isBinary()) {
       return new SvnBinaryContentRevision(vcs, file, revision, true);
     }
     return new SvnContentRevision(vcs, file, revision, true);
   }
 
-  public static SvnContentRevision createRemote(@NotNull SvnVcs vcs, @NotNull final FilePath file, final SVNRevision revision) {
+  @NotNull
+  public static SvnContentRevision createRemote(@NotNull SvnVcs vcs, @NotNull FilePath file, @NotNull SVNRevision revision) {
     if (file.getFileType().isBinary()) {
       return new SvnBinaryContentRevision(vcs, file, revision, false);
     }
@@ -89,7 +93,7 @@ public class SvnContentRevision implements ContentRevision, MarkerVcsContentRevi
                                                                @Override
                                                                public Pair<VcsRevisionNumber, byte[]> get()
                                                                  throws VcsException, IOException {
-                                                                 return new Pair<VcsRevisionNumber, byte[]>(getRevisionNumber(), getUpToDateBinaryContent());
+                                                                 return Pair.create(getRevisionNumber(), getUpToDateBinaryContent());
                                                                }
                                                              }).getSecond();
       } else {

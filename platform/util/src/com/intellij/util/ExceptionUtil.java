@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ public class ExceptionUtil {
     }
   }
 
-  public static <T extends Throwable> T findCause(Throwable e, Class<T> klass) {
+  public static <T> T findCause(Throwable e, Class<T> klass) {
     while (e != null && !klass.isInstance(e)) {
       e = e.getCause();
     }
@@ -62,7 +62,6 @@ public class ExceptionUtil {
   @NotNull
   public static String getThrowableText(@NotNull Throwable aThrowable) {
     StringWriter stringWriter = new StringWriter();
-    @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
     PrintWriter writer = new PrintWriter(stringWriter);
     aThrowable.printStackTrace(writer);
     return stringWriter.getBuffer().toString();
@@ -76,9 +75,8 @@ public class ExceptionUtil {
     final String skipPattern = prefix + stackFrameSkipPattern;
 
     final StringWriter stringWriter = new StringWriter();
-    @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
     final PrintWriter writer = new PrintWriter(stringWriter) {
-      boolean skipping = false;
+      private boolean skipping;
       @Override
       public void println(final String x) {
         boolean curSkipping = skipping;
@@ -145,5 +143,20 @@ public class ExceptionUtil {
       result = result.substring(result.lastIndexOf(errorPattern) + errorPattern.length());
     }
     return result;
+  }
+
+  public static void rethrowUnchecked(@Nullable Throwable t) {
+    if (t != null) {
+      if (t instanceof Error) throw (Error)t;
+      if (t instanceof RuntimeException) throw (RuntimeException)t;
+    }
+  }
+
+  public static void rethrowAll(@Nullable Throwable t) throws Exception {
+    if (t != null) {
+      if (t instanceof Error) throw (Error)t;
+      if (t instanceof RuntimeException) throw (RuntimeException)t;
+      throw (Exception)t;
+    }
   }
 }

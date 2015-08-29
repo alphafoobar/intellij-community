@@ -108,6 +108,15 @@ public class PythonHighlightingTest extends PyTestCase {
   }
 
   public void testYieldOutsideOfFunction() {
+    doTest(LanguageLevel.PYTHON27, true, true);
+  }
+
+  public void testYieldInDefaultValue() {
+    doTest(LanguageLevel.PYTHON34, true, false);
+  }
+
+  // PY-11663
+  public void testYieldInLambda() {
     doTest();
   }
   
@@ -162,6 +171,10 @@ public class PythonHighlightingTest extends PyTestCase {
   }
 
   public void testEscapedBackslash() {  // PY-2994
+    doTest(true, false);
+  }
+
+  public void testMultipleEscapedBackslashes() {
     doTest(true, false);
   }
 

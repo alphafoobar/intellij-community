@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ public class I18nReferenceContributor extends PsiReferenceContributor {
   private static final String INTENTION_ACTION_BUNDLE_TAG = "bundleName";
 
   @Override
-  public void registerReferenceProviders(PsiReferenceRegistrar registrar) {
+  public void registerReferenceProviders(@NotNull PsiReferenceRegistrar registrar) {
     registerKeyProviders(registrar);
 
     registerBundleNameProviders(registrar);
@@ -108,10 +108,9 @@ public class I18nReferenceContributor extends PsiReferenceContributor {
   }
 
   private static ElementPattern createPattern(String[] tagNames, String... attributeNames) {
-    return XmlPatterns.xmlAttributeValue()
-      .withParent(XmlPatterns.xmlAttribute().withLocalName(attributeNames)
-                    .withParent(XmlPatterns.xmlTag().withName(tagNames)
-                                  .withSuperParent(2, XmlPatterns.xmlTag().withName("idea-plugin"))));
+    return XmlPatterns.xmlAttributeValue(attributeNames)
+      .withSuperParent(2, XmlPatterns.xmlTag().withName(tagNames)
+                                  .withSuperParent(2, XmlPatterns.xmlTag().withName("idea-plugin")));
   }
 
 

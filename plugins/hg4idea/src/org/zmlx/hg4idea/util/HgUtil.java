@@ -12,43 +12,45 @@
 // limitations under the License.
 package org.zmlx.hg4idea.util;
 
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.fileEditor.FileEditor;
-import com.intellij.openapi.fileEditor.FileEditorManager;
-import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
-import com.intellij.openapi.vcs.changes.*;
+import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangeListManager;
+import com.intellij.openapi.vcs.changes.ContentRevision;
+import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
 import com.intellij.openapi.vcs.history.FileHistoryPanelImpl;
 import com.intellij.openapi.vcs.history.VcsFileRevisionEx;
+import com.intellij.openapi.vcs.vfs.AbstractVcsVirtualFile;
 import com.intellij.openapi.vcs.vfs.VcsVirtualFile;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.StatusBar;
-import com.intellij.openapi.wm.WindowManager;
-import com.intellij.openapi.wm.impl.status.StatusBarUtil;
 import com.intellij.ui.GuiUtils;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.zmlx.hg4idea.*;
+import org.zmlx.hg4idea.command.HgCatCommand;
 import org.zmlx.hg4idea.command.HgRemoveCommand;
 import org.zmlx.hg4idea.command.HgStatusCommand;
 import org.zmlx.hg4idea.command.HgWorkingCopyRevisionsCommand;
 import org.zmlx.hg4idea.execution.HgCommandResult;
 import org.zmlx.hg4idea.execution.ShellCommand;
 import org.zmlx.hg4idea.execution.ShellCommandException;
+import org.zmlx.hg4idea.log.HgHistoryUtil;
 import org.zmlx.hg4idea.provider.HgChangeProvider;
 import org.zmlx.hg4idea.repo.HgRepository;
 import org.zmlx.hg4idea.repo.HgRepositoryManager;
@@ -70,6 +72,8 @@ public abstract class HgUtil {
   public static final int MANY_FILES = 100;
   private static final Logger LOG = Logger.getInstance(HgUtil.class);
   public static final String DOT_HG = ".hg";
+  public static final String TIP_REFERENCE = "tip";
+  public static final String HEAD_REFERENCE = "HEAD";
 
   public static File copyResourceToTempFile(String basename, String extension) throws IOException {
     final InputStream in = HgUtil.class.getClassLoader().getResourceAsStream("python/" + basename + extension);
@@ -101,17 +105,10 @@ public abstract class HgUtil {
     return tempFile;
   }
 
-  public static void markDirectoryDirty(final Project project, final VirtualFile file) throws InvocationTargetException, InterruptedException {
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      public void run() {
-        VcsDirtyScopeManager.getInstance(project).dirDirtyRecursively(file);
-      }
-    });
-    runWriteActionAndWait(new Runnable() {
-      public void run() {
-        file.refresh(true, true);
-      }
-    });
+  public static void markDirectoryDirty(final Project project, final VirtualFile file)
+    throws InvocationTargetException, InterruptedException {
+    VfsUtil.markDirtyAndRefresh(true, true, false, file);
+    VcsDirtyScopeManager.getInstance(project).dirDirtyRecursively(file);
   }
 
   public static void markFileDirty( final Project project, final VirtualFile file ) throws InvocationTargetException, InterruptedException {
@@ -119,7 +116,7 @@ public abstract class HgUtil {
       public void run() {
         VcsDirtyScopeManager.getInstance(project).fileDirty(file);
       }
-    } );
+    });
     runWriteActionAndWait(new Runnable() {
       public void run() {
         file.refresh(true, false);
@@ -222,8 +219,8 @@ public abstract class HgUtil {
   /**
    * Checks if the given directory is an hg root.
    */
-  public static boolean isHgRoot(VirtualFile dir) {
-    return dir.findChild(DOT_HG) != null;
+  public static boolean isHgRoot(@Nullable VirtualFile dir) {
+    return dir != null && dir.findChild(DOT_HG) != null;
   }
 
   /**
@@ -237,6 +234,21 @@ public abstract class HgUtil {
       return getNearestHgRoot(VcsUtil.getVirtualFile(filePath.getPath()));
     }
     return getNearestHgRoot(VcsUtil.getVcsRootFor(project, filePath));
+  }
+
+  /**
+   * Get hg roots for paths
+   *
+   * @param filePaths the context paths
+   * @return a set of hg roots
+   */
+  @NotNull
+  public static Set<VirtualFile> hgRoots(@NotNull Project project, @NotNull Collection<FilePath> filePaths) {
+    HashSet<VirtualFile> roots = new HashSet<VirtualFile>();
+    for (FilePath path : filePaths) {
+      ContainerUtil.addIfNotNull(roots, getHgRootOrNull(project, path));
+    }
+    return roots;
   }
 
   /**
@@ -269,36 +281,9 @@ public abstract class HgUtil {
     return getHgRootOrThrow(project, VcsUtil.getFilePath(file.getPath()));
   }
 
-  /**
-   * Returns the currently selected file, based on which HgBranch components will identify the current repository root.
-   */
-  @Nullable
-  public static VirtualFile getSelectedFile(@NotNull Project project) {
-    StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
-    final FileEditor fileEditor = StatusBarUtil.getCurrentFileEditor(project, statusBar);
-    VirtualFile result = null;
-    if (fileEditor != null) {
-      if (fileEditor instanceof TextEditor) {
-        Document document = ((TextEditor)fileEditor).getEditor().getDocument();
-        result = FileDocumentManager.getInstance().getFile(document);
-      }
-    }
-
-    if (result == null) {
-      final FileEditorManager manager = FileEditorManager.getInstance(project);
-      if (manager != null) {
-        Editor editor = manager.getSelectedTextEditor();
-        if (editor != null) {
-          result = FileDocumentManager.getInstance().getFile(editor.getDocument());
-        }
-      }
-    }
-    return result;
-  }
-
   @Nullable
   public static VirtualFile getRootForSelectedFile(@NotNull Project project) {
-    VirtualFile selectedFile = getSelectedFile(project);
+    VirtualFile selectedFile = DvcsUtil.getSelectedFile(project);
     if (selectedFile != null) {
       return getHgRootOrNull(project, selectedFile);
     }
@@ -306,14 +291,17 @@ public abstract class HgUtil {
   }
 
   /**
-    * Shows a message dialog to enter the name of new branch.
-    * @return name of new branch or {@code null} if user has cancelled the dialog.
-    */
-   @Nullable
-   public static String getNewBranchNameFromUser(@NotNull Project project,
-                                                 @NotNull String dialogTitle) {
-     return Messages.showInputDialog(project, "Enter the name of new branch:", dialogTitle, Messages.getQuestionIcon());
-   }
+   * Shows a message dialog to enter the name of new branch.
+   *
+   * @return name of new branch or {@code null} if user has cancelled the dialog.
+   */
+  @Nullable
+  public static String getNewBranchNameFromUser(@NotNull HgRepository repository,
+                                                @NotNull String dialogTitle) {
+    return Messages.showInputDialog(repository.getProject(), "Enter the name of new branch:", dialogTitle, Messages.getQuestionIcon(), "",
+                                    new HgBranchReferenceValidator(repository));
+  }
+
   /**
    * Checks is a merge operation is in progress on the given repository.
    * Actually gets the number of parents of the current revision. If there are 2 parents, then a merge is going on. Otherwise there is
@@ -350,9 +338,10 @@ public abstract class HgUtil {
 
   @NotNull
   public static HgFile getFileNameInTargetRevision(Project project, HgRevisionNumber vcsRevisionNumber, HgFile localHgFile) {
-    HgStatusCommand statCommand = new HgStatusCommand.Builder(true).unknown(false).baseRevision(vcsRevisionNumber).build(project);
+    //get file name in target revision if it was moved/renamed
+    HgStatusCommand statCommand = new HgStatusCommand.Builder(false).copySource(true).baseRevision(vcsRevisionNumber).build(project);
 
-    Set<HgChange> changes = statCommand.execute(localHgFile.getRepo());
+    Set<HgChange> changes = statCommand.execute(localHgFile.getRepo(), Collections.singletonList(localHgFile.toFilePath()));
 
     for (HgChange change : changes) {
       if (change.afterFile().equals(localHgFile)) {
@@ -394,35 +383,40 @@ public abstract class HgUtil {
     return repos;
   }
 
-  public static @NotNull Map<VirtualFile, Collection<VirtualFile>> sortByHgRoots(@NotNull Project project, @NotNull Collection<VirtualFile> files) {
+  @NotNull
+  public static Map<VirtualFile, Collection<VirtualFile>> sortByHgRoots(@NotNull Project project, @NotNull Collection<VirtualFile> files) {
     Map<VirtualFile, Collection<VirtualFile>> sorted = new HashMap<VirtualFile, Collection<VirtualFile>>();
+    HgRepositoryManager repositoryManager = getRepositoryManager(project);
     for (VirtualFile file : files) {
-      VirtualFile repo = VcsUtil.getVcsRootFor(project, file);
+      HgRepository repo = repositoryManager.getRepositoryForFile(file);
       if (repo == null) {
         continue;
       }
-      Collection<VirtualFile> filesForRoot = sorted.get(repo);
+      Collection<VirtualFile> filesForRoot = sorted.get(repo.getRoot());
       if (filesForRoot == null) {
         filesForRoot = new HashSet<VirtualFile>();
-        sorted.put(repo, filesForRoot);
+        sorted.put(repo.getRoot(), filesForRoot);
       }
       filesForRoot.add(file);
     }
     return sorted;
   }
 
-  public static @NotNull Map<VirtualFile, Collection<FilePath>> groupFilePathsByHgRoots(@NotNull Project project,
-                                                                                        @NotNull Collection<FilePath> files) {
+  @NotNull
+  public static Map<VirtualFile, Collection<FilePath>> groupFilePathsByHgRoots(@NotNull Project project,
+                                                                               @NotNull Collection<FilePath> files) {
     Map<VirtualFile, Collection<FilePath>> sorted = new HashMap<VirtualFile, Collection<FilePath>>();
+    if (project.isDisposed()) return sorted;
+    HgRepositoryManager repositoryManager = getRepositoryManager(project);
     for (FilePath file : files) {
-      VirtualFile repo = VcsUtil.getVcsRootFor(project, file);
+      HgRepository repo = repositoryManager.getRepositoryForFile(file);
       if (repo == null) {
         continue;
       }
-      Collection<FilePath> filesForRoot = sorted.get(repo);
+      Collection<FilePath> filesForRoot = sorted.get(repo.getRoot());
       if (filesForRoot == null) {
         filesForRoot = new HashSet<FilePath>();
-        sorted.put(repo, filesForRoot);
+        sorted.put(repo.getRoot(), filesForRoot);
       }
       filesForRoot.add(file);
     }
@@ -430,7 +424,7 @@ public abstract class HgUtil {
   }
 
   public static void executeOnPooledThreadIfNeeded(Runnable runnable) {
-    if (EventQueue.isDispatchThread()) {
+    if (EventQueue.isDispatchThread() && !ApplicationManager.getApplication().isUnitTestMode()) {
       ApplicationManager.getApplication().executeOnPooledThread(runnable);
     } else {
       runnable.run();
@@ -447,7 +441,7 @@ public abstract class HgUtil {
    */
   @Nullable
   public static VirtualFile convertToLocalVirtualFile(@Nullable VirtualFile file) {
-    if (!(file instanceof VcsVirtualFile)) {
+    if (!(file instanceof AbstractVcsVirtualFile)) {
       return file;
     }
     LocalFileSystem lfs = LocalFileSystem.getInstance();
@@ -469,13 +463,15 @@ public abstract class HgUtil {
     if (rev1 != null) {
       revNumber1 = rev1.getRevisionNumber();
       //rev2==null means "compare with local version"
-      statusCommand = new HgStatusCommand.Builder(true).copySource(false).baseRevision(revNumber1)
+      statusCommand = new HgStatusCommand.Builder(true).ignored(false).unknown(false).copySource(false).baseRevision(revNumber1)
         .targetRevision(rev2 != null ? rev2.getRevisionNumber() : null).build(project);
     }
     else {
       LOG.assertTrue(rev2 != null, "revision1 and revision2 can't both be null. Path: " + path); //rev1 and rev2 can't be null both//
       //get initial changes//
-      statusCommand = new HgStatusCommand.Builder(true).copySource(false).baseRevision(rev2.getRevisionNumber()).build(project);
+      statusCommand =
+        new HgStatusCommand.Builder(true).ignored(false).unknown(false).copySource(false).baseRevision(rev2.getRevisionNumber())
+          .build(project);
     }
 
     Collection<HgChange> hgChanges = statusCommand.execute(root, Collections.singleton(path));
@@ -483,35 +479,13 @@ public abstract class HgUtil {
     //convert output changes to standart Change class
     for (HgChange hgChange : hgChanges) {
       FileStatus status = convertHgDiffStatus(hgChange.getStatus());
-      if (status != FileStatus.UNKNOWN && status!= FileStatus.IGNORED) {
-        changes.add(createChange(project, root, hgChange.beforeFile().getRelativePath(), revNumber1,
-                                 hgChange.afterFile().getRelativePath(),
-                                 rev2 != null ? rev2.getRevisionNumber() : null, status));
+      if (status != FileStatus.UNKNOWN) {
+        changes.add(HgHistoryUtil.createChange(project, root, hgChange.beforeFile().getRelativePath(), revNumber1,
+                                               hgChange.afterFile().getRelativePath(),
+                                               rev2 != null ? rev2.getRevisionNumber() : null, status));
       }
     }
     return changes;
-  }
-
-  @NotNull
-  public static Change createChange(@NotNull final Project project, VirtualFile root,
-                                    @NotNull String fileBefore,
-                                    @Nullable HgRevisionNumber revisionBefore,
-                                    @NotNull String fileAfter,
-                                    @Nullable HgRevisionNumber revisionAfter,
-                                    @NotNull FileStatus aStatus) {
-    HgContentRevision beforeRevision = revisionBefore == null
-                                       ? null
-                                       : new HgContentRevision(project, new HgFile(root, new File(root.getPath(), fileBefore)),
-                                                               revisionBefore);
-    if (revisionAfter == null) {
-      ContentRevision currentRevision =
-        CurrentContentRevision.create(new HgFile(root, new File(root.getPath(), fileBefore)).toFilePath());
-      return new Change(beforeRevision, currentRevision, aStatus);
-    }
-    HgContentRevision afterRevision = new HgContentRevision(project,
-                                                            new HgFile(root, new File(root.getPath(), fileAfter)),
-                                                            revisionAfter);
-    return new Change(beforeRevision, afterRevision, aStatus);
   }
 
   @NotNull
@@ -539,6 +513,12 @@ public abstract class HgUtil {
     }
   }
 
+  @NotNull
+  public static byte[] loadContent(@NotNull Project project, @Nullable HgRevisionNumber revisionNumber, @NotNull HgFile fileToCat) {
+    HgCommandResult result = new HgCatCommand(project).execute(fileToCat, revisionNumber, fileToCat.toFilePath().getCharset());
+    return result != null && result.getExitValue() == 0 ? result.getBytesOutput() : ArrayUtil.EMPTY_BYTE_ARRAY;
+  }
+
   public static String removePasswordIfNeeded(@NotNull String path) {
     Matcher matcher = URL_WITH_PASSWORD.matcher(path);
     if (matcher.matches()) {
@@ -547,18 +527,36 @@ public abstract class HgUtil {
     return path;
   }
 
-  public static String getDisplayableBranchText(HgRepository repository) {
+  @NotNull
+  public static String getDisplayableBranchOrBookmarkText(@NotNull HgRepository repository) {
     HgRepository.State state = repository.getState();
     String branchText = "";
-    if (state == HgRepository.State.MERGING) {
+    if (state != HgRepository.State.NORMAL) {
       branchText += state.toString() + " ";
     }
-    return branchText + repository.getCurrentBranch();
+    return branchText + repository.getCurrentBranchName();
   }
 
   @NotNull
   public static HgRepositoryManager getRepositoryManager(@NotNull Project project) {
     return ServiceManager.getService(project, HgRepositoryManager.class);
+  }
+
+  @Nullable
+  public static HgRepository getCurrentRepository(@NotNull Project project) {
+    if (project.isDisposed()) return null;
+    return DvcsUtil.guessRepositoryForFile(project, getRepositoryManager(project), HgVcs.getInstance(project),
+                                           DvcsUtil.getSelectedFile(project),
+                                           HgProjectSettings.getInstance(project).getRecentRootPath());
+  }
+
+  @Nullable
+  public static HgRepository getRepositoryForFile(@NotNull Project project, @Nullable VirtualFile file) {
+    if (file == null || project.isDisposed()) return null;
+
+    HgRepositoryManager repositoryManager = getRepositoryManager(project);
+    VirtualFile root = getHgRootOrNull(project, file);
+    return repositoryManager.getRepositoryForRoot(root);
   }
 
   @Nullable
@@ -573,6 +571,11 @@ public abstract class HgUtil {
     HgRepository hgRepository = getRepositoryManager(project).getRepositoryForRoot(root);
     assert hgRepository != null : "Repository can't be null for root " + root.getName();
     return hgRepository.getRepositoryConfig().getDefaultPushPath();
+  }
+
+  @Nullable
+  public static String getRepositoryDefaultPushPath(@NotNull HgRepository repository) {
+    return repository.getRepositoryConfig().getDefaultPushPath();
   }
 
   @Nullable
@@ -615,7 +618,7 @@ public abstract class HgUtil {
     cmdArgs.add("version");
     cmdArgs.add("-q");
     ShellCommand shellCommand = new ShellCommand(cmdArgs, null, CharsetToolkit.getDefaultSystemCharset());
-    return shellCommand.execute(false);
+    return shellCommand.execute(false, false);
   }
 
   public static List<String> getNamesWithoutHashes(Collection<HgNameWithHashInfo> namesWithHashes) {
@@ -629,8 +632,15 @@ public abstract class HgUtil {
     return names;
   }
 
+  public static List<String> getSortedNamesWithoutHashes(Collection<HgNameWithHashInfo> namesWithHashes) {
+    List<String> names = getNamesWithoutHashes(namesWithHashes);
+    Collections.sort(names);
+    return names;
+  }
+
   @NotNull
-  public static Pair<String, String> parseUserNameAndEmail(@NotNull String authorString) {
+  public static Couple<String> parseUserNameAndEmail(@NotNull String authorString) {
+    //special characters should be retained for properly filtering by username. For Mercurial "a.b" username is not equal to "a b"
     // Vasya Pupkin <vasya.pupkin@jetbrains.com> -> Vasya Pupkin , vasya.pupkin@jetbrains.com
     int startEmailIndex = authorString.indexOf('<');
     int startDomainIndex = authorString.indexOf('@');
@@ -639,23 +649,35 @@ public abstract class HgUtil {
     String email;
     if (0 < startEmailIndex && startEmailIndex < startDomainIndex && startDomainIndex < endEmailIndex) {
       email = authorString.substring(startEmailIndex + 1, endEmailIndex);
-      userName = convertUserName(authorString.substring(0, startEmailIndex));
+      userName = authorString.substring(0, startEmailIndex).trim();
     }
-
-    // vasya.pupkin@email.com --> vasya pupkin, vasya.pupkin@email.com
+    // vasya.pupkin@email.com || <vasya.pupkin@email.com>
     else if (!authorString.contains(" ") && startDomainIndex > 0) { //simple e-mail check. john@localhost
-      userName = convertUserName(authorString.substring(0, startDomainIndex));
-      email = authorString;
+      if (startEmailIndex >= 0 && startDomainIndex > startEmailIndex && startDomainIndex < endEmailIndex) {
+        // <vasya.pupkin@email.com> --> vasya.pupkin, vasya.pupkin@email.com
+        userName = authorString.substring(startEmailIndex + 1, startDomainIndex).trim();
+        email = authorString.substring(startEmailIndex + 1, endEmailIndex).trim();
+      } else {
+        // vasya.pupkin@email.com --> vasya.pupkin, vasya.pupkin@email.com
+        userName = authorString.substring(0, startDomainIndex).trim();
+        email = authorString;
+      }
     }
 
     else {
-      userName = convertUserName(authorString);
+      userName = authorString.trim();
       email = "";
     }
-    return Pair.create(userName, email);
+    return Couple.of(userName, email);
   }
 
-  private static String convertUserName(@NotNull String userNameInfo) {
-    return userNameInfo.trim().replace('.', ' ').replace('_', ' ').replace('-', ' ');
+  @NotNull
+  public static List<String> getTargetNames(@NotNull HgRepository repository) {
+    return ContainerUtil.sorted(ContainerUtil.map(repository.getRepositoryConfig().getPaths(), new Function<String, String>() {
+      @Override
+      public String fun(String s) {
+        return removePasswordIfNeeded(s);
+      }
+    }));
   }
 }

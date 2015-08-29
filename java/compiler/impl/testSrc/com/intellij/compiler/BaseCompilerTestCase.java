@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.compiler;
 
 import com.intellij.ProjectTopics;
@@ -18,7 +33,6 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
@@ -33,24 +47,20 @@ import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.io.TestFileSystemBuilder;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashSet;
-import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.util.JpsPathUtil;
+import org.junit.Assert;
 
 import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 /**
  * @author nik
  */
 public abstract class BaseCompilerTestCase extends ModuleTestCase {
-  protected boolean useExternalCompiler() {
-    return false;
-  }
 
   @Override
   protected void setUpModule() {
@@ -59,19 +69,14 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    if (useExternalCompiler()) {
-      myProject.getMessageBus().connect(myTestRootDisposable).subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
-        @Override
-        public void rootsChanged(ModuleRootEvent event) {
-          //todo[nik] projectOpened isn't called in tests so we need to add this listener manually
-          forceFSRescan();
-        }
-      });
-      CompilerTestUtil.enableExternalCompiler(myProject);
-    }
-    else {
-      CompilerTestUtil.disableExternalCompiler(myProject);
-    }
+    myProject.getMessageBus().connect(myTestRootDisposable).subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+      @Override
+      public void rootsChanged(ModuleRootEvent event) {
+        //todo[nik] projectOpened isn't called in tests so we need to add this listener manually
+        forceFSRescan();
+      }
+    });
+    CompilerTestUtil.enableExternalCompiler();
   }
 
   protected void forceFSRescan() {
@@ -80,10 +85,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
 
   @Override
   protected Sdk getTestProjectJdk() {
-    if (useExternalCompiler()) {
-      return JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
-    }
-    return super.getTestProjectJdk();
+    return JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
   }
 
   @Override
@@ -94,9 +96,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
         FileUtil.delete(new File(FileUtil.toSystemDependentName(outputPath)));
       }
     }
-    if (useExternalCompiler()) {
-      CompilerTestUtil.disableExternalCompiler(myProject);
-    }
+    CompilerTestUtil.disableExternalCompiler(getProject());
 
     super.tearDown();
   }
@@ -125,7 +125,8 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
       throw new RuntimeException(e);
     }
     new WriteAction() {
-      protected void run(final Result result) {
+      @Override
+      protected void run(@NotNull final Result result) {
         VirtualFile virtualDir = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(target);
         assertNotNull(target.getAbsolutePath() + " not found", virtualDir);
         virtualDir.refresh(false, true);
@@ -140,7 +141,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   protected Module addModule(final String moduleName, final @Nullable VirtualFile sourceRoot, final @Nullable VirtualFile testRoot) {
     return new WriteAction<Module>() {
       @Override
-      protected void run(final Result<Module> result) {
+      protected void run(@NotNull final Result<Module> result) {
         final Module module = createModule(moduleName);
         if (sourceRoot != null) {
           PsiTestUtil.addSourceContentToRoots(module, sourceRoot, false);
@@ -173,7 +174,15 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   }
 
   protected CompilationLog make(Module... modules) {
-    return make(getCompilerManager().createModulesCompileScope(modules, false), CompilerFilter.ALL);
+    return make(false, false, modules);
+  }
+
+  protected CompilationLog makeWithDependencies(final boolean includeRuntimeDependencies, Module... modules) {
+    return make(true, includeRuntimeDependencies, modules);
+  }
+
+  private CompilationLog make(boolean includeDependentModules, final boolean includeRuntimeDependencies, Module... modules) {
+    return make(getCompilerManager().createModulesCompileScope(modules, includeDependentModules, includeRuntimeDependencies), CompilerFilter.ALL);
   }
 
   protected CompilationLog recompile(Module... modules) {
@@ -242,11 +251,17 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
     final Ref<CompilationLog> result = Ref.create(null);
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
+    final List<String> generatedFilePaths = new ArrayList<String>();
+    getCompilerManager().addCompilationStatusListener(new CompilationStatusAdapter() {
+      @Override
+      public void fileGenerated(String outputRoot, String relativePath) {
+        generatedFilePaths.add(relativePath);
+      }
+    }, myTestRootDisposable);
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
 
-        CompilerManagerImpl.testSetup();
         final CompileStatusNotification callback = new CompileStatusNotification() {
           @Override
           public void finished(boolean aborted, int errors, int warnings, CompileContext compileContext) {
@@ -256,7 +271,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
               }
               ExitStatus status = CompileDriver.getExternalBuildExitStatus(compileContext);
               result.set(new CompilationLog(status == ExitStatus.UP_TO_DATE,
-                                            CompilerManagerImpl.getPathsToRecompile(), CompilerManagerImpl.getPathsToDelete(),
+                                            generatedFilePaths,
                                             compileContext.getMessages(CompilerMessageCategory.ERROR),
                                             compileContext.getMessages(CompilerMessageCategory.WARNING)));
             }
@@ -265,18 +280,15 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
             }
           }
         };
-        if (useExternalCompiler()) {
-          myProject.save();
-          CompilerTestUtil.saveApplicationSettings();
-          CompilerTestUtil.scanSourceRootsToRecompile(myProject);
-        }
+        myProject.save();
+        CompilerTestUtil.saveApplicationSettings();
         action.run(callback);
       }
     });
 
     final long start = System.currentTimeMillis();
     while (!semaphore.waitFor(10)) {
-      if (System.currentTimeMillis() - start > 60 * 1000) {
+      if (System.currentTimeMillis() - start > 5 * 60 * 1000) {
         throw new RuntimeException("timeout");
       }
       if (SwingUtilities.isEventDispatchThread()) {
@@ -290,23 +302,14 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
     return result.get();
   }
 
-  private Set<String> getRelativePaths(String[] paths) {
-    final Set<String> set = new THashSet<String>();
-    final String basePath = myProject.getBaseDir().getPath();
-    for (String path : paths) {
-      set.add(StringUtil.trimStart(StringUtil.trimStart(FileUtil.toSystemIndependentName(path), basePath), "/"));
-    }
-    return set;
-  }
-
   protected void changeFile(VirtualFile file) {
     changeFile(file, null);
   }
 
-  protected void changeFile(VirtualFile file, final String newText) {
+  protected void changeFile(final VirtualFile file, @Nullable final String newText) {
     try {
       if (newText != null) {
-        VfsUtil.saveText(file, newText);
+        setFileText(file, newText);
       }
       ((NewVirtualFile)file).setTimeStamp(file.getTimeStamp() + 10);
     }
@@ -318,7 +321,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   protected void deleteFile(final VirtualFile file) {
     new WriteAction() {
       @Override
-      protected void run(final Result result) {
+      protected void run(@NotNull final Result result) {
         try {
           file.delete(this);
         }
@@ -339,31 +342,26 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   @Override
   protected File getIprFile() throws IOException {
     File iprFile = super.getIprFile();
-    if (useExternalCompiler()) {
-      FileUtil.delete(iprFile);
-    }
+    FileUtil.delete(iprFile);
     return iprFile;
   }
 
   @Override
   protected Module doCreateRealModule(String moduleName) {
-    if (useExternalCompiler()) {
-      //todo[nik] reuse code from PlatformTestCase
-      final VirtualFile baseDir = myProject.getBaseDir();
-      Assert.assertNotNull(baseDir);
-      final File moduleFile = new File(baseDir.getPath().replace('/', File.separatorChar), moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
-      PlatformTestCase.myFilesToDelete.add(moduleFile);
-      return new WriteAction<Module>() {
-        @Override
-        protected void run(Result<Module> result) throws Throwable {
-          Module module = ModuleManager.getInstance(myProject)
-            .newModule(FileUtil.toSystemIndependentName(moduleFile.getAbsolutePath()), getModuleType().getId());
-          module.getModuleFile();
-          result.setResult(module);
-        }
-      }.execute().getResultObject();
-    }
-    return super.doCreateRealModule(moduleName);
+    //todo[nik] reuse code from PlatformTestCase
+    final VirtualFile baseDir = myProject.getBaseDir();
+    Assert.assertNotNull(baseDir);
+    final File moduleFile = new File(baseDir.getPath().replace('/', File.separatorChar), moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
+    PlatformTestCase.myFilesToDelete.add(moduleFile);
+    return new WriteAction<Module>() {
+      @Override
+      protected void run(@NotNull Result<Module> result) throws Throwable {
+        Module module = ModuleManager.getInstance(myProject)
+          .newModule(FileUtil.toSystemIndependentName(moduleFile.getAbsolutePath()), getModuleType().getId());
+        module.getModuleFile();
+        result.setResult(module);
+      }
+    }.execute().getResultObject();
   }
 
   @Override
@@ -418,52 +416,26 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
     }
   }
 
-  protected class CompilationLog {
-    private final Set<String> myRecompiledPaths;
-    private final Set<String> myDeletedPaths;
+  protected static class CompilationLog {
+    private final Set<String> myGeneratedPaths;
     private final boolean myExternalBuildUpToDate;
     private final CompilerMessage[] myErrors;
     private final CompilerMessage[] myWarnings;
 
-    public CompilationLog(boolean externalBuildUpToDate, String[] recompiledPaths, String[] deletedPaths, CompilerMessage[] errors, CompilerMessage[] warnings) {
+    public CompilationLog(boolean externalBuildUpToDate, List<String> generatedFilePaths, CompilerMessage[] errors,
+                          CompilerMessage[] warnings) {
       myExternalBuildUpToDate = externalBuildUpToDate;
       myErrors = errors;
       myWarnings = warnings;
-      myRecompiledPaths = getRelativePaths(recompiledPaths);
-      myDeletedPaths = getRelativePaths(deletedPaths);
+      myGeneratedPaths = new THashSet<String>(generatedFilePaths, FileUtil.PATH_HASHING_STRATEGY);
     }
 
     public void assertUpToDate() {
-      if (useExternalCompiler()) {
-        assertTrue(myExternalBuildUpToDate);
-      }
-      else {
-        checkRecompiled();
-        checkDeleted();
-      }
+      assertTrue(myExternalBuildUpToDate);
     }
 
-    public void assertRecompiled(String... expected) {
-      checkRecompiled(expected);
-      checkDeleted();
-    }
-
-    public void assertDeleted(String... expected) {
-      checkRecompiled();
-      checkDeleted(expected);
-    }
-
-    public void assertRecompiledAndDeleted(String[] recompiled, String... deleted) {
-      checkRecompiled(recompiled);
-      checkDeleted(deleted);
-    }
-
-    private void checkRecompiled(String... expected) {
-      assertSet("recompiled", myRecompiledPaths, expected);
-    }
-
-    private void checkDeleted(String... expected) {
-      assertSet("deleted", myDeletedPaths, expected);
+    public void assertGenerated(String... expected) {
+      assertSet("generated", myGeneratedPaths, expected);
     }
 
     public CompilerMessage[] getErrors() {
@@ -474,8 +446,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
       return myWarnings;
     }
 
-    private void assertSet(String name, Set<String> actual, String[] expected) {
-      if (useExternalCompiler()) return;
+    private static void assertSet(String name, Set<String> actual, String[] expected) {
       for (String path : expected) {
         if (!actual.remove(path)) {
           Assert.fail("'" + path + "' is not " + name + ". " + name + ": " + new HashSet<String>(actual));

@@ -17,7 +17,12 @@ package com.intellij.openapi.vcs;
 
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.project.Project;
-import com.intellij.util.containers.MultiMap;
+import com.intellij.openapi.util.Condition;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * @author Dmitry Avdeev
@@ -25,37 +30,60 @@ import com.intellij.util.containers.MultiMap;
  */
 public abstract class VcsTaskHandler {
 
-  public static VcsTaskHandler[] getAllHandlers(Project project) {
-    return EXTENSION_POINT_NAME.getExtensions(project);
+  public static VcsTaskHandler[] getAllHandlers(final Project project) {
+    VcsTaskHandler[] extensions = EXTENSION_POINT_NAME.getExtensions(project);
+    List<VcsTaskHandler> handlers = ContainerUtil.filter(extensions, new Condition<VcsTaskHandler>() {
+      @Override
+      public boolean value(VcsTaskHandler handler) {
+        return handler.isEnabled();
+      }
+    });
+    return handlers.toArray(new VcsTaskHandler[handlers.size()]);
   }
 
   public static class TaskInfo {
-    // branch name/repository names
-    public final MultiMap<String, String> branches;
 
-    public TaskInfo(MultiMap<String, String> branches) {
-      this.branches = branches;
+    private final String myBranch;
+    private final Collection<String> myRepositories;
+
+    public TaskInfo(String branch, Collection<String> repositories) {
+      myBranch = branch;
+      myRepositories = repositories;
     }
 
     public String getName() {
-      return branches.isEmpty() ? null : branches.keySet().iterator().next();
+      return myBranch;
+    }
+
+    public Collection<String> getRepositories() {
+      return myRepositories;
     }
 
     @Override
-    public boolean equals(Object obj) {
-      return branches.equals(((TaskInfo)obj).branches);
+    public String toString() {
+      return getName();
     }
   }
 
   private static final ExtensionPointName<VcsTaskHandler> EXTENSION_POINT_NAME = ExtensionPointName.create("com.intellij.vcs.taskHandler");
 
-  public abstract TaskInfo startNewTask(String taskName);
+  public abstract boolean isEnabled();
+
+  public abstract TaskInfo startNewTask(@NotNull String taskName);
 
   public abstract void switchToTask(TaskInfo taskInfo, Runnable invokeAfter);
 
-  public abstract void closeTask(TaskInfo taskInfo, TaskInfo original);
+  public abstract void closeTask(@NotNull TaskInfo taskInfo, @NotNull TaskInfo original);
 
-  public abstract TaskInfo getActiveTask();
+  public abstract boolean isSyncEnabled();
 
+  /**
+   * @return currently active (checked out) tasks (branches)
+   */
   public abstract TaskInfo[] getCurrentTasks();
+
+  /**
+   * @return all existing tasks (branches)
+   */
+  public abstract TaskInfo[] getAllExistingTasks();
 }

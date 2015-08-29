@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -41,6 +43,10 @@ import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.search.GlobalSearchScopes;
+import com.intellij.psi.search.GlobalSearchScopesCore;
+import com.intellij.psi.search.scope.packageSet.NamedScope;
+import com.intellij.psi.search.scope.packageSet.NamedScopesHolder;
 import com.thoughtworks.xstream.io.xml.PrettyPrintWriter;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NonNls;
@@ -105,7 +111,7 @@ public class InspectionApplication {
           LOG.error(e);
         }
         finally {
-          if (myErrorCodeRequired) application.exit(true);
+          if (myErrorCodeRequired) application.exit(true, true);
         }
       }
     });
@@ -130,15 +136,15 @@ public class InspectionApplication {
 
       logMessage(1, InspectionsBundle.message("inspection.application.opening.project"));
       final ConversionService conversionService = ConversionService.getInstance();
-      if (conversionService != null && conversionService.convertSilently(myProjectPath, createConversionListener()).openingIsCanceled()) {
-        if (myErrorCodeRequired) System.exit(1);
+      if (conversionService.convertSilently(myProjectPath, createConversionListener()).openingIsCanceled()) {
+        gracefulExit();
         return;
       }
       myProject = ProjectUtil.openOrImport(myProjectPath, null, false);
 
       if (myProject == null) {
         logError("Unable to open project");
-        if (myErrorCodeRequired) System.exit(1);
+        gracefulExit();
         return;
       }
 
@@ -165,7 +171,10 @@ public class InspectionApplication {
 
       final AnalysisScope scope;
       if (mySourceDirectory == null) {
-        scope = new AnalysisScope(myProject);
+        final String scopeName = System.getProperty("idea.analyze.scope");
+        final NamedScope namedScope = scopeName != null ? NamedScopesHolder.getScope(myProject, scopeName) : null;
+        scope = namedScope != null ? new AnalysisScope(GlobalSearchScopesCore.filterScope(myProject, namedScope), myProject) 
+                                   : new AnalysisScope(myProject);
       }
       else {
         mySourceDirectory = mySourceDirectory.replace(File.separatorChar, '/');
@@ -215,13 +224,14 @@ public class InspectionApplication {
         @Override
         public void run() {
           if (!GlobalInspectionContextUtil.canRunInspections(myProject, false)) {
-            if (myErrorCodeRequired) System.exit(1);
+            gracefulExit();
             return;
           }
           inspectionContext.launchInspectionsOffline(scope, resultsDataPath, myRunGlobalToolsOnly, inspectionsResults);
-          logMessageLn(1, "\n" +
-                          InspectionsBundle.message("inspection.capitalized.done") +
-                          "\n");
+          logMessageLn(1, "\n" + InspectionsBundle.message("inspection.capitalized.done") + "\n");
+          if (!myErrorCodeRequired) {
+            closeProject();
+          }
         }
       }, new ProgressIndicatorBase() {
         private String lastPrefix = "";
@@ -281,13 +291,29 @@ public class InspectionApplication {
     catch (Throwable e) {
       LOG.error(e);
       logError(e.getMessage());
-      if (myErrorCodeRequired) System.exit(1);
+      gracefulExit();
     }
     finally {
       // delete tmp dir
       if (tmpDir != null) {
         FileUtil.delete(tmpDir);
       }
+    }
+  }
+
+  private void gracefulExit() {
+    if (myErrorCodeRequired) {
+      System.exit(1);
+    }
+    else {
+      closeProject();
+      throw new RuntimeException("Failed to proceed");
+    }
+  }
+
+  private void closeProject() {
+    if (myProject != null && !myProject.isDisposed()) {
+      ProjectUtil.closeAndDispose(myProject);
     }
   }
 
@@ -300,7 +326,7 @@ public class InspectionApplication {
       inspectionProfile = loadProfileByName(myProfileName);
       if (inspectionProfile == null) {
         logError("Profile with configured name (" + myProfileName + ") was not found (neither in project nor in config directory)");
-        if (myErrorCodeRequired) System.exit(1);
+        gracefulExit();
         return null;
       }
       return inspectionProfile;
@@ -310,7 +336,7 @@ public class InspectionApplication {
       inspectionProfile = loadProfileByPath(myProfilePath);
       if (inspectionProfile == null) {
         logError("Failed to load profile from \'" + myProfilePath + "\'");
-        if (myErrorCodeRequired) System.exit(1);
+        gracefulExit();
         return null;
       }
       return inspectionProfile;

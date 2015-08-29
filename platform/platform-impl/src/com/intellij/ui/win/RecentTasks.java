@@ -16,6 +16,8 @@
 package com.intellij.ui.win;
 
 import com.intellij.idea.StartupUtil;
+import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.util.lang.UrlClassLoader;
 
 import java.lang.ref.WeakReference;
@@ -29,14 +31,16 @@ public class RecentTasks {
   private final static WeakReference<Thread> openerThread =
     new WeakReference<Thread>(Thread.currentThread());
 
+  private final static String openerThreadName =
+    Thread.currentThread().getName();
+
   static {
     UrlClassLoader.loadPlatformLibrary("jumpListBridge");
   }
 
   private synchronized static void init() {
     if (initialized.get()) return;
-
-    initialize("JetBrains.JetBrainsNativeAppID." + StartupUtil.getAcquiredPort());
+    initialize(ApplicationInfoEx.getInstanceEx().getVersionName() + "." + PathManager.getConfigPath().hashCode());
     initialized.set(true);
   }
 
@@ -70,6 +74,6 @@ public class RecentTasks {
   private static void checkThread() {
     Thread t = openerThread.get();
     if (t == null || !t.equals(Thread.currentThread()))
-      throw new RuntimeException("This class has to be used from the same thread");
+      throw new RuntimeException("Current thread is " + Thread.currentThread().getName() + "This class has to be used from " + openerThreadName + " thread");
   }
 }

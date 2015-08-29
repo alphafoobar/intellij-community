@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,9 @@ package com.intellij.openapi.vcs.checkout;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.vcs.CheckoutProvider;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 
@@ -29,18 +28,17 @@ public class CheckoutAction extends AnAction implements DumbAware {
   private final CheckoutProvider myProvider;
 
   public CheckoutAction(final CheckoutProvider provider) {
+    super(provider.getVcsName());
     myProvider = provider;
   }
 
   public void actionPerformed(AnActionEvent e) {
     Project project = e.getData(CommonDataKeys.PROJECT);
     project = (project == null) ? ProjectManager.getInstance().getDefaultProject() : project;
-    myProvider.doCheckout(project, ProjectLevelVcsManager.getInstance(project).getCompositeCheckoutListener());
+    myProvider.doCheckout(project, getListener(project));
   }
 
-  public void update(AnActionEvent e) {
-    super.update(e);
-    e.getPresentation().setText(myProvider.getVcsName(), true);
+  protected CheckoutProvider.Listener getListener(Project project) {
+    return ProjectLevelVcsManager.getInstance(project).getCompositeCheckoutListener();
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 package com.intellij.util.indexing;
 
 import com.intellij.lang.Language;
+import com.intellij.lang.LighterAST;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.LanguageFileType;
@@ -25,9 +28,11 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.LanguageSubstitutors;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import java.io.IOException;
@@ -45,6 +50,7 @@ public final class FileContentImpl extends UserDataHolderBase implements FileCon
   private byte[] myContent;
   private CharSequence myContentAsText;
   private final long myStamp;
+  private byte[] myHash;
 
   @Override
   public Project getProject() {
@@ -66,18 +72,32 @@ public final class FileContentImpl extends UserDataHolderBase implements FileCon
     }
 
     if (psi == null) {
-      Project project = getProject();
-      if (project == null) {
-        project = DefaultProjectFactory.getInstance().getDefaultProject();
-      }
-      final Language language = ((LanguageFileType)getFileTypeWithoutSubstitution()).getLanguage();
-      final Language substitutedLanguage = LanguageSubstitutors.INSTANCE.substituteLanguage(language, getFile(), project);
-      psi = PsiFileFactory.getInstance(project).createFileFromText(getFileName(), substitutedLanguage, getContentAsText(), false, false, true);
-
+      psi = createFileFromText(getContentAsText());
       psi.putUserData(IndexingDataKeys.VIRTUAL_FILE, getFile());
       putUserData(CACHED_PSI, psi);
     }
     return psi;
+  }
+
+  public @NotNull LighterAST getLighterASTForPsiDependentIndex() {
+    LighterAST lighterAST = getUserData(IndexingDataKeys.LIGHTER_AST_NODE_KEY);
+    if (lighterAST == null) {
+      lighterAST = getPsiFileForPsiDependentIndex().getNode().getLighterAST();
+      assert lighterAST != null;
+      putUserData(IndexingDataKeys.LIGHTER_AST_NODE_KEY, lighterAST);
+    }
+    return lighterAST;
+  }
+
+  public PsiFile createFileFromText(@NotNull CharSequence text) {
+    Project project = getProject();
+    if (project == null) {
+      project = DefaultProjectFactory.getInstance().getDefaultProject();
+    }
+    final Language language = ((LanguageFileType)getFileTypeWithoutSubstitution()).getLanguage();
+    final VirtualFile file = getFile();
+    final Language substitutedLanguage = LanguageSubstitutors.INSTANCE.substituteLanguage(language, file, project);
+    return PsiFileFactory.getInstance(project).createFileFromText(getFileName(), substitutedLanguage, text, false, false, true, file);
   }
 
   public static class IllegalDataException extends RuntimeException {
@@ -102,7 +122,12 @@ public final class FileContentImpl extends UserDataHolderBase implements FileCon
     this(file, null, null, null, -1);
   }
 
-  private FileContentImpl(@NotNull VirtualFile file, CharSequence contentAsText, byte[] content, Charset charset, long stamp) {
+  private FileContentImpl(@NotNull VirtualFile file,
+                          CharSequence contentAsText,
+                          byte[] content,
+                          Charset charset,
+                          long stamp
+  ) {
     myFile = file;
     myContentAsText = contentAsText;
     myContent = content;
@@ -114,14 +139,8 @@ public final class FileContentImpl extends UserDataHolderBase implements FileCon
   }
 
   @NotNull
-  private FileType substituteFileType(VirtualFile file, FileType fileType) {
-    Project project = getProject();
-    return SubstitutedFileType.substituteFileType(file, fileType, project);
-  }
-
-  @NotNull
   public FileType getSubstitutedFileType() {
-    return substituteFileType(myFile, myFileType);
+    return SubstitutedFileType.substituteFileType(myFile, myFileType, getProject());
   }
 
   @TestOnly
@@ -202,4 +221,31 @@ public final class FileContentImpl extends UserDataHolderBase implements FileCon
   public String toString() {
     return myFileName;
   }
+
+  public @Nullable byte[] getHash() {
+    return myHash;
+  }
+
+  public void setHash(byte[] hash) {
+    myHash = hash;
+  }
+
+  public PsiFile getPsiFileForPsiDependentIndex() {
+    Document document = FileDocumentManager.getInstance().getCachedDocument(getFile());
+    PsiFile psi = null;
+    if (document != null) {
+      PsiDocumentManager psiDocumentManager = PsiDocumentManager.getInstance(getProject());
+      if (psiDocumentManager.isUncommited(document)) {
+        PsiFile existingPsi = psiDocumentManager.getPsiFile(document);
+        if(existingPsi != null) {
+          psi = existingPsi;
+        }
+      }
+    }
+    if (psi == null) {
+      psi = getPsiFile();
+    }
+    return psi;
+  }
+
 }

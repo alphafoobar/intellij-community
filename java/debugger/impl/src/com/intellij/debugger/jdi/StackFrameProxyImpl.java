@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,15 @@ import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
 import com.intellij.debugger.engine.jdi.StackFrameProxy;
 import com.intellij.openapi.diagnostic.Logger;
 import com.sun.jdi.*;
+import gnu.trove.THashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.jdi.StackFrameProxyImpl");
@@ -43,7 +47,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
   private ObjectReference myThisReference;
   private ClassLoaderReference myClassLoader;
   private Boolean myIsObsolete = null;
-  private Map<LocalVariable,Value> myAllValues;
+  private Map<LocalVariable, Value> myAllValues;
 
   public StackFrameProxyImpl(ThreadReferenceProxyImpl threadProxy, @NotNull StackFrame frame, int fromBottomIndex /* 1-based */) {
     super(threadProxy.getVirtualMachine());
@@ -70,19 +74,33 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         clearCaches();
       }
       catch (InternalException e) {
-        if (e.errorCode() == 23 /*INVALID_METHODID accoeding to JDI sources*/) {
+        if (e.errorCode() == 23 /*INVALID_METHODID according to JDI sources*/) {
           myIsObsolete = Boolean.TRUE;
           return true;
         }
         throw e;
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return false;
+    throw new EvaluateException(error.getMessage(), error);
   }
 
+  @Override
+  public boolean isValid() {
+    DebuggerManagerThreadImpl.assertIsManagerThread();
+    if (!super.isValid()) {
+      return false;
+    }
+    try {
+      if (myStackFrame != null) {
+        myStackFrame.location(); //extra check if jdi frame is valid
+      }
+      return true;
+    } catch (InvalidStackFrameException e) {
+      return false;
+    }
+  }
+
+  @Override
   protected void clearCaches() {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     if (LOG.isDebugEnabled()) {
@@ -100,12 +118,13 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
    * Use with caution. Better access stackframe data through the Proxy's methods
    */
 
+  @Override
   public StackFrame getStackFrame() throws EvaluateException  {
     DebuggerManagerThreadImpl.assertIsManagerThread();
 
     checkValid();
 
-    if(myStackFrame == null) {
+    if (myStackFrame == null) {
       try {
         final ThreadReference threadRef = myThreadProxy.getThreadReference();
         myStackFrame = threadRef.frame(getFrameIndex());
@@ -113,7 +132,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
       catch (IndexOutOfBoundsException e) {
         throw new EvaluateException(e.getMessage(), e);
       }
-      catch (ObjectCollectedException e) {
+      catch (ObjectCollectedException ignored) {
         throw EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.thread.collected"));
       }
       catch (IncompatibleThreadStateException e) {
@@ -124,6 +143,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
     return myStackFrame;
   }
 
+  @Override
   public int getFrameIndex() throws EvaluateException {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     checkValid();
@@ -151,10 +171,12 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
 //    return false;
 //  }
 
+  @Override
   public VirtualMachineProxyImpl getVirtualMachine() {
     return (VirtualMachineProxyImpl) myTimer;
   }
 
+  @Override
   public Location location() throws EvaluateException {
     InvalidStackFrameException error = null;
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -166,12 +188,10 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         clearCaches();
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return null;
+    throw new EvaluateException(error.getMessage(), error);
   }
 
+  @Override
   public ThreadReferenceProxyImpl threadProxy() {
     return myThreadProxy;
   }
@@ -197,16 +217,22 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
           }
           break;
         }
-        catch (InvalidStackFrameException e) {
+        catch (InvalidStackFrameException ignored) {
           clearCaches();
         }
       }
     }
     catch (InternalException e) {
-      // supress some internal errors caused by bugs in specific JDI implementations
-      if(e.errorCode() != 23) {
+      // suppress some internal errors caused by bugs in specific JDI implementations
+      if (e.errorCode() != 23 && e.errorCode() != 35) {
         throw EvaluateExceptionUtil.createEvaluateException(e);
       }
+      else {
+        LOG.info("Exception while getting this object", e);
+      }
+    }
+    catch (IllegalArgumentException e) {
+        LOG.info("Exception while getting this object", e);
     }
     return myThisReference;
   }
@@ -232,16 +258,20 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         throw EvaluateExceptionUtil.createEvaluateException(e);
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return Collections.emptyList();
+    throw new EvaluateException(error.getMessage(), error);
   }
 
+  @Override
   public LocalVariableProxyImpl visibleVariableByName(String name) throws EvaluateException  {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     final LocalVariable variable = visibleVariableByNameInt(name);
     return variable != null ? new LocalVariableProxyImpl(this, variable) : null;
+  }
+
+  @Nullable
+  public Value visibleValueByName(@NotNull String name) throws EvaluateException {
+    LocalVariable variable = visibleVariableByNameInt(name);
+    return variable != null ? getValue(new LocalVariableProxyImpl(this, variable)) : null;
   }
 
   protected LocalVariable visibleVariableByNameInt(String name) throws EvaluateException  {
@@ -264,10 +294,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         throw EvaluateExceptionUtil.createEvaluateException(e);
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return null;
+    throw new EvaluateException(error.getMessage(), error);
   }
 
   public Value getValue(LocalVariableProxyImpl localVariable) throws EvaluateException {
@@ -275,18 +302,14 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
     InvalidStackFrameException error = null;
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
-        final Map<LocalVariable, Value> allValues = getAllValues();
-        return allValues.get(localVariable.getVariable());
+        return getAllValues().get(localVariable.getVariable());
       }
       catch (InvalidStackFrameException e) {
         error = e;
         clearCaches();
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return null;
+    throw new EvaluateException(error.getMessage(), error);
   }
 
   public List<Value> getArgumentValues() throws EvaluateException {
@@ -313,10 +336,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         clearCaches();
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
-    return Collections.emptyList();
+    throw new EvaluateException(error.getMessage(), error);
   }
 
   private Map<LocalVariable, Value> getAllValues() throws EvaluateException{
@@ -324,15 +344,10 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
     checkValid();
     if (myAllValues == null) {
       try {
-        final StackFrame stackFrame = getStackFrame();
-        final Map<LocalVariable, Value> values = stackFrame.getValues(stackFrame.visibleVariables());
-        myAllValues = new HashMap<LocalVariable, Value>(values.size());
-        for (final LocalVariable variable : values.keySet()) {
-          final Value value = values.get(variable);
-          myAllValues.put(variable, value);
-        }
+        StackFrame stackFrame = getStackFrame();
+        myAllValues = new THashMap<LocalVariable, Value>(stackFrame.getValues(stackFrame.visibleVariables()));
       }
-      catch (InconsistentDebugInfoException e) {
+      catch (InconsistentDebugInfoException ignored) {
         clearCaches();
         throw EvaluateExceptionUtil.INCONSISTEND_DEBUG_INFO;
       }
@@ -363,9 +378,7 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
         clearCaches();
       }
     }
-    if (error != null) {
-      throw new EvaluateException(error.getMessage(), error);
-    }
+    throw new EvaluateException(error.getMessage(), error);
   }
 
   public int hashCode() {
@@ -388,12 +401,13 @@ public class StackFrameProxyImpl extends JdiProxy implements StackFrameProxy {
     try {
       return var.getVariable().isVisible(getStackFrame());
     }
-    catch (IllegalArgumentException e) {
+    catch (IllegalArgumentException ignored) {
       // can be thrown if frame's method is different than variable's method
       return false;
     }
   }
 
+  @Override
   public ClassLoaderReference getClassLoader() throws EvaluateException {
     if(myClassLoader == null) {
       myClassLoader = location().declaringType().classLoader();

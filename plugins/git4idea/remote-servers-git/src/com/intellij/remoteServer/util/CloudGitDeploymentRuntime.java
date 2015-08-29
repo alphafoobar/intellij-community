@@ -1,20 +1,28 @@
 package com.intellij.remoteServer.util;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.changes.*;
+import com.intellij.openapi.vcs.changes.ui.CommitChangeListDialog;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.remoteServer.agent.util.CloudAgentLoggingHandler;
 import com.intellij.remoteServer.agent.util.CloudGitApplication;
 import com.intellij.remoteServer.configuration.deployment.DeploymentSource;
 import com.intellij.remoteServer.runtime.deployment.DeploymentLogManager;
 import com.intellij.remoteServer.runtime.deployment.DeploymentTask;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.concurrency.Semaphore;
+import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.actions.GitInit;
 import git4idea.commands.*;
@@ -22,11 +30,17 @@ import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
 import git4idea.util.GitFileUtils;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * @author michael.golubev
@@ -35,6 +49,79 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
 
   private static final Logger LOG = Logger.getInstance("#" + CloudGitDeploymentRuntime.class.getName());
 
+  private static final String COMMIT_MESSAGE = "Deploy";
+
+  private static final CommitSession NO_COMMIT = new CommitSession() {
+
+    @Nullable
+    @Override
+    public JComponent getAdditionalConfigurationUI() {
+      return null;
+    }
+
+    @Nullable
+    @Override
+    public JComponent getAdditionalConfigurationUI(Collection<Change> changes, String commitMessage) {
+      return null;
+    }
+
+    @Override
+    public boolean canExecute(Collection<Change> changes, String commitMessage) {
+      return true;
+    }
+
+    @Override
+    public void execute(Collection<Change> changes, String commitMessage) {
+
+    }
+
+    @Override
+    public void executionCanceled() {
+
+    }
+
+    @Override
+    public String getHelpId() {
+      return null;
+    }
+  };
+
+  private static final List<CommitExecutor> ourCommitExecutors = Arrays.asList(
+    new CommitExecutor() {
+
+      @Nls
+      @Override
+      public String getActionText() {
+        return "Commit and Push";
+      }
+
+      @NotNull
+      @Override
+      public CommitSession createCommitSession() {
+        return CommitSession.VCS_COMMIT;
+      }
+    },
+    new CommitExecutorBase() {
+
+      @Nls
+      @Override
+      public String getActionText() {
+        return "Push without Commit";
+      }
+
+      @NotNull
+      @Override
+      public CommitSession createCommitSession() {
+        return NO_COMMIT;
+      }
+
+      @Override
+      public boolean areChangesRequired() {
+        return false;
+      }
+    }
+  );
+
   private final GitRepositoryManager myGitRepositoryManager;
   private final Git myGit;
 
@@ -42,6 +129,7 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
   private final File myRepositoryRootFile;
 
   private final String myDefaultRemoteName;
+  private final ChangeListManagerEx myChangeListManager;
   private String myRemoteName;
   private final String myCloudName;
 
@@ -65,34 +153,114 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
     LOG.assertTrue(contentRoot != null, "Repository root is not found");
     myContentRoot = contentRoot;
 
-    myGitRepositoryManager = GitUtil.getRepositoryManager(getProject());
+    Project project = getProject();
+    myGitRepositoryManager = GitUtil.getRepositoryManager(project);
     myGit = ServiceManager.getService(Git.class);
     if (myGit == null) {
       throw new ServerRuntimeException("Can't initialize GIT");
     }
+    GitPlatformFacade gitPlatformFacade = ServiceManager.getService(GitPlatformFacade.class);
+    myChangeListManager = gitPlatformFacade.getChangeListManager(project);
   }
 
   @Override
   public CloudGitApplication deploy() throws ServerRuntimeException {
     CloudGitApplication application = findOrCreateApplication();
-    GitRepository repository = findOrCreateRepository();
-    addOrResetGitRemote(application, repository);
-    add();
-    commit();
-    repository.update();
-    pushApplication(application);
+    deployApplication(application);
     return application;
   }
 
-  public void undeploy() throws ServerRuntimeException {
-    getAgentTaskExecutor().execute(new Computable<Object>() {
+  private void deployApplication(CloudGitApplication application) throws ServerRuntimeException {
+    boolean firstDeploy = findRepository() == null;
+
+    GitRepository repository = findOrCreateRepository();
+    addOrResetGitRemote(application, repository);
+
+    final LocalChangeList activeChangeList = myChangeListManager.getDefaultChangeList();
+
+    if (activeChangeList != null && !firstDeploy) {
+      commitWithChangesDialog(activeChangeList);
+    }
+    else {
+      add();
+      commit();
+    }
+    repository.update();
+    pushApplication(application);
+  }
+
+  protected void commitWithChangesDialog(final @NotNull LocalChangeList activeChangeList)
+    throws ServerRuntimeException {
+
+    Collection<Change> changes = activeChangeList.getChanges();
+    final List<Change> relevantChanges = new ArrayList<Change>();
+    for (Change change : changes) {
+      if (isRelevant(change.getBeforeRevision()) || isRelevant(change.getAfterRevision())) {
+        relevantChanges.add(change);
+      }
+    }
+
+    final Semaphore commitSemaphore = new Semaphore();
+    commitSemaphore.down();
+
+    final Ref<Boolean> commitSucceeded = new Ref<Boolean>(false);
+    Boolean commitStarted = runOnEdt(new Computable<Boolean>() {
 
       @Override
-      public Object compute() {
-        getDeployment().deleteApplication();
-        return null;
+      public Boolean compute() {
+        return CommitChangeListDialog.commitChanges(getProject(),
+                                                    relevantChanges,
+                                                    activeChangeList,
+                                                    ourCommitExecutors,
+                                                    false,
+                                                    COMMIT_MESSAGE,
+                                                    new CommitResultHandler() {
+
+                                                      @Override
+                                                      public void onSuccess(@NotNull String commitMessage) {
+                                                        commitSucceeded.set(true);
+                                                        commitSemaphore.up();
+                                                      }
+
+                                                      @Override
+                                                      public void onFailure() {
+                                                        commitSemaphore.up();
+                                                      }
+                                                    },
+                                                    false);
       }
     });
+    if (commitStarted != null && commitStarted) {
+      commitSemaphore.waitFor();
+      if (!commitSucceeded.get()) {
+        getRepository().update();
+        throw new ServerRuntimeException("Commit failed");
+      }
+    }
+    else {
+      throw new ServerRuntimeException("Deploy interrupted");
+    }
+  }
+
+  private boolean isRelevant(ContentRevision contentRevision) throws ServerRuntimeException {
+    if (contentRevision == null) {
+      return false;
+    }
+    GitRepository repository = getRepository();
+    VirtualFile affectedFile = contentRevision.getFile().getVirtualFile();
+    return affectedFile != null && VfsUtilCore.isAncestor(repository.getRoot(), affectedFile, false);
+  }
+
+  private static <T> T runOnEdt(final Computable<T> computable) {
+    final Ref<T> result = new Ref<T>();
+    ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+
+      @Override
+      public void run() {
+        result.set(computable.compute());
+      }
+    }, ModalityState.any());
+    return result.get();
   }
 
   public boolean isDeployed() throws ServerRuntimeException {
@@ -141,13 +309,7 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
   }
 
   public void downloadExistingApplication() throws ServerRuntimeException {
-    CloudGitApplication application = findApplication();
-    if (application == null) {
-      throw new ServerRuntimeException("Can't find the application: " + getApplicationName());
-    }
-
-    new CloneJobWithRemote().cloneToModule(application.getGitUrl());
-
+    new CloneJobWithRemote().cloneToModule(getApplication().getGitUrl());
     getRepository().update();
     refreshContentRoot();
   }
@@ -185,6 +347,11 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
         getLoggingHandler().println(line);
       }
     };
+  }
+
+  @Override
+  protected CloudAgentLoggingHandler getLoggingHandler() {
+    return super.getLoggingHandler();
   }
 
   protected void addGitRemote(CloudGitApplication application) throws ServerRuntimeException {
@@ -229,8 +396,13 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
   }
 
   protected void pushApplication(@NotNull CloudGitApplication application) throws ServerRuntimeException {
+    push(application, getRepository(), getRemoteName());
+  }
+
+  protected void push(@NotNull CloudGitApplication application, @NotNull GitRepository repository, @NotNull String remote)
+    throws ServerRuntimeException {
     GitCommandResult gitPushResult
-      = getGit().push(getRepository(), getRemoteName(), application.getGitUrl(), "master:master", createGitLineHandlerListener());
+      = getGit().push(repository, remote, application.getGitUrl(), "master:master", false, createGitLineHandlerListener());
     checkGitResult(gitPushResult);
   }
 
@@ -247,6 +419,7 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
     final VirtualFile contentRoot = getRepositoryRoot();
     GitRepository repository = getRepository();
     final GitLineHandler fetchHandler = new GitLineHandler(getProject(), contentRoot, GitCommand.FETCH);
+    fetchHandler.setUrl(getApplication().getGitUrl());
     fetchHandler.setSilent(false);
     fetchHandler.addParameters(getRemoteName());
     fetchHandler.addLineListener(createGitLineHandlerListener());
@@ -265,11 +438,16 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
   }
 
   protected void commit() throws ServerRuntimeException {
+    commit(COMMIT_MESSAGE);
+  }
+
+  protected void commit(String message) throws ServerRuntimeException {
     try {
       if (GitUtil.hasLocalChanges(true, getProject(), myContentRoot)) {
         GitSimpleHandler handler = new GitSimpleHandler(getProject(), myContentRoot, GitCommand.COMMIT);
         handler.setSilent(false);
-        handler.addParameters("-m", "Deploy");
+        handler.setStdoutSuppressed(false);
+        handler.addParameters("-m", message);
         handler.endOptions();
         handler.run();
       }
@@ -329,6 +507,11 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
     });
   }
 
+  public void fetchAndRefresh() throws ServerRuntimeException {
+    fetch();
+    refreshContentRoot();
+  }
+
   private String getRemoteName() {
     if (myRemoteName == null) {
       myRemoteName = myDefaultRemoteName;
@@ -350,12 +533,37 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
     });
   }
 
+  protected CloudGitApplication getApplication() throws ServerRuntimeException {
+    CloudGitApplication application = findApplication();
+    if (application == null) {
+      throw new ServerRuntimeException("Can't find the application: " + getApplicationName());
+    }
+    return application;
+  }
+
   protected CloudGitApplication createApplication() throws ServerRuntimeException {
     return getAgentTaskExecutor().execute(new Computable<CloudGitApplication>() {
 
       @Override
       public CloudGitApplication compute() {
         return getDeployment().createApplication();
+      }
+    });
+  }
+
+  public CloudGitApplication findApplication4Repository() throws ServerRuntimeException {
+    final List<String> repositoryUrls = new ArrayList<String>();
+    for (GitRemote remote : getRepository().getRemotes()) {
+      for (String url : remote.getUrls()) {
+        repositoryUrls.add(url);
+      }
+    }
+
+    return getAgentTaskExecutor().execute(new Computable<CloudGitApplication>() {
+
+      @Override
+      public CloudGitApplication compute() {
+        return getDeployment().findApplication4Repository(ArrayUtil.toStringArray(repositoryUrls));
       }
     });
   }
@@ -403,6 +611,7 @@ public class CloudGitDeploymentRuntime extends CloudDeploymentRuntime {
     public void doClone(File cloneDirParent, String cloneDirName, String gitUrl) throws ServerRuntimeException {
       final GitLineHandler handler = new GitLineHandler(getProject(), cloneDirParent, GitCommand.CLONE);
       handler.setSilent(false);
+      handler.setStdoutSuppressed(false);
       handler.setUrl(gitUrl);
       handler.addParameters("--progress");
       handler.addParameters(gitUrl);

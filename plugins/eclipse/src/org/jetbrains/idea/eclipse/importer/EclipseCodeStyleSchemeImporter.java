@@ -16,19 +16,20 @@
 package org.jetbrains.idea.eclipse.importer;
 
 
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
+import com.intellij.application.options.ImportSchemeChooserDialog;
+import com.intellij.openapi.options.SchemeFactory;
 import com.intellij.openapi.options.SchemeImportException;
 import com.intellij.openapi.options.SchemeImporter;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.codeStyle.CodeStyleScheme;
-import com.intellij.psi.codeStyle.CodeStyleSettings;
-import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ThrowableConsumer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -36,28 +37,53 @@ import java.util.Set;
  * @author Rustam Vishnyakov
  */
 public class EclipseCodeStyleSchemeImporter implements SchemeImporter<CodeStyleScheme>, EclipseXmlProfileElements {
-
-  private static final Logger LOG = Logger.getInstance("#" + EclipseCodeStyleSchemeImporter.class.getName());
-  
-  private final static String PROGRAMMATIC_IMPORT_KEY = "<Programmatic>";
-  
-  private final EclipseImportMap myImportMap;
-
-  public EclipseCodeStyleSchemeImporter() {
-    myImportMap = new EclipseImportMap();
-    myImportMap.load();    
-  }
-
-  @Override
-  public String getSourceExtension() {
-    return "xml";
-  }
-
   @NotNull
   @Override
-  public String[] readSchemeNames(@NotNull InputStream inputStream) throws SchemeImportException {
+  public String[] getSourceExtensions() {
+    return new String[]{"xml"};
+  }
+
+  @Nullable
+  @Override
+  public CodeStyleScheme importScheme(@NotNull Project project,
+                                      @NotNull VirtualFile selectedFile,
+                                      CodeStyleScheme currentScheme,
+                                      SchemeFactory<CodeStyleScheme> schemeFactory) throws SchemeImportException {
+    final String[] schemeNames = readSchemeNames(selectedFile);
+    final ImportSchemeChooserDialog schemeChooserDialog =
+      new ImportSchemeChooserDialog(project, schemeNames, !currentScheme.isDefault() ? currentScheme.getName() : null);
+    if (! schemeChooserDialog.showAndGet()) return null;
+    final CodeStyleScheme scheme = schemeChooserDialog.isUseCurrentScheme() && (! currentScheme.isDefault()) ? currentScheme :
+      schemeFactory.createNewScheme(schemeChooserDialog.getTargetName());
+    if (scheme == null) return null;
+    readFromStream(selectedFile, new ThrowableConsumer<InputStream, SchemeImportException>() {
+      @Override
+      public void consume(InputStream stream) throws SchemeImportException {
+        new EclipseCodeStyleImportWorker().importScheme(stream, schemeChooserDialog.getSelectedName(), scheme);
+      }
+    });
+
+    return scheme;
+  }
+
+  @Nullable
+  @Override
+  public String getAdditionalImportInfo(CodeStyleScheme scheme) {
+    return null;
+  }
+
+  /**
+   * Attempts to read scheme names from the given stream. The stream may contain several schemes in which case all the available
+   * names are returned.
+   *
+   * @param inputStream The input stream to read the name from.
+   * @return Either scheme name or null if the scheme doesn't have a name.
+   * @throws SchemeImportException
+   */
+  @NotNull
+  private String[] readSchemeNames(@NotNull VirtualFile selectedFile) throws SchemeImportException {
     final Set<String> names = new HashSet<String>();
-    EclipseXmlProfileReader reader = new EclipseXmlProfileReader(new EclipseXmlProfileReader.OptionHandler() {
+    final EclipseXmlProfileReader reader = new EclipseXmlProfileReader(new EclipseXmlProfileReader.OptionHandler() {
       @Override
       public void handleOption(@NotNull String eclipseKey, @NotNull String value) throws SchemeImportException {
         // Ignore
@@ -67,152 +93,32 @@ public class EclipseCodeStyleSchemeImporter implements SchemeImporter<CodeStyleS
         names.add(name);
       }
     });
-    reader.readSettings(inputStream);
+    readFromStream(selectedFile, new ThrowableConsumer<InputStream, SchemeImportException>() {
+      @Override
+      public void consume(InputStream stream) throws SchemeImportException {
+        reader.readSettings(stream);
+      }
+    });
     return ArrayUtil.toStringArray(names);
   }
 
-  @Override
-  public void importScheme(@NotNull InputStream inputStream, final @Nullable String sourceScheme, final CodeStyleScheme scheme)
+  private static void readFromStream(@NotNull final VirtualFile file,
+                                     @NotNull final ThrowableConsumer<InputStream, SchemeImportException> consumer)
     throws SchemeImportException {
-    final CodeStyleSettings settings = scheme.getCodeStyleSettings();
-    EclipseXmlProfileReader reader = new EclipseXmlProfileReader(new EclipseXmlProfileReader.OptionHandler() {
-      private String myCurrScheme;
-
-      @Override
-      public void handleOption(@NotNull String eclipseKey, @NotNull String value) throws SchemeImportException {
-        if (sourceScheme == null || myCurrScheme != null && myCurrScheme.equals(sourceScheme)) {
-          setCodeStyleOption(settings, eclipseKey, value);
-        }
-      }
-      @Override
-      public void handleName(String name) {
-        myCurrScheme = name;
-      }
-    });
-    reader.readSettings(inputStream);
-  }
-
-  private void setCodeStyleOption(@NotNull CodeStyleSettings settings, @NotNull String key, @NotNull String value)
-    throws SchemeImportException {
-    EclipseImportMap.ImportDescriptor importDescriptor = myImportMap.getImportDescriptor(key);
-    if (importDescriptor != null) {
-      try {
-        if (importDescriptor.isLanguageSpecific()) {
-          CommonCodeStyleSettings languageSettings = settings.getCommonSettings(importDescriptor.getLanguage());
-          if (languageSettings != null) {
-            if (importDescriptor.isIndentOptions()) {
-              CommonCodeStyleSettings.IndentOptions indentOptions = languageSettings.getIndentOptions();
-              if (indentOptions != null) {
-                setValue(indentOptions, key, importDescriptor.getFieldName(), value);
-              }
-            }
-            else {
-              setValue(languageSettings, key, importDescriptor.getFieldName(), value);
-            }
-          }
-        }
-        else {
-          setValue(settings, key, importDescriptor.getFieldName(), value);
-        }
-      }
-      catch (Exception e) {
-        throw new SchemeImportException(e);
-      }
-    }
-  }
-
-  private static void setValue(Object object, String key, String fieldName, String value) throws SchemeImportException {
-    if (PROGRAMMATIC_IMPORT_KEY.equalsIgnoreCase(fieldName)) {
-      setProgrammatically(object, key, value);
-      return;
-    }
+    InputStream inputStream = null;
     try {
-      Field targetField = object.getClass().getField(fieldName);
-      Class<?> fieldType = targetField.getType();
-      if (fieldType.isPrimitive()) {
-        if (Boolean.TYPE.equals(fieldType)) {
-          targetField.setBoolean(object, valueToBoolean(key, value));
+      inputStream = file.getInputStream();
+      consumer.consume(inputStream);
+    } catch (IOException e) {
+      throw new SchemeImportException(e);
+    }
+    finally {
+      if (inputStream != null) {
+        try {
+          inputStream.close();
         }
-        else if (Integer.TYPE.equals(fieldType)) {
-          targetField.setInt(object, valueToInt(value));
-        }
-      }
-      else if (fieldType.equals(String.class)) {
-        targetField.set(object, value);
-      }
-    }
-    catch (IllegalAccessException e) {
-      LOG.error(e);
-    }
-    catch (NoSuchFieldException e) {
-      LOG.error("Field '" + fieldName + "' does not exist in " + object.getClass().getName(), e); 
-    }    
-  }
-
-  private static boolean valueToBoolean(@NotNull String key, @NotNull String value) throws SchemeImportException {
-    if (VALUE_INSERT.equals(value) ||
-      VALUE_TRUE.equals(value)) {
-      return true;
-    }
-    if (key.contains("alignment") && value.matches("\\d*")) {
-      return isAlignmentOn(value);
-    }
-    if (!(VALUE_DO_NOT_INSERT.equals(value) ||
-          VALUE_FALSE.equals(value))) {
-      throw new SchemeImportException("Unrecognized boolean value: " + value + ", key: " + key);
-    }
-    return false;
-  }
-  
-  private static int valueToInt(@NotNull String value) {
-    if (VALUE_END_OF_LINE.equals(value)) return CommonCodeStyleSettings.END_OF_LINE;
-    if (VALUE_NEXT_LINE.equals(value)) return CommonCodeStyleSettings.NEXT_LINE;
-    if (VALUE_NEXT_LINE_SHIFTED.equals(value)) return CommonCodeStyleSettings.NEXT_LINE_SHIFTED;
-    if (VALUE_NEXT_LINE_IF_WRAPPED.equals(value)) return CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
-    return Integer.parseInt(value);
-  }
-
-  private static boolean isAlignmentOn(@NotNull String value) {
-    int packed = valueToInt(value);
-    return (packed & 2) != 0;
-  }
-  
-  private static void setProgrammatically(@NotNull Object object, @NotNull String key, @NotNull String value) throws SchemeImportException {
-    if (object instanceof CodeStyleSettings) {
-      CodeStyleSettings settings = (CodeStyleSettings)object;
-      if (OPTION_REMOVE_JAVADOC_BLANK_LINES.equals(key)) {
-        settings.JD_KEEP_EMPTY_LINES = !valueToBoolean(key, value);
-      }
-      else if (OPTION_NEW_LINE_AT_EOF.equals(key)) {
-        EditorSettingsExternalizable editorSettings = EditorSettingsExternalizable.getInstance();
-        editorSettings.setEnsureNewLineAtEOF(valueToBoolean(key, value));
-      }
-    }
-    else if (object instanceof CommonCodeStyleSettings) {
-      CommonCodeStyleSettings commonSettings = (CommonCodeStyleSettings)object;
-      if (OPTION_SPACE_AFTER_BINARY_OPERATOR.equals(key)) {
-        boolean addSpace = valueToBoolean(key, value);
-        commonSettings.SPACE_AROUND_ADDITIVE_OPERATORS = 
-        commonSettings.SPACE_AROUND_BITWISE_OPERATORS = 
-        commonSettings.SPACE_AROUND_LOGICAL_OPERATORS = 
-        commonSettings.SPACE_AROUND_MULTIPLICATIVE_OPERATORS =
-        commonSettings.SPACE_AROUND_RELATIONAL_OPERATORS =
-        commonSettings.SPACE_AROUND_SHIFT_OPERATORS =
-        commonSettings.SPACE_AROUND_EQUALITY_OPERATORS =
-          addSpace;
-      }
-      else if (OPTION_INDENT_CLASS_BODY_DECL.equals(key)) {
-        commonSettings.DO_NOT_INDENT_TOP_LEVEL_CLASS_MEMBERS = !valueToBoolean(key, value);
-      }
-    }
-    else if (object instanceof CommonCodeStyleSettings.IndentOptions) {
-      CommonCodeStyleSettings.IndentOptions indentOptions = (CommonCodeStyleSettings.IndentOptions)object;
-      if (OPTION_TAB_CHAR.equals(key)) {
-        if (TAB_CHAR_TAB.equals(value) || TAB_CHAR_MIXED.equals(value)) {
-          indentOptions.USE_TAB_CHARACTER = true;
-        }
-        else if (TAB_CHAR_SPACE.equals(value)) {
-          indentOptions.USE_TAB_CHARACTER = false;
+        catch (IOException e) {
+          //
         }
       }
     }

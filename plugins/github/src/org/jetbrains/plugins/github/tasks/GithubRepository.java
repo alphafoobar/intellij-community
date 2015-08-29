@@ -1,13 +1,11 @@
 package org.jetbrains.plugins.github.tasks;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.PasswordUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.tasks.Comment;
-import com.intellij.tasks.Task;
-import com.intellij.tasks.TaskRepository;
-import com.intellij.tasks.TaskType;
+import com.intellij.tasks.*;
 import com.intellij.tasks.impl.BaseRepository;
 import com.intellij.tasks.impl.BaseRepositoryImpl;
 import com.intellij.util.Function;
@@ -18,12 +16,10 @@ import icons.TasksIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiUtil;
+import org.jetbrains.plugins.github.api.GithubConnection;
 import org.jetbrains.plugins.github.api.GithubIssue;
 import org.jetbrains.plugins.github.api.GithubIssueComment;
-import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException;
-import org.jetbrains.plugins.github.exceptions.GithubJsonException;
-import org.jetbrains.plugins.github.exceptions.GithubRateLimitExceededException;
-import org.jetbrains.plugins.github.exceptions.GithubStatusCodeException;
+import org.jetbrains.plugins.github.exceptions.*;
 import org.jetbrains.plugins.github.util.GithubAuthData;
 import org.jetbrains.plugins.github.util.GithubUtil;
 
@@ -47,7 +43,8 @@ public class GithubRepository extends BaseRepositoryImpl {
   @NotNull private String myToken = "";
 
   @SuppressWarnings({"UnusedDeclaration"})
-  public GithubRepository() {}
+  public GithubRepository() {
+  }
 
   public GithubRepository(GithubRepository other) {
     super(other);
@@ -58,12 +55,29 @@ public class GithubRepository extends BaseRepositoryImpl {
 
   public GithubRepository(GithubRepositoryType type) {
     super(type);
-    setUrl(GithubApiUtil.DEFAULT_GITHUB_HOST);
+    setUrl("https://" + GithubApiUtil.DEFAULT_GITHUB_HOST);
   }
 
+  @NotNull
   @Override
-  public void testConnection() throws Exception {
-    getIssues("", 10, 0);
+  public CancellableConnection createCancellableConnection() {
+    return new CancellableConnection() {
+      private final GithubConnection myConnection = new GithubConnection(getAuthData(), false);
+
+      @Override
+      protected void doTest() throws Exception {
+        try {
+          GithubApiUtil.getIssuesQueried(myConnection, getRepoAuthor(), getRepoName(), "", false);
+        }
+        catch (GithubOperationCanceledException ignore) {
+        }
+      }
+
+      @Override
+      public void cancel() {
+        myConnection.abort();
+      }
+    };
   }
 
   @Override
@@ -83,9 +97,9 @@ public class GithubRepository extends BaseRepositoryImpl {
   }
 
   @Override
-  public Task[] getIssues(@Nullable String query, int max, long since) throws Exception {
+  public Task[] getIssues(@Nullable String query, int offset, int limit, boolean withClosed) throws Exception {
     try {
-      return getIssues(query, max);
+      return getIssues(query, offset + limit, withClosed);
     }
     catch (GithubRateLimitExceededException e) {
       return new Task[0];
@@ -101,25 +115,38 @@ public class GithubRepository extends BaseRepositoryImpl {
     }
   }
 
-  @NotNull
-  private Task[] getIssues(@Nullable String query, int max) throws Exception {
-    List<GithubIssue> issues;
-    if (StringUtil.isEmptyOrSpaces(query)) {
-      if (StringUtil.isEmptyOrSpaces(myUser)) {
-        myUser = GithubApiUtil.getCurrentUser(getAuthData()).getLogin();
-      }
-      issues = GithubApiUtil.getIssuesAssigned(getAuthData(), getRepoAuthor(), getRepoName(), myUser, max);
-    }
-    else {
-      issues = GithubApiUtil.getIssuesQueried(getAuthData(), getRepoAuthor(), getRepoName(), query);
-    }
+  @Override
+  public Task[] getIssues(@Nullable String query, int offset, int limit, boolean withClosed, @NotNull ProgressIndicator cancelled)
+    throws Exception {
+    return getIssues(query, offset, limit, withClosed);
+  }
 
-    return ContainerUtil.map2Array(issues, Task.class, new Function<GithubIssue, Task>() {
-      @Override
-      public Task fun(GithubIssue issue) {
-        return createTask(issue);
+  @NotNull
+  private Task[] getIssues(@Nullable String query, int max, boolean withClosed) throws Exception {
+    GithubConnection connection = getConnection();
+
+    try {
+      List<GithubIssue> issues;
+      if (StringUtil.isEmptyOrSpaces(query)) {
+        if (StringUtil.isEmptyOrSpaces(myUser)) {
+          myUser = GithubApiUtil.getCurrentUser(connection).getLogin();
+        }
+        issues = GithubApiUtil.getIssuesAssigned(connection, getRepoAuthor(), getRepoName(), myUser, max, withClosed);
       }
-    });
+      else {
+        issues = GithubApiUtil.getIssuesQueried(connection, getRepoAuthor(), getRepoName(), query, withClosed);
+      }
+
+      return ContainerUtil.map2Array(issues, Task.class, new Function<GithubIssue, Task>() {
+        @Override
+        public Task fun(GithubIssue issue) {
+          return createTask(issue);
+        }
+      });
+    }
+    finally {
+      connection.close();
+    }
   }
 
   @NotNull
@@ -205,29 +232,76 @@ public class GithubRepository extends BaseRepositoryImpl {
   }
 
   private Comment[] fetchComments(final long id) throws Exception {
-    List<GithubIssueComment> result = GithubApiUtil.getIssueComments(getAuthData(), getRepoAuthor(), getRepoName(), id);
+    GithubConnection connection = getConnection();
+    try {
+      List<GithubIssueComment> result = GithubApiUtil.getIssueComments(connection, getRepoAuthor(), getRepoName(), id);
 
-    return ContainerUtil.map2Array(result, Comment.class, new Function<GithubIssueComment, Comment>() {
-      @Override
-      public Comment fun(GithubIssueComment comment) {
-        return new GithubComment(comment.getCreatedAt(), comment.getUser().getLogin(), comment.getBodyHtml(), comment.getUser().getGravatarId(),
-                                 comment.getUser().getHtmlUrl());
-      }
-    });
+      return ContainerUtil.map2Array(result, Comment.class, new Function<GithubIssueComment, Comment>() {
+        @Override
+        public Comment fun(GithubIssueComment comment) {
+          return new GithubComment(comment.getCreatedAt(), comment.getUser().getLogin(), comment.getBodyHtml(),
+                                   comment.getUser().getAvatarUrl(),
+                                   comment.getUser().getHtmlUrl());
+        }
+      });
+    }
+    finally {
+      connection.close();
+    }
   }
 
   @Nullable
-  public String extractId(String taskName) {
+  public String extractId(@NotNull String taskName) {
     Matcher matcher = myPattern.matcher(taskName);
     return matcher.find() ? matcher.group(1) : null;
   }
 
   @Nullable
   @Override
-  public Task findTask(String id) throws Exception {
-    return createTask(GithubApiUtil.getIssue(getAuthData(), getRepoAuthor(), getRepoName(), id));
+  public Task findTask(@NotNull String id) throws Exception {
+    final int index = id.lastIndexOf("-");
+    if (index < 0) {
+      return null;
+    }
+    final String numericId = id.substring(index + 1);
+    GithubConnection connection = getConnection();
+    try {
+      return createTask(GithubApiUtil.getIssue(connection, getRepoAuthor(), getRepoName(), numericId));
+    }
+    catch (GithubStatusCodeException e) {
+      if (e.getStatusCode() == 404) {
+        return null;
+      }
+      throw e;
+    }
+    finally {
+      connection.close();
+    }
   }
 
+  @Override
+  public void setTaskState(@NotNull Task task, @NotNull TaskState state) throws Exception {
+    GithubConnection connection = getConnection();
+    try {
+      boolean isOpen;
+      switch (state) {
+        case OPEN:
+          isOpen = true;
+          break;
+        case RESOLVED:
+          isOpen = false;
+          break;
+        default:
+          throw new IllegalStateException("Unknown state: " + state);
+      }
+      GithubApiUtil.setIssueState(connection, getRepoAuthor(), getRepoName(), task.getNumber(), isOpen);
+    }
+    finally {
+      connection.close();
+    }
+  }
+
+  @NotNull
   @Override
   public BaseRepository clone() {
     return new GithubRepository(this);
@@ -240,7 +314,7 @@ public class GithubRepository extends BaseRepositoryImpl {
 
   public void setRepoName(@NotNull String repoName) {
     myRepoName = repoName;
-    myPattern = Pattern.compile("(" + StringUtil.escapeToRegexp(repoName) + "\\-\\d+):\\s+");
+    myPattern = Pattern.compile("(" + StringUtil.escapeToRegexp(repoName) + "\\-\\d+)");
   }
 
   @NotNull
@@ -287,7 +361,11 @@ public class GithubRepository extends BaseRepositoryImpl {
   }
 
   private GithubAuthData getAuthData() {
-      return GithubAuthData.createTokenAuth(getUrl(), getToken(), isUseProxy());
+    return GithubAuthData.createTokenAuth(getUrl(), getToken(), isUseProxy());
+  }
+
+  private GithubConnection getConnection() {
+    return new GithubConnection(getAuthData(), true);
   }
 
   @Override
@@ -305,6 +383,6 @@ public class GithubRepository extends BaseRepositoryImpl {
 
   @Override
   protected int getFeatures() {
-    return super.getFeatures() | BASIC_HTTP_AUTHORIZATION;
+    return super.getFeatures() | STATE_UPDATING;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,11 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.psi.util.*;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.ParameterizedCachedValue;
+import com.intellij.psi.util.ParameterizedCachedValueProvider;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.annotations.MapAnnotation;
 import com.intellij.util.xmlb.annotations.Tag;
 import org.jdom.Element;
@@ -39,6 +42,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author nik
@@ -56,7 +60,8 @@ public class ProjectFacetManagerImpl extends ProjectFacetManagerEx implements Pe
   private static final Logger LOG = Logger.getInstance("#com.intellij.facet.impl.ProjectFacetManagerImpl");
   private ProjectFacetManagerState myState = new ProjectFacetManagerState();
   private final Project myProject;
-  private final ConcurrentHashMap<FacetTypeId<?>, ParameterizedCachedValue<Boolean,FacetTypeId<?>>> myCachedHasFacets = new ConcurrentHashMap<FacetTypeId<?>, ParameterizedCachedValue<Boolean, FacetTypeId<?>>>();
+  private final ConcurrentMap<FacetTypeId<?>, ParameterizedCachedValue<Boolean, FacetTypeId<?>>> myCachedHasFacets =
+    ContainerUtil.newConcurrentMap();
   private final ParameterizedCachedValueProvider<Boolean,FacetTypeId<?>> myCachedValueProvider;
 
   public ProjectFacetManagerImpl(Project project) {
@@ -90,6 +95,18 @@ public class ProjectFacetManagerImpl extends ProjectFacetManagerEx implements Pe
   @Override
   public <F extends Facet> List<F> getFacets(@NotNull FacetTypeId<F> typeId) {
     return getFacets(typeId, ModuleManager.getInstance(myProject).getModules());
+  }
+
+  @NotNull
+  @Override
+  public List<Module> getModulesWithFacet(@NotNull FacetTypeId<?> typeId) {
+    List<Module> result = new ArrayList<Module>();
+    for (Module module : ModuleManager.getInstance(myProject).getModules()) {
+      if (!FacetManager.getInstance(module).getFacetsByType(typeId).isEmpty()) {
+        result.add(module);
+      }
+    }
+    return result;
   }
 
   @Override

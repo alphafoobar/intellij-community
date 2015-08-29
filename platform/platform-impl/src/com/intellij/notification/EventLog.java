@@ -24,6 +24,7 @@ import com.intellij.openapi.components.AbstractProjectComponent;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.impl.DocumentImpl;
+import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -105,8 +106,9 @@ public class EventLog {
     Map<RangeMarker, HyperlinkInfo> links = new LinkedHashMap<RangeMarker, HyperlinkInfo>();
     List<RangeMarker> lineSeparators = new ArrayList<RangeMarker>();
 
-    String title = notification.getTitle();
-    String content = notification.getContent();
+    String title = truncateLongString(showMore, notification.getTitle());
+    String content = truncateLongString(showMore, notification.getContent());
+
     RangeMarker afterTitle = null;
     boolean hasHtml = parseHtmlContent(title, notification, logDoc, showMore, links, lineSeparators);
     if (StringUtil.isNotEmpty(title)) {
@@ -143,6 +145,15 @@ public class EventLog {
     return new LogEntry(logDoc.getText(), status, list);
   }
 
+  @NotNull
+  private static String truncateLongString(AtomicBoolean showMore, String title) {
+    if (title.length() > 1000) {
+      showMore.set(true);
+      return title.substring(0, 1000) + "...";
+    }
+    return title;
+  }
+
   private static void indentNewLines(DocumentImpl logDoc, List<RangeMarker> lineSeparators, RangeMarker afterTitle, boolean hasHtml, String indent) {
     if (!hasHtml) {
       int i = -1;
@@ -175,7 +186,7 @@ public class EventLog {
   }
 
   private static String getStatusText(DocumentImpl logDoc, AtomicBoolean showMore, List<RangeMarker> lineSeparators, boolean hasHtml) {
-    DocumentImpl statusDoc = new DocumentImpl(logDoc.getText(),true);
+    DocumentImpl statusDoc = new DocumentImpl(logDoc.getImmutableCharSequence(),true);
     List<RangeMarker> statusSeparators = new ArrayList<RangeMarker>();
     for (RangeMarker separator : lineSeparators) {
       if (separator.isValid()) {
@@ -297,7 +308,7 @@ public class EventLog {
     public final String status;
     public final List<Pair<TextRange, HyperlinkInfo>> links;
 
-    public LogEntry(String message, String status, List<Pair<TextRange, HyperlinkInfo>> links) {
+    public LogEntry(@NotNull String message, @NotNull String status, @NotNull List<Pair<TextRange, HyperlinkInfo>> links) {
       this.message = message;
       this.status = status;
       this.links = links;
@@ -457,11 +468,16 @@ public class EventLog {
     }
   }
 
-  private static class ShowBalloon implements HyperlinkInfo {
+  static class ShowBalloon implements HyperlinkInfo {
     private final Notification myNotification;
+    private RangeHighlighter myRangeHighlighter;
 
     public ShowBalloon(Notification notification) {
       myNotification = notification;
+    }
+
+    public void setRangeHighlighter(RangeHighlighter rangeHighlighter) {
+      myRangeHighlighter = rangeHighlighter;
     }
 
     @Override
@@ -473,7 +489,10 @@ public class EventLog {
       }
 
       EventLogConsole console = ObjectUtils.assertNotNull(getProjectComponent(project).getConsole(myNotification));
-      RelativePoint target = console.getHyperlinkLocation(this);
+      if (myRangeHighlighter == null || !myRangeHighlighter.isValid()) {
+        return;
+      }
+      RelativePoint target = console.getRangeHighlighterLocation(myRangeHighlighter);
       if (target != null) {
         IdeFrame frame = WindowManager.getInstance().getIdeFrame(project);
         assert frame != null;

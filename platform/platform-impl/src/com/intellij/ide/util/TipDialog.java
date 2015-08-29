@@ -1,6 +1,5 @@
-
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,30 +17,47 @@ package com.intellij.ide.util;
 
 import com.intellij.CommonBundle;
 import com.intellij.ide.IdeBundle;
+import com.intellij.internal.statistic.UsageTrigger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.impl.DialogWrapperPeerImpl;
+import com.intellij.openapi.wm.ex.WindowManagerEx;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 import java.awt.event.ActionEvent;
 
 public class TipDialog extends DialogWrapper{
-  private final TipPanel myTipPanel;
+  private TipPanel myTipPanel;
+
+  @Nullable
+  @Override
+  protected String getDimensionServiceKey() {
+    return getClass().getName();
+  }
 
   public TipDialog(){
-    super(true);
-    setModal(false);
-    setTitle(IdeBundle.message("title.tip.of.the.day"));
-    setCancelButtonText(CommonBundle.getCloseButtonText());
-    myTipPanel = new TipPanel();
-    myTipPanel.nextTip();
-    setHorizontalStretch(1.33f);
-    setVerticalStretch(1.25f);
-    init();
-    if (getPeer() instanceof DialogWrapperPeerImpl) {
-      ((DialogWrapperPeerImpl)getPeer()).setAutoRequestFocus(false);
-    }
+    super(WindowManagerEx.getInstanceEx().findVisibleFrame(), true);
+    initialize();
   }
+
+  public TipDialog(@NotNull final Window parent) {
+    super(parent, true);
+    initialize();
+  }
+
+  private void initialize () {
+      setModal(false);
+      setTitle(IdeBundle.message("title.tip.of.the.day"));
+      setCancelButtonText(CommonBundle.getCloseButtonText());
+      myTipPanel = new TipPanel();
+      myTipPanel.nextTip();
+      setHorizontalStretch(1.33f);
+      setVerticalStretch(1.25f);
+      init();
+    }
 
   @NotNull
   protected Action[] createActions(){
@@ -56,6 +72,11 @@ public class TipDialog extends DialogWrapper{
     super.dispose();
   }
 
+  public static TipDialog createForProject(final Project project) {
+    final Window w = WindowManagerEx.getInstanceEx().suggestParentWindow(project);
+    return (w == null) ? new TipDialog() : new TipDialog(w);
+  }
+
   private class PreviousTipAction extends AbstractAction{
     public PreviousTipAction(){
       super(IdeBundle.message("action.previous.tip"));
@@ -63,6 +84,7 @@ public class TipDialog extends DialogWrapper{
 
     public void actionPerformed(ActionEvent e){
       myTipPanel.prevTip();
+      UsageTrigger.trigger("tips.of.the.day.prev");
     }
   }
 
@@ -70,10 +92,18 @@ public class TipDialog extends DialogWrapper{
     public NextTipAction(){
       super(IdeBundle.message("action.next.tip"));
       putValue(DialogWrapper.DEFAULT_ACTION,Boolean.TRUE);
+      putValue(DialogWrapper.FOCUSED_ACTION,Boolean.TRUE); // myPreferredFocusedComponent
     }
 
     public void actionPerformed(ActionEvent e){
       myTipPanel.nextTip();
+      UsageTrigger.trigger("tips.of.the.day.next");
     }
+  }
+
+  @Nullable
+  @Override
+  public JComponent getPreferredFocusedComponent() {
+    return myPreferredFocusedComponent;
   }
 }

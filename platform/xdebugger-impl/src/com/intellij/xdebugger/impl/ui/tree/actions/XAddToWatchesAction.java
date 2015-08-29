@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,25 +16,56 @@
 package com.intellij.xdebugger.impl.ui.tree.actions;
 
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.Consumer;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.XExpression;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
+import com.intellij.xdebugger.impl.breakpoints.XExpressionImpl;
 import com.intellij.xdebugger.impl.frame.XWatchesView;
+import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
+import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * @author nik
+ * This action works only in the variables view, it is not generic action like {@see com.intellij.xdebugger.impl.actions.AddToWatchesAction}
  */
-public class XAddToWatchesAction extends XDebuggerTreeActionBase {
+class XAddToWatchesAction extends XDebuggerTreeActionBase {
   @Override
   protected boolean isEnabled(@NotNull final XValueNodeImpl node, @NotNull AnActionEvent e) {
-    return super.isEnabled(node, e) && node.getValueContainer().getEvaluationExpression() != null && e.getData(XWatchesView.DATA_KEY) != null;
+    return super.isEnabled(node, e) && DebuggerUIUtil.hasEvaluationExpression(node.getValueContainer()) && getWatchesView(e) != null;
   }
 
   @Override
   protected void perform(final XValueNodeImpl node, @NotNull final String nodeName, final AnActionEvent e) {
-    XWatchesView watchesView = e.getData(XWatchesView.DATA_KEY);
-    String expression = node.getValueContainer().getEvaluationExpression();
-    if (watchesView != null && expression != null) {
-      watchesView.addWatchExpression(expression, -1, true);
+    final XWatchesView watchesView = getWatchesView(e);
+    if (watchesView != null) {
+      node.getValueContainer().calculateEvaluationExpression().done(new Consumer<XExpression>() {
+        @Override
+        public void consume(XExpression expression) {
+          if (expression != null) {
+            watchesView.addWatchExpression(expression, -1, true);
+          }
+        }
+      });
     }
+  }
+
+  private static XWatchesView getWatchesView(@NotNull AnActionEvent e) {
+    XWatchesView view = e.getData(XWatchesView.DATA_KEY);
+    Project project = e.getProject();
+    if (view == null && project != null) {
+      XDebugSession session = XDebuggerManager.getInstance(project).getCurrentSession();
+      if (session != null) {
+        XDebugSessionTab tab = ((XDebugSessionImpl)session).getSessionTab();
+        if (tab != null) {
+          return tab.getWatchesView();
+        }
+      }
+    }
+    return view;
   }
 }

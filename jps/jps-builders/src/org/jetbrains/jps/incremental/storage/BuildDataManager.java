@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,14 @@ package org.jetbrains.jps.incremental.storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.util.io.PersistentHashMapValueStorage;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.builders.BuildTarget;
 import org.jetbrains.jps.builders.impl.BuildTargetChunk;
 import org.jetbrains.jps.builders.impl.storage.BuildTargetStorages;
 import org.jetbrains.jps.builders.java.dependencyView.Mappings;
+import org.jetbrains.jps.builders.storage.BuildDataCorruptedException;
 import org.jetbrains.jps.builders.storage.BuildDataPaths;
 import org.jetbrains.jps.builders.storage.SourceToOutputMapping;
 import org.jetbrains.jps.builders.storage.StorageProvider;
@@ -41,9 +43,10 @@ import java.util.concurrent.ConcurrentMap;
  *         Date: 10/7/11
  */
 public class BuildDataManager implements StorageOwner {
-  private static final int VERSION = 22;
+  private static final int VERSION = 27 + (PersistentHashMapValueStorage.COMPRESSION_ENABLED ? 1:0);
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.jps.incremental.storage.BuildDataManager");
   private static final String SRC_TO_FORM_STORAGE = "src-form";
+  private static final String OUT_TARGET_STORAGE = "out-target";
   private static final String MAPPINGS_STORAGE = "mappings";
   private static final int CONCURRENCY_LEVEL = BuildRunner.PARALLEL_BUILD_ENABLED? IncProjectBuilder.MAX_BUILDER_THREADS : 1;
 
@@ -56,8 +59,9 @@ public class BuildDataManager implements StorageOwner {
   private final Mappings myMappings;
   private final BuildDataPaths myDataPaths;
   private final BuildTargetsState myTargetsState;
+  private final OutputToTargetRegistry myOutputToTargetRegistry;
   private final File myVersionFile;
-  private StorageOwner myTargetStoragesOwner = new CompositeStorageOwner() {
+  private final StorageOwner myTargetStoragesOwner = new CompositeStorageOwner() {
     @Override
     protected Iterable<? extends StorageOwner> getChildStorages() {
       return new Iterable<StorageOwner>() {
@@ -101,7 +105,7 @@ public class BuildDataManager implements StorageOwner {
             return new SourceToOutputMappingImpl(new File(getSourceToOutputMapRoot(key), "data"));
           }
           catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new BuildDataCorruptedException(e);
           }
         }
       };
@@ -125,12 +129,23 @@ public class BuildDataManager implements StorageOwner {
     myDataPaths = dataPaths;
     myTargetsState = targetsState;
     mySrcToFormMap = new OneToManyPathsMapping(new File(getSourceToFormsRoot(), "data"));
-    myMappings = new Mappings(getMappingsRoot(), useMemoryTempCaches);
+    myOutputToTargetRegistry = new OutputToTargetRegistry(new File(getOutputToSourceRegistryRoot(), "data"));
+    myMappings = new Mappings(getMappingsRoot(myDataPaths.getDataStorageRoot()), useMemoryTempCaches);
     myVersionFile = new File(myDataPaths.getDataStorageRoot(), "version.dat");
   }
 
+  public BuildTargetsState getTargetsState() {
+    return myTargetsState;
+  }
+
+  public OutputToTargetRegistry getOutputToTargetRegistry() {
+    return myOutputToTargetRegistry;
+  }
+
   public SourceToOutputMapping getSourceToOutputMap(final BuildTarget<?> target) throws IOException {
-    return fetchValue(mySourceToOutputs, target, SOURCE_OUTPUT_MAPPING_VALUE_FACTORY);
+    final SourceToOutputMappingImpl sourceToOutputMapping = fetchValue(mySourceToOutputs, target, SOURCE_OUTPUT_MAPPING_VALUE_FACTORY);
+    final int buildTargetId = myTargetsState.getBuildTargetId(target);
+    return new SourceToOutputMappingWrapper(sourceToOutputMapping, buildTargetId);
   }
 
   @NotNull
@@ -170,7 +185,7 @@ public class BuildDataManager implements StorageOwner {
 
   public void clean() throws IOException {
     try {
-      myTargetStoragesOwner.close();
+      myTargetStoragesOwner.clean();
       myTargetStorages.clear();
     }
     finally {
@@ -182,14 +197,20 @@ public class BuildDataManager implements StorageOwner {
           wipeStorage(getSourceToFormsRoot(), mySrcToFormMap);
         }
         finally {
-          final Mappings mappings = myMappings;
-          if (mappings != null) {
-            synchronized (mappings) {
-              mappings.clean();
-            }
+          try {
+            wipeStorage(getOutputToSourceRegistryRoot(), myOutputToTargetRegistry);
           }
-          else {
-            FileUtil.delete(getMappingsRoot());
+          finally {
+            final Mappings mappings = myMappings;
+            if (mappings != null) {
+              synchronized (mappings) {
+                mappings.clean();
+              }
+            }
+            else {
+              FileUtil.delete(getMappingsRoot(myDataPaths.getDataStorageRoot()));
+            }
+            
           }
         }
       }
@@ -203,6 +224,7 @@ public class BuildDataManager implements StorageOwner {
     for (AtomicNotNullLazyValue<SourceToOutputMappingImpl> mapping : mySourceToOutputs.values()) {
       mapping.getValue().flush(memoryCachesOnly);
     }
+    myOutputToTargetRegistry.flush(memoryCachesOnly);
     mySrcToFormMap.flush(memoryCachesOnly);
     final Mappings mappings = myMappings;
     if (mappings != null) {
@@ -228,20 +250,21 @@ public class BuildDataManager implements StorageOwner {
       }
       finally {
         try {
-          closeStorage(mySrcToFormMap);
+          myOutputToTargetRegistry.close();
         }
         finally {
-          final Mappings mappings = myMappings;
-          if (mappings != null) {
-            try {
-              mappings.close();
-            }
-            catch (RuntimeException e) {
-              final Throwable cause = e.getCause();
-              if (cause instanceof IOException) {
-                throw ((IOException)cause);
+          try {
+            closeStorage(mySrcToFormMap);
+          }
+          finally {
+            final Mappings mappings = myMappings;
+            if (mappings != null) {
+              try {
+                mappings.close();
               }
-              throw e;
+              catch (BuildDataCorruptedException e) {
+                throw e.getCause();
+              }
             }
           }
         }
@@ -294,12 +317,8 @@ public class BuildDataManager implements StorageOwner {
     try {
       return lazy.getValue();
     }
-    catch (RuntimeException e) {
-      final Throwable cause = e.getCause();
-      if (cause instanceof IOException) {
-        throw (IOException)cause;
-      }
-      throw e;
+    catch (BuildDataCorruptedException e) {
+      throw e.getCause();
     }
   }
   
@@ -311,12 +330,16 @@ public class BuildDataManager implements StorageOwner {
     return new File(myDataPaths.getDataStorageRoot(), SRC_TO_FORM_STORAGE);
   }
 
-  private File getMappingsRoot() {
-    return new File(myDataPaths.getDataStorageRoot(), MAPPINGS_STORAGE);
+  private File getOutputToSourceRegistryRoot() {
+    return new File(myDataPaths.getDataStorageRoot(), OUT_TARGET_STORAGE);
   }
 
   public BuildDataPaths getDataPaths() {
     return myDataPaths;
+  }
+
+  public static File getMappingsRoot(final File dataStorageRoot) {
+    return new File(dataStorageRoot, MAPPINGS_STORAGE);
   }
 
   private static void wipeStorage(File root, @Nullable AbstractStateStorage<?, ?> storage) {
@@ -381,6 +404,66 @@ public class BuildDataManager implements StorageOwner {
       }
       catch (IOException ignored) {
       }
+    }
+  }
+  
+  private final class SourceToOutputMappingWrapper implements SourceToOutputMapping {
+    private final SourceToOutputMapping myDelegate;
+    private final int myBuildTargetId;
+
+    SourceToOutputMappingWrapper(SourceToOutputMapping delegate, int buildTargetId) {
+      myDelegate = delegate;
+      myBuildTargetId = buildTargetId;
+    }
+
+    public void setOutputs(@NotNull String srcPath, @NotNull Collection<String> outputs) throws IOException {
+      try {
+        myDelegate.setOutputs(srcPath, outputs);
+      }
+      finally {
+        myOutputToTargetRegistry.addMapping(outputs, myBuildTargetId);
+      }
+    }
+
+    public void setOutput(@NotNull String srcPath, @NotNull String outputPath) throws IOException {
+      try {
+        myDelegate.setOutput(srcPath, outputPath);
+      }
+      finally {
+        myOutputToTargetRegistry.addMapping(outputPath, myBuildTargetId);
+      }
+    }
+
+    public void appendOutput(@NotNull String srcPath, @NotNull String outputPath) throws IOException {
+      try {
+        myDelegate.appendOutput(srcPath, outputPath);
+      }
+      finally {
+        myOutputToTargetRegistry.addMapping(outputPath, myBuildTargetId);
+      }
+    }
+
+    public void remove(@NotNull String srcPath) throws IOException {
+      myDelegate.remove(srcPath);
+    }
+
+    public void removeOutput(@NotNull String sourcePath, @NotNull String outputPath) throws IOException {
+      myDelegate.removeOutput(sourcePath, outputPath);
+    }
+
+    @NotNull 
+    public Collection<String> getSources() throws IOException {
+      return myDelegate.getSources();
+    }
+
+    @Nullable 
+    public Collection<String> getOutputs(@NotNull String srcPath) throws IOException {
+      return myDelegate.getOutputs(srcPath);
+    }
+
+    @NotNull 
+    public Iterator<String> getSourcesIterator() throws IOException {
+      return myDelegate.getSourcesIterator();
     }
   }
 }

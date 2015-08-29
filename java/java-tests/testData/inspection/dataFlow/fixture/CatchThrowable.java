@@ -1,4 +1,6 @@
-public class BrokenAlignment {
+import java.util.Random;
+
+class BrokenAlignment {
 
   public static void main(String[] args) {
 
@@ -20,7 +22,7 @@ public class BrokenAlignment {
   }
 
   public static void doSomething() {
-    throw new RuntimeException("dummy");
+    if (new Random().nextInt() > 2) throw new RuntimeException("dummy");
   }
 
 }

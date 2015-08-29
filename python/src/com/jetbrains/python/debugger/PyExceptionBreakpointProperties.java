@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,12 +25,12 @@ import org.jetbrains.annotations.NotNull;
  * @author traff
  */
 public class PyExceptionBreakpointProperties extends ExceptionBreakpointProperties<PyExceptionBreakpointProperties> {
-  @Attribute("notifyAlways")
-  public boolean myNotifyAlways;
   @Attribute("notifyOnlyOnFirst")
   public boolean myNotifyOnlyOnFirst;
   @Attribute("notifyOnTerminate")
   public boolean myNotifyOnTerminate;
+  @Attribute("ignoreLibraries")
+  public boolean myIgnoreLibraries;
 
 
   @SuppressWarnings({"UnusedDeclaration"})
@@ -39,6 +39,8 @@ public class PyExceptionBreakpointProperties extends ExceptionBreakpointProperti
 
   public PyExceptionBreakpointProperties(@NotNull final String exception) {
     myException = exception;
+    myNotifyOnTerminate = true;
+    myIgnoreLibraries = false;
   }
 
   @Override
@@ -49,9 +51,9 @@ public class PyExceptionBreakpointProperties extends ExceptionBreakpointProperti
   @Override
   public void loadState(final PyExceptionBreakpointProperties state) {
     myException = state.myException;
-    myNotifyAlways = state.myNotifyAlways;
     myNotifyOnlyOnFirst = state.myNotifyOnlyOnFirst;
     myNotifyOnTerminate = state.myNotifyOnTerminate;
+    myIgnoreLibraries = state.myIgnoreLibraries;
   }
 
   public boolean isNotifyOnTerminate() {
@@ -62,14 +64,6 @@ public class PyExceptionBreakpointProperties extends ExceptionBreakpointProperti
     myNotifyOnTerminate = notifyOnTerminate;
   }
 
-  public boolean isNotifyAlways() {
-    return myNotifyAlways;
-  }
-
-  public void setNotifyAlways(boolean notifyAlways) {
-    myNotifyAlways = notifyAlways;
-  }
-
   public boolean isNotifyOnlyOnFirst() {
     return myNotifyOnlyOnFirst;
   }
@@ -78,16 +72,27 @@ public class PyExceptionBreakpointProperties extends ExceptionBreakpointProperti
     myNotifyOnlyOnFirst = notifyOnlyOnFirst;
   }
 
+  public void setIgnoreLibraries(boolean ignoreLibraries) {
+    myIgnoreLibraries = ignoreLibraries;
+  }
+
+  public boolean isIgnoreLibraries() {
+    return myIgnoreLibraries;
+  }
+
+  public String getExceptionBreakpointId() {
+    return "python-" + myException;
+  }
+
   @Override
   public ExceptionBreakpointCommand createAddCommand(RemoteDebugger debugger) {
-    return ExceptionBreakpointCommand.addExceptionBreakpointCommand(debugger, getException(),
+    return ExceptionBreakpointCommand.addExceptionBreakpointCommand(debugger, getExceptionBreakpointId(),
                                                                     new AddExceptionBreakpointCommand.ExceptionBreakpointNotifyPolicy(
-                                                                      isNotifyAlways(),
-                                                                      isNotifyOnTerminate(), isNotifyOnlyOnFirst()));
+                                                                      isNotifyOnTerminate(), isNotifyOnlyOnFirst(), isIgnoreLibraries()));
   }
 
   @Override
   public ExceptionBreakpointCommand createRemoveCommand(RemoteDebugger debugger) {
-    return ExceptionBreakpointCommand.removeExceptionBreakpointCommand(debugger, getException());
+    return ExceptionBreakpointCommand.removeExceptionBreakpointCommand(debugger, getExceptionBreakpointId());
   }
 }

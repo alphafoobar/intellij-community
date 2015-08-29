@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package com.intellij.application.options.editor;
 
 import com.intellij.codeInsight.CodeInsightSettings;
+import com.intellij.codeInsight.editorActions.SmartBackspaceMode;
 import com.intellij.lang.CodeDocumentationAwareCommenter;
 import com.intellij.lang.Commenter;
 import com.intellij.lang.Language;
@@ -62,6 +63,8 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
   private JCheckBox myCbInsertPairCurlyBraceOnEnter;
   private JCheckBox myCbInsertJavadocStubOnEnter;
   private JCheckBox myCbSurroundSelectionOnTyping;
+  private JCheckBox myCbReformatBlockOnTypingRBrace;
+  private JComboBox mySmartBackspaceCombo;
   private boolean myAddonsInitialized = false;
 
   private static final String NO_REFORMAT = ApplicationBundle.message("combobox.paste.reformat.none");
@@ -69,11 +72,19 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
   private static final String INDENT_EACH_LINE = ApplicationBundle.message("combobox.paste.reformat.indent.each.line");
   private static final String REFORMAT_BLOCK = ApplicationBundle.message("combobox.paste.reformat.reformat.block");
 
+  private static final String OFF = ApplicationBundle.message("combobox.smart.backspace.off");
+  private static final String SIMPLE = ApplicationBundle.message("combobox.smart.backspace.simple");
+  private static final String SMART = ApplicationBundle.message("combobox.smart.backspace.smart");
+
   public EditorSmartKeysConfigurable() {
     myReformatOnPasteCombo.addItem(NO_REFORMAT);
     myReformatOnPasteCombo.addItem(INDENT_BLOCK);
     myReformatOnPasteCombo.addItem(INDENT_EACH_LINE);
     myReformatOnPasteCombo.addItem(REFORMAT_BLOCK);
+
+    mySmartBackspaceCombo.addItem(OFF);
+    mySmartBackspaceCombo.addItem(SIMPLE);
+    mySmartBackspaceCombo.addItem(SMART);
 
     myCbInsertJavadocStubOnEnter.setVisible(hasAnyDocAwareCommenters());
   }
@@ -154,9 +165,25 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
 
     myCbInsertPairBracket.setSelected(codeInsightSettings.AUTOINSERT_PAIR_BRACKET);
     myCbInsertPairQuote.setSelected(codeInsightSettings.AUTOINSERT_PAIR_QUOTE);
+    myCbReformatBlockOnTypingRBrace.setSelected(codeInsightSettings.REFORMAT_BLOCK_ON_RBRACE);
     myCbCamelWords.setSelected(editorSettings.isCamelWords());
 
     myCbSurroundSelectionOnTyping.setSelected(codeInsightSettings.SURROUND_SELECTION_ON_QUOTE_TYPED);
+
+    SmartBackspaceMode backspaceMode = codeInsightSettings.getBackspaceMode();
+    switch (backspaceMode) {
+      case OFF:
+        mySmartBackspaceCombo.setSelectedItem(OFF);
+        break;
+      case INDENT:
+        mySmartBackspaceCombo.setSelectedItem(SIMPLE);
+        break;
+      case AUTOINDENT:
+        mySmartBackspaceCombo.setSelectedItem(SMART);
+        break;
+      default:
+        LOG.error("Unexpected smart backspace mode value: " + backspaceMode);
+    }
 
     super.reset();
   }
@@ -173,9 +200,11 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
     codeInsightSettings.JAVADOC_STUB_ON_ENTER = myCbInsertJavadocStubOnEnter.isSelected();
     codeInsightSettings.AUTOINSERT_PAIR_BRACKET = myCbInsertPairBracket.isSelected();
     codeInsightSettings.AUTOINSERT_PAIR_QUOTE = myCbInsertPairQuote.isSelected();
+    codeInsightSettings.REFORMAT_BLOCK_ON_RBRACE = myCbReformatBlockOnTypingRBrace.isSelected();
     codeInsightSettings.SURROUND_SELECTION_ON_QUOTE_TYPED = myCbSurroundSelectionOnTyping.isSelected();
     editorSettings.setCamelWords(myCbCamelWords.isSelected());
     codeInsightSettings.REFORMAT_ON_PASTE = getReformatPastedBlockValue();
+    codeInsightSettings.setBackspaceMode(getSmartBackspaceModeValue());
 
     super.apply();
   }
@@ -196,9 +225,12 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
 
     isModified |= isModified(myCbInsertPairBracket, codeInsightSettings.AUTOINSERT_PAIR_BRACKET);
     isModified |= isModified(myCbInsertPairQuote, codeInsightSettings.AUTOINSERT_PAIR_QUOTE);
+    isModified |= isModified(myCbReformatBlockOnTypingRBrace, codeInsightSettings.REFORMAT_BLOCK_ON_RBRACE);
     isModified |= isModified(myCbCamelWords, editorSettings.isCamelWords());
 
     isModified |= isModified(myCbSurroundSelectionOnTyping, codeInsightSettings.SURROUND_SELECTION_ON_QUOTE_TYPED);
+
+    isModified |= (getSmartBackspaceModeValue() != codeInsightSettings.getBackspaceMode());
 
     return isModified;
 
@@ -225,6 +257,23 @@ public class EditorSmartKeysConfigurable extends CompositeConfigurable<UnnamedCo
     else{
       LOG.assertTrue(false);
       return -1;
+    }
+  }
+  
+  private SmartBackspaceMode getSmartBackspaceModeValue() {
+    Object selectedItem = mySmartBackspaceCombo.getSelectedItem();
+    if (OFF.equals(selectedItem)){
+      return SmartBackspaceMode.OFF;
+    }
+    else if (SIMPLE.equals(selectedItem)){
+      return SmartBackspaceMode.INDENT;
+    }
+    else if (SMART.equals(selectedItem)){
+      return SmartBackspaceMode.AUTOINDENT;
+    }
+    else{
+      LOG.error("Unexpected smart backspace item value: " + selectedItem);
+      return SmartBackspaceMode.OFF;
     }
   }
 

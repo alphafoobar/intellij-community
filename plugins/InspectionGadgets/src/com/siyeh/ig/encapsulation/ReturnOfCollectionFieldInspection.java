@@ -24,6 +24,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.HighlightUtils;
 import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NonNls;
@@ -89,11 +90,11 @@ public class ReturnOfCollectionFieldInspection extends ReturnOfCollectionFieldIn
       }
       final PsiReferenceExpression referenceExpression = (PsiReferenceExpression)element;
       fixContainingMethodReturnType(referenceExpression);
-      replaceExpressionAndShorten(referenceExpression, myReplacementText);
+      PsiReplacementUtil.replaceExpressionAndShorten(referenceExpression, myReplacementText);
     }
 
     private void fixContainingMethodReturnType(PsiReferenceExpression referenceExpression) {
-      final PsiMethod method = PsiTreeUtil.getParentOfType(referenceExpression, PsiMethod.class, true);
+      final PsiMethod method = PsiTreeUtil.getParentOfType(referenceExpression, PsiMethod.class, true, PsiLambdaExpression.class);
       if (method == null) {
         return;
       }

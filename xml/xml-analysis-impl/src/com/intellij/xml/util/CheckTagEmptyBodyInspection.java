@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,11 +59,11 @@ public class CheckTagEmptyBodyInspection extends XmlSuppressableInspectionTool {
 
             if (node != null &&
                 node.getElementType() == XmlTokenType.XML_END_TAG_START) {
-              final LocalQuickFix localQuickFix = new ReplaceEmptyTagBodyByEmptyEndFix();
+              final LocalQuickFix localQuickFix = new Fix();
               holder.registerProblem(
                 tag,
                 XmlBundle.message("xml.inspections.tag.empty.body"),
-                isCollapsableTag(tag) ? localQuickFix : null
+                isCollapsibleTag(tag) ? localQuickFix : null
               );
             }
           }
@@ -72,8 +72,7 @@ public class CheckTagEmptyBodyInspection extends XmlSuppressableInspectionTool {
     };
   }
 
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  private static boolean isCollapsableTag(final XmlTag tag) {
+  private static boolean isCollapsibleTag(final XmlTag tag) {
     final String name = tag.getName().toLowerCase();
     return tag.getLanguage() == XMLLanguage.INSTANCE ||
            "link".equals(name) || "br".equals(name) || "meta".equals(name) || "img".equals(name) || "input".equals(name) || "hr".equals(name);
@@ -98,7 +97,7 @@ public class CheckTagEmptyBodyInspection extends XmlSuppressableInspectionTool {
     return "CheckTagEmptyBody";
   }
 
-  private static class ReplaceEmptyTagBodyByEmptyEndFix implements LocalQuickFix {
+  public static class Fix implements LocalQuickFix {
     @Override
     @NotNull
     public String getName() {
@@ -128,7 +127,7 @@ public class CheckTagEmptyBodyInspection extends XmlSuppressableInspectionTool {
 
       new WriteCommandAction(project) {
         @Override
-        protected void run(final Result result) throws Throwable {
+        protected void run(@NotNull final Result result) throws Throwable {
           document.replaceString(offset, tag.getTextRange().getEndOffset(),"/>");
         }
       }.execute();

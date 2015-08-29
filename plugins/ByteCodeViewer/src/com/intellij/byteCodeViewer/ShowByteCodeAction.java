@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,13 @@ package com.intellij.byteCodeViewer;
 
 import com.intellij.codeInsight.documentation.DocumentationManager;
 import com.intellij.codeInsight.lookup.LookupManager;
-import com.intellij.compiler.impl.TranslatingCompilerFilesMonitor;
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -38,8 +41,6 @@ import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.awt.RelativePoint;
-import com.intellij.ui.popup.NotLookupOrSearchCondition;
-import com.intellij.ui.popup.PopupPositionManager;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -83,16 +84,15 @@ public class ShowByteCodeAction extends AnAction {
     final RelativePoint bestPopupLocation = JBPopupFactory.getInstance().guessBestPopupLocation(dataContext);
 
     final SmartPsiElementPointer element = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(psiElement);
-    ProgressManager.getInstance().run(new Task.Backgroundable(project, "Searching byte code...") {
+    ProgressManager.getInstance().run(new Task.Backgroundable(project, "Looking for bytecode...") {
       private String myByteCode;
       private String myErrorMessage;
       private String myErrorTitle;
 
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        if (ProjectRootManager.getInstance(project).getFileIndex().isInContent(virtualFile) &&
-            TranslatingCompilerFilesMonitor.getInstance().isMarkedForCompilation(project, virtualFile)) {
-          myErrorMessage = "Unable to show byte code for '" + psiElementTitle + "'. Class file does not exist or is out-of-date.";
+        if (ProjectRootManager.getInstance(project).getFileIndex().isInContent(virtualFile) && isMarkedForCompilation(project, virtualFile)) {
+          myErrorMessage = "Unable to show bytecode for '" + psiElementTitle + "'. Class file does not exist or is out-of-date.";
           myErrorTitle = "Class File Out-Of-Date";
         }
         else {
@@ -122,7 +122,7 @@ public class ShowByteCodeAction extends AnAction {
         }
         else {
           if (myByteCode == null) {
-            Messages.showErrorDialog(project, "Unable to parse class file for '" + psiElementTitle + "'.", "Byte Code not Found");
+            Messages.showErrorDialog(project, "Unable to parse class file for '" + psiElementTitle + "'.", "Bytecode not Found");
             return;
           }
           final ByteCodeViewerComponent component = new ByteCodeViewerComponent(project, null);
@@ -137,7 +137,6 @@ public class ShowByteCodeAction extends AnAction {
           };
 
           final JBPopup popup = JBPopupFactory.getInstance().createComponentPopupBuilder(component, null)
-            .setRequestFocusCondition(project, NotLookupOrSearchCondition.INSTANCE)
             .setProject(project)
             .setDimensionServiceKey(project, DocumentationManager.JAVADOC_LOCATION_AND_SIZE, false)
             .setResizable(true)
@@ -156,6 +155,11 @@ public class ShowByteCodeAction extends AnAction {
         }
       }
     });
+  }
+
+  private static boolean isMarkedForCompilation(Project project, VirtualFile virtualFile) {
+    final CompilerManager compilerManager = CompilerManager.getInstance(project);
+    return !compilerManager.isUpToDate(compilerManager.createFilesCompileScope(new VirtualFile[]{virtualFile}));
   }
 
   @Nullable

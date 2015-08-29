@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.openapi.components;
+
+import com.intellij.openapi.util.Getter;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -23,14 +24,19 @@ import java.lang.annotation.RetentionPolicy;
 public @interface State {
   String name();
 
-  /**
-   * {@link RoamingType#GLOBAL} will be ignored, use only {@link RoamingType#DISABLED} or {@link RoamingType#PER_PLATFORM}
-   */
-  RoamingType roamingType() default RoamingType.PER_USER;
-
   Storage[] storages();
 
-  Class<? extends StateStorageChooser> storageChooser() default StorageAnnotationsDefaultValues.NullStateStorageChooser.class;
-
   boolean reloadable() default true;
+
+  /**
+   * If true, default state will be loaded from resources (if exists)
+   */
+  boolean defaultStateAsResource() default false;
+
+  String additionalExportFile() default "";
+
+  Class<? extends NameGetter> presentableName() default NameGetter.class;
+
+  abstract class NameGetter implements Getter<String> {
+  }
 }

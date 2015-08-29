@@ -26,6 +26,7 @@ import com.intellij.util.IncorrectOperationException;
 import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ParenthesesUtils;
 import com.siyeh.ig.psiutils.StringUtils;
 import com.siyeh.ig.psiutils.TypeUtils;
@@ -94,7 +95,7 @@ public class ForCanBeForeachInspection extends ForCanBeForeachInspectionBase {
       if (newExpression == null) {
         return;
       }
-      replaceStatementAndShortenClassNames(forStatement, newExpression);
+      PsiReplacementUtil.replaceStatementAndShortenClassNames(forStatement, newExpression);
     }
 
     @Nullable
@@ -144,7 +145,7 @@ public class ForCanBeForeachInspection extends ForCanBeForeachInspectionBase {
         return null;
       }
       final PsiReferenceExpression listLengthExpression = methodCallExpression.getMethodExpression();
-      final PsiExpression qualifier = listLengthExpression.getQualifierExpression();
+      final PsiExpression qualifier = ParenthesesUtils.stripParentheses(listLengthExpression.getQualifierExpression());
       final PsiReferenceExpression listReference;
       if (qualifier instanceof PsiReferenceExpression) {
         listReference = (PsiReferenceExpression)qualifier;

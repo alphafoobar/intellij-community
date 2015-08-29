@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,11 +102,7 @@ public class RenameTo extends ShowSuggestions implements SpellCheckerQuickFix {
         } else if (ApplicationManager.getApplication().isUnitTestMode()) { // TextEditorComponent / FiledEditorManagerImpl give away the data in real life
           map.put(
             CommonDataKeys.PSI_ELEMENT.getName(),
-            new TextEditorPsiDataProvider().getData(
-              CommonDataKeys.PSI_ELEMENT.getName(),
-              editor, 
-              containingFile.getVirtualFile()
-            )
+            new TextEditorPsiDataProvider().getData(CommonDataKeys.PSI_ELEMENT.getName(), editor, editor.getCaretModel().getCurrentCaret())
           );
         }
 
@@ -115,7 +111,7 @@ public class RenameTo extends ShowSuggestions implements SpellCheckerQuickFix {
           editor.putUserData(RenameHandlerRegistry.SELECT_ALL, true);
           DataContext dataContext = SimpleDataContext.getSimpleContext(map, DataManager.getInstance().getDataContext(editor.getComponent()));
           AnAction action = new RenameElementAction();
-          AnActionEvent event = new AnActionEvent(null, dataContext, "", action.getTemplatePresentation(), ActionManager.getInstance(), 0);
+          AnActionEvent event = AnActionEvent.createFromAnAction(action, null, "", dataContext);
           action.actionPerformed(event);
           if (provider != null) {
             provider.setActive(false);

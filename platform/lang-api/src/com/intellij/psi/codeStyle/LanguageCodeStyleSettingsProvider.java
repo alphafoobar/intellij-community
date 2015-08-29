@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,12 +21,10 @@ import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiFile;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.HashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Set;
@@ -99,16 +97,6 @@ public abstract class LanguageCodeStyleSettingsProvider {
   }
 
   /**
-   * @return True if the language uses the preview pane shared with other languages. The tab for the
-   *         language is shown above common settings' preview pane in this case.
-   * @deprecated Normally a language must have it's own settings/preview page.
-   */
-  @SuppressWarnings("MethodMayBeStatic")
-  public boolean usesSharedPreview() {
-    return false;
-  }
-
-  /**
    * @deprecated use PredefinedCodeStyle extension point instead
    */
   @NotNull
@@ -129,17 +117,6 @@ public abstract class LanguageCodeStyleSettingsProvider {
     }
     return languages.toArray(new Language[languages.size()]);
   }
-
-  @NotNull
-  public static Language[] getLanguagesWithSharedPreview() {
-  final ArrayList<Language> languages = new ArrayList<Language>();
-  for (LanguageCodeStyleSettingsProvider provider : Extensions.getExtensions(EP_NAME)) {
-    if (provider.usesSharedPreview()) {
-      languages.add(provider.getLanguage());
-    }
-  }
-  return languages.toArray(new Language[languages.size()]);
-}
 
   @Nullable
   public static String getCodeSample(Language lang, @NotNull SettingsType settingsType) {
@@ -208,6 +185,7 @@ public abstract class LanguageCodeStyleSettingsProvider {
     return null;
   }
 
+  @SuppressWarnings("unused")
   public static DisplayPriority getDisplayPriority(Language language) {
     LanguageCodeStyleSettingsProvider langProvider = forLanguage(language);
     if (langProvider == null) return DisplayPriority.LANGUAGE_SETTINGS;
@@ -225,6 +203,12 @@ public abstract class LanguageCodeStyleSettingsProvider {
     return fieldCollector.getCollectedFields();
   }
 
+  public Set<String> getSupportedFields(SettingsType type) {
+    SupportedFieldCollector fieldCollector = new SupportedFieldCollector();
+    fieldCollector.collectFields(type);
+    return fieldCollector.getCollectedFields();
+  }
+
   private final class SupportedFieldCollector implements CodeStyleSettingsCustomizable {
     private final Set<String> myCollectedFields = new HashSet<String>();
     private SettingsType myCurrSettingsType;
@@ -234,6 +218,11 @@ public abstract class LanguageCodeStyleSettingsProvider {
         myCurrSettingsType = settingsType;
         LanguageCodeStyleSettingsProvider.this.customizeSettings(this, settingsType);
       }
+    }
+
+    public void collectFields(SettingsType type) {
+      myCurrSettingsType = type;
+      LanguageCodeStyleSettingsProvider.this.customizeSettings(this, type);
     }
 
     @Override
@@ -298,5 +287,4 @@ public abstract class LanguageCodeStyleSettingsProvider {
       return myCollectedFields;
     }
   }
-
 }

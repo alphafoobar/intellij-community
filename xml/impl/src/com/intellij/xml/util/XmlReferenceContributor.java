@@ -1,18 +1,31 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.xml.util;
 
 import com.intellij.codeInsight.daemon.impl.analysis.encoding.XmlEncodingReferenceProvider;
 import com.intellij.html.impl.providers.MicrodataReferenceProvider;
 import com.intellij.html.impl.util.MicrodataUtil;
+import com.intellij.openapi.paths.WebReference;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.*;
 import com.intellij.psi.filters.*;
 import com.intellij.psi.filters.position.NamespaceFilter;
 import com.intellij.psi.filters.position.ParentElementFilter;
-import com.intellij.psi.impl.UrlPsiReference;
-import com.intellij.psi.impl.source.resolve.reference.impl.providers.DtdReferencesProvider;
-import com.intellij.psi.impl.source.resolve.reference.impl.providers.IdReferenceProvider;
-import com.intellij.psi.impl.source.resolve.reference.impl.providers.SchemaReferencesProvider;
-import com.intellij.psi.impl.source.resolve.reference.impl.providers.URIReferenceProvider;
+import com.intellij.psi.impl.source.resolve.reference.ArbitraryPlaceUrlReferenceProvider;
+import com.intellij.psi.impl.source.resolve.reference.impl.providers.*;
 import com.intellij.psi.xml.*;
 import com.intellij.util.ProcessingContext;
 import org.jetbrains.annotations.NotNull;
@@ -23,7 +36,8 @@ import static com.intellij.patterns.XmlPatterns.*;
  * @author peter
  */
 public class XmlReferenceContributor extends PsiReferenceContributor {
-  public void registerReferenceProviders(final PsiReferenceRegistrar registrar) {
+  @Override
+  public void registerReferenceProviders(@NotNull final PsiReferenceRegistrar registrar) {
 
     final IdReferenceProvider idReferenceProvider = new IdReferenceProvider();
 
@@ -39,10 +53,11 @@ public class XmlReferenceContributor extends PsiReferenceContributor {
     registrar.registerReferenceProvider(PlatformPatterns.psiElement(XmlAttlistDecl.class), dtdReferencesProvider);
     registrar.registerReferenceProvider(PlatformPatterns.psiElement(XmlElementContentSpec.class), dtdReferencesProvider);
     registrar.registerReferenceProvider(PlatformPatterns.psiElement(XmlToken.class), dtdReferencesProvider);
+    registrar.registerReferenceProvider(xmlAttributeValue(), new ArbitraryPlaceUrlReferenceProvider(), PsiReferenceRegistrar.LOWER_PRIORITY);
+
 
     URIReferenceProvider uriProvider = new URIReferenceProvider();
     XmlUtil.registerXmlAttributeValueReferenceProvider(registrar, null, dtdReferencesProvider.getSystemReferenceFilter(), uriProvider);
-
 
     XmlUtil.registerXmlAttributeValueReferenceProvider(registrar, new String[] { "href" }, new ScopeFilter(
       new ParentElementFilter(
@@ -52,7 +67,10 @@ public class XmlReferenceContributor extends PsiReferenceContributor {
         ),
         2
       )
-    ), true, uriProvider);
+    ), true, new XmlBaseReferenceProvider(true));
+
+    registrar.registerReferenceProvider(xmlAttributeValue().withLocalName("base").withNamespace(XmlUtil.XML_NAMESPACE_URI),
+                                        new XmlBaseReferenceProvider(false));
 
     XmlUtil.registerXmlAttributeValueReferenceProvider(
       registrar,
@@ -101,7 +119,7 @@ public class XmlReferenceContributor extends PsiReferenceContributor {
                                           @Override
                                           public PsiReference[] getReferencesByElement(@NotNull PsiElement element,
                                                                                        @NotNull ProcessingContext context) {
-                                            return new PsiReference[] { new UrlPsiReference(element) };
+                                            return new PsiReference[] { new WebReference(element) };
                                           }
                                         });
   }

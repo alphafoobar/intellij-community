@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ package com.intellij.openapi.keymap.impl.ui;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.KeyboardShortcut;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.ex.QuickList;
 import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.keymap.KeyMapBundle;
@@ -32,8 +31,10 @@ import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -119,7 +120,7 @@ public class KeyboardShortcutDialog extends DialogWrapper {
     myConflictInfoArea.setLineWrap(true);
     myConflictInfoArea.setWrapStyleWord(true);
     final JScrollPane conflictInfoScroll = ScrollPaneFactory.createScrollPane(myConflictInfoArea);
-    conflictInfoScroll.setPreferredSize(new Dimension(260, 60));
+    conflictInfoScroll.setPreferredSize(JBUI.size(260, 60));
     conflictInfoScroll.setBorder(null);
     conflictsPanel.add(conflictInfoScroll);
     panel.add(
@@ -186,7 +187,7 @@ public class KeyboardShortcutDialog extends DialogWrapper {
     }
     myKeystrokePreview.setText(strokeText);
 
-    StringBuffer buffer = new StringBuffer();
+    StringBuilder buffer = new StringBuilder();
 
     Map<String, ArrayList<KeyboardShortcut>> conflicts = myKeymap.getConflicts(myActionId, keyboardShortcut);
 
@@ -214,7 +215,8 @@ public class KeyboardShortcutDialog extends DialogWrapper {
       myConflictInfoArea.setForeground(JBColor.RED);
       if (loaded) {
         myConflictInfoArea.setText(KeyMapBundle.message("assigned.to.info.message", buffer.toString()));
-      } else {
+      }
+      else {
         myConflictInfoArea.setText("Assigned to " + buffer.toString() + " which is now not loaded but may be loaded later");
       }
     }
@@ -224,13 +226,10 @@ public class KeyboardShortcutDialog extends DialogWrapper {
     mySecondStrokePanel.setEnabled(myEnableSecondKeystroke.isSelected());
   }
 
+  @Nullable
   public KeyboardShortcut getKeyboardShortcut() {
     KeyStroke firstStroke = myFirstStrokePanel.getKeyStroke();
-    if (firstStroke == null) {
-      return null;
-    }
-    KeyStroke secondStroke = myEnableSecondKeystroke.isSelected() ? mySecondStrokePanel.getKeyStroke() : null;
-    return new KeyboardShortcut(firstStroke, secondStroke);
+    return firstStroke == null ? null : new KeyboardShortcut(firstStroke, myEnableSecondKeystroke.isSelected() ? mySecondStrokePanel.getKeyStroke() : null);
   }
 
   static String getTextByKeyStroke(KeyStroke keyStroke) {

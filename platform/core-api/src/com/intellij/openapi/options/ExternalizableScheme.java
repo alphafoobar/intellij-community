@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,13 @@
 package com.intellij.openapi.options;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-public interface ExternalizableScheme extends Scheme{
-  @NotNull
+public interface ExternalizableScheme extends Scheme {
+  @SuppressWarnings({"unused", "deprecation"})
+  @Nullable
+  @Deprecated
   ExternalInfo getExternalInfo();
 
-  void setName(String newName);
+  void setName(@NotNull String newName);
 }

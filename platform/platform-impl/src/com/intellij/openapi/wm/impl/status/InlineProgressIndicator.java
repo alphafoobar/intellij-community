@@ -17,12 +17,12 @@ package com.intellij.openapi.wm.impl.status;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.progress.TaskInfo;
 import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.ui.GraphicsConfig;
 import com.intellij.openapi.ui.popup.IconButton;
-import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.InplaceButton;
@@ -45,7 +45,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
   private final TextPanel myText = new TextPanel();
   private final TextPanel myText2 = new TextPanel();
 
-  private MyProgressBar myProgress;
+  private JProgressBar myProgress;
 
   private JPanel myComponent;
 
@@ -56,9 +56,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
 
   private final TextPanel myProcessName = new TextPanel();
   private boolean myDisposed;
-
-  private long myLastTimeProgressWasAtZero;
-  private boolean myLastTimeProgressWasZero;
 
   public InlineProgressIndicator(boolean compact, @NotNull TaskInfo processInfo) {
     myCompact = compact;
@@ -78,7 +75,8 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     myCancelButton.setToolTipText(processInfo.getCancelTooltipText());
     myCancelButton.setFillBg(false);
 
-    myProgress = new MyProgressBar(JProgressBar.HORIZONTAL, compact);
+    myProgress = new JProgressBar(SwingConstants.HORIZONTAL);
+    myProgress.putClientProperty("JComponent.sizeVariant", "mini");
 
     myComponent = new MyComponent(compact, myProcessName);
     if (myCompact) {
@@ -101,7 +99,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       myComponent.add(textAndProgress, BorderLayout.CENTER);
       myComponent.add(myCancelButton, BorderLayout.EAST);
       myComponent.setToolTipText(processInfo.getTitle() + ". " + IdeBundle.message("progress.text.clickToViewProgressWindow"));
-      myProgress.setActive(false);
     } else {
       myComponent.setLayout(new BorderLayout());
       myProcessName.setText(processInfo.getTitle());
@@ -127,7 +124,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       myText2.setDecorate(false);
 
       myComponent.setBorder(new EmptyBorder(2, 2, 2, 2));
-      myProgress.setActive(false);
     }
 
     if (!myCompact) {
@@ -142,43 +138,21 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     cancel();
   }
 
-  private void updateRunning() {
-    queueRunningUpdate(EmptyRunnable.getInstance());
+  protected void updateProgress() {
+    queueProgressUpdate();
   }
 
-  protected void updateProgress() {
-    queueProgressUpdate(new Runnable() {
-      public void run() {
-        if (isDisposed()) return;
+  protected void updateAndRepaint() {
+    if (isDisposed()) return;
 
-        updateProgressNow();
+    updateProgressNow();
 
-        myComponent.repaint();
-      }
-    });
+    myComponent.repaint();
   }
 
   public void updateProgressNow() {
-    if (myLastTimeProgressWasAtZero == 0 && getFraction() == 0) {
-      myLastTimeProgressWasAtZero = System.currentTimeMillis();
-    }
-
-    final long delta = System.currentTimeMillis() - myLastTimeProgressWasAtZero;
-    boolean forcedIndeterminite = false;
-
-    boolean indeterminate = isIndeterminate();
-    if (!indeterminate && getFraction() == 0) {
-      if (delta > 2000 && !myCompact) {
-          indeterminate = true;
-          forcedIndeterminite = true;
-        } else {
-          forcedIndeterminite = false;
-        }
-    }
-
-    final boolean visible = getFraction() > 0 || (indeterminate || forcedIndeterminite);
-    updateVisibility(myProgress, visible);
-    if (indeterminate || forcedIndeterminite) {
+    boolean indeterminate = isIndeterminate() || getFraction() == 0;
+    if (indeterminate) {
       myProgress.setIndeterminate(true);
     }
     else {
@@ -198,15 +172,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     }
 
     myCancelButton.setPainting(isCancelable());
-
-    if (getFraction() == 0) {
-      if (!myLastTimeProgressWasZero) {
-        myLastTimeProgressWasAtZero = System.currentTimeMillis();
-        myLastTimeProgressWasZero = true;
-      }
-    } else {
-      myLastTimeProgressWasZero = false;
-    }
 
     final boolean isStopping = wasStarted() && (isCanceled() || !isRunning()) && !isFinished();
     if (isStopping) {
@@ -232,38 +197,16 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     return false;
   }
 
-  protected void queueProgressUpdate(Runnable update) {
-    update.run();
+  protected void queueProgressUpdate() {
+    updateAndRepaint();
   }
 
   protected void queueRunningUpdate(Runnable update) {
     update.run();
   }
 
-
-  private void updateVisibility(MyProgressBar bar, boolean holdsValue) {
-    if (holdsValue && !bar.isActive()) {
-      bar.setActive(true);
-      bar.revalidate();
-      bar.repaint();
-      myComponent.revalidate();
-      myComponent.repaint();
-    }
-    else if (!holdsValue && bar.isActive()) {
-      bar.setActive(false);
-      bar.revalidate();
-      bar.repaint();
-      myComponent.revalidate();
-      myComponent.repaint();
-    }
-  }
-
   protected void onProgressChange() {
     updateProgress();
-  }
-
-  protected void onRunningChange() {
-    updateRunning();
   }
 
   public JComponent getComponent() {
@@ -276,45 +219,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
 
   public TaskInfo getInfo() {
     return myInfo;
-  }
-
-  private static class MyProgressBar extends JProgressBar {
-    private boolean myActive = true;
-    private final boolean myCompact;
-
-    public MyProgressBar(final int orient, boolean compact) {
-      super(orient);
-      myCompact = compact;
-      putClientProperty("JComponent.sizeVariant", "mini");
-    }
-
-
-    public void paint(final Graphics g) {
-      if (!myActive) return;
-      super.paint(g);
-    }
-
-    @Override
-    public void setIndeterminate(boolean newValue) {
-      super.setIndeterminate(newValue);
-      if (myCompact) {
-        setVisible(!newValue);
-      }
-    }
-
-    public boolean isActive() {
-      return myActive;
-    }
-
-
-    public Dimension getPreferredSize() {
-      if (!myActive && myCompact) return new Dimension(0, 0);
-      return super.getPreferredSize();
-    }
-
-    public void setActive(final boolean active) {
-      myActive = active;
-    }
   }
 
   private class MyComponent extends JPanel {
@@ -340,7 +244,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       }
 
       final GraphicsConfig c = GraphicsUtil.setupAAPainting(g);
-      GraphicsUtil.setupAntialiasing(g, true, true);
+      UISettings.setupAntialiasing(g);
 
       int arc = 8;
       Color bg = getBackground();

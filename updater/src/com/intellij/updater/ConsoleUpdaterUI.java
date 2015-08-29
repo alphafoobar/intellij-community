@@ -10,6 +10,7 @@ public class ConsoleUpdaterUI implements UpdaterUI {
 
   public void startProcess(String title) {
     System.out.println(title);
+    Runner.logger.info("title: " + title);
   }
 
   public void setProgress(int percentage) {
@@ -20,6 +21,7 @@ public class ConsoleUpdaterUI implements UpdaterUI {
 
   public void setStatus(String status) {
     System.out.println(myStatus = status);
+    Runner.logger.info("status: " + status);
   }
 
   public void showError(Throwable e) {
@@ -27,6 +29,17 @@ public class ConsoleUpdaterUI implements UpdaterUI {
   }
 
   public void checkCancelled() throws OperationCancelledException {
+  }
+
+  @Override
+  public void setDescription(String oldBuildDesc, String newBuildDesc) {
+    System.out.println("From " + oldBuildDesc + " to " + newBuildDesc);
+  }
+
+  @Override
+  public boolean showWarning(String message) {
+    System.out.println("Warning: " + message);
+    return false;
   }
 
   public Map<String, ValidationResult.Option> askUser(List<ValidationResult> validationResults) {

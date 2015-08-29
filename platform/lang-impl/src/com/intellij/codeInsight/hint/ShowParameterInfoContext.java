@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
@@ -137,7 +138,7 @@ public class ShowParameterInfoContext implements CreateParameterInfoContext {
     ApplicationManager.getApplication().invokeLater(new Runnable() {
       @Override
       public void run() {
-        if (editor.isDisposed()) return;
+        if (editor.isDisposed() || DumbService.isDumb(project)) return;
 
         final Document document = editor.getDocument();
         if (document.getTextLength() < elementStart) return;
@@ -243,7 +244,7 @@ public class ShowParameterInfoContext implements CreateParameterInfoContext {
                                                    short preferredPosition) {
       final TextRange textRange = list.getTextRange();
       offset = textRange.contains(offset) ? offset:textRange.getStartOffset() + 1;
-      if (previousOffset == offset) return new Pair<Point, Short>(previousBestPoint, previousBestPosition);
+      if (previousOffset == offset) return Pair.create(previousBestPoint, previousBestPosition);
 
       String listText = list.getText();
       final boolean isMultiline = listText.indexOf('\n') >= 0 || listText.indexOf('\r') >= 0;

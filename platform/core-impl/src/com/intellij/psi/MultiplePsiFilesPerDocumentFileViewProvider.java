@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,8 +29,9 @@ import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.impl.source.tree.FileElement;
 import com.intellij.psi.templateLanguages.OuterLanguageElement;
 import com.intellij.util.ConcurrencyUtil;
-import com.intellij.util.ReflectionCache;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.NullableFunction;
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -39,11 +40,11 @@ import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 
 public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends SingleRootFileViewProvider {
-  private final ConcurrentMap<Language, PsiFile> myRoots = new ConcurrentHashMap<Language, PsiFile>(1, ConcurrentHashMap.DEFAULT_LOAD_FACTOR, 1);
+  private final ConcurrentMap<Language, PsiFileImpl> myRoots = ContainerUtil.newConcurrentMap(1, 0.75f, 1);
   private MultiplePsiFilesPerDocumentFileViewProvider myOriginal = null;
 
-  public MultiplePsiFilesPerDocumentFileViewProvider(PsiManager manager, VirtualFile virtualFile, boolean physical) {
-    super(manager, virtualFile, physical, Language.ANY);
+  public MultiplePsiFilesPerDocumentFileViewProvider(PsiManager manager, VirtualFile virtualFile, boolean eventSystemEnabled) {
+    super(manager, virtualFile, eventSystemEnabled, Language.ANY);
   }
 
   @Override
@@ -67,12 +68,15 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
   }
 
   protected void removeFile(final Language language) {
-    myRoots.remove(language);
+    PsiFileImpl file = myRoots.remove(language);
+    if (file != null) {
+      file.markInvalidated();
+    }
   }
 
   @Override
   protected PsiFile getPsiInner(@NotNull final Language target) {
-    PsiFile file = myRoots.get(target);
+    PsiFileImpl file = myRoots.get(target);
     if (file == null) {
       if (isPhysical()) {
         VirtualFile virtualFile = getVirtualFile();
@@ -82,12 +86,15 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
           getManager().findDirectory(parent);
         }
       }
-      file = createFile(target);
+      if (target != getBaseLanguage() && !getLanguages().contains(target)) {
+        return null;
+      }
+      file = (PsiFileImpl)createFile(target);
       if (file == null) return null;
       if (myOriginal != null) {
         final PsiFile originalFile = myOriginal.getPsi(target);
         if (originalFile != null) {
-          ((PsiFileImpl)file).setOriginalFile(originalFile);
+          file.setOriginalFile(originalFile);
         }
       }
       file = ConcurrencyUtil.cacheOrGet(myRoots, target, file);
@@ -97,12 +104,24 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
 
 
   @Override
-  public PsiFile getCachedPsi(Language target) {
+  public PsiFile getCachedPsi(@NotNull Language target) {
     return myRoots.get(target);
   }
 
   @Override
-  public FileElement[] getKnownTreeRoots() {
+  public List<PsiFile> getCachedPsiFiles() {
+    return ContainerUtil.mapNotNull(myRoots.keySet(), new NullableFunction<Language, PsiFile>() {
+      @Nullable
+      @Override
+      public PsiFile fun(Language language) {
+        return getCachedPsi(language);
+      }
+    });
+  }
+
+  @NotNull
+  @Override
+  public List<FileElement> getKnownTreeRoots() {
     List<FileElement> files = new ArrayList<FileElement>(myRoots.size());
     for (PsiFile file : myRoots.values()) {
       final FileElement treeElement = ((PsiFileImpl)file).getTreeElement();
@@ -111,12 +130,12 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
       }
     }
 
-    return files.toArray(new FileElement[files.size()]);
+    return files;
   }
 
   @TestOnly
   public void checkAllTreesEqual() {
-    Collection<PsiFile> roots = myRoots.values();
+    Collection<PsiFileImpl> roots = myRoots.values();
     PsiDocumentManager documentManager = PsiDocumentManager.getInstance(getManager().getProject());
     documentManager.commitAllDocuments();
     for (PsiFile root : roots) {
@@ -142,7 +161,7 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
     final PsiFile mainRoot = getPsi(getBaseLanguage());
     PsiElement ret = null;
     for (final Language language : getLanguages()) {
-      if (!ReflectionCache.isAssignable(lang, language.getClass())) continue;
+      if (!ReflectionUtil.isAssignable(lang, language.getClass())) continue;
       if (lang.equals(Language.class) && !getLanguages().contains(language)) continue;
 
       final PsiFile psiRoot = getPsi(language);
@@ -181,13 +200,23 @@ public abstract class MultiplePsiFilesPerDocumentFileViewProvider extends Single
 
   @Override
   public void contentsSynchronized() {
-    super.contentsSynchronized();
     Set<Language> languages = getLanguages();
-    for (Iterator<Map.Entry<Language, PsiFile>> iterator = myRoots.entrySet().iterator(); iterator.hasNext(); ) {
-      Map.Entry<Language, PsiFile> entry = iterator.next();
+    for (Iterator<Map.Entry<Language, PsiFileImpl>> iterator = myRoots.entrySet().iterator(); iterator.hasNext(); ) {
+      Map.Entry<Language, PsiFileImpl> entry = iterator.next();
       if (!languages.contains(entry.getKey())) {
+        PsiFileImpl file = entry.getValue();
         iterator.remove();
+        file.markInvalidated();
       }
     }
+    super.contentsSynchronized();
+  }
+
+  @Override
+  public void markInvalidated() {
+    for (PsiFileImpl file : myRoots.values()) {
+      file.markInvalidated();
+    }
+    super.markInvalidated();
   }
 }

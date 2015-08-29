@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ package com.intellij.ide.actions;
 import com.intellij.ide.ExporterToTextFile;
 import com.intellij.ide.util.ExportToFileUtil;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 
-public class ExportToTextFileAction extends AnAction {
+public class ExportToTextFileAction extends DumbAwareAction {
   public void actionPerformed(AnActionEvent e) {
     DataContext dataContext = e.getDataContext();
     Project project = CommonDataKeys.PROJECT.getData(dataContext);
@@ -34,8 +35,7 @@ public class ExportToTextFileAction extends AnAction {
   public static void export(Project project, ExporterToTextFile exporter) {
     final ExportToFileUtil.ExportDialogBase dlg = new ExportToFileUtil.ExportDialogBase(project, exporter);
 
-    dlg.show();
-    if (!dlg.isOK()) {
+    if (!dlg.showAndGet()) {
       return;
     }
 

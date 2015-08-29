@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,12 +21,13 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.util.ExecUtil;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationListener;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -38,6 +39,7 @@ import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -49,6 +51,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.event.HyperlinkEvent;
 import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
 import java.awt.event.MouseEvent;
@@ -56,12 +59,22 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ShowFilePathAction extends AnAction {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.actions.ShowFilePathAction");
+
+  public static final NotificationListener FILE_SELECTING_LISTENER = new NotificationListener.Adapter() {
+    @Override
+    protected void hyperlinkActivated(@NotNull Notification notification, @NotNull HyperlinkEvent e) {
+      URL url = e.getURL();
+      if (url != null) openFile(new File(url.getPath()));
+      notification.expire();
+    }
+  };
 
   private static NotNullLazyValue<Boolean> canUseNautilus = new NotNullLazyValue<Boolean>() {
     @NotNull
@@ -71,10 +84,10 @@ public class ShowFilePathAction extends AnAction {
         return false;
       }
 
-      String appName = ExecUtil.execAndReadLine("xdg-mime", "query", "default", "inode/directory");
+      String appName = ExecUtil.execAndReadLine(new GeneralCommandLine("xdg-mime", "query", "default", "inode/directory"));
       if (appName == null || !appName.matches("nautilus.*\\.desktop")) return false;
 
-      String version = ExecUtil.execAndReadLine("nautilus", "--version");
+      String version = ExecUtil.execAndReadLine(new GeneralCommandLine("nautilus", "--version"));
       if (version == null) return false;
 
       Matcher m = Pattern.compile("GNOME nautilus ([0-9.]+)").matcher(version);
@@ -98,7 +111,7 @@ public class ShowFilePathAction extends AnAction {
 
   @Nullable
   private static String getUnixFileManagerName() {
-    String appName = ExecUtil.execAndReadLine("xdg-mime", "query", "default", "inode/directory");
+    String appName = ExecUtil.execAndReadLine(new GeneralCommandLine("xdg-mime", "query", "default", "inode/directory"));
     if (appName == null || !appName.matches(".+\\.desktop")) return null;
 
     String dirs = System.getenv("XDG_DATA_DIRS");
@@ -139,21 +152,27 @@ public class ShowFilePathAction extends AnAction {
     e.getPresentation().setEnabled(getFile(e) != null);
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     show(getFile(e), new ShowAction() {
+      @Override
       public void show(final ListPopup popup) {
-        DataManager.getInstance().getDataContextFromFocus().doWhenDone(new Consumer<DataContext>() {
-          @Override
-          public void consume(DataContext context) {
-            popup.showInBestPositionFor(context);
-          }
-        });
+        DataManager dataManager = DataManager.getInstance();
+        if (dataManager != null) {
+          dataManager.getDataContextFromFocus().doWhenDone(new Consumer<DataContext>() {
+            @Override
+            public void consume(DataContext context) {
+              popup.showInBestPositionFor(context);
+            }
+          });
+        }
       }
     });
   }
 
   public static void show(final VirtualFile file, final MouseEvent e) {
     show(file, new ShowAction() {
+      @Override
       public void show(final ListPopup popup) {
         if (e.getComponent().isShowing()) {
           popup.show(new RelativePoint(e));
@@ -182,6 +201,7 @@ public class ShowFilePathAction extends AnAction {
 
     final ArrayList<Icon> icons = new ArrayList<Icon>();
     ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+      @Override
       public void run() {
         for (String each : fileUrls) {
           final File ioFile = new File(each);
@@ -196,7 +216,8 @@ public class ShowFilePathAction extends AnAction {
           icons.add(eachIcon);
         }
 
-        LaterInvocator.invokeLater(new Runnable() {
+        ApplicationManager.getApplication().invokeLater(new Runnable() {
+          @Override
           public void run() {
             show.show(createPopup(files, icons));
           }
@@ -230,6 +251,7 @@ public class ShowFilePathAction extends AnAction {
         final File selectedFile = new File(getPresentableUrl(selectedValue));
         if (selectedFile.exists()) {
           ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+            @Override
             public void run() {
               openFile(selectedFile);
             }
@@ -291,6 +313,9 @@ public class ShowFilePathAction extends AnAction {
   }
 
   private static void doOpen(@NotNull File dir, @Nullable File toSelect) throws IOException, ExecutionException {
+    dir = new File(FileUtil.toCanonicalPath(dir.getPath()));
+    toSelect = toSelect == null ? null : new File(FileUtil.toCanonicalPath(toSelect.getPath()));
+    
     if (SystemInfo.isWindows) {
       String cmd;
       if (toSelect != null) {
@@ -372,6 +397,7 @@ public class ShowFilePathAction extends AnAction {
         return true;
       }
 
+      @NotNull
       @Override
       public String getDoNotShowMessage() {
         return CommonBundle.message("dialog.options.do.not.ask");

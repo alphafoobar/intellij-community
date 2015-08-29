@@ -46,7 +46,6 @@ import org.intellij.plugins.intelliLang.inject.LanguageInjectionConfigBean;
 import org.intellij.plugins.intelliLang.inject.LanguageInjectionSupport;
 import org.intellij.plugins.intelliLang.inject.config.BaseInjection;
 import org.intellij.plugins.intelliLang.inject.config.InjectionPlace;
-import org.jdom.Document;
 import org.jdom.Element;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NonNls;
@@ -66,8 +65,7 @@ import java.util.*;
  * Making it a service may result in FileContentUtil.reparseFiles at a random loading moment which may cause
  * mysterious PSI validity losses
  */
-public class Configuration implements PersistentStateComponent<Element>, ModificationTracker {
-
+public class Configuration extends SimpleModificationTracker implements PersistentStateComponent<Element>, ModificationTracker {
   static final Logger LOG = Logger.getInstance(Configuration.class.getName());
   private static final Condition<BaseInjection> LANGUAGE_INJECTION_CONDITION = new Condition<BaseInjection>() {
     @Override
@@ -78,7 +76,8 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
 
   @State(
     name = Configuration.COMPONENT_NAME,
-    storages = {@Storage( file = StoragePathMacros.APP_CONFIG + "/IntelliLang.xml", scheme = StorageScheme.DIRECTORY_BASED)})
+    defaultStateAsResource = true,
+    storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/IntelliLang.xml", scheme = StorageScheme.DIRECTORY_BASED)})
   public static class App extends Configuration {
 
     private final List<BaseInjection> myDefaultInjections;
@@ -112,8 +111,10 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
       return getState(element);
     }
   }
+
   @State(
     name = Configuration.COMPONENT_NAME,
+    defaultStateAsResource = true,
     storages = {
       @Storage(file = StoragePathMacros.PROJECT_FILE),
       @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/IntelliLang.xml", scheme = StorageScheme.DIRECTORY_BASED)
@@ -162,6 +163,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
       return super.getModificationCount() + myParentConfiguration.getModificationCount();
     }
 
+    @Override
     public boolean replaceInjections(List<? extends BaseInjection> newInjections,
                                      List<? extends BaseInjection> originalInjections,
                                      boolean forceLevel) {
@@ -204,14 +206,14 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
   };
 
   protected Collection<BaseInjection> getAllInjections() {
-    ArrayList<BaseInjection> injections = new ArrayList<BaseInjection>();
+    List<BaseInjection> injections = new ArrayList<BaseInjection>();
     for (List<BaseInjection> list : myInjections.values()) {
       injections.addAll(list);
     }
     return injections;
   }
 
-  private CachedValue<MultiMap<String, BaseInjection>> myInjectionsById = new CachedValueImpl<MultiMap<String, BaseInjection>>(new CachedValueProvider<MultiMap<String, BaseInjection>>() {
+  private final CachedValue<MultiMap<String, BaseInjection>> myInjectionsById = new CachedValueImpl<MultiMap<String, BaseInjection>>(new CachedValueProvider<MultiMap<String, BaseInjection>>() {
     @Nullable
     @Override
     public Result<MultiMap<String, BaseInjection>> compute() {
@@ -223,8 +225,6 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
     }
   });
 
-  private volatile long myModificationCount;
-
   public Configuration() {
   }
 
@@ -232,9 +232,10 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
     throw new UnsupportedOperationException("getAdvancedConfiguration should not be called");
   }
 
+  @Override
   public void loadState(final Element element) {
     myInjections.clear();
-    final THashMap<String, LanguageInjectionSupport> supports = new THashMap<String, LanguageInjectionSupport>();
+    final Map<String, LanguageInjectionSupport> supports = new THashMap<String, LanguageInjectionSupport>();
     for (LanguageInjectionSupport support : InjectorUtils.getActiveInjectionSupports()) {
       supports.put(support.getId(), support);
     }
@@ -270,8 +271,8 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
   }
 
   private static List<BaseInjection> loadDefaultInjections() {
-    final ArrayList<Configuration> cfgList = new ArrayList<Configuration>();
-    final THashSet<Object> visited = new THashSet<Object>();
+    final List<Configuration> cfgList = new ArrayList<Configuration>();
+    final Set<Object> visited = new THashSet<Object>();
     for (LanguageInjectionConfigBean configBean : Extensions.getExtensions(LanguageInjectionSupport.CONFIG_EP_NAME)) {
       PluginDescriptor descriptor = configBean.getPluginDescriptor();
       final ClassLoader loader = descriptor.getPluginClassLoader();
@@ -284,11 +285,18 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
           while (enumeration.hasMoreElements()) {
             URL url = enumeration.nextElement();
             if (!visited.add(url.getFile())) continue; // for DEBUG mode
+            InputStream stream = null;
             try {
-              cfgList.add(load(url.openStream()));
+              stream = url.openStream();
+              cfgList.add(load(stream));
             }
             catch (Exception e) {
               LOG.warn(e);
+            }
+            finally {
+              if (stream != null) {
+                stream.close();
+              }
             }
           }
         }
@@ -298,7 +306,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
       }
     }
 
-    final ArrayList<BaseInjection> defaultInjections = new ArrayList<BaseInjection>();
+    final List<BaseInjection> defaultInjections = new ArrayList<BaseInjection>();
     for (String supportId : InjectorUtils.getActiveInjectionSupportIds()) {
       for (Configuration cfg : cfgList) {
         final List<BaseInjection> imported = cfg.getInjections(supportId);
@@ -308,12 +316,14 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
     return defaultInjections;
   }
 
+  @Override
   public Element getState() {
     return getState(new Element(COMPONENT_NAME));
   }
 
   protected Element getState(final Element element) {
     Comparator<BaseInjection> comparator = new Comparator<BaseInjection>() {
+      @Override
       public int compare(final BaseInjection o1, final BaseInjection o2) {
         return Comparing.compare(o1.getDisplayName(), o2.getDisplayName());
       }
@@ -321,7 +331,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
     List<String> injectorIds = new ArrayList<String>(myInjections.keySet());
     Collections.sort(injectorIds);
     for (String key : injectorIds) {
-      TreeSet<BaseInjection> injections = new TreeSet<BaseInjection>(comparator);
+      Set<BaseInjection> injections = new TreeSet<BaseInjection>(comparator);
       injections.addAll(myInjections.get(key));
       injections.removeAll(getDefaultInjections());
       for (BaseInjection injection : injections) {
@@ -349,34 +359,29 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
 
   @Nullable
   public static Configuration load(final InputStream is) throws IOException, JDOMException {
-    try {
-      final Document document = JDOMUtil.loadDocument(is);
-      final ArrayList<Element> elements = new ArrayList<Element>();
-      final Element rootElement = document.getRootElement();
-      final Element state;
-      if (rootElement.getName().equals(COMPONENT_NAME)) {
-        state = rootElement;
-      }
-      else {
-        elements.add(rootElement);
-        //noinspection unchecked
-        elements.addAll(rootElement.getChildren("component"));
-        state = ContainerUtil.find(elements, new Condition<Element>() {
-          public boolean value(final Element element) {
-            return "component".equals(element.getName()) && COMPONENT_NAME.equals(element.getAttributeValue("name"));
-          }
-        });
-      }
-      if (state != null) {
-        final Configuration cfg = new Configuration();
-        cfg.loadState(state);
-        return cfg;
-      }
-      return null;
+    final List<Element> elements = new ArrayList<Element>();
+    final Element rootElement = JDOMUtil.load(is);
+    final Element state;
+    if (rootElement.getName().equals(COMPONENT_NAME)) {
+      state = rootElement;
     }
-    finally {
-      is.close();
+    else {
+      elements.add(rootElement);
+      //noinspection unchecked
+      elements.addAll(rootElement.getChildren("component"));
+      state = ContainerUtil.find(elements, new Condition<Element>() {
+        @Override
+        public boolean value(final Element element) {
+          return "component".equals(element.getName()) && COMPONENT_NAME.equals(element.getAttributeValue("name"));
+        }
+      });
     }
+    if (state != null) {
+      final Configuration cfg = new Configuration();
+      cfg.loadState(state);
+      return cfg;
+    }
+    return null;
   }
 
   private int importPlaces(final List<BaseInjection> injections) {
@@ -386,8 +391,8 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
         return o.getSupportId();
       }
     });
-    final ArrayList<BaseInjection> originalInjections = new ArrayList<BaseInjection>();
-    final ArrayList<BaseInjection> newInjections = new ArrayList<BaseInjection>();
+    List<BaseInjection> originalInjections = new ArrayList<BaseInjection>();
+    List<BaseInjection> newInjections = new ArrayList<BaseInjection>();
     for (String supportId : InjectorUtils.getActiveInjectionSupportIds()) {
       final Set<BaseInjection> importingInjections = map.get(supportId);
       if (importingInjections == null) continue;
@@ -408,6 +413,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
     }
     main: for (BaseInjection other : importingInjections) {
       final List<BaseInjection> matchingInjections = ContainerUtil.concat(other.getInjectionPlaces(), new Function<InjectionPlace, Collection<? extends BaseInjection>>() {
+        @Override
         public Collection<? extends BaseInjection> fun(final InjectionPlace o) {
           final Collection<BaseInjection> collection = placeMap.get(o);
           return collection == null? Collections.<BaseInjection>emptyList() : collection;
@@ -436,11 +442,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
   }
 
   private void configurationModified() {
-    myModificationCount ++;
-  }
-
-  public long getModificationCount() {
-    return myModificationCount;
+    incModificationCount();
   }
 
   @Nullable
@@ -453,8 +455,8 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
   }
 
   public boolean setHostInjectionEnabled(final PsiLanguageInjectionHost host, final Collection<String> languages, final boolean enabled) {
-    final ArrayList<BaseInjection> originalInjections = new ArrayList<BaseInjection>();
-    final ArrayList<BaseInjection> newInjections = new ArrayList<BaseInjection>();
+    List<BaseInjection> originalInjections = new ArrayList<BaseInjection>();
+    List<BaseInjection> newInjections = new ArrayList<BaseInjection>();
     for (LanguageInjectionSupport support : InjectorUtils.getActiveInjectionSupports()) {
       for (BaseInjection injection : getInjections(support.getId())) {
         if (!languages.contains(injection.getInjectedLanguageId())) continue;
@@ -503,6 +505,7 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
                                 final List<? extends PsiElement> psiElementsToRemove) {
     replaceInjectionsWithUndo(project, newInjections, originalInjections, psiElementsToRemove,
                               new PairProcessor<List<? extends BaseInjection>, List<? extends BaseInjection>>() {
+                                @Override
                                 public boolean process(final List<? extends BaseInjection> add,
                                                        final List<? extends BaseInjection> remove) {
                                   replaceInjectionsWithUndoInner(add, remove);
@@ -523,20 +526,24 @@ public class Configuration implements PersistentStateComponent<Element>, Modific
                                 final List<? extends PsiElement> psiElementsToRemove,
                                 final PairProcessor<T, T> actualProcessor) {
     final UndoableAction action = new GlobalUndoableAction() {
+      @Override
       public void undo() {
         actualProcessor.process(remove, add);
       }
 
+      @Override
       public void redo() {
         actualProcessor.process(add, remove);
       }
     };
     final List<PsiFile> psiFiles = ContainerUtil.mapNotNull(psiElementsToRemove, new NullableFunction<PsiElement, PsiFile>() {
+      @Override
       public PsiFile fun(final PsiElement psiAnnotation) {
         return psiAnnotation instanceof PsiCompiledElement ? null : psiAnnotation.getContainingFile();
       }
     });
     new WriteCommandAction.Simple(project, "Language Injection Configuration Update", PsiUtilCore.toPsiFileArray(psiFiles)) {
+      @Override
       public void run() {
         for (PsiElement annotation : psiElementsToRemove) {
           annotation.delete();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ package com.jetbrains.python.hierarchy.treestructures;
 import com.intellij.ide.hierarchy.HierarchyNodeDescriptor;
 import com.intellij.ide.hierarchy.HierarchyTreeStructure;
 import com.intellij.openapi.project.Project;
+import com.intellij.psi.PsiElement;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Query;
-import com.jetbrains.python.hierarchy.PyTypeHierarchyNodeDescriptor;
+import com.jetbrains.python.hierarchy.PyHierarchyNodeDescriptor;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.search.PyClassInheritorsSearch;
 import org.jetbrains.annotations.NotNull;
@@ -40,17 +41,20 @@ public class PySubTypesHierarchyTreeStructure extends HierarchyTreeStructure {
   }
 
   public PySubTypesHierarchyTreeStructure(@NotNull final PyClass cl) {
-    super(cl.getProject(), new PyTypeHierarchyNodeDescriptor(null, cl, true));
+    super(cl.getProject(), new PyHierarchyNodeDescriptor(null, cl, true));
   }
 
   @NotNull
   protected Object[] buildChildren(@NotNull HierarchyNodeDescriptor descriptor) {
-    final PyClass classElement = ((PyTypeHierarchyNodeDescriptor)descriptor).getClassElement();
-    Query<PyClass> subClasses = PyClassInheritorsSearch.search(classElement, false);
+    final List<PyHierarchyNodeDescriptor> res = new ArrayList<PyHierarchyNodeDescriptor>();
+    final PsiElement element = ((PyHierarchyNodeDescriptor)descriptor).getPsiElement();
+    if (element instanceof PyClass) {
+      final PyClass cls = (PyClass)element;
+      Query<PyClass> subClasses = PyClassInheritorsSearch.search(cls, false);
+      for (PyClass subClass : subClasses) {
+        res.add(new PyHierarchyNodeDescriptor(descriptor, subClass, false));
+      }
 
-    List<PyTypeHierarchyNodeDescriptor> res = new ArrayList<PyTypeHierarchyNodeDescriptor>();
-    for (PyClass cl : subClasses) {
-      res.add(new PyTypeHierarchyNodeDescriptor(descriptor, cl, false));
     }
 
     return ArrayUtil.toObjectArray(res);

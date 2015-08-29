@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.ide.util.treeView;
 
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
@@ -171,9 +172,9 @@ public class UpdaterTreeState {
 
     final Set<Object> originallySelected = myUi.getSelectedElements();
 
-    myUi._select(toSelect, new Runnable() {
+    myUi._select(toSelect, new TreeRunnable("UpdaterTreeState.restore") {
       @Override
-      public void run() {
+      public void perform() {
         processUnsuccessfulSelections(toSelect, new Function<Object, Object>() {
           @Override
           public Object fun(final Object o) {
@@ -184,12 +185,12 @@ public class UpdaterTreeState {
           }
         }, originallySelected);
 
-        processAjusted(adjusted, originallySelected).doWhenDone(new Runnable() {
+        processAjusted(adjusted, originallySelected).doWhenDone(new TreeRunnable("UpdaterTreeState.restore: on done") {
           @Override
-          public void run() {
-            myUi.expand(toExpand, new Runnable() {
+          public void perform() {
+            myUi.expand(toExpand, new TreeRunnable("UpdaterTreeState.restore: after on done") {
               @Override
-              public void run() {
+              public void perform() {
                 myUi.clearUpdaterState();
                 setProcessingNow(false);
               }
@@ -214,7 +215,7 @@ public class UpdaterTreeState {
             if (!children.contains(eachToSelect)) {
               toSelect.remove();
               if (!myToSelect.containsKey(readyElement) && !myUi.getSelectedElements().contains(eachToSelect)) {
-                addAdjustedSelection(eachToSelect, Condition.FALSE, null);
+                addAdjustedSelection(eachToSelect, Conditions.alwaysFalse(), null);
               }
             }
           }
@@ -271,9 +272,9 @@ public class UpdaterTreeState {
     final Object[] newSelection = ArrayUtil.toObjectArray(toSelect);
 
     if (newSelection.length > 0) {
-      myUi._select(newSelection, new Runnable() {
+      myUi._select(newSelection, new TreeRunnable("UpdaterTreeState.processAjusted") {
         @Override
-        public void run() {
+        public void perform() {
           final Set<Object> hangByParent = new HashSet<Object> ();
           processUnsuccessfulSelections(newSelection, new Function<Object, Object>() {
             @Override
@@ -298,7 +299,7 @@ public class UpdaterTreeState {
   }
 
   private ActionCallback processHangByParent(Set<Object> elements) {
-    if (elements.isEmpty()) return new ActionCallback.Done();
+    if (elements.isEmpty()) return ActionCallback.DONE;
 
     ActionCallback result = new ActionCallback(elements.size());
     for (Object hangElement : elements) {
@@ -326,9 +327,9 @@ public class UpdaterTreeState {
       if (nextElement == null) {
         callback.setDone();
       } else {
-       myUi.select(nextElement, new Runnable() {
+       myUi.select(nextElement, new TreeRunnable("UpdaterTreeState.processNextHang") {
           @Override
-          public void run() {
+          public void perform() {
             processNextHang(nextElement, callback);
           }
         }, true);

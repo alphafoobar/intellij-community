@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.Toggleable;
 import com.intellij.openapi.actionSystem.impl.ActionButton;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.std.ArrangementSettingsToken;
 import com.intellij.psi.codeStyle.arrangement.std.ArrangementUiComponent;
@@ -44,7 +45,7 @@ import java.util.Set;
  */
 public class ArrangementListRowDecorator extends JPanel implements ArrangementUiComponent {
 
-  @NotNull private final JLabel mySortLabel = new JLabel(AllIcons.Icons.Inspector.SortByName);
+  @NotNull private final JLabel mySortLabel = new JLabel(AllIcons.ObjectBrowser.Sorted);
 
   @NotNull private final ArrangementRuleIndexControl     myRowIndexControl;
   @NotNull private final ArrangementUiComponent          myDelegate;
@@ -82,6 +83,11 @@ public class ArrangementListRowDecorator extends JPanel implements ArrangementUi
 
     setOpaque(true);
     init();
+  }
+
+  public void setError(@Nullable String message) {
+    myRowIndexControl.setError(StringUtil.isNotEmpty(message));
+    setToolTipText(message);
   }
 
   private void init() {
@@ -208,6 +214,7 @@ public class ArrangementListRowDecorator extends JPanel implements ArrangementUi
         int row = myControl.getRowByRenderer(this);
         if (row >= 0) {
           myControl.showEditor(row);
+          myControl.scrollRowToVisible(row);
           myBeingEdited = true;
         }
       }
@@ -271,6 +278,16 @@ public class ArrangementListRowDecorator extends JPanel implements ArrangementUi
   @Override
   public void setListener(@NotNull Listener listener) {
     myDelegate.setListener(listener); 
+  }
+
+  @Override
+  public void handleMouseClickOnSelected() {
+    myDelegate.handleMouseClickOnSelected();
+  }
+
+  @Override
+  public boolean alwaysCanBeActive() {
+    return false;
   }
 
   @Override

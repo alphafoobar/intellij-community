@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
-import com.intellij.ui.PortField;
 import com.intellij.xdebugger.impl.settings.DebuggerConfigurable;
 import org.jetbrains.annotations.NotNull;
 
@@ -40,7 +39,7 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
   private JTextField myAddressField;
   private JPanel myShMemPanel;
   private JPanel myPortPanel;
-  private PortField myPortField;
+  private JTextField myPortField;
   private boolean myIsLocal = false;
   private JButton myDebuggerSettings;
   private JRadioButton mySocketTransport;
@@ -51,7 +50,7 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
     myDebuggerSettings.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
-        ShowSettingsUtil.getInstance().showSettingsDialog(project, DebuggerConfigurable.DISPLAY_NAME);
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, DebuggerConfigurable.class);
         if (myIsLocal) {
           setTransport(DebuggerSettings.getInstance().DEBUGGER_TRANSPORT);
         }
@@ -94,7 +93,6 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
     myPortPanel.setVisible(isSocket());
     myShMemPanel.setVisible(!isSocket());
     myAddressField.setEditable(!myIsLocal);
-    myPortField.setEditable(!myIsLocal);
     mySocketTransport.setEnabled(!myIsLocal);
     myShmemTransport.setEnabled(!myIsLocal);
   }
@@ -132,7 +130,7 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
   }
 
   private int getTransport() {
-    if(myIsLocal) {
+    if (myIsLocal) {
       return DebuggerSettings.getInstance().DEBUGGER_TRANSPORT;
     }
     else {
@@ -142,7 +140,7 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
 
   private String getPort() {
     if (isSocket()) {
-      return String.valueOf(myPortField.getNumber());
+      return String.valueOf(myPortField.getText());
     }
     else {
       return myAddressField.getText();
@@ -150,8 +148,16 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
   }
 
   private void checkPort() throws ConfigurationException {
-    if (isSocket() && !myPortField.isSpecified()) {
+    if (isSocket() && parsePort() == 0) {
       throw new ConfigurationException(DebuggerBundle.message("error.text.invalid.port"));
+    }
+  }
+  private int parsePort() {
+    try {
+      return Math.max(0, Integer.parseInt(myPortField.getText()));
+    }
+    catch (NumberFormatException e) {
+      return 0;
     }
   }
 
@@ -168,7 +174,7 @@ public class GenericDebuggerParametersRunnerConfigurable extends SettingsEditor<
 
   private void setPort(String port) {
     if (isSocket()) {
-      myPortField.setNumber(StringUtilRt.parseInt(port, 0));
+      myPortField.setText(String.valueOf(StringUtilRt.parseInt(port, 0)));
     }
     else {
       myAddressField.setText(port);

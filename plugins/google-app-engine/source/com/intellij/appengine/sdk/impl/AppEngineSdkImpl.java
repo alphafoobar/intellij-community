@@ -19,14 +19,15 @@ import com.intellij.appengine.sdk.AppEngineSdk;
 import com.intellij.appengine.util.AppEngineUtil;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.roots.libraries.JarVersionDetectionUtil;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.JarUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
@@ -50,32 +51,40 @@ public class AppEngineSdkImpl implements AppEngineSdk {
     myHomePath = homePath;
   }
 
+  @NotNull
   public File getAppCfgFile() {
     final String extension = SystemInfo.isWindows ? "cmd" : "sh";
-    return new File(FileUtil.toSystemDependentName(myHomePath + "/bin/appcfg." + extension));
+    return new File(myHomePath, "bin/appcfg." + extension);
   }
 
+  @NotNull
   public File getWebSchemeFile() {
-    return new File(FileUtil.toSystemDependentName(myHomePath + "/docs/appengine-web.xsd"));
+    return new File(myHomePath, "docs/appengine-web.xsd");
   }
 
+  @NotNull
+  @Override
+  public File getApplicationSchemeFile() {
+    return new File(myHomePath, "docs/appengine-application.xsd");
+  }
+
+  @NotNull
   public File getToolsApiJarFile() {
-    final String path = FileUtil.toSystemDependentName(myHomePath + JpsAppEngineModuleExtensionImpl.LIB_APPENGINE_TOOLS_API_JAR);
-    return new File(path);
+    return new File(myHomePath, JpsAppEngineModuleExtensionImpl.LIB_APPENGINE_TOOLS_API_JAR);
   }
 
+  @NotNull
   public File[] getLibraries() {
-    File sdkHome = new File(FileUtil.toSystemDependentName(myHomePath));
-    return getJarsFromDirectory(new File(sdkHome, "lib" + File.separator + "shared"));
+    return getJarsFromDirectory(new File(myHomePath, "lib/shared"));
   }
 
+  @NotNull
   @Override
   public File[] getJspLibraries() {
-    File sdkHome = new File(FileUtil.toSystemDependentName(myHomePath));
-    return getJarsFromDirectory(new File(sdkHome, "lib" + File.separator + "shared" + File.separator + "jsp"));
+    return getJarsFromDirectory(new File(myHomePath, "lib/shared/jsp"));
   }
 
-  public void patchJavaParametersForDevServer(ParametersList vmParameters) {
+  public void patchJavaParametersForDevServer(@NotNull ParametersList vmParameters) {
     final String agentPath = myHomePath + "/lib/agent/appengine-agent.jar";
     if (new File(FileUtil.toSystemDependentName(agentPath)).exists()) {
       vmParameters.add("-javaagent:" + agentPath);
@@ -120,9 +129,16 @@ public class AppEngineSdkImpl implements AppEngineSdk {
       }
       else {
         myClassesWhiteList = AppEngineSdkUtil.computeWhiteList(getToolsApiJarFile());
-        AppEngineSdkUtil.saveWhiteList(cachedWhiteList, myClassesWhiteList);
+        if (!myClassesWhiteList.isEmpty()) {
+          AppEngineSdkUtil.saveWhiteList(cachedWhiteList, myClassesWhiteList);
+        }
       }
     }
+    if (myClassesWhiteList.isEmpty()) {
+      //don't report errors if white-list wasn't properly loaded
+      return true;
+    }
+
     final String packageName = StringUtil.getPackageName(className);
     final String name = StringUtil.getShortName(className);
     final Set<String> classes = myClassesWhiteList.get(packageName);
@@ -132,12 +148,7 @@ public class AppEngineSdkImpl implements AppEngineSdk {
   @Override
   @Nullable
   public String getVersion() {
-    try {
-      return JarVersionDetectionUtil.getJarAttributeVersion(getToolsApiJarFile(), Attributes.Name.SPECIFICATION_VERSION, "com/google/appengine/tools/info/");
-    }
-    catch (IOException e) {
-      return null;
-    }
+    return JarUtil.getJarAttribute(getToolsApiJarFile(), "com/google/appengine/tools/info/", Attributes.Name.SPECIFICATION_VERSION);
   }
 
   private File getCachedWhiteListFile() {
@@ -163,12 +174,34 @@ public class AppEngineSdkImpl implements AppEngineSdk {
     return getToolsApiJarFile().exists() && getAppCfgFile().exists();
   }
 
+  @NotNull
   public String getOrmLibDirectoryPath() {
     return getLibUserDirectoryPath() + "/orm";
   }
 
+  @NotNull
+  @Override
+  public List<String> getUserLibraryPaths() {
+    List<String> result = new ArrayList<String>();
+    result.add(getLibUserDirectoryPath());
+    File opt = new File(myHomePath, "lib/opt/user");
+    ContainerUtil.addIfNotNull(result, findLatestVersion(new File(opt, "appengine-endpoints")));
+    ContainerUtil.addIfNotNull(result, findLatestVersion(new File(opt, "jsr107")));
+    return result;
+  }
+
+  private static String findLatestVersion(File dir) {
+    String[] names = dir.list();
+    if (names != null && names.length > 0) {
+      String max = Collections.max(Arrays.asList(names));
+      return FileUtil.toSystemIndependentName(new File(dir, max).getAbsolutePath());
+    }
+    return null;
+  }
+
+  @NotNull
   public VirtualFile[] getOrmLibSources() {
-    final File libsDir = new File(FileUtil.toSystemDependentName(myHomePath + "/src/orm"));
+    final File libsDir = new File(myHomePath, "src/orm");
     final File[] files = libsDir.listFiles();
     List<VirtualFile> roots = new ArrayList<VirtualFile>();
     if (files != null) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,6 +84,10 @@ public class BackgroundTaskQueue {
   public boolean isEmpty() {
     return myProcessor.isEmpty();
   }
+  
+  public void waitForTasksToFinish() {
+    myProcessor.waitFor();
+  }
 
   public void run(Task.Backgroundable task) {
     run(task, null, null);
@@ -94,7 +98,7 @@ public class BackgroundTaskQueue {
     if (isTestMode()) { // test tasks are executed in this thread without the progress manager
       RunBackgroundable.runIfBackgroundThread(task, new EmptyProgressIndicator(), null);
     } else {
-      myProcessor.add(new Pair<Task.Backgroundable, Getter<ProgressIndicator>>(task, pi), state);
+      myProcessor.add(Pair.create(task, pi), state);
     }
   }
 
@@ -150,7 +154,7 @@ public class BackgroundTaskQueue {
           pi[0] = new BackgroundableProcessIndicator(backgroundable);
         }
 
-        ProgressManagerImpl.runProcessWithProgressAsynchronously(backgroundable, pi[0], runnable);
+        ((ProgressManagerImpl)ProgressManager.getInstance()).runProcessWithProgressAsynchronously(backgroundable, pi[0], runnable);
       }
     }
   }

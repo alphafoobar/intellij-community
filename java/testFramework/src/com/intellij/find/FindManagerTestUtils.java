@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 package com.intellij.find;
 
 import com.intellij.testFramework.LightVirtualFile;
-import junit.framework.Assert;
+import org.junit.Assert;
 
 public class FindManagerTestUtils {
   static void runFindInCommentsAndLiterals(FindManager findManager, FindModel findModel, String text) {
@@ -24,12 +24,10 @@ public class FindManagerTestUtils {
   }
 
   public static void runFindInCommentsAndLiterals(FindManager findManager, FindModel findModel, String text, String ext) {
-    findModel.setInStringLiteralsOnly(true);
-    findModel.setInCommentsOnly(false);
+    findModel.setSearchContext(FindModel.SearchContext.IN_STRING_LITERALS);
     runFindForwardAndBackward(findManager, findModel, text, ext);
 
-    findModel.setInStringLiteralsOnly(false);
-    findModel.setInCommentsOnly(true);
+    findModel.setSearchContext(FindModel.SearchContext.IN_COMMENTS);
     runFindForwardAndBackward(findManager, findModel, text, ext);
   }
 

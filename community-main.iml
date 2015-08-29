@@ -3,7 +3,7 @@
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="1.8" jdkType="JavaSDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="annotations" />
     <orderEntry type="module" module-name="ant" />
@@ -14,6 +14,8 @@
     <orderEntry type="module" module-name="compiler-openapi" />
     <orderEntry type="module" module-name="debugger-impl" />
     <orderEntry type="module" module-name="debugger-openapi" />
+    <orderEntry type="module" module-name="diff-api" />
+    <orderEntry type="module" module-name="diff-impl" />
     <orderEntry type="module" module-name="dom-impl" />
     <orderEntry type="module" module-name="dom-openapi" />
     <orderEntry type="module" module-name="execution-impl" />
@@ -71,7 +73,6 @@
     <orderEntry type="module" module-name="svn4idea-tests" />
     <orderEntry type="module" module-name="testng" />
     <orderEntry type="module" module-name="IntelliLang-java" />
-    <orderEntry type="module" module-name="IntelliLang-javaee" />
     <orderEntry type="module" module-name="IntelliLang-xml" />
     <orderEntry type="module" module-name="xpath" />
     <orderEntry type="module" module-name="xslt-debugger" />
@@ -93,9 +94,22 @@
     <orderEntry type="module" module-name="manifest" />
     <orderEntry type="module" module-name="xml-tests" scope="TEST" />
     <orderEntry type="module" module-name="devkit-jps-plugin" scope="TEST" />
+    <orderEntry type="module" module-name="jps-model-tests" scope="TEST" />
+    <orderEntry type="module" module-name="jps-serialization-tests" scope="TEST" />
+    <orderEntry type="module" module-name="ui-designer-jps-plugin" scope="TEST" />
     <orderEntry type="module" module-name="ui-designer-jps-plugin" scope="TEST" />
     <orderEntry type="module" module-name="java-tests" scope="TEST" />
     <orderEntry type="module" module-name="community-tests" scope="TEST" />
+    <orderEntry type="module" module-name="jira" />
+    <orderEntry type="module" module-name="java-decompiler-plugin" />
+    <orderEntry type="module" module-name="structuralsearch" />
+    <orderEntry type="module" module-name="structuralsearch-java" />
+    <orderEntry type="module" module-name="structuralsearch-tests" scope="TEST" />
+    <orderEntry type="module" module-name="structuralsearch-groovy" />
+    <orderEntry type="module" module-name="json" />
+    <orderEntry type="module" module-name="json-tests" scope="TEST" />
+    <orderEntry type="module" module-name="typeMigration" />
+    <orderEntry type="module" module-name="platform-tests" />
+    <orderEntry type="module" module-name="android" />
   </component>
 </module>
-

@@ -42,7 +42,6 @@
       <keyboard-shortcut first-keystroke="control alt SPACE" />
       <keyboard-shortcut first-keystroke="control alt BACK_SLASH" />
     </action>
-    <action id="CloneElement" />
     <action id="CloseActiveTab" />
     <action id="CloseAllEditors">
       <keyboard-shortcut first-keystroke="shift control W" />
@@ -61,8 +60,10 @@
     <action id="CollapseSelection" />
     <action id="CommentByLineComment">
       <keyboard-shortcut first-keystroke="control SLASH" />
-      <keyboard-shortcut first-keystroke="control DIVIDE" />
       <keyboard-shortcut first-keystroke="shift control C" />
+    </action>
+    <action id="CollapseRegionRecursively">
+      <keyboard-shortcut first-keystroke="control DIVIDE"/>
     </action>
     <action id="Compile">
       <keyboard-shortcut first-keystroke="F9" />
@@ -82,7 +83,7 @@
       <keyboard-shortcut first-keystroke="shift control F5" />
       <keyboard-shortcut first-keystroke="shift alt F5" />
     </action>
-    <action id="Debugger.NewWatch">
+    <action id="XDebugger.NewWatch">
       <keyboard-shortcut first-keystroke="shift control F7" />
     </action>
     <action id="Debugger.ResumeThread">
@@ -107,10 +108,10 @@
       <keyboard-shortcut first-keystroke="shift alt RIGHT" />
     </action>
     <action id="EditorMoveToPageBottom">
-      <keyboard-shortcut first-keystroke="shift alt PAGE_DOWN" />
+      <keyboard-shortcut first-keystroke="shift alt END" />
     </action>
     <action id="EditorMoveToPageTop">
-      <keyboard-shortcut first-keystroke="shift alt PAGE_UP" />
+      <keyboard-shortcut first-keystroke="shift alt HOME" />
     </action>
     <action id="EditorScrollToCenter" />
     <action id="EditorSelectWord">
@@ -129,6 +130,19 @@
     <action id="EvaluateExpression">
       <keyboard-shortcut first-keystroke="control F9" />
     </action>
+    <action id="ExpandAllToLevel1"/>
+    <action id="ExpandAllToLevel2"/>
+    <action id="ExpandAllToLevel3"/>
+    <action id="ExpandAllToLevel4"/>
+    <action id="ExpandAllToLevel5"/>
+    <action id="ExpandRegionRecursively">
+      <keyboard-shortcut first-keystroke="control MULTIPLY"/>
+    </action>
+    <action id="ExpandToLevel1"/>
+    <action id="ExpandToLevel2"/>
+    <action id="ExpandToLevel3"/>
+    <action id="ExpandToLevel4"/>
+    <action id="ExpandToLevel5"/>
     <action id="ExtractMethod">
       <keyboard-shortcut first-keystroke="shift alt M" />
     </action>
@@ -168,6 +182,9 @@
     <action id="ToggleBookmark9" />
 
     <action id="GotoClass">
+      <keyboard-shortcut first-keystroke="control O" />
+    </action>
+    <action id="GotoChangedFile">
       <keyboard-shortcut first-keystroke="control O" />
     </action>
     <action id="GotoFile">
@@ -213,6 +230,7 @@
     <action id="IntroduceField">
       <keyboard-shortcut first-keystroke="shift alt E" />
     </action>
+    <action id="IntroduceFunctionalParameter"/>
     <action id="IntroduceVariable">
       <keyboard-shortcut first-keystroke="shift alt V" />
     </action>
@@ -227,10 +245,10 @@
       <keyboard-shortcut first-keystroke="control M" />
     </action>
     <action id="MoveStatementDown">
-      <keyboard-shortcut first-keystroke="shift alt DOWN" />
+      <keyboard-shortcut first-keystroke="shift alt PAGE_DOWN" />
     </action>
     <action id="MoveStatementUp">
-      <keyboard-shortcut first-keystroke="shift alt UP" />
+      <keyboard-shortcut first-keystroke="shift alt PAGE_UP" />
     </action>
     <action id="NewElement">
       <keyboard-shortcut first-keystroke="alt INSERT" />
@@ -267,6 +285,7 @@
     <action id="Print">
       <keyboard-shortcut first-keystroke="shift control alt P" />
     </action>
+    <action id="ExpressionTypeInfo"/>
     <action id="QuickImplementations" />
     <action id="RecentChangedFiles" />
     <action id="RecentChanges" />
@@ -347,8 +366,12 @@
     <action id="ValidateXml">
       <keyboard-shortcut first-keystroke="shift alt F9" />
     </action>
-    <action id="MoveLineDown" />
-    <action id="MoveLineUp" />
+    <action id="MoveLineDown">
+      <keyboard-shortcut first-keystroke="shift alt DOWN" />
+    </action>
+    <action id="MoveLineUp">
+      <keyboard-shortcut first-keystroke="shift alt UP" />
+    </action>
     <action id="Vcs.ShowMessageHistory">
       <keyboard-shortcut first-keystroke="control M"/>
       <keyboard-shortcut first-keystroke="shift F4"/>

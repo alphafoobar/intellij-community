@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,15 +21,21 @@ import com.intellij.ide.util.newProjectWizard.AddModuleWizard;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.compiler.CompileContext;
+import com.intellij.openapi.compiler.CompileTask;
+import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.externalSystem.model.ExternalSystemDataKeys;
 import com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
-import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.plugins.gradle.config.GradleResourceCompilerConfigurationGenerator;
+import org.jetbrains.plugins.gradle.service.GradleBuildClasspathManager;
 import org.jetbrains.plugins.gradle.service.project.wizard.GradleProjectImportBuilder;
 import org.jetbrains.plugins.gradle.service.project.wizard.GradleProjectImportProvider;
 import org.jetbrains.plugins.gradle.settings.GradleSettings;
@@ -38,7 +44,6 @@ import org.jetbrains.plugins.gradle.util.GradleConstants;
 
 import javax.swing.event.HyperlinkEvent;
 import java.io.File;
-import java.io.FilenameFilter;
 
 /**
  * @author Vladislav.Soroka
@@ -51,8 +56,28 @@ public class GradleStartupActivity implements StartupActivity {
   private static final String DO_NOT_SHOW_EVENT_DESCRIPTION = "do.not.show";
 
   @Override
-  public void runActivity(@NotNull Project project) {
+  public void runActivity(@NotNull final Project project) {
+    configureBuildClasspath(project);
     showNotificationForUnlinkedGradleProject(project);
+
+    final GradleResourceCompilerConfigurationGenerator buildConfigurationGenerator = new GradleResourceCompilerConfigurationGenerator(project);
+    CompilerManager.getInstance(project).addBeforeTask(new CompileTask() {
+      @Override
+      public boolean execute(CompileContext context) {
+        AccessToken token = ReadAction.start();
+        try {
+          buildConfigurationGenerator.generateBuildConfiguration(context);
+        }
+        finally {
+          token.finish();
+        }
+        return true;
+      }
+    });
+  }
+
+  private static void configureBuildClasspath(@NotNull final Project project) {
+    GradleBuildClasspathManager.getInstance(project).reload();
   }
 
   private static void showNotificationForUnlinkedGradleProject(@NotNull final Project project) {
@@ -64,34 +89,29 @@ public class GradleStartupActivity implements StartupActivity {
     }
 
     File baseDir = VfsUtilCore.virtualToIoFile(project.getBaseDir());
-    final File[] files = baseDir.listFiles(new FilenameFilter() {
-      @Override
-      public boolean accept(File dir, String name) {
-        return FileUtil.namesEqual(GradleConstants.DEFAULT_SCRIPT_NAME, name);
-      }
-    });
-
-    if (files != null && files.length != 0) {
+    final File gradleFile = new File(baseDir, GradleConstants.DEFAULT_SCRIPT_NAME);
+    if (gradleFile.exists()) {
       String message = String.format("%s<br>\n%s",
                                      GradleBundle.message("gradle.notifications.unlinked.project.found.msg", IMPORT_EVENT_DESCRIPTION),
-                                     GradleBundle.message("gradle.notifications.do.not.show", DO_NOT_SHOW_EVENT_DESCRIPTION));
+                                     GradleBundle.message("gradle.notifications.do.not.show"));
 
       GradleNotification.getInstance(project).showBalloon(
         GradleBundle.message("gradle.notifications.unlinked.project.found.title"),
         message, NotificationType.INFORMATION, new NotificationListener.Adapter() {
           @Override
           protected void hyperlinkActivated(@NotNull Notification notification, @NotNull HyperlinkEvent e) {
+            notification.expire();
             if (IMPORT_EVENT_DESCRIPTION.equals(e.getDescription())) {
               final ProjectDataManager projectDataManager = ServiceManager.getService(ProjectDataManager.class);
               GradleProjectImportBuilder gradleProjectImportBuilder = new GradleProjectImportBuilder(projectDataManager);
               final GradleProjectImportProvider gradleProjectImportProvider = new GradleProjectImportProvider(gradleProjectImportBuilder);
-              AddModuleWizard wizard = new AddModuleWizard(null, files[0].getPath(), gradleProjectImportProvider);
+              AddModuleWizard wizard = new AddModuleWizard(null, gradleFile.getPath(), gradleProjectImportProvider);
               if ((wizard.getStepCount() <= 0 || wizard.showAndGet())) {
                 ImportModuleAction.createFromWizard(project, wizard);
               }
             }
             else if (DO_NOT_SHOW_EVENT_DESCRIPTION.equals(e.getDescription())) {
-              PropertiesComponent.getInstance(project).setValue(SHOW_UNLINKED_GRADLE_POPUP, Boolean.FALSE.toString());
+              PropertiesComponent.getInstance(project).setValue(SHOW_UNLINKED_GRADLE_POPUP, false, true);
             }
           }
         }

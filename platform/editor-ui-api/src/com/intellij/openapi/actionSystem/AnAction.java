@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,14 +20,14 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.SmartList;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Represents an entity that has a state, a presentation and can be performed.
@@ -143,9 +143,10 @@ public abstract class AnAction implements PossiblyDumbAware {
   public final void registerCustomShortcutSet(@NotNull ShortcutSet shortcutSet, @Nullable JComponent component){
     myShortcutSet = shortcutSet;
     if (component != null){
-      @SuppressWarnings("unchecked") ArrayList<AnAction> actionList = (ArrayList<AnAction>)component.getClientProperty(ourClientProperty);
+      @SuppressWarnings("unchecked")
+      List<AnAction> actionList = (List<AnAction>)component.getClientProperty(ourClientProperty);
       if (actionList == null){
-        actionList = new ArrayList<AnAction>(1);
+        actionList = new SmartList<AnAction>();
         component.putClientProperty(ourClientProperty, actionList);
       }
       if (!actionList.contains(this)){
@@ -170,7 +171,8 @@ public abstract class AnAction implements PossiblyDumbAware {
 
   public final void unregisterCustomShortcutSet(JComponent component){
     if (component != null){
-      @SuppressWarnings("unchecked") ArrayList<AnAction> actionList = (ArrayList<AnAction>)component.getClientProperty(ourClientProperty);
+      @SuppressWarnings("unchecked")
+      List<AnAction> actionList = (List<AnAction>)component.getClientProperty(ourClientProperty);
       if (actionList != null){
         actionList.remove(this);
       }
@@ -272,13 +274,6 @@ public abstract class AnAction implements PossiblyDumbAware {
   }
 
   /**
-   * @deprecated Use KeymapUtil.createTooltipText()
-   */
-  public static String createTooltipText(String s, @NotNull AnAction action) {
-    throw new IncorrectOperationException("Please use KeymapUtil.createTooltipText()");
-  }
-
-  /**
    * Sets the flag indicating whether the action has an internal or a user-customized icon.
    * @param isDefaultIconSet true if the icon is internal, false if the icon is customized by the user.
    */
@@ -294,6 +289,10 @@ public abstract class AnAction implements PossiblyDumbAware {
     return myIsDefaultIcon;
   }
 
+  /**
+   * Enables automatic detection of injected fragments in editor. Values in DataContext, passed to the action, like EDITOR, PSI_FILE
+   * will refer to an injected fragment, if caret is currently positioned on it.
+   */
   public void setInjectedContext(boolean worksInInjected) {
     myWorksInInjected = worksInInjected;
   }

@@ -31,7 +31,7 @@ import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.arrangement.Rearranger;
 import com.intellij.psi.codeStyle.arrangement.group.ArrangementGroupingRule;
-import com.intellij.psi.codeStyle.arrangement.match.StdArrangementMatchRule;
+import com.intellij.psi.codeStyle.arrangement.match.ArrangementSectionRule;
 import com.intellij.psi.codeStyle.arrangement.std.*;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.ui.GridBag;
@@ -42,6 +42,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 
@@ -78,8 +79,9 @@ public abstract class ArrangementSettingsPanel extends CodeStyleAbstractPanel {
     ArrangementStandardSettingsManager settingsManager = new ArrangementStandardSettingsManager(mySettingsAware, colorsProvider);
 
     myGroupingRulesPanel = new ArrangementGroupingRulesPanel(settingsManager, colorsProvider);
-    myMatchingRulesPanel = new ArrangementMatchingRulesPanel(settingsManager, colorsProvider);
+    myMatchingRulesPanel = new ArrangementMatchingRulesPanel(myLanguage, settingsManager, colorsProvider);
 
+    myContent.setBorder(BorderFactory.createEmptyBorder(0, 10, 10, 10));
     myContent.add(myGroupingRulesPanel, new GridBag().coverLine().fillCellHorizontally().weightx(1));
     myContent.add(myMatchingRulesPanel, new GridBag().fillCell().weightx(1).weighty(1).coverLine());
 
@@ -139,8 +141,10 @@ public abstract class ArrangementSettingsPanel extends CodeStyleAbstractPanel {
 
   @Override
   public void apply(CodeStyleSettings settings) {
+    myMatchingRulesPanel.hideEditor();
+
     CommonCodeStyleSettings commonSettings = settings.getCommonSettings(myLanguage);
-    commonSettings.setArrangementSettings(new StdRulePriorityAwareSettings(myGroupingRulesPanel.getRules(), myMatchingRulesPanel.getRules()));
+    commonSettings.setArrangementSettings(createSettings());
     if (myForceArrangementPanel != null) {
       commonSettings.FORCE_REARRANGE_MODE = myForceArrangementPanel.getRearrangeMode();
     }
@@ -148,9 +152,19 @@ public abstract class ArrangementSettingsPanel extends CodeStyleAbstractPanel {
 
   @Override
   public boolean isModified(CodeStyleSettings settings) {
-    StdArrangementSettings s = new StdRulePriorityAwareSettings(myGroupingRulesPanel.getRules(), myMatchingRulesPanel.getRules());
+    final StdArrangementSettings s = createSettings();
     return !Comparing.equal(getSettings(settings), s)
            || myForceArrangementPanel != null && settings.getCommonSettings(myLanguage).FORCE_REARRANGE_MODE != myForceArrangementPanel.getRearrangeMode();
+  }
+
+  private StdArrangementSettings createSettings() {
+    final List<ArrangementGroupingRule> groupingRules = myGroupingRulesPanel.getRules();
+    final List<ArrangementSectionRule> sections = myMatchingRulesPanel.getSections();
+    final Collection<StdArrangementRuleAliasToken> tokens = myMatchingRulesPanel.getRulesAliases();
+    if (tokens != null) {
+      return new StdArrangementExtendableSettings(groupingRules, sections, tokens);
+    }
+    return new StdArrangementSettings(groupingRules, sections);
   }
 
   @Override
@@ -158,14 +172,16 @@ public abstract class ArrangementSettingsPanel extends CodeStyleAbstractPanel {
     StdArrangementSettings s = getSettings(settings);
     if (s == null) {
       myGroupingRulesPanel.setRules(null);
-      myMatchingRulesPanel.setRules(null);
+      myMatchingRulesPanel.setSections(null);
     }
     else {
       List<ArrangementGroupingRule> groupings = s.getGroupings();
-      if (!groupings.isEmpty()) {
-        myGroupingRulesPanel.setRules(ContainerUtilRt.newArrayList(groupings));
+      myGroupingRulesPanel.setRules(ContainerUtilRt.newArrayList(groupings));
+      myMatchingRulesPanel.setSections(copy(s.getSections()));
+      if (s instanceof StdArrangementExtendableSettings) {
+        myMatchingRulesPanel.setRulesAliases(((StdArrangementExtendableSettings)s).getRuleAliases());
       }
-      myMatchingRulesPanel.setRules(copy(s.getRules()));
+
       if (myForceArrangementPanel != null) {
         myForceArrangementPanel.setSelectedMode(settings.getCommonSettings(myLanguage).FORCE_REARRANGE_MODE);
       }
@@ -173,9 +189,9 @@ public abstract class ArrangementSettingsPanel extends CodeStyleAbstractPanel {
   }
 
   @NotNull
-  private static List<StdArrangementMatchRule> copy(@NotNull List<StdArrangementMatchRule> rules) {
-    List<StdArrangementMatchRule> result = new ArrayList<StdArrangementMatchRule>();
-    for (StdArrangementMatchRule rule : rules) {
+  private static List<ArrangementSectionRule> copy(@NotNull List<ArrangementSectionRule> rules) {
+    List<ArrangementSectionRule> result = new ArrayList<ArrangementSectionRule>();
+    for (ArrangementSectionRule rule : rules) {
       result.add(rule.clone());
     }
     return result;

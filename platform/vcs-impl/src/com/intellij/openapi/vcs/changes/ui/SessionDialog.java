@@ -21,6 +21,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.CommitSession;
+import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.util.Alarm;
 import org.jetbrains.annotations.Nullable;
 
@@ -40,15 +41,22 @@ public class SessionDialog extends DialogWrapper {
 
   public SessionDialog(String title, Project project,
                        CommitSession session, List<Change> changes,
-                       String commitMessage) {
+                       String commitMessage, @Nullable JComponent configurationComponent) {
     super(project, true);
     mySession = session;
     myChanges = changes;
     myCommitMessage = commitMessage;
-    myConfigurationComponent = createConfigurationUI(mySession, myChanges, myCommitMessage);
+    myConfigurationComponent =
+      configurationComponent == null ? createConfigurationUI(mySession, myChanges, myCommitMessage) : configurationComponent;
     setTitle(CommitChangeListDialog.trimEllipsis(title));
     init();
     updateButtons();
+  }
+
+  public SessionDialog(String title, Project project,
+                       CommitSession session, List<Change> changes,
+                       String commitMessage) {
+    this(title, project, session, changes, commitMessage, null);
   }
 
   public static JComponent createConfigurationUI(final CommitSession session, final List<Change> changes, final String commitMessage) {
@@ -68,7 +76,7 @@ public class SessionDialog extends DialogWrapper {
 
   @Override
   public JComponent getPreferredFocusedComponent() {
-    return myConfigurationComponent;
+    return IdeFocusTraversalPolicy.getPreferredFocusedComponent(myConfigurationComponent);
   }
 
   private void updateButtons() {

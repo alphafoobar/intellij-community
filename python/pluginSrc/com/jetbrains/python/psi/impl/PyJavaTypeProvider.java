@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.jetbrains.python.psi.impl;
 
 import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
 import com.intellij.util.Processor;
 import com.jetbrains.python.psi.PyFunction;
@@ -65,7 +66,9 @@ public class PyJavaTypeProvider extends PyTypeProviderBase {
     return null;
   }
 
-  public PyType getParameterType(@NotNull final PyNamedParameter param, @NotNull final PyFunction func, @NotNull TypeEvalContext context) {
+  public Ref<PyType> getParameterType(@NotNull final PyNamedParameter param,
+                                      @NotNull final PyFunction func,
+                                      @NotNull TypeEvalContext context) {
     if (!(param.getParent() instanceof PyParameterList)) return null;
     List<PyNamedParameter> params = ParamHelper.collectNamedParameters((PyParameterList) param.getParent());
     final int index = params.indexOf(param);
@@ -91,7 +94,10 @@ public class PyJavaTypeProvider extends PyTypeProviderBase {
       }
     });
     if (superMethodParameterTypes.size() > 0) {
-      return superMethodParameterTypes.get(0);
+      final PyType type = superMethodParameterTypes.get(0);
+      if (type != null) {
+        return Ref.create(type);
+      }
     }
     return null;
   }

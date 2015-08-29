@@ -18,15 +18,23 @@ package org.jetbrains.idea.devkit.run;
 import com.intellij.execution.JUnitPatcher;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.ParametersList;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.projectRoots.JavaSdkType;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.lang.UrlClassLoader;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.devkit.module.PluginModuleType;
 import org.jetbrains.idea.devkit.projectRoots.IdeaJdk;
 import org.jetbrains.idea.devkit.projectRoots.Sandbox;
 import org.jetbrains.idea.devkit.util.DescriptorUtil;
+import org.jetbrains.idea.devkit.util.PsiUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,8 +44,23 @@ import java.io.IOException;
  * Date: Mar 4, 2005
  */
 public class JUnitDevKitPatcher extends JUnitPatcher{
+  public static final String JAVA_SYSTEM_CLASS_LOADER_PROPERTY = "java.system.class.loader";
 
-  public void patchJavaParameters(@Nullable Module module, JavaParameters javaParameters) {
+  public void patchJavaParameters(@Nullable final Module module, JavaParameters javaParameters) {
+    if (module != null && PsiUtil.isIdeaProject(module.getProject()) &&
+        !javaParameters.getVMParametersList().hasParameter(JAVA_SYSTEM_CLASS_LOADER_PROPERTY)) {
+      final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(module.getProject());
+      final String qualifiedName = UrlClassLoader.class.getName();
+      final PsiClass urlLoaderClass = ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>() {
+        @Override
+        public PsiClass compute() {
+          return psiFacade.findClass(qualifiedName, GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module));
+        }
+      });
+      if (urlLoaderClass != null) {
+        javaParameters.getVMParametersList().add("-D" + JAVA_SYSTEM_CLASS_LOADER_PROPERTY + "=" + UrlClassLoader.class.getName());
+      }
+    }
     Sdk jdk = javaParameters.getJdk();
     jdk = IdeaJdk.findIdeaJdk(jdk);
     if (jdk == null) return;
@@ -53,13 +76,15 @@ public class JUnitDevKitPatcher extends JUnitPatcher{
       }
     }
 
-    final String sandboxHome = getSandboxPath(jdk);
+    final File sandboxHome = getSandboxPath(jdk);
     if (sandboxHome != null) {
       if (!vm.hasProperty("idea.home.path")) {
-        vm.defineProperty("idea.home.path", sandboxHome + File.separator + "test");
+        File homeDir = new File(sandboxHome, "test");
+        FileUtil.createDirectory(homeDir);
+        vm.defineProperty("idea.home.path", homeDir.getAbsolutePath());
       }
       if (!vm.hasProperty("idea.plugins.path")) {
-        vm.defineProperty("idea.plugins.path", sandboxHome + File.separator + "plugins");
+        vm.defineProperty("idea.plugins.path", new File(sandboxHome, "plugins").getAbsolutePath());
       }
     }
 
@@ -69,16 +94,16 @@ public class JUnitDevKitPatcher extends JUnitPatcher{
   }
 
   @Nullable
-  private static String getSandboxPath(final Sdk jdk) {
+  private static File getSandboxPath(final Sdk jdk) {
     String sandboxHome = ((Sandbox)jdk.getSdkAdditionalData()).getSandboxHome();
     if (sandboxHome != null) {
       try {
-        sandboxHome = new File(sandboxHome).getCanonicalPath();
+        return new File(sandboxHome).getCanonicalFile();
       }
       catch (IOException e) {
-        sandboxHome = new File(sandboxHome).getAbsolutePath();
+        return new File(sandboxHome).getAbsoluteFile();
       }
     }
-    return sandboxHome;
+    return null;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,19 +28,20 @@ import org.jetbrains.annotations.Nullable;
  */
 public class MacHelpUtil {
   static boolean invokeHelp(@NonNls @Nullable String id) {
-    id = id == null || "top".equals(id) ? "startpage" : id;
+    if (id == null || "top".equals(id)) id = "startpage";
 
-    final ID mainBundle = Foundation.invoke("NSBundle", "mainBundle");
-    final ID helpBundle = Foundation.invoke(mainBundle, "objectForInfoDictionaryKey:", Foundation.nsString("CFBundleHelpBookName"));
+    ID mainBundle = Foundation.invoke("NSBundle", "mainBundle");
+    ID helpBundle = Foundation.invoke(mainBundle, "objectForInfoDictionaryKey:", Foundation.nsString("CFBundleHelpBookName"));
     if (helpBundle.equals(ID.NIL)) {
       return false;
     }
-    final ID helpManager = Foundation.invoke("NSHelpManager", "sharedHelpManager");
+
+    ID helpManager = Foundation.invoke("NSHelpManager", "sharedHelpManager");
     Foundation.invoke(helpManager, "openHelpAnchor:inBook:", Foundation.nsString(id), helpBundle);
     return true;
   }
 
   static boolean isApplicable() {
-    return SystemInfo.isMac && Registry.is("ide.mac.show.native.help", false) && !PlatformUtils.isCidr() && !PlatformUtils.isCommunity();
+    return SystemInfo.isMac && Registry.is("ide.mac.show.native.help") && !PlatformUtils.isCidr() && !PlatformUtils.isIdeaCommunity();
   }
 }

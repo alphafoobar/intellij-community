@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package com.intellij.execution.impl;
 
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.ide.ui.LafManager;
+import com.intellij.ide.ui.LafManagerListener;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.lexer.Lexer;
 import com.intellij.openapi.application.ApplicationManager;
@@ -36,12 +38,15 @@ import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.util.containers.FactoryMap;
+import com.intellij.util.containers.ConcurrentFactoryMap;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
-import java.util.*;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static com.intellij.execution.ui.ConsoleViewContentType.registerNewConsoleViewType;
 
@@ -60,8 +65,9 @@ public class ConsoleViewUtil {
     return editor;
   }
 
-  public static void setupConsoleEditor(final EditorEx editor, final boolean foldingOutlineShown, final boolean lineMarkerAreaShown) {
+  public static void setupConsoleEditor(@NotNull final EditorEx editor, final boolean foldingOutlineShown, final boolean lineMarkerAreaShown) {
     ApplicationManager.getApplication().runReadAction(new Runnable() {
+      @Override
       public void run() {
         editor.setSoftWrapAppliancePlace(SoftWrapAppliancePlaces.CONSOLE);
 
@@ -73,6 +79,9 @@ public class ConsoleViewUtil {
         editorSettings.setAdditionalPageAtBottom(false);
         editorSettings.setAdditionalColumnsCount(0);
         editorSettings.setAdditionalLinesCount(0);
+        editorSettings.setRightMarginShown(false);
+        editorSettings.setCaretRowShown(false);
+        editor.getGutterComponentEx().setPaintBackground(false);
 
         editor.putUserData(EDITOR_IS_CONSOLE_VIEW, true);
 
@@ -81,13 +90,12 @@ public class ConsoleViewUtil {
           scheme.setEditorFontSize(UISettings.getInstance().PRESENTATION_MODE_FONT_SIZE);
         }
         editor.setColorsScheme(scheme);
-        scheme.setColor(EditorColors.CARET_ROW_COLOR, null);
-        scheme.setColor(EditorColors.RIGHT_MARGIN_COLOR, null);
       }
     });
   }
 
-  public static DelegateColorScheme updateConsoleColorScheme(EditorColorsScheme scheme) {
+  @NotNull
+  public static DelegateColorScheme updateConsoleColorScheme(@NotNull EditorColorsScheme scheme) {
     return new DelegateColorScheme(scheme) {
       @NotNull
       @Override
@@ -129,29 +137,58 @@ public class ConsoleViewUtil {
     };
   }
 
-  public static boolean isConsoleViewEditor(Editor editor) {
+  public static boolean isConsoleViewEditor(@NotNull Editor editor) {
     return editor.getUserData(EDITOR_IS_CONSOLE_VIEW) == Boolean.TRUE;
   }
 
-  // @noinspection MismatchedQueryAndUpdateOfCollection
-  private static final Map<List<TextAttributesKey>, Key> ourContentTypes = Collections.synchronizedMap(new FactoryMap<List<TextAttributesKey>, Key>() {
-    protected Key create(List<TextAttributesKey> keys) {
-      EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-      TextAttributes result = scheme.getAttributes(HighlighterColors.TEXT);
-      StringBuilder keyName = new StringBuilder("Generated_");
-      for (TextAttributesKey key : keys) {
-        TextAttributes attributes = scheme.getAttributes(key);
-        if (attributes != null) {
-          keyName.append("_").append(key.getExternalName());
-          result = TextAttributes.merge(result, attributes);
+  @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
+  private static class ColorCache {
+    static {
+      LafManager.getInstance().addLafManagerListener(new LafManagerListener() {
+        @Override
+        public void lookAndFeelChanged(LafManager source) {
+          mergedTextAttributes.clear();
         }
-      }
-      Key newKey = new Key(keyName.toString());
-      ConsoleViewContentType contentType = new ConsoleViewContentType(keyName.toString(), result);
-      registerNewConsoleViewType(newKey, contentType);
-      return newKey;
+      });
     }
-  });
+    static final Map<Key, List<TextAttributesKey>> textAttributeKeys = ContainerUtil.newConcurrentMap();
+    static final Map<Key, TextAttributes> mergedTextAttributes = new ConcurrentFactoryMap<Key, TextAttributes>() {
+      @Nullable
+      @Override
+      protected TextAttributes create(Key contentKey) {
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        TextAttributes result = scheme.getAttributes(HighlighterColors.TEXT);
+        for (TextAttributesKey key : textAttributeKeys.get(contentKey)) {
+          TextAttributes attributes = scheme.getAttributes(key);
+          if (attributes != null) {
+            result = TextAttributes.merge(result, attributes);
+          }
+        }
+        return result;
+      }
+    };
+
+    static final Map<List<TextAttributesKey>, Key> keys = new ConcurrentFactoryMap<List<TextAttributesKey>, Key>() {
+      @Override
+      protected Key create(List<TextAttributesKey> keys) {
+        StringBuilder keyName = new StringBuilder("ConsoleViewUtil_");
+        for (TextAttributesKey key : keys) {
+          keyName.append("_").append(key.getExternalName());
+        }
+        final Key newKey = new Key(keyName.toString());
+        textAttributeKeys.put(newKey, keys);
+        ConsoleViewContentType contentType = new ConsoleViewContentType(keyName.toString(), HighlighterColors.TEXT) {
+          @Override
+          public TextAttributes getAttributes() {
+            return mergedTextAttributes.get(newKey);
+          }
+        };
+
+        registerNewConsoleViewType(newKey, contentType);
+        return newKey;
+      }
+    };
+  }
 
   public static void printWithHighlighting(@NotNull ConsoleView console, @NotNull String text, @NotNull SyntaxHighlighter highlighter) {
     Lexer lexer = highlighter.getHighlightingLexer();
@@ -159,12 +196,16 @@ public class ConsoleViewUtil {
 
     IElementType tokenType;
     while ((tokenType = lexer.getTokenType()) != null) {
-      TextAttributesKey[] keys = highlighter.getTokenHighlights(tokenType);
-      ConsoleViewContentType type = keys.length == 0 ? ConsoleViewContentType.NORMAL_OUTPUT :
-                                    ConsoleViewContentType.getConsoleViewType(ourContentTypes.get(Arrays.asList(keys)));
-      console.print(lexer.getTokenText(), type);
+      console.print(lexer.getTokenText(), getContentTypeForToken(tokenType, highlighter));
       lexer.advance();
     }
+  }
+
+  @NotNull
+  public static ConsoleViewContentType getContentTypeForToken(@NotNull IElementType tokenType, @NotNull SyntaxHighlighter highlighter) {
+    TextAttributesKey[] keys = highlighter.getTokenHighlights(tokenType);
+    return keys.length == 0 ? ConsoleViewContentType.NORMAL_OUTPUT :
+           ConsoleViewContentType.getConsoleViewType(ColorCache.keys.get(Arrays.asList(keys)));
   }
 
   public static void printAsFileType(@NotNull ConsoleView console, @NotNull String text, @NotNull FileType fileType) {

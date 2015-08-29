@@ -26,14 +26,13 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.InputValidatorEx;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
-import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.generate.tostring.util.StringUtil;
 
 /**
  * @author peter
@@ -48,29 +47,21 @@ public class EditContractIntention extends BaseIntentionAction {
 
   @Nullable
   private static PsiMethod getTargetMethod(@NotNull Project project, Editor editor, PsiFile file) {
-    PsiElement element = file.findElementAt(editor.getCaretModel().getOffset());
-    if (element == null) return null;
-    if (!PsiUtil.isLanguageLevel5OrHigher(element)) return null;
-    if (!element.getManager().isInProject(element) || CodeStyleSettingsManager.getSettings(project).USE_EXTERNAL_ANNOTATIONS) {
-      final PsiModifierListOwner owner = AddAnnotationPsiFix.getContainer(element);
-      if (owner instanceof PsiMethod) {
-        PsiElement original = owner.getOriginalElement();
-        if (original instanceof PsiMethod) {
-          return (PsiMethod)original;
-        }
-        return (PsiMethod)owner;
-      }
+    final PsiModifierListOwner owner =  AddAnnotationPsiFix.getContainer(file, editor.getCaretModel().getOffset());
+    if (owner instanceof PsiMethod &&
+        (!owner.getManager().isInProject(owner) || CodeStyleSettingsManager.getSettings(project).USE_EXTERNAL_ANNOTATIONS)) {
+      PsiElement original = owner.getOriginalElement();
+      return original instanceof PsiMethod ? (PsiMethod)original : (PsiMethod)owner;
     }
     return null;
   }
-
 
   @Override
   public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
     final PsiMethod method = getTargetMethod(project, editor, file);
     if (method != null) {
       boolean hasContract = ControlFlowAnalyzer.findContractAnnotation(method) != null;
-      setText(hasContract ? "Edit method contract" : "Add method contract");
+      setText(hasContract ? "Edit method contract of '" + method.getName() + "'" : "Add method contract to '" + method.getName() + "'");
       return true;
     }
     return false;
@@ -92,7 +83,7 @@ public class EditContractIntention extends BaseIntentionAction {
       public String getErrorText(String inputString) {
         if (StringUtil.isEmpty(inputString)) return null;
 
-        return DataFlowInspectionBase.checkContract(method, inputString);
+        return ContractInspection.checkContract(method, inputString);
       }
 
       @Override
@@ -111,7 +102,7 @@ public class EditContractIntention extends BaseIntentionAction {
     try {
       ExternalAnnotationsManager manager = ExternalAnnotationsManager.getInstance(project);
       manager.deannotate(method, ControlFlowAnalyzer.ORG_JETBRAINS_ANNOTATIONS_CONTRACT);
-      if (StringUtil.isNotEmpty(newContract)) {
+      if (!StringUtil.isEmpty(newContract)) {
         PsiAnnotation mockAnno = JavaPsiFacade.getElementFactory(project).createAnnotationFromText("@Foo(\"" + newContract + "\")", null);
         manager.annotateExternally(method, ControlFlowAnalyzer.ORG_JETBRAINS_ANNOTATIONS_CONTRACT, file,
                                    mockAnno.getParameterList().getAttributes());

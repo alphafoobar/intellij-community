@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
 public class JavaDocUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.javadoc.JavaDocUtil");
 
-  private static final @NonNls Pattern ourTypePattern = Pattern.compile("[ ]+[^ ^\\[^\\]]");
+  @NonNls private static final Pattern ourTypePattern = Pattern.compile("[ ]+[^ ^\\[^\\]]");
 
   private JavaDocUtil() {
   }
@@ -65,6 +65,11 @@ public class JavaDocUtil {
 
   @Nullable
   public static PsiElement findReferenceTarget(PsiManager manager, String refText, PsiElement context) {
+    return findReferenceTarget(manager, refText, context, true);
+  }
+
+  @Nullable
+  public static PsiElement findReferenceTarget(PsiManager manager, String refText, PsiElement context, boolean useNavigationElement) {
     LOG.assertTrue(context == null || context.isValid());
 
     int poundIndex = refText.indexOf('#');
@@ -74,20 +79,23 @@ public class JavaDocUtil {
 
       if (aClass == null) aClass = facade.findClass(refText, context.getResolveScope());
 
-      if (aClass != null) return aClass.getNavigationElement();
+      if (aClass != null) {
+        return useNavigationElement ? aClass.getNavigationElement() : aClass;
+      }
       PsiPackage aPackage = facade.findPackage(refText);
       if (aPackage!=null) return aPackage;
       return null;
     }
     else {
       String classRef = refText.substring(0, poundIndex).trim();
-      if (classRef.length() > 0) {
+      if (!classRef.isEmpty()) {
         PsiClass aClass = facade.getResolveHelper().resolveReferencedClass(classRef, context);
 
         if (aClass == null) aClass = facade.findClass(classRef, context.getResolveScope());
 
         if (aClass == null) return null;
-        return findReferencedMember(aClass, refText.substring(poundIndex + 1), context);
+        PsiElement member = findReferencedMember(aClass, refText.substring(poundIndex + 1), context);
+        return useNavigationElement && member != null ? member.getNavigationElement() : member;
       }
       else {
         String memberRefText = refText.substring(1);
@@ -96,7 +104,9 @@ public class JavaDocUtil {
           if (scope instanceof PsiFile) break;
           if (scope instanceof PsiClass) {
             PsiElement member = findReferencedMember((PsiClass)scope, memberRefText, context);
-            if (member != null) return member;
+            if (member != null) {
+              return useNavigationElement ? member.getNavigationElement() :  member;
+            }
           }
           scope = scope.getParent();
         }
@@ -111,12 +121,12 @@ public class JavaDocUtil {
     if (parenthIndex < 0) {
       String name = memberRefText;
       PsiField field = aClass.findFieldByName(name, true);
-      if (field != null) return field.getNavigationElement();
+      if (field != null) return field;
       PsiClass inner = aClass.findInnerClassByName(name, true);
-      if (inner != null) return inner.getNavigationElement();
+      if (inner != null) return inner;
       PsiMethod[] methods = aClass.getAllMethods();
       for (PsiMethod method : methods) {
-        if (method.getName().equals(name)) return method.getNavigationElement();
+        if (method.getName().equals(name)) return method;
       }
       return null;
     }
@@ -127,7 +137,7 @@ public class JavaDocUtil {
       
       String parmsText = memberRefText.substring(parenthIndex + 1, rparenIndex).trim();
       StringTokenizer tokenizer = new StringTokenizer(parmsText.replaceAll("[*]", ""), ",");
-      PsiType[] types = new PsiType[tokenizer.countTokens()];
+      PsiType[] types = PsiType.createArray(tokenizer.countTokens());
       int i = 0;
       PsiElementFactory factory = JavaPsiFacade.getInstance(aClass.getProject()).getElementFactory();
       while (tokenizer.hasMoreTokens()) {
@@ -169,9 +179,9 @@ public class JavaDocUtil {
         int hashIndex = memberRefText.indexOf('#',rparenIndex);
         if (hashIndex != -1) {
           int parameterNumber = Integer.parseInt(memberRefText.substring(hashIndex + 1));
-          if (parameterNumber < parms.length) return method.getParameterList().getParameters()[parameterNumber].getNavigationElement();
+          if (parameterNumber < parms.length) return method.getParameterList().getParameters()[parameterNumber];
         }
-        return method.getNavigationElement();
+        return method;
       }
       return null;
     }
@@ -230,8 +240,8 @@ public class JavaDocUtil {
       return buffer.toString();
     }
     else if (element instanceof PsiParameter) {
-      final PsiMethod method = PsiTreeUtil.getParentOfType(element, PsiMethod.class);
-      if (method != null) {
+      final PsiElement method = ((PsiParameter)element).getDeclarationScope();
+      if (method instanceof PsiMethod) {
         return getReferenceText(project, method) +
                "#"+
                ((PsiParameterList)element.getParent()).getParameterIndex((PsiParameter)element);
@@ -262,7 +272,7 @@ public class JavaDocUtil {
   }
 
   public static String getLabelText(Project project, PsiManager manager, String refText, PsiElement context) {
-    PsiElement refElement = findReferenceTarget(manager, refText, context);
+    PsiElement refElement = findReferenceTarget(manager, refText, context, false);
     if (refElement == null) {
       return refText.replaceFirst("^#", "").replaceAll("#", ".");
     }
@@ -290,7 +300,7 @@ public class JavaDocUtil {
       String classRef = refText.substring(0, poundIndex).trim();
       String memberText = refText.substring(poundIndex + 1);
       String memberLabel = getMemberLabelText(project, manager, memberText, context);
-      if (classRef.length() > 0) {
+      if (!classRef.isEmpty()) {
         PsiElement refClass = findReferenceTarget(manager, classRef, context);
         if (refClass instanceof PsiClass) {
           PsiElement scope = context;
@@ -363,4 +373,7 @@ public class JavaDocUtil {
     return list == null ? PsiClassType.EMPTY_ARRAY : list.getReferencedTypes();
   }
 
+  public static boolean isInsidePackageInfo(@Nullable PsiDocComment containingComment) {
+    return containingComment != null && containingComment.getOwner() == null && containingComment.getParent() instanceof PsiJavaFile;
+  }
 }

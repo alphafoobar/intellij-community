@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ class PyDocumentationBuilder {
     PsiElement outer = null;
     boolean is_property = false;
     String accessor_kind = "None";
-    final TypeEvalContext context = TypeEvalContext.userInitiated(myElement.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(myElement.getProject(), myElement.getContainingFile());
     if (myOriginalElement != null) {
       String elementName = myOriginalElement.getText();
       if (PyUtil.isPythonIdentifier(elementName)) {
@@ -95,11 +95,11 @@ class PyDocumentationBuilder {
             PyType type = context.getType(qual);
             if (type instanceof PyClassType) {
               cls = ((PyClassType)type).getPyClass();
-              Property property = cls.findProperty(elementName);
+              Property property = cls.findProperty(elementName, true, null);
               if (property != null) {
                 is_property = true;
                 final AccessDirection dir = AccessDirection.of((PyElement)outer);
-                Maybe<Callable> accessor = property.getByDirection(dir);
+                Maybe<PyCallable> accessor = property.getByDirection(dir);
                 myProlog
                   .addItem("property ").addWith(TagBold, $().addWith(TagCode, $(elementName)))
                   .addItem(" of ").add(PythonDocumentationProvider.describeClass(cls, TagCode, true, true))
@@ -108,7 +108,7 @@ class PyDocumentationBuilder {
                   myBody.addItem(": ").addItem(property.getDoc()).addItem(BR);
                 }
                 else {
-                  final Callable getter = property.getGetter().valueOrNull();
+                  final PyCallable getter = property.getGetter().valueOrNull();
                   if (getter != null && getter != myElement && getter instanceof PyFunction) {
                     // not in getter, getter's doc comment may be useful
                     PyStringLiteralExpression docstring = ((PyFunction)getter).getDocStringExpression();
@@ -293,7 +293,7 @@ class PyDocumentationBuilder {
     if (cls != null && meth_name != null) {
       final boolean is_constructor = PyNames.INIT.equals(meth_name);
       // look for inherited and its doc
-      Iterable<PyClass> classes = cls.getAncestorClasses();
+      Iterable<PyClass> classes = cls.getAncestorClasses(null);
       if (is_constructor) {
         // look at our own class again and maybe inherit class's doc
         classes = new ChainIterable<PyClass>(cls).add(classes);

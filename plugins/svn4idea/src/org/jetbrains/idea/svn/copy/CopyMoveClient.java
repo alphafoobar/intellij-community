@@ -3,9 +3,9 @@ package org.jetbrains.idea.svn.copy;
 import com.intellij.openapi.vcs.VcsException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.svn.api.ProgressTracker;
 import org.jetbrains.idea.svn.api.SvnClient;
-import org.jetbrains.idea.svn.commandLine.CommitEventHandler;
-import org.tmatesoft.svn.core.wc.ISVNEventHandler;
+import org.jetbrains.idea.svn.checkin.CommitEventHandler;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 
@@ -23,6 +23,7 @@ public interface CopyMoveClient extends SvnClient {
    * @param destination
    * @param revision
    * @param makeParents
+   * @param isMove
    * @param message
    * @param handler
    * @return new revision number
@@ -32,6 +33,7 @@ public interface CopyMoveClient extends SvnClient {
             @NotNull SvnTarget destination,
             @Nullable SVNRevision revision,
             boolean makeParents,
+            boolean isMove,
             @NotNull String message,
             @Nullable CommitEventHandler handler) throws VcsException;
 
@@ -39,5 +41,5 @@ public interface CopyMoveClient extends SvnClient {
             @NotNull File destination,
             @Nullable SVNRevision revision,
             boolean makeParents,
-            @Nullable ISVNEventHandler handler) throws VcsException;
+            @Nullable ProgressTracker handler) throws VcsException;
 }

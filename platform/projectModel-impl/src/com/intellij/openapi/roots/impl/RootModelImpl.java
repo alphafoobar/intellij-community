@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.openapi.CompositeDisposable;
@@ -93,24 +92,19 @@ public class RootModelImpl extends RootModelBase implements ModifiableRootModel 
   RootModelImpl(@NotNull Element element,
                 @NotNull ModuleRootManagerImpl moduleRootManager,
                 ProjectRootManagerImpl projectRootManager,
-                VirtualFilePointerManager filePointerManager) throws InvalidDataException {
+                VirtualFilePointerManager filePointerManager, boolean writable) throws InvalidDataException {
     myProjectRootManager = projectRootManager;
     myFilePointerManager = filePointerManager;
     myModuleRootManager = moduleRootManager;
 
     myModuleLibraryTable = new ModuleLibraryTable(this, myProjectRootManager);
 
-    final List contentChildren = element.getChildren(ContentEntryImpl.ELEMENT_NAME);
-    for (Object aContentChildren : contentChildren) {
-      Element child = (Element)aContentChildren;
-      ContentEntryImpl contentEntry = new ContentEntryImpl(child, this);
-      myContent.add(contentEntry);
+    for (Element child : element.getChildren(ContentEntryImpl.ELEMENT_NAME)) {
+      myContent.add(new ContentEntryImpl(child, this));
     }
 
-    final List orderElements = element.getChildren(OrderEntryFactory.ORDER_ENTRY_ELEMENT_NAME);
     boolean moduleSourceAdded = false;
-    for (Object orderElement : orderElements) {
-      Element child = (Element)orderElement;
+    for (Element child : element.getChildren(OrderEntryFactory.ORDER_ENTRY_ELEMENT_NAME)) {
       final OrderEntry orderEntry = OrderEntryFactory.createOrderEntryByElement(child, this, myProjectRootManager);
       if (orderEntry instanceof ModuleSourceOrderEntry) {
         if (moduleSourceAdded) continue;
@@ -123,8 +117,7 @@ public class RootModelImpl extends RootModelBase implements ModifiableRootModel 
       myOrderEntries.add(new ModuleSourceOrderEntryImpl(this));
     }
 
-
-    myWritable = true;
+    myWritable = writable;
 
     RootModelImpl originalRootModel = moduleRootManager.getRootModel();
     for (ModuleExtension extension : originalRootModel.myExtensions) {
@@ -214,6 +207,8 @@ public class RootModelImpl extends RootModelBase implements ModifiableRootModel 
     LOG.assertTrue(myContent.contains(entry));
     if (entry instanceof RootModelComponentBase) {
       Disposer.dispose((RootModelComponentBase)entry);
+      RootModelImpl entryModel = ((RootModelComponentBase)entry).getRootModel();
+      LOG.assertTrue(entryModel == this, "Removing from " + this + " content entry obtained from " + entryModel);
     }
     myContent.remove(entry);
   }
@@ -351,17 +346,17 @@ public class RootModelImpl extends RootModelBase implements ModifiableRootModel 
       getSourceModel().setOrderEntriesFrom(this);
     }
 
+    for (ModuleExtension extension : myExtensions) {
+      if (extension.isChanged()) {
+        extension.commit();
+      }
+    }
+
     if (areContentEntriesChanged()) {
       getSourceModel().removeAllContentEntries();
       for (ContentEntry contentEntry : myContent) {
         ContentEntry cloned = ((ClonableContentEntry)contentEntry).cloneEntry(getSourceModel());
         getSourceModel().myContent.add(cloned);
-      }
-    }
-
-    for (ModuleExtension extension : myExtensions) {
-      if (extension.isChanged()) {
-        extension.commit();
       }
     }
   }
@@ -730,6 +725,15 @@ public class RootModelImpl extends RootModelBase implements ModifiableRootModel 
   private RootModelImpl getSourceModel() {
     assertWritable();
     return myModuleRootManager.getRootModel();
+  }
+
+  @Override
+  public String toString() {
+    return "RootModelImpl{" +
+           "module=" + getModule().getName() +
+           ", writable=" + myWritable +
+           ", disposed=" + myDisposed +
+           '}';
   }
 
   @Nullable

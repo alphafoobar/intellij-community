@@ -2,10 +2,10 @@ package io.netty.bootstrap;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelPromise;
+import org.jetbrains.annotations.NotNull;
 
 public final class BootstrapUtil {
-  public static ChannelFuture initAndRegister(Channel channel, Bootstrap bootstrap) throws Throwable {
+  public static ChannelFuture initAndRegister(@NotNull Channel channel, @NotNull Bootstrap bootstrap) throws Throwable {
     try {
       bootstrap.init(channel);
     }
@@ -14,10 +14,9 @@ public final class BootstrapUtil {
       throw e;
     }
 
-    ChannelPromise regPromise = channel.newPromise();
-    channel.unsafe().register(regPromise);
+    ChannelFuture registrationFuture = bootstrap.group().register(channel);
     //noinspection ThrowableResultOfMethodCallIgnored
-    if (regPromise.cause() != null) {
+    if (registrationFuture.cause() != null) {
       if (channel.isRegistered()) {
         channel.close();
       }
@@ -25,6 +24,6 @@ public final class BootstrapUtil {
         channel.unsafe().closeForcibly();
       }
     }
-    return regPromise;
+    return registrationFuture;
   }
 }

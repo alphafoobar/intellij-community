@@ -4,23 +4,32 @@ import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonShortcuts;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.OptionalConfigurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.MasterDetailsComponent;
 import com.intellij.openapi.ui.NamedConfigurable;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.remoteServer.ServerType;
 import com.intellij.remoteServer.configuration.RemoteServer;
 import com.intellij.remoteServer.configuration.RemoteServersManager;
+import com.intellij.remoteServer.util.CloudBundle;
+import com.intellij.ui.TreeSpeedSearch;
+import com.intellij.ui.speedSearch.SpeedSearchSupply;
+import com.intellij.util.Function;
 import com.intellij.util.IconUtil;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.Convertor;
 import com.intellij.util.text.UniqueNameGenerator;
 import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.tree.TreePath;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -29,7 +38,11 @@ import java.util.Set;
 /**
  * @author nik
  */
-public class RemoteServerListConfigurable extends MasterDetailsComponent implements OptionalConfigurable, SearchableConfigurable {
+public class RemoteServerListConfigurable extends MasterDetailsComponent implements SearchableConfigurable {
+
+  @NonNls
+  public static final String ID = "RemoteServers";
+
   private final RemoteServersManager myServersManager;
   @Nullable private final ServerType<?> myServerType;
   private RemoteServer<?> myLastSelectedServer;
@@ -42,6 +55,23 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
     myServersManager = manager;
     myServerType = type;
     initTree();
+  }
+
+  @Nullable
+  @Override
+  protected String getEmptySelectionString() {
+    final String typeNames = StringUtil.join(Extensions.getExtensions(ServerType.EP_NAME),
+                    new Function<ServerType, String>() {
+                      @Override
+                      public String fun(ServerType type) {
+                        return type.getPresentableName();
+                      }
+                    }, ", ");
+
+    if (typeNames.length() > 0) {
+      return CloudBundle.getText("clouds.configure.empty.selection.string", typeNames);
+    }
+    return null;
   }
 
   public static RemoteServerListConfigurable createConfigurable(@NotNull ServerType<?> type) {
@@ -57,25 +87,23 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   @Override
   public void reset() {
     myRoot.removeAllChildren();
-    List<RemoteServer<?>> servers = getServers();
-    for (RemoteServer<?> server : servers) {
+    for (RemoteServer<?> server : getServers()) {
       addServerNode(server, false);
     }
     super.reset();
   }
 
-  private List<RemoteServer<?>> getServers() {
+  private List<? extends RemoteServer<?>> getServers() {
     if (myServerType == null) {
       return myServersManager.getServers();
     }
     else {
-      //code won't compile without this ugly cast (at least in jdk 1.6)
-      return (List<RemoteServer<?>>)((List)myServersManager.getServers(myServerType));
+      return myServersManager.getServers(myServerType);
     }
   }
 
   private MyNode addServerNode(RemoteServer<?> server, boolean isNew) {
-    MyNode node = new MyNode(new RemoteServerConfigurable(server, TREE_UPDATER, isNew));
+    MyNode node = new MyNode(new SingleRemoteServerConfigurable(server, TREE_UPDATER, isNew));
     addNode(node, myRoot);
     return node;
   }
@@ -83,13 +111,29 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   @NotNull
   @Override
   public String getId() {
-    return "RemoteServers";
+    return ID;
   }
 
   @Nullable
   @Override
-  public Runnable enableSearch(String option) {
-    return null;
+  public Runnable enableSearch(final String option) {
+    return new Runnable() {
+      @Override
+      public void run() {
+        ObjectUtils.assertNotNull(SpeedSearchSupply.getSupply(myTree, true)).findAndSelectElement(option);
+      }
+    };
+  }
+
+  @Override
+  protected void initTree() {
+    super.initTree();
+    new TreeSpeedSearch(myTree, new Convertor<TreePath, String>() {
+      @Override
+      public String convert(final TreePath treePath) {
+        return ((MyNode)treePath.getLastPathComponent()).getDisplayName();
+      }
+    }, true);
   }
 
   @Override
@@ -138,13 +182,13 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   }
 
   @Override
-  public boolean needDisplay() {
-    return ServerType.EP_NAME.getExtensions().length > 0;
+  protected boolean wasObjectStored(Object editableObject) {
+    return true;
   }
 
   @Override
-  protected boolean wasObjectStored(Object editableObject) {
-    return true;
+  public String getHelpTopic() {
+    return ObjectUtils.notNull(super.getHelpTopic(), "reference.settings.clouds");
   }
 
   @Override

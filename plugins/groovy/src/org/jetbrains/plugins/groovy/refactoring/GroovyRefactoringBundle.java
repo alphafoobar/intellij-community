@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package org.jetbrains.plugins.groovy.refactoring;
 
-import org.jetbrains.plugins.groovy.GroovyBundle;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.PropertyKey;
 
@@ -31,14 +31,13 @@ import com.intellij.CommonBundle;
  */
 public class GroovyRefactoringBundle {
 
-  private static Reference<ResourceBundle> ourBundle;
-
-  @NonNls
-  private static final String BUNDLE = "org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringBundle";
-
-  public static String message(@PropertyKey(resourceBundle = BUNDLE)String key, Object... params) {
+  public static String message(@NotNull @PropertyKey(resourceBundle = BUNDLE) String key, @NotNull Object... params) {
     return CommonBundle.message(getBundle(), key, params);
   }
+
+  private static Reference<ResourceBundle> ourBundle;
+  @NonNls
+  private static final String BUNDLE = "org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringBundle";
 
   private static ResourceBundle getBundle() {
     ResourceBundle bundle = com.intellij.reference.SoftReference.dereference(ourBundle);
@@ -49,5 +48,4 @@ public class GroovyRefactoringBundle {
     }
     return bundle;
   }
-
 }

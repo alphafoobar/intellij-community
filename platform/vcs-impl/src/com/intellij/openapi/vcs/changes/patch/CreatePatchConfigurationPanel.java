@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,10 +38,11 @@ import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileWrapper;
-import com.intellij.openapi.vfs.encoding.EncodingManager;
+import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.ui.HideableTitledPanel;
 import com.intellij.util.Consumer;
 import com.intellij.util.ui.FormBuilder;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -54,7 +55,7 @@ import java.util.Collection;
 import java.util.List;
 
 public class CreatePatchConfigurationPanel {
-  private static final String SYSTEM_DEFAULT = IdeBundle.message("encoding.name.system.default");
+  private static final String SYSTEM_DEFAULT = IdeBundle.message("encoding.name.system.default", CharsetToolkit.getDefaultSystemCharset().displayName());
 
   public static final String ALL = "(All)";
   private JPanel myMainPanel;
@@ -65,7 +66,6 @@ public class CreatePatchConfigurationPanel {
   private JCheckBox myIncludeBaseRevisionTextCheckBox;
   private Consumer<Boolean> myOkEnabledListener;
   private final Project myProject;
-  private boolean myDvcsIsUsed;
   private List<Change> myChanges;
   private Collection<Change> myIncludedChanges;
   private SelectFilesToAddTextsToPatchPanel mySelectFilesToAddTextsToPatchPanel;
@@ -73,7 +73,7 @@ public class CreatePatchConfigurationPanel {
   private JPanel myPanelWithSelectedFiles;
   private boolean myExecute;
 
-  public CreatePatchConfigurationPanel(final Project project) {
+  public CreatePatchConfigurationPanel(@NotNull final Project project) {
     myProject = project;
     initMainPanel();
 
@@ -82,7 +82,7 @@ public class CreatePatchConfigurationPanel {
         final FileSaverDialog dialog =
           FileChooserFactory.getInstance().createSaveFileDialog(
             new FileSaverDescriptor("Save patch to", ""), myMainPanel);
-        final String path = FileUtil.toSystemIndependentName(myFileNameField.getText().trim());
+        final String path = FileUtil.toSystemIndependentName(getFileName());
         final int idx = path.lastIndexOf("/");
         VirtualFile baseDir = idx == -1 ? project.getBaseDir() :
                               (LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(path.substring(0, idx))));
@@ -130,12 +130,12 @@ public class CreatePatchConfigurationPanel {
     encodingsModel.insertElementAt(SYSTEM_DEFAULT, 0);
     myEncoding.setModel(encodingsModel);
 
-    final String name = EncodingManager.getInstance().getDefaultCharsetName();
+    final String name = EncodingProjectManager.getInstance(myProject).getDefaultCharsetName();
     if (StringUtil.isEmpty(name)) {
       myEncoding.setSelectedItem(SYSTEM_DEFAULT);
     }
     else {
-      myEncoding.setSelectedItem(EncodingManager.getInstance().getDefaultCharset());
+      myEncoding.setSelectedItem(EncodingProjectManager.getInstance(myProject).getDefaultCharset());
     }
   }
 
@@ -143,7 +143,7 @@ public class CreatePatchConfigurationPanel {
   public Charset getEncoding() {
     final Object selectedItem = myEncoding.getSelectedItem();
     if (SYSTEM_DEFAULT.equals(selectedItem)) {
-      return EncodingManager.getInstance().getDefaultCharset();
+      return CharsetToolkit.getDefaultSystemCharset();
     }
     return (Charset)selectedItem;
   }
@@ -152,7 +152,7 @@ public class CreatePatchConfigurationPanel {
     myFileNameField = new TextFieldWithBrowseButton();
     myReversePatchCheckbox = new JCheckBox(VcsBundle.message("create.patch.reverse.checkbox"));
     myEncoding = new JComboBox();
-    myIncludeBaseRevisionTextCheckBox = new JCheckBox(VcsBundle.message("create.patch.base.revision"));
+    myIncludeBaseRevisionTextCheckBox = new JCheckBox(VcsBundle.message("create.patch.base.revision", 0));
     myErrorLabel = new JLabel();
 
     myMainPanel = FormBuilder.createFormBuilder()
@@ -172,8 +172,7 @@ public class CreatePatchConfigurationPanel {
     myPanelWithSelectedFiles.add(myHideableTitledPanel, BorderLayout.CENTER);
   }
 
-  public void showTextStoreOption(final boolean dvcsIsUsed) {
-    myDvcsIsUsed = dvcsIsUsed;
+  public void showTextStoreOption() {
     if (myChanges.size() > 0) {
       myIncludeBaseRevisionTextCheckBox.setVisible(true);
 
@@ -182,8 +181,8 @@ public class CreatePatchConfigurationPanel {
         public void run() {
           if (mySelectFilesToAddTextsToPatchPanel != null) {
             myIncludedChanges = mySelectFilesToAddTextsToPatchPanel.getIncludedChanges();
-            myHideableTitledPanel.setTitle("&Selected: " + (myIncludedChanges.size() == myChanges.size() ?
-                                                           "All" : (myIncludedChanges.size() + " of " + myChanges.size())));
+            myHideableTitledPanel.setTitle("Included &Files: " + (myIncludedChanges.size() == myChanges.size() ?
+                                                                  "All" : (myIncludedChanges.size() + " of " + myChanges.size())));
           }
         }
       };
@@ -205,7 +204,7 @@ public class CreatePatchConfigurationPanel {
   }
 
   private void checkName() {
-    final PatchNameChecker patchNameChecker = new PatchNameChecker(myFileNameField.getText());
+    final PatchNameChecker patchNameChecker = new PatchNameChecker(getFileName());
     if (patchNameChecker.nameOk()) {
       myErrorLabel.setText("");
     }
@@ -242,7 +241,7 @@ public class CreatePatchConfigurationPanel {
   }
 
   public String getFileName() {
-    return myFileNameField.getText();
+    return FileUtil.expandUserHome(myFileNameField.getText().trim());
   }
 
   public void setFileName(final File file) {
@@ -266,9 +265,15 @@ public class CreatePatchConfigurationPanel {
     return myErrorLabel.getText() == null ? "" : myErrorLabel.getText();
   }
 
-  public void setChanges(Collection<Change> changes) {
+  public void setChanges(@NotNull Collection<Change> changes) {
     myChanges = new ArrayList<Change>(changes);
     myIncludedChanges = new ArrayList<Change>(myChanges);
     myIncludedChanges.removeAll(SelectFilesToAddTextsToPatchPanel.getBig(myChanges));
+    updateIncludeBaseRevisionText();
+  }
+
+  private void updateIncludeBaseRevisionText() {
+    myIncludeBaseRevisionTextCheckBox
+      .setText(VcsBundle.message("create.patch.base.revision", myIncludedChanges != null ? myIncludedChanges.size() : 0));
   }
 }

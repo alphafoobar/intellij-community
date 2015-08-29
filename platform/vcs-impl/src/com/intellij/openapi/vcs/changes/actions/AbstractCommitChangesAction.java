@@ -27,12 +27,16 @@ import com.intellij.openapi.vcs.actions.VcsContext;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeList;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author yole
  */
 public abstract class AbstractCommitChangesAction extends AbstractCommonCheckinAction {
-  protected FilePath[] getRoots(VcsContext context) {
+  @Override
+  @NotNull
+  protected FilePath[] getRoots(@NotNull VcsContext context) {
     return getAllContentRoots(context);
   }
 
@@ -43,6 +47,7 @@ public abstract class AbstractCommitChangesAction extends AbstractCommonCheckinA
     return manager.hasAnyMappings();
   }
 
+  @Override
   protected boolean filterRootsBeforeAction() {
     return false;
   }
@@ -55,7 +60,7 @@ public abstract class AbstractCommitChangesAction extends AbstractCommonCheckinA
       final Change[] selectedChanges = vcsContext.getSelectedChanges();
       if (vcsContext.getPlace().equals(ActionPlaces.CHANGES_VIEW_POPUP)) {
         if (selectedChangeLists != null && selectedChangeLists.length > 0) {
-          presentation.setEnabled(selectedChangeLists.length == 1);
+          presentation.setEnabled(selectedChangeLists.length == 1 && !ContainerUtil.isEmpty(selectedChangeLists[0].getChanges()));
         }
         else {
           presentation.setEnabled (selectedChanges != null && selectedChanges.length > 0);

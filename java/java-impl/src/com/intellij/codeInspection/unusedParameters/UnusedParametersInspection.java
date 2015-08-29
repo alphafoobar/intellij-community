@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,9 +29,10 @@ import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ex.EntryPointsManager;
+import com.intellij.codeInspection.ex.EntryPointsManagerImpl;
 import com.intellij.codeInspection.reference.*;
+import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspectionBase;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.*;
 import com.intellij.psi.search.PsiReferenceProcessor;
@@ -43,7 +44,6 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -54,8 +54,6 @@ import java.util.Collection;
 import java.util.List;
 
 public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
-  @NonNls public static final String SHORT_NAME = "UnusedParameters";
-
   @Override
   @Nullable
   public CommonProblemDescriptor[] checkElement(@NotNull final RefEntity refEntity,
@@ -87,7 +85,8 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
 
       final List<ProblemDescriptor> result = new ArrayList<ProblemDescriptor>();
       for (RefParameter refParameter : unusedParameters) {
-        final PsiIdentifier psiIdentifier = refParameter.getElement().getNameIdentifier();
+        final PsiParameter parameter = refParameter.getElement();
+        final PsiIdentifier psiIdentifier = parameter != null ? parameter.getNameIdentifier() : null;
         if (psiIdentifier != null) {
           result.add(manager.createProblemDescriptor(psiIdentifier,
                                                      refMethod.isAbstract()
@@ -133,7 +132,7 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
                   int idx = refParameter.getIndex();
                   final boolean[] found = {false};
                   for (int i = 0; i < derived.length && !found[0]; i++) {
-                    if (!scope.contains(derived[i])) {
+                    if (scope == null || !scope.contains(derived[i])) {
                       final PsiParameter[] parameters = derived[i].getParameterList().getParameters();
                       if (parameters.length >= idx) continue;
                       PsiParameter psiParameter = parameters[idx];
@@ -192,7 +191,7 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
     clearUsedParameters(refMethod, result, checkDeep);
 
     for (RefParameter parameter : result) {
-      if (parameter != null) {
+      if (parameter != null && !((RefElementImpl)parameter).isSuppressed(UnusedSymbolLocalInspectionBase.UNUSED_PARAMETERS_SHORT_NAME)) {
         res.add(parameter);
       }
     }
@@ -229,14 +228,13 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
   @Override
   @NotNull
   public String getShortName() {
-    return SHORT_NAME;
+    return UnusedSymbolLocalInspectionBase.UNUSED_PARAMETERS_SHORT_NAME;
   }
 
   @Override
   public JComponent createOptionsPanel() {
     final JPanel panel = new JPanel(new GridBagLayout());
-    Project project = ProjectUtil.guessCurrentProject(panel);
-    panel.add(EntryPointsManager.getInstance(project).createConfigureAnnotationsBtn(),
+    panel.add(EntryPointsManagerImpl.createConfigureAnnotationsButton(),
               new GridBagConstraints(0, 0, 1, 1, 1, 1, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
                                      new Insets(0, 0, 0, 0), 0, 0));
     return panel;

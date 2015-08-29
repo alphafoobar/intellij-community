@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,21 @@ public class ElementStub extends DomStub {
   private final boolean myCustom;
 
   @Nullable
-  private Class myElementClass;
+  private final StringRef myElementClass;
+  private final String myValue;
 
-  public ElementStub(@Nullable ElementStub parent, @NotNull StringRef name, @Nullable StringRef namespace, int index, boolean custom) {
+  public ElementStub(@Nullable ElementStub parent,
+                     @NotNull StringRef name,
+                     @Nullable StringRef namespace,
+                     int index,
+                     boolean custom,
+                     @Nullable StringRef elementClass,
+                     @NotNull String value) {
     super(parent, name, namespace);
     myIndex = index;
     myCustom = custom;
+    myElementClass = elementClass;
+    myValue = value;
   }
 
   void addChild(DomStub child) {
@@ -60,9 +69,11 @@ public class ElementStub extends DomStub {
   @Override
   public String toString() {
     String key = getNamespaceKey();
-    return StringUtil.isEmpty(key) ? getName() : key + ":" + getName();
+    return (StringUtil.isEmpty(key) ? getName() : key + ":" + getName()) +
+           (StringUtil.isEmpty(getValue()) ? "" : ":" + getValue());
   }
 
+  @Override
   public boolean isCustom() {
     return myCustom;
   }
@@ -72,12 +83,13 @@ public class ElementStub extends DomStub {
     return myIndex;
   }
 
-  public void setElementClass(@Nullable Class elementClass) {
-    myElementClass = elementClass;
+  @Nullable
+  String getElementClass() {
+    return myElementClass == null ? null : myElementClass.getString();
   }
 
-  @Nullable
-  Class getElementClass() {
-    return myElementClass;
+  @NotNull
+  public String getValue() {
+    return myValue;
   }
 }

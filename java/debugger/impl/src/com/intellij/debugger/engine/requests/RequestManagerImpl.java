@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,43 +16,29 @@
 package com.intellij.debugger.engine.requests;
 
 import com.intellij.debugger.DebuggerBundle;
-import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.SourcePosition;
 import com.intellij.debugger.engine.*;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
-import com.intellij.debugger.engine.events.DebuggerCommandImpl;
-import com.intellij.debugger.impl.DebuggerSession;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.requests.ClassPrepareRequestor;
 import com.intellij.debugger.requests.RequestManager;
 import com.intellij.debugger.requests.Requestor;
 import com.intellij.debugger.settings.DebuggerSettings;
-import com.intellij.debugger.ui.breakpoints.Breakpoint;
-import com.intellij.debugger.ui.breakpoints.BreakpointManager;
 import com.intellij.debugger.ui.breakpoints.FilteredRequestor;
-import com.intellij.openapi.application.AccessToken;
+import com.intellij.diagnostic.ThreadDumper;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiClass;
 import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.util.containers.HashMap;
-import com.intellij.xdebugger.XDebuggerManager;
-import com.intellij.xdebugger.breakpoints.XBreakpointProperties;
-import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
 import com.sun.jdi.*;
 import com.sun.jdi.event.ClassPrepareEvent;
 import com.sun.jdi.request.*;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.java.debugger.breakpoints.JavaBreakpointAdapter;
-import org.jetbrains.java.debugger.breakpoints.JavaBreakpointType;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * @author lex
@@ -157,35 +143,38 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
       request.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
     }
 
-    if (requestor.COUNT_FILTER_ENABLED && requestor.COUNT_FILTER > 0) {
-      request.addCountFilter(requestor.COUNT_FILTER);
+    if (requestor.isCountFilterEnabled() && requestor.getCountFilter() > 0) {
+      request.addCountFilter(requestor.getCountFilter());
     }
 
-    if (requestor.CLASS_FILTERS_ENABLED && !(request instanceof BreakpointRequest) /*no built-in class filters support for breakpoint requests*/ ) {
+    if (requestor.isClassFiltersEnabled() && !(request instanceof BreakpointRequest) /*no built-in class filters support for breakpoint requests*/ ) {
       ClassFilter[] classFilters = requestor.getClassFilters();
-      for (final ClassFilter filter : classFilters) {
-        if (!filter.isEnabled()) {
-          continue;
-        }
-        final JVMName jvmClassName = ApplicationManager.getApplication().runReadAction(new Computable<JVMName>() {
-          public JVMName compute() {
-            PsiClass psiClass = DebuggerUtils.findClass(filter.getPattern(), myDebugProcess.getProject(), myDebugProcess.getSearchScope());
-            if (psiClass == null) {
-              return null;
+      if (DebuggerUtilsEx.getEnabledNumber(classFilters) == 1) {
+        for (final ClassFilter filter : classFilters) {
+          if (!filter.isEnabled()) {
+            continue;
+          }
+          final JVMName jvmClassName = ApplicationManager.getApplication().runReadAction(new Computable<JVMName>() {
+            public JVMName compute() {
+              PsiClass psiClass = DebuggerUtils.findClass(filter.getPattern(), myDebugProcess.getProject(), myDebugProcess.getSearchScope());
+              if (psiClass == null) {
+                return null;
+              }
+              return JVMNameUtil.getJVMQualifiedName(psiClass);
             }
-            return JVMNameUtil.getJVMQualifiedName(psiClass);
+          });
+          String pattern = filter.getPattern();
+          try {
+            if (jvmClassName != null) {
+              pattern = jvmClassName.getName(myDebugProcess);
+            }
           }
-        });
-        String pattern = filter.getPattern();
-        try {
-          if (jvmClassName != null) {
-            pattern = jvmClassName.getName(myDebugProcess);
+          catch (EvaluateException ignored) {
           }
-        }
-        catch (EvaluateException ignored) {
-        }
 
-        addClassFilter(request, pattern);
+          addClassFilter(request, pattern);
+          break; // adding more than one inclusion filter does not work, only events that satisfy ALL filters are placed in the event queue.
+        }
       }
 
       for (ClassFilter filter : requestor.getClassExclusionFilters()) {
@@ -268,6 +257,7 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
 
   public void deleteRequest(Requestor requestor) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
+    myRequestWarnings.remove(requestor);
     if(!myDebugProcess.isAttached()) {
       return;
     }
@@ -290,7 +280,11 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
             }
           }
         }
-        myEventRequestManager.deleteEventRequest(request);
+        try {
+          myEventRequestManager.deleteEventRequest(request);
+        } catch (ArrayIndexOutOfBoundsException e) {
+          LOG.error("Exception in EventRequestManager.deleteEventRequest", e, ThreadDumper.dumpThreadsToString());
+        }
       }
       catch (InvalidRequestStateException ignored) {
         // request is already deleted
@@ -310,15 +304,17 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
 
   public void callbackOnPrepareClasses(final ClassPrepareRequestor requestor, final SourcePosition classPosition) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
-    ClassPrepareRequest prepareRequest = myDebugProcess.getPositionManager().createPrepareRequest(requestor, classPosition);
 
-    if(prepareRequest == null) {
+    List<ClassPrepareRequest> prepareRequests = myDebugProcess.getPositionManager().createPrepareRequests(requestor, classPosition);
+    if(prepareRequests.isEmpty()) {
       setInvalid(requestor, DebuggerBundle.message("status.invalid.breakpoint.out.of.class"));
       return;
     }
 
-    registerRequest(requestor, prepareRequest);
-    prepareRequest.enable();
+    for (ClassPrepareRequest prepareRequest : prepareRequests) {
+      registerRequest(requestor, prepareRequest);
+      prepareRequest.enable();
+    }
   }
 
   public void callbackOnPrepareClasses(ClassPrepareRequestor requestor, String classOrPatternToBeLoaded) {
@@ -350,13 +346,14 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
       }
       request.enable();
     } catch (InternalException e) {
-      //noinspection StatementWithEmptyBody
-      if (e.errorCode() == 41) {
+      switch (e.errorCode()) {
+        case 40 /* DUPLICATE */ : LOG.info(e); break;
+
+        case 41 /* NOT_FOUND */ : break;
         //event request not found
         //there could be no requests after hotswap
-      }
-      else {
-        LOG.error(e);
+
+        default: LOG.error(e);
       }
     }
   }
@@ -395,28 +392,6 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
 
   public void processAttached(DebugProcessImpl process) {
     myEventRequestManager = myDebugProcess.getVirtualMachineProxy().eventRequestManager();
-    // invoke later, so that requests are for sure created only _after_ 'processAttached()' methods of other listeners are executed
-    process.getManagerThread().schedule(new DebuggerCommandImpl() {
-      protected void action() throws Exception {
-        Project project = myDebugProcess.getProject();
-        final BreakpointManager breakpointManager = DebuggerManagerEx.getInstanceEx(project).getBreakpointManager();
-        for (final Breakpoint breakpoint : breakpointManager.getBreakpoints()) {
-          breakpoint.createRequest(myDebugProcess);
-        }
-
-        AccessToken token = ReadAction.start();
-        try {
-          JavaBreakpointAdapter adapter = new JavaBreakpointAdapter(project);
-          for (XLineBreakpoint<XBreakpointProperties> breakpoint : XDebuggerManager.getInstance(project).getBreakpointManager()
-            .getBreakpoints(JavaBreakpointType.class)) {
-            adapter.getOrCreate(breakpoint).createRequest(myDebugProcess);
-          }
-        }
-        finally {
-          token.finish();
-        }
-      }
-    });
   }
 
   public void processClassPrepared(final ClassPrepareEvent event) {
@@ -438,50 +413,6 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
         requestor.processClassPrepare(myDebugProcess, refType);
       }
     }
-  }
-
-  private interface AllProcessesCommand {
-    void action(DebugProcessImpl process);
-  }
-
-  private static void invoke(Project project, final AllProcessesCommand command) {
-    for (DebuggerSession debuggerSession : (DebuggerManagerEx.getInstanceEx(project)).getSessions()) {
-      final DebugProcessImpl process = debuggerSession.getProcess();
-      if (process != null) {
-        process.getManagerThread().invoke(new DebuggerCommandImpl() {
-          protected void action() throws Exception {
-            command.action(process);
-          }
-        });
-      }
-    }
-  }
-
-  public static void createRequests(final Breakpoint breakpoint) {
-    invoke(breakpoint.getProject(), new AllProcessesCommand (){
-      public void action(DebugProcessImpl process)  {
-        breakpoint.createRequest(process);
-      }
-    });
-  }
-
-  public static void updateRequests(final Breakpoint breakpoint) {
-    invoke(breakpoint.getProject(), new AllProcessesCommand (){
-      public void action(DebugProcessImpl process)  {
-        process.getRequestsManager().myRequestWarnings.remove(breakpoint);
-        process.getRequestsManager().deleteRequest(breakpoint);
-        breakpoint.createRequest(process);
-      }
-    });
-  }
-
-  public static void deleteRequests(final Breakpoint breakpoint) {
-    invoke(breakpoint.getProject(), new AllProcessesCommand (){
-      public void action(DebugProcessImpl process)  {
-        process.getRequestsManager().myRequestWarnings.remove(breakpoint);
-        process.getRequestsManager().deleteRequest(breakpoint);
-      }
-    });
   }
 
   public void clearWarnings() {

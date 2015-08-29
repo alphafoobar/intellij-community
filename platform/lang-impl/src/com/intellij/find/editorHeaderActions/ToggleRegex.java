@@ -26,18 +26,12 @@ public class ToggleRegex extends EditorHeaderToggleAction {
 
   @Override
   public boolean isSelected(AnActionEvent e) {
-    return getEditorSearchComponent().getFindModel().isRegularExpressions();
-  }
-
-  @Override
-  public void update(AnActionEvent e) {
-    super.update(e);
-    e.getPresentation().setVisible(!getEditorSearchComponent().getFindModel().isMultiline());
+    return myEditorSearchComponent.getFindModel().isRegularExpressions();
   }
 
   @Override
   public void setSelected(AnActionEvent e, boolean state) {
-    final FindModel findModel = getEditorSearchComponent().getFindModel();
+    final FindModel findModel = myEditorSearchComponent.getFindModel();
     findModel.setRegularExpressions(state);
     if (state) {
       findModel.setWholeWordsOnly(false);

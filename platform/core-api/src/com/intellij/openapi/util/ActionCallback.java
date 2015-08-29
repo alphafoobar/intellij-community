@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,17 @@ package com.intellij.openapi.util;
 import com.intellij.openapi.Disposable;
 import com.intellij.util.Consumer;
 import com.intellij.util.concurrency.Semaphore;
+import com.intellij.util.containers.OrderedSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.LinkedHashSet;
 import java.util.Set;
 
 public class ActionCallback implements Disposable {
+  public static final ActionCallback DONE = new Done();
+  public static final ActionCallback REJECTED = new Rejected();
+
   private final ExecutionCallback myDone;
   private final ExecutionCallback myRejected;
 
@@ -43,6 +46,12 @@ public class ActionCallback implements Disposable {
     myRejected = new ExecutionCallback();
   }
 
+  private ActionCallback(ExecutionCallback done, ExecutionCallback rejected) {
+    myDone = done;
+    myRejected = rejected;
+    myName = null;
+  }
+
   public ActionCallback(int countToDone) {
     this(null, countToDone);
   }
@@ -51,10 +60,7 @@ public class ActionCallback implements Disposable {
     myName = name;
 
     assert countToDone >= 0 : "count=" + countToDone;
-
-    int count = countToDone >= 1 ? countToDone : 1;
-
-    myDone = new ExecutionCallback(count);
+    myDone = new ExecutionCallback(countToDone >= 1 ? countToDone : 1);
     myRejected = new ExecutionCallback();
 
     if (countToDone < 1) {
@@ -161,13 +167,52 @@ public class ActionCallback implements Disposable {
 
   public static class Done extends ActionCallback {
     public Done() {
-      setDone();
+      super(new ExecutedExecutionCallback(), new IgnoreExecutionCallback());
     }
   }
 
   public static class Rejected extends ActionCallback {
     public Rejected() {
-      setRejected();
+      super(new IgnoreExecutionCallback(), new ExecutedExecutionCallback());
+    }
+  }
+
+  private static class ExecutedExecutionCallback extends ExecutionCallback {
+    public ExecutedExecutionCallback() {
+      super(0);
+    }
+
+    @Override
+    void doWhenExecuted(@NotNull Runnable runnable) {
+      runnable.run();
+    }
+
+    @Override
+    boolean setExecuted() {
+      throw new IllegalStateException("Forbidden");
+    }
+
+    @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod")
+    @Override
+    boolean isExecuted() {
+      return true;
+    }
+  }
+
+  private static class IgnoreExecutionCallback extends ExecutionCallback {
+    @Override
+    void doWhenExecuted(@NotNull Runnable runnable) {
+    }
+
+    @Override
+    boolean setExecuted() {
+      throw new IllegalStateException("Forbidden");
+    }
+
+    @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod")
+    @Override
+    boolean isExecuted() {
+      return false;
     }
   }
 
@@ -179,7 +224,7 @@ public class ActionCallback implements Disposable {
   }
 
   public static class Chunk {
-    private final Set<ActionCallback> myCallbacks = new LinkedHashSet<ActionCallback>();
+    private final Set<ActionCallback> myCallbacks = new OrderedSet<ActionCallback>();
 
     public void add(@NotNull ActionCallback callback) {
       myCallbacks.add(callback);
@@ -187,8 +232,8 @@ public class ActionCallback implements Disposable {
 
     @NotNull
     public ActionCallback create() {
-      if (myCallbacks.isEmpty()) {
-        return new Done();
+      if (isEmpty()) {
+        return DONE;
       }
 
       ActionCallback result = new ActionCallback(myCallbacks.size());
@@ -197,6 +242,14 @@ public class ActionCallback implements Disposable {
         each.doWhenDone(doneRunnable).notifyWhenRejected(result);
       }
       return result;
+    }
+
+    public boolean isEmpty() {
+      return myCallbacks.isEmpty();
+    }
+
+    public int getSize() {
+      return myCallbacks.size();
     }
 
     @NotNull

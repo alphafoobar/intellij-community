@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
  */
 package com.intellij.execution.junit2.inspection;
 
-import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.codeInspection.reference.EntryPoint;
 import com.intellij.codeInspection.reference.RefElement;
 import com.intellij.execution.junit.JUnitUtil;
@@ -33,6 +32,7 @@ import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiModifier;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiClassUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.CommonProcessors;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -42,20 +42,24 @@ public class JUnitEntryPoint extends EntryPoint {
 
   @NotNull
   public String getDisplayName() {
-    return InspectionsBundle.message("inspection.dead.code.option2");
+    return "JUnit test cases";
   }
 
-  public boolean isEntryPoint(RefElement refElement, PsiElement psiElement) {
+  public boolean isEntryPoint(@NotNull RefElement refElement, @NotNull PsiElement psiElement) {
     return isEntryPoint(psiElement);
   }
 
   @Override
-  public boolean isEntryPoint(PsiElement psiElement) {
+  public boolean isEntryPoint(@NotNull PsiElement psiElement) {
     if (ADD_JUNIT_TO_ENTRIES) {
       if (psiElement instanceof PsiClass) {
         final PsiClass aClass = (PsiClass)psiElement;
         if (JUnitUtil.isTestClass(aClass, false, true)) {
           if (!PsiClassUtil.isRunnableClass(aClass, true, true)) {
+            final PsiClass topLevelClass = PsiTreeUtil.getTopmostParentOfType(aClass, PsiClass.class);
+            if (topLevelClass != null && PsiClassUtil.isRunnableClass(topLevelClass, true, true)) {
+              return true;
+            }
             final CommonProcessors.FindProcessor<PsiClass> findProcessor = new CommonProcessors.FindProcessor<PsiClass>() {
               @Override
               protected boolean accept(PsiClass psiClass) {
@@ -98,6 +102,12 @@ public class JUnitEntryPoint extends EntryPoint {
 
   @Override
   public String[] getIgnoreAnnotations() {
-    return new String[]{"org.junit.Rule", "org.mockito.Mock", "org.mockito.InjectMocks", "org.junit.ClassRule", "org.junit.experimental.theories.DataPoint"};
+    return new String[]{"org.junit.Rule",
+                        "org.mockito.Mock",
+                        "org.mockito.Spy",
+                        "org.mockito.Captor",
+                        "org.mockito.InjectMocks",
+                        "org.junit.ClassRule",
+                        "org.junit.experimental.theories.DataPoint"};
   }
 }

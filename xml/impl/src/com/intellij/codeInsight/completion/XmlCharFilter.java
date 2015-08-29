@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,19 +70,17 @@ public class XmlCharFilter extends CharFilter {
   public static boolean isWithinTag(Lookup lookup) {
     if (isInXmlContext(lookup)) {
       PsiElement psiElement = lookup.getPsiElement();
-      final PsiElement parentElement = psiElement.getParent() != null ? psiElement.getParent():null;
-      String s;
-      return parentElement != null &&
-             ( parentElement instanceof XmlTag ||
-               ( parentElement instanceof PsiErrorElement &&
-                 parentElement.getParent() instanceof XmlDocument
-               ) ||
-                 ((parentElement instanceof XmlDocument || parentElement instanceof XmlText) &&
-                  ((s = psiElement.getText()).equals("<") || s.equals("\""))));
+      final PsiElement parentElement = psiElement != null ? psiElement.getParent() : null;
+      if (parentElement instanceof XmlTag) return true;
+      if (parentElement instanceof PsiErrorElement && parentElement.getParent() instanceof XmlDocument) return true;
+
+      return (parentElement instanceof XmlDocument || parentElement instanceof XmlText) &&
+             (psiElement.textMatches("<") || psiElement.textMatches("\""));
     }
     return false;
   }
 
+  @Override
   public Result acceptChar(char c, final int prefixLength, final Lookup lookup) {
     if (!isInXmlContext(lookup)) return null;
 

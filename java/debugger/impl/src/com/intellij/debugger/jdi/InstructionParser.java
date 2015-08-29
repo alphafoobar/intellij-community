@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,23 +22,19 @@ import org.jetbrains.annotations.Nullable;
  */
 public class InstructionParser {
   private final byte[] myCode;
-  private final long myCurrentInstructionIndex;
+  private final long myStopOffset;
 
-  public InstructionParser(byte[] code, long instructionIndex) {
+  public InstructionParser(byte[] code, long stopOffset) {
     myCode = code;
-    myCurrentInstructionIndex = instructionIndex;
+    myStopOffset = stopOffset;
   }
 
   public void parse()  {
-    final int codeEnd = myCode.length;
     int v = 0;
-    int instructionIndex = 0;
-    while (v < codeEnd) {
-      if (instructionIndex++ >= myCurrentInstructionIndex) {
-        break;
-      }
+    while (v < myStopOffset) {
       int opcode = myCode[v] & 0xFF;
-      switch (Bytecodes.TYPE[opcode]) {
+      final byte opcodeType = opcode == Bytecodes.IMPDEP1 || opcode == Bytecodes.IMPDEP2? Bytecodes.NOARG_INSN : Bytecodes.TYPE[opcode];
+      switch (opcodeType) {
         case Bytecodes.NOARG_INSN:
           v += 1;
           break;

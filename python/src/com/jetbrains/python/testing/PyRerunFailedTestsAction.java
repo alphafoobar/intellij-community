@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,40 +23,33 @@ import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.testframework.AbstractTestProxy;
-import com.intellij.execution.testframework.Filter;
 import com.intellij.execution.testframework.TestFrameworkRunningModel;
 import com.intellij.execution.testframework.actions.AbstractRerunFailedTestsAction;
-import com.intellij.execution.testframework.sm.runner.states.TestStateInfo;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComponentContainer;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.jetbrains.python.run.AbstractPythonRunConfiguration;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-/*
- * User: ktisha
- */
 public class PyRerunFailedTestsAction extends AbstractRerunFailedTestsAction {
-
   protected PyRerunFailedTestsAction(@NotNull ComponentContainer componentContainer) {
     super(componentContainer);
   }
 
   @Override
   @Nullable
-  public MyRunProfile getRunProfile() {
+  protected MyRunProfile getRunProfile(@NotNull ExecutionEnvironment environment) {
     final TestFrameworkRunningModel model = getModel();
-    if (model == null) return null;
-    final AbstractPythonRunConfiguration configuration = (AbstractPythonRunConfiguration)model.getProperties().getConfiguration();
-    return new MyTestRunProfile(configuration);
+    if (model == null) {
+      return null;
+    }
+    return new MyTestRunProfile((AbstractPythonRunConfiguration)model.getProperties().getConfiguration());
   }
-
 
   private class MyTestRunProfile extends MyRunProfile {
 
@@ -74,8 +67,21 @@ public class PyRerunFailedTestsAction extends AbstractRerunFailedTestsAction {
     @Override
     public RunProfileState getState(@NotNull Executor executor, @NotNull ExecutionEnvironment env) throws ExecutionException {
       final AbstractPythonRunConfiguration configuration = ((AbstractPythonRunConfiguration)getPeer());
+
+      // If configuration wants to take care about rerun itself
+      if (configuration instanceof TestRunConfigurationReRunResponsible) {
+        // TODO: Extract method
+        final Set<PsiElement> failedTestElements = new HashSet<PsiElement>();
+        for (final AbstractTestProxy proxy : getFailedTests(getProject())) {
+          final Location<?> location = proxy.getLocation(getProject(), GlobalSearchScope.allScope(getProject()));
+          if (location != null) {
+            failedTestElements.add(location.getPsiElement());
+          }
+        }
+        return ((TestRunConfigurationReRunResponsible)configuration).rerunTests(executor, env, failedTestElements);
+      }
       return new FailedPythonTestCommandLineStateBase(configuration, env,
-                                                            (PythonTestCommandLineStateBase)configuration.getState(executor, env));
+                                                      (PythonTestCommandLineStateBase)configuration.getState(executor, env));
     }
   }
 
@@ -130,16 +136,5 @@ public class PyRerunFailedTestsAction extends AbstractRerunFailedTestsAction {
       myState.addPredefinedEnvironmentVariables(envs,
                                                 passParentEnvs);
     }
-  }
-
-  @NotNull
-  @Override
-  protected Filter getFilter(Project project, GlobalSearchScope searchScope) {
-    return new Filter() {
-      public boolean shouldAccept(final AbstractTestProxy test) {
-        boolean ignored = (test.getMagnitude() == TestStateInfo.Magnitude.IGNORED_INDEX.getValue());
-        return !ignored && (test.isInterrupted() || test.isDefect());
-      }
-    };
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package com.siyeh.ig.bugs;
 
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.Processor;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -29,11 +31,22 @@ import com.siyeh.ig.ui.ExternalizableStringSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
 public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspection {
-  @SuppressWarnings({"PublicField"})
+  private static final Set<String> QUERY_EXCLUDES = Collections.singleton("java.util.Collections");
+  private static final Set<String> UPDATE_EXCLUDES = new HashSet<String>(CollectionUtils.getAllCollectionNames());
+  static {
+    UPDATE_EXCLUDES.add("java.util.Collections");
+  }
+
+  @SuppressWarnings("PublicField")
   public final ExternalizableStringSet queryNames =
-    new ExternalizableStringSet("copyInto", "drainTo", "propertyNames", "save", "store", "write", "forEach", "replaceAll");
-  @SuppressWarnings({"PublicField"})
+    new ExternalizableStringSet("copyInto", "drainTo", "parallelStream", "propertyNames", "save", "store", "stream", "write", "forEach",
+                                "replaceAll");
+  @SuppressWarnings("PublicField")
   public final ExternalizableStringSet updateNames =
     new ExternalizableStringSet("add", "clear", "drainTo", "insert", "load", "offer", "poll", "push", "put", "remove", "replace",
                                 "retain", "set", "take", "compute");
@@ -108,12 +121,11 @@ public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspectio
     return new MismatchedCollectionQueryUpdateVisitor();
   }
 
-  private static class CollectionQueriedByAssignmentVisitor extends JavaRecursiveElementVisitor {
-
-    private boolean mayBeQueried = false;
+  private static class CollectionQueriedByAssignmentVisitor extends JavaRecursiveElementWalkingVisitor {
+    private boolean mayBeQueried;
     @NotNull private final PsiVariable variable;
 
-    CollectionQueriedByAssignmentVisitor(@NotNull PsiVariable variable) {
+    private CollectionQueriedByAssignmentVisitor(@NotNull PsiVariable variable) {
       this.variable = variable;
     }
 
@@ -168,7 +180,7 @@ public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspectio
       mayBeQueried = true;
     }
 
-    public boolean mayBeQueried() {
+    private boolean mayBeQueried() {
       return mayBeQueried;
     }
   }
@@ -221,14 +233,12 @@ public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspectio
       if (VariableAccessUtils.variableIsReturned(variable, context)) {
         return false;
       }
-      if (VariableAccessUtils.variableIsPassedAsMethodArgument(variable, context)) {
-        return false;
-      }
       return !VariableAccessUtils.variableIsUsedInArrayInitializer(variable, context);
     }
 
     private boolean collectionContentsAreUpdated(PsiVariable variable, PsiElement context) {
-      if (collectionUpdateCalled(variable, context)) {
+      if (VariableAccessUtils.variableIsPassedAsMethodArgument(variable, context, new UpdateCallProcessor()) ||
+          collectionUpdateCalled(variable, context)) {
         return true;
       }
       final PsiExpression initializer = variable.getInitializer();
@@ -253,7 +263,8 @@ public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspectio
     }
 
     private boolean collectionContentsAreQueried(PsiVariable variable, PsiElement context) {
-      if (collectionQueryCalled(variable, context)) {
+      if (VariableAccessUtils.variableIsPassedAsMethodArgument(variable, context, new QueryCallProcessor()) ||
+          collectionQueryCalled(variable, context)) {
         return true;
       }
       final PsiExpression initializer = variable.getInitializer();
@@ -264,15 +275,42 @@ public class MismatchedCollectionQueryUpdateInspectionBase extends BaseInspectio
     }
 
     private boolean collectionQueryCalled(PsiVariable variable, PsiElement context) {
-      final CollectionQueryCalledVisitor visitor = new CollectionQueryCalledVisitor(variable, queryNames);
+      final CollectionQueryUpdateCalledVisitor visitor = new CollectionQueryUpdateCalledVisitor(variable, queryNames, true);
       context.accept(visitor);
-      return visitor.isQueried();
+      return visitor.isQueriedUpdated();
     }
 
     private boolean collectionUpdateCalled(@Nullable PsiVariable variable, PsiElement context) {
-      final CollectionUpdateCalledVisitor visitor = new CollectionUpdateCalledVisitor(variable, updateNames);
+      final CollectionQueryUpdateCalledVisitor visitor = new CollectionQueryUpdateCalledVisitor(variable, updateNames, false);
       context.accept(visitor);
-      return visitor.isUpdated();
+      return visitor.isQueriedUpdated();
+    }
+  }
+
+  private static class QueryCallProcessor implements Processor<PsiCall> {
+    @Override
+    public boolean process(PsiCall call) {
+      final PsiMethod method = call.resolveMethod();
+      if (method == null) {
+        return false;
+      }
+      final PsiClass aClass = method.getContainingClass();
+      return aClass != null && QUERY_EXCLUDES.contains(aClass.getQualifiedName());
+    }
+  }
+
+  private static class UpdateCallProcessor implements Processor<PsiCall> {
+    @Override
+    public boolean process(PsiCall call) {
+      final PsiMethod method = call.resolveMethod();
+      if (method == null) {
+        return false;
+      }
+      final PsiClass aClass = method.getContainingClass();
+      if (aClass == null || !UPDATE_EXCLUDES.contains(aClass.getQualifiedName())) {
+        return false;
+      }
+      return !"drainTo".equals(method.getName()) || !InheritanceUtil.isInheritor(aClass, "java.util.concurrent.BlockingQueue");
     }
   }
 }

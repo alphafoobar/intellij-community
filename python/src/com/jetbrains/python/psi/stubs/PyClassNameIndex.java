@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ public class PyClassNameIndex extends StringStubIndexExtension<PyClass> {
     int pos = qName.lastIndexOf(".");
     String shortName = pos > 0 ? qName.substring(pos+1) : qName;
     for (PyClass pyClass : find(shortName, project, scope)) {
-      if (pyClass.getQualifiedName().equals(qName)) {
+      if (qName.equals(pyClass.getQualifiedName())) {
         return pyClass;
       }
     }

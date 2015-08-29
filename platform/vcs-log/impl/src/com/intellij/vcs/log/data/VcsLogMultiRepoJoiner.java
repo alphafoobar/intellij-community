@@ -1,35 +1,36 @@
 package com.intellij.vcs.log.data;
 
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.vcs.log.TimedVcsCommit;
+import com.intellij.vcs.log.graph.GraphCommit;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
-/**
- * @author Kirill Likhodedov
- */
-class VcsLogMultiRepoJoiner {
+public class VcsLogMultiRepoJoiner<CommitId, Commit extends GraphCommit<CommitId>> {
 
   @NotNull
-  public List<TimedVcsCommit> join(@NotNull Collection<List<? extends TimedVcsCommit>> logsFromRepos) {
+  public List<Commit> join(@NotNull Collection<List<Commit>> logsFromRepos) {
+    if (logsFromRepos.size() == 1) {
+      return logsFromRepos.iterator().next();
+    }
+
     int size = 0;
-    for (List<? extends TimedVcsCommit> repo : logsFromRepos) {
+    for (List<Commit> repo : logsFromRepos) {
       size += repo.size();
     }
-    List<TimedVcsCommit> result = new ArrayList<TimedVcsCommit>(size);
+    List<Commit> result = new ArrayList<Commit>(size);
 
-    Map<TimedVcsCommit, Iterator<? extends TimedVcsCommit>> nextCommits = ContainerUtil.newHashMap();
-    for (List<? extends TimedVcsCommit> log : logsFromRepos) {
-      Iterator<? extends TimedVcsCommit> iterator = log.iterator();
+    Map<Commit, Iterator<Commit>> nextCommits = ContainerUtil.newHashMap();
+    for (List<Commit> log : logsFromRepos) {
+      Iterator<Commit> iterator = log.iterator();
       if (iterator.hasNext()) {
         nextCommits.put(iterator.next(), iterator);
       }
     }
 
     while (!nextCommits.isEmpty()) {
-      TimedVcsCommit lastCommit = findLatestCommit(nextCommits.keySet());
-      Iterator<? extends TimedVcsCommit> iterator = nextCommits.get(lastCommit);
+      Commit lastCommit = findLatestCommit(nextCommits.keySet());
+      Iterator<Commit> iterator = nextCommits.get(lastCommit);
       result.add(lastCommit);
       nextCommits.remove(lastCommit);
 
@@ -42,12 +43,12 @@ class VcsLogMultiRepoJoiner {
   }
 
   @NotNull
-  private static TimedVcsCommit findLatestCommit(@NotNull Set<TimedVcsCommit> commits) {
-    long maxTimeStamp = 0;
-    TimedVcsCommit lastCommit = null;
-    for (TimedVcsCommit commit : commits) {
-      if (commit.getTime() > maxTimeStamp) {
-        maxTimeStamp = commit.getTime();
+  private Commit findLatestCommit(@NotNull Set<Commit> commits) {
+    long maxTimeStamp = Long.MIN_VALUE;
+    Commit lastCommit = null;
+    for (Commit commit : commits) {
+      if (commit.getTimestamp() >= maxTimeStamp) {
+        maxTimeStamp = commit.getTimestamp();
         lastCommit = commit;
       }
     }

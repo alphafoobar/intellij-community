@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,14 @@ public class PyWithStatementImpl extends PyElementImpl implements PyWithStatemen
   }
 
   public PyWithItem[] getWithItems() {
-    return childrenToPsi(WITH_ITEM, PyWithItem.EMPTY_ARRAY); 
+    return childrenToPsi(WITH_ITEM, PyWithItem.EMPTY_ARRAY);
+  }
+
+  @Override
+  @NotNull
+  public PyStatementList getStatementList() {
+    final PyStatementList statementList = childToPsi(PyElementTypes.STATEMENT_LIST);
+    assert statementList != null : "Statement list missing for with statement " + getText();
+    return statementList;
   }
 }

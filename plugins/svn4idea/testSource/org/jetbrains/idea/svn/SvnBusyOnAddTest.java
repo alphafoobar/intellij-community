@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.jetbrains.idea.svn;
 
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.PluginPathManager;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.Semaphore;
 import junit.framework.Assert;
 import junit.framework.TestCase;
@@ -48,6 +49,7 @@ public class SvnBusyOnAddTest extends TestCase {
 
   @Before
   public void setUp() throws Exception {
+    super.setUp();
     //PlatformTestCase.initPlatformLangPrefix();
     File pluginRoot = new File(PluginPathManager.getPluginHomePath("svn4idea"));
     if (!pluginRoot.isDirectory()) {
@@ -61,6 +63,7 @@ public class SvnBusyOnAddTest extends TestCase {
 
   @Override
   public void tearDown() throws Exception {
+    super.tearDown();
   }
 
   @Test
@@ -146,14 +149,10 @@ public class SvnBusyOnAddTest extends TestCase {
             exception[0] = e;
           }
         }
-      }).start();
+      },"svn test").start();
 
       semaphoreMain.waitFor();
-      try {
-        Thread.sleep(5);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(5);
       SVNWCClient client = new SVNWCClient((ISVNRepositoryPool)null, new DefaultSVNOptions());
       client.doAdd(ioFile.getParentFile(), true, false, true, true);
       semaphore.up();

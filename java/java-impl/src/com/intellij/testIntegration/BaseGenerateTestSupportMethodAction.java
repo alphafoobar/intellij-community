@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,11 @@ import com.intellij.codeInsight.generation.actions.BaseGenerateAction;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.ide.fileTemplates.FileTemplateDescriptor;
 import com.intellij.ide.fileTemplates.impl.AllFileTemplatesConfigurable;
-import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -38,7 +41,6 @@ import com.intellij.ui.components.JBList;
 import com.intellij.util.Consumer;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -98,7 +100,7 @@ public class BaseGenerateTestSupportMethodAction extends BaseGenerateAction {
   private static PsiClass findTargetClass(@NotNull Editor editor, @NotNull PsiFile file) {
     int offset = editor.getCaretModel().getOffset();
     PsiElement element = file.findElementAt(offset);
-    return element == null ? null : TestIntegrationUtils.findOuterClass(element);
+    return PsiTreeUtil.getParentOfType(element, PsiClass.class, false) == null ? null : TestIntegrationUtils.findOuterClass(element);
   }
 
   @Override
@@ -170,7 +172,7 @@ public class BaseGenerateTestSupportMethodAction extends BaseGenerateAction {
   }
 
   private static class MyHandler implements CodeInsightActionHandler {
-    private TestIntegrationUtils.MethodKind myMethodKind;
+    private final TestIntegrationUtils.MethodKind myMethodKind;
 
     private MyHandler(TestIntegrationUtils.MethodKind methodKind) {
       myMethodKind = methodKind;
@@ -198,9 +200,29 @@ public class BaseGenerateTestSupportMethodAction extends BaseGenerateAction {
 
 
     private void doGenerate(final Editor editor, final PsiFile file, final PsiClass targetClass, final TestFramework framework) {
+      if (framework instanceof JavaTestFramework && ((JavaTestFramework)framework).isSingleConfig()) {
+        PsiElement alreadyExist = null;
+        switch (myMethodKind) {
+          case SET_UP:
+            alreadyExist = framework.findSetUpMethod(targetClass);
+            break;
+          case TEAR_DOWN:
+            alreadyExist = framework.findTearDownMethod(targetClass);
+            break;
+          default:
+            break;
+        }
+
+        if (alreadyExist instanceof PsiMethod) {
+          editor.getCaretModel().moveToOffset(alreadyExist.getNavigationElement().getTextOffset());
+          HintManager.getInstance().showErrorHint(editor, "Method " + ((PsiMethod)alreadyExist).getName() + " already exists");
+          return;
+        }
+      }
+
       if (!CommonRefactoringUtil.checkReadOnlyStatus(file)) return;
 
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      WriteCommandAction.runWriteCommandAction(file.getProject(), new Runnable() {
         @Override
         public void run() {
           try {

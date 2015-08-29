@@ -1,33 +1,39 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.compiler;
 
-import com.intellij.compiler.impl.TranslatingCompilerFilesMonitor;
-import com.intellij.compiler.impl.javaCompiler.javac.JavacConfiguration;
 import com.intellij.compiler.server.BuildManager;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
+import com.intellij.openapi.components.ComponentsPackage;
 import com.intellij.openapi.fileTypes.FileTypeManager;
-import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.impl.JavaAwareProjectJdkTableImpl;
-import com.intellij.openapi.projectRoots.impl.ProjectJdkTableImpl;
-import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.util.JDOMUtil;
-import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.SystemProperties;
-import org.jdom.Document;
-import org.jdom.Element;
-import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
-import org.jetbrains.jps.model.java.compiler.JpsJavaCompilerOptions;
-import org.jetbrains.jps.model.serialization.JDomSerializationUtil;
-import org.jetbrains.jps.model.serialization.JpsGlobalLoader;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import org.jetbrains.annotations.NotNull;
 
-import java.io.File;
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,63 +45,70 @@ public class CompilerTestUtil {
 
   public static void setupJavacForTests(Project project) {
     CompilerConfigurationImpl compilerConfiguration = (CompilerConfigurationImpl)CompilerConfiguration.getInstance(project);
-    compilerConfiguration.projectOpened();
     compilerConfiguration.setDefaultCompiler(compilerConfiguration.getJavacCompiler());
-
-    JpsJavaCompilerOptions javacSettings = JavacConfiguration.getOptions(project, JavacConfiguration.class);
-    javacSettings.setTestsUseExternalCompiler(true);
   }
 
+  /**
+   * @deprecated not needed anymore
+   */
   public static void scanSourceRootsToRecompile(Project project) {
-    // need this to emulate project opening
-    final List<VirtualFile> roots = ProjectRootManager.getInstance(project).getModuleSourceRoots(JavaModuleSourceRootTypes.SOURCES);
-    TranslatingCompilerFilesMonitor.getInstance().scanSourceContent(new TranslatingCompilerFilesMonitor.ProjectRef(project), roots, roots.size(), true);
   }
 
   public static void saveApplicationSettings() {
-    try {
-      ProjectJdkTableImpl table = (ProjectJdkTableImpl)ProjectJdkTable.getInstance();
-      Element root = new Element("application");
-      root.addContent(JDomSerializationUtil.createComponentElement(JpsGlobalLoader.SDK_TABLE_COMPONENT_NAME).addContent(table.getState().cloneContent()));
-      saveApplicationComponent(root, ((ProjectJdkTableImpl)ProjectJdkTable.getInstance()).getExportFiles()[0]);
-
-      FileTypeManagerImpl fileTypeManager = (FileTypeManagerImpl)FileTypeManager.getInstance();
-      Element fileTypesComponent = JDomSerializationUtil.createComponentElement(fileTypeManager.getComponentName());
-      fileTypeManager.writeExternal(fileTypesComponent);
-      saveApplicationComponent(new Element("application").addContent(fileTypesComponent), PathManager.getOptionsFile(fileTypeManager));
-    }
-    catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-    catch (WriteExternalException e) {
-      throw new RuntimeException(e);
-    }
+    ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+      @Override
+      public void run() {
+        doSaveComponent(ProjectJdkTable.getInstance());
+        doSaveComponent(FileTypeManager.getInstance());
+      }
+    }, ModalityState.any());
   }
 
-  private static void saveApplicationComponent(Element root, final File file) throws IOException {
-    FileUtil.createParentDirs(file);
-    JDOMUtil.writeDocument(new Document(root), file, SystemProperties.getLineSeparator());
+  public static void saveApplicationComponent(final Object appComponent) {
+    ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+      @Override
+      public void run() {
+        doSaveComponent(appComponent);
+      }
+    }, ModalityState.any());
   }
 
-  public static void enableExternalCompiler(final Project project) {
+  private static void doSaveComponent(Object appComponent) {
+    //noinspection TestOnlyProblems
+    ComponentsPackage.getStateStore(ApplicationManager.getApplication()).saveApplicationComponent(appComponent);
+  }
+
+  public static void enableExternalCompiler() {
+    ApplicationManagerEx.getApplicationEx().doNotSave(false);
+    final JavaAwareProjectJdkTableImpl table = JavaAwareProjectJdkTableImpl.getInstanceEx();
     new WriteAction() {
-      protected void run(final Result result) {
-        CompilerWorkspaceConfiguration.getInstance(project).USE_OUT_OF_PROCESS_BUILD = true;
-        ApplicationManagerEx.getApplicationEx().doNotSave(false);
-        JavaAwareProjectJdkTableImpl table = JavaAwareProjectJdkTableImpl.getInstanceEx();
+      @Override
+      protected void run(@NotNull final Result result) {
         table.addJdk(table.getInternalJdk());
       }
     }.execute();
   }
 
   public static void disableExternalCompiler(final Project project) {
+    ApplicationManagerEx.getApplicationEx().doNotSave(true);
+    final JavaAwareProjectJdkTableImpl table = JavaAwareProjectJdkTableImpl.getInstanceEx();
     new WriteAction() {
-      protected void run(final Result result) {
-        CompilerWorkspaceConfiguration.getInstance(project).USE_OUT_OF_PROCESS_BUILD = false;
-        ApplicationManagerEx.getApplicationEx().doNotSave(true);
-        JavaAwareProjectJdkTableImpl table = JavaAwareProjectJdkTableImpl.getInstanceEx();
-        table.removeJdk(table.getInternalJdk());
-        BuildManager.getInstance().stopWatchingProject(project);
+      @Override
+      protected void run(@NotNull final Result result) {
+        Module[] modules = ModuleManager.getInstance(project).getModules();
+        Sdk internalJdk = table.getInternalJdk();
+        List<Module> modulesToRestore = new ArrayList<Module>();
+        for (Module module : modules) {
+          Sdk sdk = ModuleRootManager.getInstance(module).getSdk();
+          if (sdk != null && sdk.equals(internalJdk)) {
+            modulesToRestore.add(module);
+          }
+        }
+        table.removeJdk(internalJdk);
+        for (Module module : modulesToRestore) {
+          ModuleRootModificationUtil.setModuleSdk(module, internalJdk);
+        }
+        BuildManager.getInstance().clearState(project);
       }
     }.execute();
   }

@@ -15,6 +15,7 @@
  */
 package org.jetbrains.idea.svn.history;
 
+import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -22,6 +23,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.VcsActions;
 import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.annotate.ShowAllAffectedGenericAction;
@@ -40,11 +42,13 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.*;
-import org.tmatesoft.svn.core.*;
+import org.jetbrains.idea.svn.commandLine.SvnBindException;
+import org.jetbrains.idea.svn.info.Info;
+import org.tmatesoft.svn.core.SVNCancelException;
+import org.tmatesoft.svn.core.SVNException;
+import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.util.SVNPathUtil;
 import org.tmatesoft.svn.core.internal.wc.SVNErrorManager;
-import org.tmatesoft.svn.core.wc.SVNInfo;
-import org.tmatesoft.svn.core.wc.SVNLogClient;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 import org.tmatesoft.svn.util.SVNLogType;
@@ -66,13 +70,14 @@ public class SvnHistoryProvider
     myVcs = vcs;
   }
 
+  @Override
   public boolean supportsHistoryForDirectories() {
     return true;
   }
 
   @Override
   public DiffFromHistoryHandler getHistoryDiffHandler() {
-    return null;
+    return new SvnDiffFromHistoryHandler(myVcs);
   }
 
   @Override
@@ -80,6 +85,7 @@ public class SvnHistoryProvider
     return true;
   }
 
+  @Override
   public VcsDependentHistoryComponents getUICustomization(final VcsHistorySession session, JComponent forShortcutRegistration) {
     final ColumnInfo[] columns;
     final Consumer<VcsFileRevision> listener;
@@ -95,6 +101,7 @@ public class SvnHistoryProvider
       field.setBackground(UIUtil.getComboBoxDisabledBackground());
       field.setWrapStyleWord(true);
       listener = new Consumer<VcsFileRevision>() {
+        @Override
         public void consume(VcsFileRevision vcsFileRevision) {
           field.setText(mergeSourceColumn.getText(vcsFileRevision));
         }
@@ -156,6 +163,7 @@ public class SvnHistoryProvider
     return new SvnHistorySession(myVcs, revisions, filePath, aBoolean, currentRevision, false, ! filePath.isNonLocal());
   }
 
+  @Override
   @Nullable
   public VcsHistorySession createSessionFor(final FilePath filePath) throws VcsException {
     final VcsAppendableHistoryPartnerAdapter adapter = new VcsAppendableHistoryPartnerAdapter();
@@ -165,9 +173,14 @@ public class SvnHistoryProvider
     return adapter.getSession();
   }
 
+  @Override
   public void reportAppendableHistory(FilePath path, final VcsAppendableHistorySessionPartner partner) throws VcsException {
-    // we need + 1 rows to be reported to further detect that number of rows exceeded the limit
-    reportAppendableHistory(path, partner, null, null, VcsConfiguration.getInstance(myVcs.getProject()).MAXIMUM_HISTORY_ROWS + 1, null, false);
+    // request MAXIMUM_HISTORY_ROWS + 1 log entries to be able to detect if there are more log entries than it is configured to show -
+    // see LimitHistoryCheck
+    VcsConfiguration configuration = VcsConfiguration.getInstance(myVcs.getProject());
+    int limit = configuration.LIMIT_HISTORY ? configuration.MAXIMUM_HISTORY_ROWS + 1 : 0;
+
+    reportAppendableHistory(path, partner, null, null, limit, null, false);
   }
 
   public void reportAppendableHistory(FilePath path, final VcsAppendableHistorySessionPartner partner,
@@ -188,7 +201,7 @@ public class SvnHistoryProvider
       }
     }
 
-    final boolean showMergeSources = SvnConfiguration.getInstance(myVcs.getProject()).SHOW_MERGE_SOURCES_IN_ANNOTATE;
+    final boolean showMergeSources = SvnConfiguration.getInstance(myVcs.getProject()).isShowMergeSourcesInAnnotate();
     final LogLoader logLoader;
     if (path.isNonLocal()) {
       logLoader = new RepositoryLoader(myVcs, committedPath, from, to, limit, peg, forceBackwards, showMergeSources);
@@ -221,6 +234,7 @@ public class SvnHistoryProvider
       indicator.setText(SvnBundle.message("progress.text2.collecting.history", path.getName()));
     }
     final Consumer<VcsFileRevision> consumer = new Consumer<VcsFileRevision>() {
+      @Override
       public void consume(VcsFileRevision vcsFileRevision) {
         if (!Boolean.TRUE.equals(sessionReported.get())) {
           partner.reportCreatedEmptySession(historySession);
@@ -279,7 +293,7 @@ public class SvnHistoryProvider
   }
 
   private static class LocalLoader extends LogLoader {
-    private SVNInfo myInfo;
+    private Info myInfo;
 
     private LocalLoader(SvnVcs vcs, FilePath file, SVNRevision from, SVNRevision to, int limit, SVNRevision peg, boolean showMergeSources) {
       super(vcs, file, from, to, limit, peg, showMergeSources);
@@ -318,7 +332,7 @@ public class SvnHistoryProvider
           target,
           myFrom == null ? SVNRevision.HEAD : myFrom,
           myTo == null ? SVNRevision.create(1) : myTo,
-          false, true, myShowMergeSources && mySupport15, myLimit + 1, null,
+          false, true, myShowMergeSources && mySupport15, myLimit, null,
           new MyLogEntryHandler(myVcs, myUrl, pegRevision, relativeUrl,
                                 createConsumerAdapter(myConsumer),
                                 repoRootURL, myFile.getCharset()));
@@ -380,7 +394,10 @@ public class SvnHistoryProvider
 
         final SVNURL svnurl = SVNURL.parseURIEncoded(myUrl);
         SVNRevision operationalFrom = myFrom == null ? SVNRevision.HEAD : myFrom;
-        final SVNURL rootURL = getRepositoryRoot(svnurl, myFrom);
+        // TODO: try to rewrite without separately retrieving repository url by item url - as this command could require authentication
+        // TODO: and it is not "clear enough/easy to implement" with current design (for some cases) how to cache credentials (if in
+        // TODO: non-interactive mode)
+        final SVNURL rootURL = SvnUtil.getRepositoryRoot(myVcs, svnurl);
         if (rootURL == null) {
           throw new VcsException("Could not find repository root for URL: " + myUrl);
         }
@@ -395,7 +412,7 @@ public class SvnHistoryProvider
 
         myVcs.getFactory(target).createHistoryClient()
           .doLog(target, operationalFrom, myTo == null ? SVNRevision.create(1) : myTo, false, true, myShowMergeSources && mySupport15,
-                 myLimit + 1, null, handler);
+                 myLimit, null, handler);
       }
       catch (SVNCancelException e) {
         //
@@ -409,64 +426,62 @@ public class SvnHistoryProvider
     }
 
     private void loadBackwards(SVNURL svnurl) throws SVNException, VcsException {
-        final SVNURL rootURL = getRepositoryRoot(svnurl, myFrom);
-        final String root = rootURL.toString();
-        String relativeUrl = myUrl;
-        if (myUrl.startsWith(root)) {
-          relativeUrl = myUrl.substring(root.length());
-        }
+      // this method is called when svnurl does not exist in latest repository revision - thus concrete old revision is used for "info"
+      // command to get repository url
+      Info info = myVcs.getInfo(svnurl, myPeg, myPeg);
+      final SVNURL rootURL = info != null ? info.getRepositoryRootURL() : null;
+      final String root = rootURL != null ? rootURL.toString() : "";
+      String relativeUrl = myUrl;
+      if (myUrl.startsWith(root)) {
+        relativeUrl = myUrl.substring(root.length());
+      }
 
-      // TODO: Update this call to myVcs.getFactory.createHistoryClient
-        SVNLogClient client = myVcs.createLogClient();
-
-        final RepositoryLogEntryHandler repositoryLogEntryHandler =
+      final RepositoryLogEntryHandler repositoryLogEntryHandler =
           new RepositoryLogEntryHandler(myVcs, myUrl, SVNRevision.UNDEFINED, relativeUrl,
                                         new ThrowableConsumer<VcsFileRevision, SVNException>() {
                                           @Override
                                           public void consume(VcsFileRevision revision) throws SVNException {
                                             myConsumer.consume(revision);
-                                            throw new SVNCancelException(); // load only one revision
                                           }
                                         }, rootURL);
-        repositoryLogEntryHandler.setThrowCancelOnMeetPathCreation(true);
+      repositoryLogEntryHandler.setThrowCancelOnMeetPathCreation(true);
 
-        client.doLog(rootURL, new String[]{}, myFrom, myFrom, myTo == null ? SVNRevision.create(1) : myTo, false, true, myShowMergeSources && mySupport15, 0, null, repositoryLogEntryHandler);
-    }
-
-    // TODO: try to rewrite without separately retrieving repository url by item url - as this command could require authentication
-    // TODO: and it is not "clear enough/easy to implement" with current design (for some cases) how to cache credentials (if in
-    // TODO: non-interactive mode)
-    private SVNURL getRepositoryRoot(SVNURL svnurl, SVNRevision operationalFrom) throws SVNException {
-      SVNInfo info = myVcs.getInfo(svnurl, SVNRevision.HEAD);
-
-      return info != null ? info.getRepositoryRootURL() : null;
+      SvnTarget target = SvnTarget.fromURL(rootURL, myFrom);
+      myVcs.getFactory(target).createHistoryClient()
+        .doLog(target, myFrom, myTo == null ? SVNRevision.create(1) : myTo, false, true, myShowMergeSources && mySupport15, 1, null,
+               repositoryLogEntryHandler);
     }
 
     private boolean existsNow(SVNURL svnurl) {
-      final SVNInfo info;
+      final Info info;
       try {
         info = myVcs.getInfo(svnurl, SVNRevision.HEAD, SVNRevision.HEAD);
       }
-      catch (SVNException e) {
+      catch (SvnBindException e) {
         return false;
       }
       return info != null && info.getURL() != null && info.getRevision().isValid();
     }
   }
 
+  @Override
   public String getHelpId() {
     return null;
   }
 
+  @Override
   public AnAction[] getAdditionalActions(final Runnable refresher) {
-    return new AnAction[]{ ShowAllAffectedGenericAction.getInstance(), new MergeSourceDetailsAction(), new SvnEditCommitMessageFromFileHistoryAction()};
+    return new AnAction[]{ShowAllAffectedGenericAction.getInstance(),
+      ActionManager.getInstance().getAction(VcsActions.ACTION_COPY_REVISION_NUMBER), new MergeSourceDetailsAction(),
+      new SvnEditCommitMessageFromFileHistoryAction()};
   }
 
+  @Override
   public boolean isDateOmittable() {
     return false;
   }
 
-  private static class MyLogEntryHandler implements ISVNLogEntryHandler {
+  private static class MyLogEntryHandler implements LogEntryConsumer {
     private final ProgressIndicator myIndicator;
     protected final SvnVcs myVcs;
     protected final SvnPathThroughHistoryCorrection myLastPathCorrector;
@@ -499,9 +514,10 @@ public class SvnHistoryProvider
       myPegRevision = pegRevision;
       myUrl = url;
       myRepositoryRoot = repoRootURL;
-      myTracker = new SvnMergeSourceTracker(new ThrowableConsumer<Pair<SVNLogEntry, Integer>, SVNException>() {
-        public void consume(final Pair<SVNLogEntry, Integer> svnLogEntryIntegerPair) throws SVNException {
-          final SVNLogEntry logEntry = svnLogEntryIntegerPair.getFirst();
+      myTracker = new SvnMergeSourceTracker(new ThrowableConsumer<Pair<LogEntry, Integer>, SVNException>() {
+        @Override
+        public void consume(final Pair<LogEntry, Integer> svnLogEntryIntegerPair) throws SVNException {
+          final LogEntry logEntry = svnLogEntryIntegerPair.getFirst();
 
           if (myIndicator != null) {
             if (myIndicator.isCanceled()) {
@@ -509,12 +525,12 @@ public class SvnHistoryProvider
             }
             myIndicator.setText2(SvnBundle.message("progress.text2.revision.processed", logEntry.getRevision()));
           }
-          SVNLogEntryPath entryPath = null;
+          LogEntryPath entryPath = null;
           String copyPath = null;
           final int mergeLevel = svnLogEntryIntegerPair.getSecond();
 
           if (! myLastPathCorrector.isRoot()) {
-            myLastPathCorrector.handleLogEntry(logEntry);
+            myLastPathCorrector.consume(logEntry);
             entryPath = myLastPathCorrector.getDirectlyMentioned();
             copyPath = null;
             if (entryPath != null) {
@@ -523,7 +539,7 @@ public class SvnHistoryProvider
               // if there are no path with exact match, check whether parent or child paths had changed
               // "entry path" is allowed to be null now; if it is null, last path would be taken for revision construction
 
-              // Separate SVNLogEntry is issued for each "merge source" revision. These "merge source" revisions are treated as child
+              // Separate LogEntry is issued for each "merge source" revision. These "merge source" revisions are treated as child
               // revisions of some other revision - this way we construct merge hierarchy.
               // mergeLevel >= 0 indicates that we are currently processing some "merge source" revision. This "merge source" revision
               // contains changes from some other branch - so checkForChildChanges() and checkForParentChanges() return "false".
@@ -551,11 +567,11 @@ public class SvnHistoryProvider
       });
     }
 
-    private boolean checkForParentChanges(SVNLogEntry logEntry) {
+    private boolean checkForParentChanges(LogEntry logEntry) {
       final String lastPathBefore = myLastPathCorrector.getBefore();
       String path = SVNPathUtil.removeTail(lastPathBefore);
       while (path.length() > 0) {
-        final SVNLogEntryPath entryPath = logEntry.getChangedPaths().get(path);
+        final LogEntryPath entryPath = logEntry.getChangedPaths().get(path);
         // A & D are checked since we are not interested in parent folders property changes, only in structure changes
         // TODO: seems that R (replaced) should also be checked here
         if (entryPath != null && (entryPath.getType() == 'A' || entryPath.getType() == 'D')) {
@@ -571,7 +587,7 @@ public class SvnHistoryProvider
 
     // TODO: this makes sense only for directories, but should always return true if something under the directory was changed in revision
     // TODO: as svn will provide child changes in history for directory
-    private boolean checkForChildChanges(SVNLogEntry logEntry) {
+    private boolean checkForChildChanges(LogEntry logEntry) {
       final String lastPathBefore = myLastPathCorrector.getBefore();
       for (String key : logEntry.getChangedPaths().keySet()) {
         if (SVNPathUtil.isAncestor(lastPathBefore, key)) {
@@ -581,11 +597,12 @@ public class SvnHistoryProvider
       return false;
     }
 
-    public void handleLogEntry(SVNLogEntry logEntry) throws SVNException {
+    @Override
+    public void consume(LogEntry logEntry) throws SVNException {
       myTracker.consume(logEntry);
     }
 
-    private void addToListByLevel(final SvnFileRevision revision, final SvnFileRevision revisionToAdd, final int level) {
+    private static void addToListByLevel(final SvnFileRevision revision, final SvnFileRevision revisionToAdd, final int level) {
       if (level < 0) {
         return;
       }
@@ -599,7 +616,7 @@ public class SvnHistoryProvider
       }
     }
 
-    protected SvnFileRevision createRevision(final SVNLogEntry logEntry, final String copyPath, SVNLogEntryPath entryPath) throws SVNException {
+    protected SvnFileRevision createRevision(final LogEntry logEntry, final String copyPath, LogEntryPath entryPath) throws SVNException {
       Date date = logEntry.getDate();
       String author = logEntry.getAuthor();
       String message = logEntry.getMessage();
@@ -607,7 +624,7 @@ public class SvnHistoryProvider
       final SVNURL url = myRepositoryRoot.appendPath(myLastPath, true);
 //      final SVNURL url = entryPath != null ? myRepositoryRoot.appendPath(entryPath.getPath(), true) :
 //                         myRepositoryRoot.appendPath(myLastPathCorrector.getBefore(), false);
-      return new SvnFileRevision(myVcs, myPegRevision, rev, url.toString(), author, date, message, copyPath, myCharset);
+      return new SvnFileRevision(myVcs, myPegRevision, rev, url.toString(), author, date, message, copyPath);
     }
   }
 
@@ -622,11 +639,11 @@ public class SvnHistoryProvider
     }
 
     @Override
-    protected SvnFileRevision createRevision(final SVNLogEntry logEntry, final String copyPath, SVNLogEntryPath entryPath)
+    protected SvnFileRevision createRevision(final LogEntry logEntry, final String copyPath, LogEntryPath entryPath)
       throws SVNException {
       final SVNURL url = entryPath == null ? myRepositoryRoot.appendPath(myLastPathCorrector.getBefore(), false) :
                          myRepositoryRoot.appendPath(entryPath.getPath(), true);
-      return new SvnFileRevision(myVcs, SVNRevision.UNDEFINED, logEntry, url.toString(), copyPath, null);
+      return new SvnFileRevision(myVcs, SVNRevision.UNDEFINED, logEntry, url.toString(), copyPath);
     }
   }
 
@@ -683,6 +700,7 @@ public class SvnHistoryProvider
       return myRenderer;
     }
 
+    @Override
     public RevisionMergeSourceInfo valueOf(final VcsFileRevision vcsFileRevision) {
       return vcsFileRevision != null ? new RevisionMergeSourceInfo(vcsFileRevision) : null;
     }
@@ -714,7 +732,7 @@ public class SvnHistoryProvider
     }
 
     @Override
-    public boolean onClick(MouseEvent e, int clickCount) {
+    public boolean onClick(@NotNull MouseEvent e, int clickCount) {
       if (e.getButton() == 1 && !e.isPopupTrigger()) {
         Object tag = getTagAt(e);
         if (tag == myTag) {
@@ -741,6 +759,7 @@ public class SvnHistoryProvider
       return null;
     }
 
+    @Override
     public void mouseMoved(MouseEvent e) {
       JTable table = (JTable)e.getSource();
       Object tag = getTagAt(e);
@@ -765,6 +784,7 @@ public class SvnHistoryProvider
       return RevisionMergeSourceInfo.toString(value);
     }
 
+    @Override
     protected void customizeCellRenderer(final JTable table,
                                          final Object value,
                                          final boolean selected,
@@ -813,6 +833,7 @@ public class SvnHistoryProvider
   private static class CopyFromColumnInfo extends ColumnInfo<VcsFileRevision, String> {
     private final Icon myIcon = PlatformIcons.COPY_ICON;
     private final ColoredTableCellRenderer myRenderer = new ColoredTableCellRenderer() {
+      @Override
       protected void customizeCellRenderer(final JTable table,
                                            final Object value,
                                            final boolean selected,
@@ -833,6 +854,7 @@ public class SvnHistoryProvider
       super(SvnBundle.message("copy.column.title"));
     }
 
+    @Override
     public String valueOf(final VcsFileRevision o) {
       return o instanceof SvnFileRevision ? ((SvnFileRevision)o).getCopyFromPath() : "";
     }

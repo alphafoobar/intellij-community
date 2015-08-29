@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
  */
 package com.intellij.openapi.wm.impl;
 
+import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.ide.actions.ActivateToolWindowAction;
 import com.intellij.ide.ui.UISettings;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionPlaces;
@@ -27,9 +29,10 @@ import com.intellij.openapi.keymap.KeymapManagerListener;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.ToolWindowAnchor;
-import com.intellij.openapi.wm.ex.ToolWindowEx;
 import com.intellij.ui.MouseDragHelper;
 import com.intellij.ui.PopupHandler;
+import com.intellij.util.ui.JBImageIcon;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -39,14 +42,12 @@ import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
-import java.beans.PropertyChangeEvent;
-import java.beans.PropertyChangeListener;
 
 /**
  * @author Eugene Belyaev
  * @author Vladimir Kondratyev
  */
-public final class StripeButton extends AnchoredButton implements ActionListener {
+public final class StripeButton extends AnchoredButton implements ActionListener, Disposable {
   private final Color ourBackgroundColor = new Color(247, 243, 239);
 
   /**
@@ -55,7 +56,6 @@ public final class StripeButton extends AnchoredButton implements ActionListener
    */
   private int myMnemonic;
   private final InternalDecorator myDecorator;
-  private final MyPropertyChangeListener myToolWindowHandler;
   private boolean myPressedWhenSelected;
 
   private JLayeredPane myDragPane;
@@ -69,7 +69,6 @@ public final class StripeButton extends AnchoredButton implements ActionListener
 
   StripeButton(@NotNull final InternalDecorator decorator, ToolWindowsPane pane) {
     myDecorator = decorator;
-    myToolWindowHandler = new MyPropertyChangeListener();
     myKeymapListener = new MyKeymapListener();
     myPane = pane;
 
@@ -102,6 +101,7 @@ public final class StripeButton extends AnchoredButton implements ActionListener
     return getWindowInfo().getAnchor();
   }
 
+  @NotNull
   WindowInfoImpl getWindowInfo() {
     return myDecorator.getWindowInfo();
   }
@@ -109,12 +109,10 @@ public final class StripeButton extends AnchoredButton implements ActionListener
   private void init() {
     setFocusable(false);
     setBackground(ourBackgroundColor);
-    final Border border = BorderFactory.createEmptyBorder(5, 5, 0, 5);
+    final Border border = JBUI.Borders.empty(5, 5, 0, 5);
     setBorder(border);
-    updateText();
-    updateState();
+    updatePresentation();
     apply(myDecorator.getWindowInfo());
-    myDecorator.getToolWindow().addPropertyChangeListener(myToolWindowHandler);
     addActionListener(this);
     addMouseListener(new MyPopupHandler());
     setRolloverEnabled(true);
@@ -128,7 +126,7 @@ public final class StripeButton extends AnchoredButton implements ActionListener
         processDrag(e);
       }
     });
-    KeymapManager.getInstance().addKeymapManagerListener(myKeymapListener);
+    KeymapManager.getInstance().addKeymapManagerListener(myKeymapListener, this);
   }
 
   
@@ -179,7 +177,7 @@ public final class StripeButton extends AnchoredButton implements ActionListener
   }
 
   private void processDrag(final MouseEvent e) {
-    if (myDragCancelled) return;
+    if (myDragCancelled || !MouseDragHelper.checkModifiers(e)) return;
     if (!isDraggingNow()) {
       if (myPressedPoint == null) return;
       if (isWithinDeadZone(e)) return;
@@ -188,12 +186,22 @@ public final class StripeButton extends AnchoredButton implements ActionListener
       if (myDragPane == null) return;
       final BufferedImage image = UIUtil.createImage(getWidth(), getHeight(), BufferedImage.TYPE_INT_ARGB);
       paint(image.getGraphics());
-      myDragButtonImage = new JLabel(new ImageIcon(image)) {
+      myDragButtonImage = new JLabel(new JBImageIcon(image)) {
 
         public String toString() {
           return "Image for: " + StripeButton.this.toString();
         }
       };
+
+      myDragButtonImage.addMouseListener(new MouseAdapter() {
+        @Override
+        public void mouseReleased(MouseEvent e) {
+          finishDragging();
+          myPressedPoint = null;
+          myDragButtonImage = null;
+          super.mouseReleased(e);
+        }
+      });
       myDragPane.add(myDragButtonImage, JLayeredPane.POPUP_LAYER);
       myDragButtonImage.setSize(myDragButtonImage.getPreferredSize());
       setVisible(false);
@@ -288,15 +296,14 @@ public final class StripeButton extends AnchoredButton implements ActionListener
       myDecorator.fireActivated();
     }
     myPressedWhenSelected = false;
+    FeatureUsageTracker.getInstance().triggerFeatureUsed("toolwindow.clickstat." + myDecorator.getToolWindow().getId());
   }
 
-  public void apply(final WindowInfoImpl info) {
+  public void apply(@NotNull WindowInfoImpl info) {
     setSelected(info.isVisible() || info.isActive());
   }
 
-  void dispose() {
-    myDecorator.getToolWindow().removePropertyChangeListener(myToolWindowHandler);
-    KeymapManager.getInstance().removeKeymapManagerListener(myKeymapListener);
+  public void dispose() {
   }
 
   private void showPopup(final Component component, final int x, final int y) {
@@ -317,15 +324,19 @@ public final class StripeButton extends AnchoredButton implements ActionListener
     setFont(font);
   }
 
-  /**
-   * Updates button's text. It composes text as combination of tool window <code>id</code>
-   * and short cut registered in the key map.
-   */
-  void updateText() {
-    final String toolWindowId = getWindowInfo().getId();
-    String text = toolWindowId;
+  void updatePresentation() {
+    updateState();
+    updateText();
+    Icon icon = myDecorator.getToolWindow().getIcon();
+    setIcon(icon);
+    setDisabledIcon(IconLoader.getDisabledIcon(icon));
+  }
+
+  private void updateText() {
+    String text = myDecorator.getToolWindow().getStripeTitle();
     if (UISettings.getInstance().SHOW_TOOL_WINDOW_NUMBERS) {
-      final int mnemonic = ActivateToolWindowAction.getMnemonicForToolWindow(toolWindowId);
+      String toolWindowId = myDecorator.getToolWindow().getId();
+      int mnemonic = ActivateToolWindowAction.getMnemonicForToolWindow(toolWindowId);
       if (mnemonic != -1) {
         text = (char)mnemonic + ": " + text;
         setMnemonic2(mnemonic);
@@ -337,9 +348,9 @@ public final class StripeButton extends AnchoredButton implements ActionListener
     setText(text);
   }
 
-  void updateState() {
-    final ToolWindowImpl window = myDecorator.getToolWindow();
-    final boolean toShow = window.isAvailable() || window.isPlaceholderMode();
+  private void updateState() {
+    ToolWindowImpl window = myDecorator.getToolWindow();
+    boolean toShow = window.isAvailable() || window.isPlaceholderMode();
     if (UISettings.getInstance().ALWAYS_SHOW_WINDOW_BUTTONS) {
       setVisible(true);
     }
@@ -356,29 +367,10 @@ public final class StripeButton extends AnchoredButton implements ActionListener
     }
   }
 
-  private final class MyPropertyChangeListener implements PropertyChangeListener {
-    @Override
-    public void propertyChange(final PropertyChangeEvent e) {
-      final String name = e.getPropertyName();
-      if (ToolWindowEx.PROP_AVAILABLE.equals(name)) {
-        updateState();
-      }
-      else if (ToolWindowEx.PROP_TITLE.equals(name)) {
-        updateText();
-      }
-      else if (ToolWindowEx.PROP_ICON.equals(name)) {
-        final Icon icon = (Icon)e.getNewValue();
-        final Icon disabledIcon = IconLoader.getDisabledIcon(icon);
-        setIcon(icon);
-        setDisabledIcon(disabledIcon);
-      }
-    }
-  }
-  
   private final class MyKeymapListener implements KeymapManagerListener {
     @Override
     public void activeKeymapChanged(Keymap keymap) {
-      updateText();
+      updatePresentation();
     }
   }
 

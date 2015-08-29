@@ -25,6 +25,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
 import gnu.trove.THashSet;
 import gnu.trove.TObjectHashingStrategy;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 import java.util.List;
@@ -46,12 +47,12 @@ public class MagicCompletionContributor extends CompletionContributor {
   private static final int PRIORITY = 100;
 
   @Override
-  public void fillCompletionVariants(final CompletionParameters parameters, final CompletionResultSet result) {
+  public void fillCompletionVariants(@NotNull final CompletionParameters parameters, @NotNull final CompletionResultSet result) {
     //if (parameters.getCompletionType() != CompletionType.SMART) return;
     PsiElement pos = parameters.getPosition();
     MagicConstantInspection.AllowedValues allowedValues = null;
 
-    if (JavaCompletionData.AFTER_DOT.accepts(pos)) {
+    if (JavaKeywordCompletion.AFTER_DOT.accepts(pos)) {
       return;
     }
 
@@ -114,9 +115,16 @@ public class MagicCompletionContributor extends CompletionContributor {
     else if (IN_RETURN.accepts(pos)) {
       PsiReturnStatement statement = PsiTreeUtil.getParentOfType(pos, PsiReturnStatement.class);
       PsiExpression l = statement == null ? null : statement.getReturnValue();
-      PsiMethod method = PsiTreeUtil.getParentOfType(l, PsiMethod.class);
-      if (method != null) {
-        allowedValues = MagicConstantInspection.getAllowedValues(method, method.getReturnType(), null);
+      PsiElement element = PsiTreeUtil.getParentOfType(l, PsiMethod.class, PsiLambdaExpression.class);
+      if (element instanceof PsiMethod) {
+        allowedValues = MagicConstantInspection.getAllowedValues((PsiMethod)element, ((PsiMethod)element).getReturnType(), null);
+      } 
+      else if (element instanceof PsiLambdaExpression) {
+        final PsiType interfaceType = ((PsiLambdaExpression)element).getFunctionalInterfaceType();
+        final PsiMethod interfaceMethod = LambdaUtil.getFunctionalInterfaceMethod(interfaceType);
+        if (interfaceMethod != null) {
+          allowedValues = MagicConstantInspection.getAllowedValues(interfaceMethod, LambdaUtil.getFunctionalInterfaceReturnType(interfaceType), null);
+        }
       }
     }
     else if (IN_ANNOTATION_INITIALIZER.accepts(pos)) {

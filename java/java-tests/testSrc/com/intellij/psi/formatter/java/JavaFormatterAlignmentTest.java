@@ -16,6 +16,7 @@
 package com.intellij.psi.formatter.java;
 
 import com.intellij.openapi.fileTypes.StdFileTypes;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.util.IncorrectOperationException;
 
@@ -238,6 +239,23 @@ public class JavaFormatterAlignmentTest extends AbstractJavaFormatterTest {
       "}"
     );
   }
+
+  public void testDoNotAlignIfNotEnabled() {
+    getSettings().ALIGN_GROUP_FIELD_DECLARATIONS = false;
+    doTextTest(
+      "public class Test {\n" +
+      "private Long field2 = null;\n" +
+      "private final Object field1 = null;\n" +
+      "private int i = 1;\n" +
+      "}",
+
+      "public class Test {\n" +
+      "    private Long field2 = null;\n" +
+      "    private final Object field1 = null;\n" +
+      "    private int i = 1;\n" +
+      "}"
+    );
+  }
   
   public void testAnnotatedAndNonAnnotatedFieldsInColumnsAlignment() {
     // Inspired by IDEA-60237
@@ -350,7 +368,7 @@ public class JavaFormatterAlignmentTest extends AbstractJavaFormatterTest {
   public void testChainedMethodCalls_WithChopDownIfLongOption() throws Exception {
     getSettings().ALIGN_MULTILINE_CHAINED_METHODS = true;
     getSettings().METHOD_CALL_CHAIN_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM; // it's equal to "Chop down if long"
-    getSettings().getRootSettings().RIGHT_MARGIN = 50;
+    getSettings().RIGHT_MARGIN = 50;
 
     String before = "a.current.current.getThis().getThis().getThis().getThis().getThis();";
     doMethodTest(
@@ -362,14 +380,14 @@ public class JavaFormatterAlignmentTest extends AbstractJavaFormatterTest {
       "                 .getThis();"
     );
 
-    getSettings().getRootSettings().RIGHT_MARGIN = 80;
+    getSettings().RIGHT_MARGIN = 80;
     doMethodTest(before, before);
   }
 
   public void testChainedMethodCalls_WithWrapIfNeededOption() throws Exception {
     getSettings().ALIGN_MULTILINE_CHAINED_METHODS = false;
     getSettings().METHOD_CALL_CHAIN_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
-    getSettings().getRootSettings().RIGHT_MARGIN = 50;
+    getSettings().RIGHT_MARGIN = 50;
 
     String before = "a.current.current.getThis().getThis().getThis().getThis();";
 
@@ -387,7 +405,332 @@ public class JavaFormatterAlignmentTest extends AbstractJavaFormatterTest {
       "                 .getThis().getThis();"
     );
 
-    getSettings().getRootSettings().RIGHT_MARGIN = 75;
+    getSettings().RIGHT_MARGIN = 75;
     doMethodTest(before, before);
+  }
+
+  public void testAlignMethodCalls_PassedAsParameters_InMethodCall() {
+    getSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+
+    doMethodTest(
+      "test(call1(),\n" +
+      "             call2(),\n" +
+      "                        call3());\n",
+      "test(call1(),\n" +
+      "     call2(),\n" +
+      "     call3());\n"
+    );
+  }
+
+  public void testLocalVariablesAlignment() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "int a = 2;\n" +
+      "String myString = \"my string\"",
+      "int    a        = 2;\n" +
+      "String myString = \"my string\""
+    );
+  }
+
+  public void testAlignOnlyDeclarationStatements() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "      String s;\n" +
+      "   int a = 2;\n" +
+      "s = \"abs\";\n" +
+      "long stamp = 12;",
+      "String s;\n" +
+      "int    a = 2;\n" +
+      "s = \"abs\";\n" +
+      "long stamp = 12;"
+    );
+  }
+
+  public void testDoNotAlignWhenBlankLine() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "int a = 2;\n" +
+      "\n" +
+      "String myString = \"my string\"",
+      "int a = 2;\n" +
+      "\n" +
+      "String myString = \"my string\""
+    );
+  }
+
+  public void testDoNotAlignWhenGroupInterrupted() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "int a = 2;\n" +
+      "System.out.println(\"hi!\")\n" +
+      "String myString = \"my string\"",
+      "int a = 2;\n" +
+      "System.out.println(\"hi!\")\n" +
+      "String myString = \"my string\""
+    );
+  }
+
+  public void testDoNotAlignMultiDeclarations() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "  int a, b = 2;\n" +
+      "String myString = \"my string\"",
+      "int    a, b     = 2;\n" +
+      "String myString = \"my string\""
+    );
+  }
+
+  public void testDoNotAlignMultilineParams() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+
+    doMethodTest(
+      "int a = 12;\n" +
+      "  Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};",
+
+      "int a = 12;\n" +
+      "Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};"
+    );
+
+    doMethodTest(
+      "   Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};\n" +
+      "int c = 12;",
+
+      "Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};\n" +
+      "int c = 12;"
+    );
+
+    doMethodTest(
+      "    int ac = 99;\n" +
+      "Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};\n" +
+      "int c = 12;",
+
+      "int ac = 99;\n" +
+      "Runnable runnable = new Runnable() {\n" +
+      "    @Override\n" +
+      "    public void run() {\n" +
+      "        System.out.println(\"AAA!\");\n" +
+      "    }\n" +
+      "};\n" +
+      "int c = 12;"
+    );
+  }
+
+  public void testDoNotAlign_IfFirstMultiline() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+
+    doMethodTest(
+      "int\n" +
+      "       i = 0;\n" +
+      "int[] a = new int[]{1, 2, 0x0052, 0x0053, 0x0054};\n" +
+      "int var1 = 1;\n" +
+      "int var2 = 2;",
+
+      "int\n" +
+      "        i = 0;\n" +
+      "int[] a    = new int[]{1, 2, 0x0052, 0x0053, 0x0054};\n" +
+      "int   var1 = 1;\n" +
+      "int   var2 = 2;"
+    );
+  }
+
+  public void testAlign_InMethod() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doClassTest(
+      "public void run() {\n" +
+      "\n" +
+      "                int a = 2;\n" +
+      "            String superString = \"\";\n" +
+      "\n" +
+      "     test(call1(), call2(), call3());\n" +
+      "    }",
+
+      "public void run() {\n" +
+      "\n" +
+      "    int    a           = 2;\n" +
+      "    String superString = \"\";\n" +
+      "\n" +
+      "    test(call1(), call2(), call3());\n" +
+      "}"
+    );
+
+    doClassTest(
+      "public void run() {\n" +
+      "\n" +
+      "        test(call1(), call2(), call3());\n" +
+      "\n" +
+      "        int a = 2;\n" +
+      "             String superString = \"\";\n" +
+      "}",
+      "public void run() {\n" +
+      "\n" +
+      "    test(call1(), call2(), call3());\n" +
+      "\n" +
+      "    int    a           = 2;\n" +
+      "    String superString = \"\";\n" +
+      "}");
+  }
+
+  public void test_Shift_All_AlignedParameters() {
+    myLineRange = new TextRange(2, 2);
+    getSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    doTextTest(
+      Action.REFORMAT_WITH_CONTEXT,
+      "public class Test {\n" +
+      "  \n" +
+      "    public void fooooo(String foo,\n" +
+      "                    String booo,\n" +
+      "                    String kakadoo) {\n" +
+      "\n" +
+      "    }\n" +
+      "\n" +
+      "}",
+
+      "public class Test {\n" +
+      "\n" +
+      "    public void fooooo(String foo,\n" +
+      "                       String booo,\n" +
+      "                       String kakadoo) {\n" +
+      "\n" +
+      "    }\n" +
+      "\n" +
+      "}"
+    );
+  }
+
+  public void test_Align_UnselectedField_IfNeeded() {
+    myLineRange = new TextRange(2, 2);
+    getSettings().ALIGN_GROUP_FIELD_DECLARATIONS = true;
+    doTextTest(
+      Action.REFORMAT_WITH_CONTEXT,
+      "public class Test {\n" +
+      "    public int    i = 1;\n" +
+      "    public String iiiiiiiiii = 2;\n" +
+      "}",
+      "public class Test {\n" +
+      "    public int    i          = 1;\n" +
+      "    public String iiiiiiiiii = 2;\n" +
+      "}"
+    );
+  }
+
+  public void test_Align_UnselectedVariable_IfNeeded() {
+    myLineRange = new TextRange(3, 3);
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doTextTest(
+      Action.REFORMAT_WITH_CONTEXT,
+      "public class Test {\n" +
+      "    public void test() {\n" +
+      "        int s = 2;\n" +
+      "        String sssss = 3;\n" +
+      "    }\n" +
+      "}",
+      "public class Test {\n" +
+      "    public void test() {\n" +
+      "        int    s     = 2;\n" +
+      "        String sssss = 3;\n" +
+      "    }\n" +
+      "}"
+    );
+  }
+
+  public void test_Align_ConsecutiveVars_InsideIfBlock() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "if (a > 2) {\n" +
+      "int a=2;\n" +
+      "String name=\"Yarik\";\n" +
+      "}\n",
+      "if (a > 2) {\n" +
+      "    int    a    = 2;\n" +
+      "    String name = \"Yarik\";\n" +
+      "}\n"
+    );
+  }
+
+  public void test_Align_ConsecutiveVars_InsideForBlock() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "    for (int i = 0; i < 10; i++) {\n" +
+      "      int a=2;\n" +
+      "      String name=\"Xa\";\n" +
+      "    }\n",
+      "for (int i = 0; i < 10; i++) {\n" +
+      "    int    a    = 2;\n" +
+      "    String name = \"Xa\";\n" +
+      "}\n"
+    );
+  }
+
+  public void test_Align_ConsecutiveVars_InsideTryBlock() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "    try {\n" +
+      "      int x = getX();\n" +
+      "      String name = \"Ha\";\n" +
+      "    }\n" +
+      "    catch (IOException exception) {\n" +
+      "      int y = 12;\n" +
+      "      String test = \"Test\";\n" +
+      "    }\n" +
+      "    finally {\n" +
+      "      int z = 12;\n" +
+      "      String zzzz = \"pnmhd\";\n" +
+      "    }\n",
+      "try {\n" +
+      "    int    x    = getX();\n" +
+      "    String name = \"Ha\";\n" +
+      "} catch (IOException exception) {\n" +
+      "    int    y    = 12;\n" +
+      "    String test = \"Test\";\n" +
+      "} finally {\n" +
+      "    int    z    = 12;\n" +
+      "    String zzzz = \"pnmhd\";\n" +
+      "}\n"
+    );
+  }
+
+  public void test_Align_ConsecutiveVars_InsideCodeBlock() {
+    getSettings().ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = true;
+    doMethodTest(
+      "    System.out.println(\"AAAA\");\n" +
+      "    int a = 2;\n" +
+      "    \n" +
+      "    {\n" +
+      "      int x=2;\n" +
+      "      String name=3;\n" +
+      "    }\n",
+      "System.out.println(\"AAAA\");\n" +
+      "int a = 2;\n" +
+      "\n" +
+      "{\n" +
+      "    int    x    = 2;\n" +
+      "    String name = 3;\n" +
+      "}\n"
+    );
   }
 }

@@ -15,8 +15,9 @@
  */
 package com.intellij.uiDesigner.binding;
 
-import com.intellij.lang.properties.PropertiesUtil;
 import com.intellij.lang.properties.PropertiesFileType;
+import com.intellij.lang.properties.PropertiesUtilBase;
+import com.intellij.lang.properties.ResourceBundleManager;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -53,14 +54,14 @@ public final class ResourceBundleFileReference extends ReferenceInForm {
     if (module == null) {
       return null;
     }
-    PropertiesFile propertiesFile = PropertiesUtil.getPropertiesFile(getRangeText(), module, null);
+    PropertiesFile propertiesFile = PropertiesUtilBase.getPropertiesFile(getRangeText(), module, null);
     return propertiesFile == null ? null : propertiesFile.getContainingFile();
   }
 
   @Override
   public boolean isReferenceTo(final PsiElement element) {
     if (!(element instanceof PropertiesFile)) return false;
-    String baseName = PropertiesUtil.getFullName((PropertiesFile) element);
+    String baseName = ResourceBundleManager.getInstance(element.getProject()).getFullName((PropertiesFile)element);
     if (baseName == null) return false;
     baseName = baseName.replace('.', '/');
     final String rangeText = getRangeText();

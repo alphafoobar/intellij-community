@@ -33,7 +33,6 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.ui.awt.RelativePoint;
-import com.intellij.ui.popup.NotLookupOrSearchCondition;
 
 import java.awt.*;
 
@@ -66,6 +65,7 @@ public class ShowJavadoc extends AnAction implements IPropertyTableAction {
   private static void setEnabled(RadPropertyTable table, AnActionEvent e, Presentation presentation) {
     Property property = table.getSelectionProperty();
     presentation.setEnabled(property != null &&
+                            !table.isEditing() &&
                             (property.getJavadocElement() != null || !StringUtil.isEmpty(property.getJavadocText())) &&
                             (e == null || e.getProject() != null));
   }
@@ -100,7 +100,6 @@ public class ShowJavadoc extends AnAction implements IPropertyTableAction {
       public void run() {
         JBPopup hint =
           JBPopupFactory.getInstance().createComponentPopupBuilder(component, component)
-            .setRequestFocusCondition(project, NotLookupOrSearchCondition.INSTANCE)
             .setProject(project)
             .setDimensionServiceKey(project, DocumentationManager.JAVADOC_LOCATION_AND_SIZE, false)
             .setResizable(true)

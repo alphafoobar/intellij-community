@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,7 +86,7 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
     return ApplicationManager.getApplication().runWriteAction(new Computable<PsiField>() {
       @Override
       public PsiField compute() {
-        PsiField field = elementFactory.createField(getInputName() != null ? getInputName() : names[0], defaultType);
+        PsiField field = elementFactory.createField(chooseName(names, myParentClass.getLanguage()), defaultType);
         field = (PsiField)myParentClass.add(field);
         if (myExprText != null) {
           updateInitializer(elementFactory, field);
@@ -148,6 +148,11 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
     }
   }
 
+  @Override
+  protected String getRefactoringId() {
+    return "refactoring.extractField";
+  }
+
   public void setVisibility(String visibility) {
     myIntroduceFieldPanel.setVisibility(visibility);
   }
@@ -167,7 +172,7 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
 
   @Override
   protected boolean startsOnTheSameElement(RefactoringActionHandler handler, PsiElement element) {
-    return super.startsOnTheSameElement(handler, element) && handler instanceof IntroduceFieldHandler;
+    return handler instanceof IntroduceFieldHandler && super.startsOnTheSameElement(handler, element);
   }
 
   @Override
@@ -203,6 +208,8 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
 
     protected void performIntroduce() {
       ourLastInitializerPlace = myIntroduceFieldPanel.getInitializerPlace();
+      final PsiType forcedType = getType();
+      LOG.assertTrue(forcedType == null || forcedType.isValid(), forcedType);
       final BaseExpressionToFieldHandler.Settings settings =
         new BaseExpressionToFieldHandler.Settings(getInputName(),
                                                   getExpr(),
@@ -211,12 +218,12 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
                                                   myIntroduceFieldPanel.isDeclareFinal(),
                                                   myIntroduceFieldPanel.getInitializerPlace(),
                                                   myIntroduceFieldPanel.getFieldVisibility(), (PsiLocalVariable)getLocalVariable(),
-                                                  getType(),
+                                                  forcedType,
                                                   myIntroduceFieldPanel.isDeleteVariable(),
                                                   myParentClass, false, false);
       new WriteCommandAction(myProject, getCommandName(), getCommandName()){
         @Override
-        protected void run(Result result) throws Throwable {
+        protected void run(@NotNull Result result) throws Throwable {
           if (getLocalVariable() != null) {
             final LocalToFieldHandler.IntroduceFieldRunnable fieldRunnable =
               new LocalToFieldHandler.IntroduceFieldRunnable(false, (PsiLocalVariable)getLocalVariable(), myParentClass, settings, myStatic, myOccurrences);

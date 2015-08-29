@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,14 @@
  */
 package com.intellij.xdebugger.frame;
 
+import com.intellij.util.ThreeState;
+import com.intellij.xdebugger.XDebuggerUtil;
+import com.intellij.xdebugger.XExpression;
+import com.intellij.xdebugger.evaluation.EvaluationMode;
+import com.intellij.xdebugger.evaluation.XInstanceEvaluator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.Promise;
 
 /**
  * Represents a value in debugger tree.
@@ -43,6 +49,25 @@ public abstract class XValue extends XValueContainer {
   }
 
   /**
+   * Asynchronously calculates expression which evaluates to the current value
+   */
+  @NotNull
+  public Promise<XExpression> calculateEvaluationExpression() {
+    String expression = getEvaluationExpression();
+    XExpression res =
+      expression != null ? XDebuggerUtil.getInstance().createExpression(expression, null, null, EvaluationMode.EXPRESSION) : null;
+    return Promise.resolve(res);
+  }
+
+  /**
+   * @return evaluator to calculate value of the current object instance
+   */
+  @Nullable
+  public XInstanceEvaluator getInstanceEvaluator() {
+    return null;
+  }
+
+  /**
    * @return {@link com.intellij.xdebugger.frame.XValueModifier} instance which can be used to modify the value
    */
   @Nullable
@@ -58,6 +83,17 @@ public abstract class XValue extends XValueContainer {
    */
   public void computeSourcePosition(@NotNull XNavigatable navigatable) {
     navigatable.setSourcePosition(null);
+  }
+
+  /**
+   * Provide inline debugger data, return ability to provide, use
+   * {@link ThreeState#UNSURE} if unsupported (default platform implementation will be used),
+   * {@link ThreeState#YES} if applicable
+   * {@link ThreeState#NO} if not applicable
+   */
+  @NotNull
+  public ThreeState computeInlineDebuggerData(@NotNull XInlineDebuggerDataCallback callback) {
+    return ThreeState.UNSURE;
   }
 
   /**
@@ -86,5 +122,16 @@ public abstract class XValue extends XValueContainer {
    */
   public void computeTypeSourcePosition(@NotNull XNavigatable navigatable) {
     navigatable.setSourcePosition(null);
+  }
+
+  /**
+   * This enables showing referrers for the value
+   *
+   * @return provider that creates an XValue returning objects that refer to the current value
+   * or null if showing referrers for the value is disabled
+   */
+  @Nullable
+  public XReferrersProvider getReferrersProvider() {
+    return null;
   }
 }

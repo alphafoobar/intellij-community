@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,11 @@ import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.IncorrectOperationException;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.codeInsight.editorActions.smartEnter.PySmartEnterProcessor;
-import com.jetbrains.python.psi.PyElsePart;
-import com.jetbrains.python.psi.PyFinallyPart;
-import com.jetbrains.python.psi.PyTryPart;
-import com.jetbrains.python.psi.PyUtil;
+import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
+import org.jetbrains.annotations.NotNull;
+
+import static com.jetbrains.python.psi.PyUtil.sure;
 
 /**
  * Created by IntelliJ IDEA.
@@ -32,16 +33,20 @@ import com.jetbrains.python.psi.PyUtil;
  * Date:   16.04.2010
  * Time:   14:25:20
  */
-public class PyUnconditionalStatementPartFixer implements PyFixer {
-  public void apply(Editor editor, PySmartEnterProcessor processor, PsiElement psiElement) throws IncorrectOperationException {
+public class PyUnconditionalStatementPartFixer extends PyFixer<PyElement> {
+  public PyUnconditionalStatementPartFixer() {
+    super(PyElement.class);
+  }
+
+  @Override
+  public void doApply(@NotNull Editor editor, @NotNull PySmartEnterProcessor processor, @NotNull PyElement psiElement)
+    throws IncorrectOperationException {
     if (PyUtil.instanceOf(psiElement, PyElsePart.class, PyTryPart.class, PyFinallyPart.class)) {
-      final PsiElement colon = PyUtil.getChildByFilter(psiElement, TokenSet.create(PyTokenTypes.COLON), 0);
+      final PsiElement colon = PyPsiUtils.getFirstChildOfType(psiElement, PyTokenTypes.COLON);
       if (colon == null) {
-        final PsiElement keywordToken = PyUtil.getChildByFilter(psiElement,
-                                                                TokenSet.create(PyTokenTypes.ELSE_KEYWORD, PyTokenTypes.TRY_KEYWORD,
-                                                                                PyTokenTypes.FINALLY_KEYWORD),
-                                                                0);
-        editor.getDocument().insertString(keywordToken.getTextRange().getEndOffset(), ":");
+        final TokenSet keywords = TokenSet.create(PyTokenTypes.ELSE_KEYWORD, PyTokenTypes.TRY_KEYWORD, PyTokenTypes.FINALLY_KEYWORD);
+        final PsiElement keywordToken = PyPsiUtils.getChildByFilter(psiElement, keywords, 0);
+        editor.getDocument().insertString(sure(keywordToken).getTextRange().getEndOffset(), ":");
       }
     }
   }

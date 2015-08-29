@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,6 +72,7 @@ abstract class AbstractRegisterFix implements LocalQuickFix, DescriptorUtil.Patc
     final PsiFile psiFile = myClass.getContainingFile();
     LOG.assertTrue(psiFile != null);
     final Module module = ModuleUtil.findModuleForFile(psiFile.getVirtualFile(), project);
+    assert module != null;
 
     Runnable command = new Runnable() {
       public void run() {
@@ -86,9 +87,7 @@ abstract class AbstractRegisterFix implements LocalQuickFix, DescriptorUtil.Patc
             List<Module> modules = PluginModuleType.getCandidateModules(module);
             if (modules.size() > 1) {
               final ChooseModulesDialog dialog = new ChooseModulesDialog(project, modules, getName());
-              dialog.show();
-
-              if (!dialog.isOK()) {
+              if (!dialog.showAndGet()) {
                 return;
               }
               modules = dialog.getSelectedModules();

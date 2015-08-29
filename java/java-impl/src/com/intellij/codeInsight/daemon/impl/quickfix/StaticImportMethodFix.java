@@ -27,6 +27,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.PopupStep;
@@ -44,6 +45,7 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -83,6 +85,7 @@ public class StaticImportMethodFix implements IntentionAction {
   @Override
   public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
     return PsiUtil.isLanguageLevel5OrHigher(file)
+           && file instanceof PsiJavaFile
            && myMethodCall.getElement() != null
            && myMethodCall.getElement().isValid()
            && myMethodCall.getElement().getMethodExpression().getQualifierExpression() == null
@@ -107,15 +110,12 @@ public class StaticImportMethodFix implements IntentionAction {
       }
     }
     else if (parent instanceof PsiReturnStatement) {
-      final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(parent, PsiLambdaExpression.class);
-      if (lambdaExpression != null) {
-        return LambdaUtil.getFunctionalInterfaceReturnType(lambdaExpression.getFunctionalInterfaceType());
+      final PsiElement psiElement = PsiTreeUtil.getParentOfType(parent, PsiLambdaExpression.class, PsiMethod.class);
+      if (psiElement instanceof PsiLambdaExpression) {
+        return LambdaUtil.getFunctionalInterfaceReturnType(((PsiLambdaExpression)psiElement).getFunctionalInterfaceType());
       }
-      else {
-        PsiMethod method = PsiTreeUtil.getParentOfType(parent, PsiMethod.class);
-        if (method != null) {
-          return method.getReturnType();
-        }
+      else if (psiElement instanceof PsiMethod) {
+        return ((PsiMethod)psiElement).getReturnType();
       }
     }
     else if (parent instanceof PsiExpressionList) {
@@ -164,7 +164,8 @@ public class StaticImportMethodFix implements IntentionAction {
     final List<PsiMethod> applicableList = new ArrayList<PsiMethod>();
     final PsiResolveHelper resolveHelper = JavaPsiFacade.getInstance(element.getProject()).getResolveHelper();
 
-    final Map<PsiClass, PsiMethod> deprecated = new HashMap<PsiClass, PsiMethod>();
+    final Map<PsiClass, PsiMethod> deprecated = new LinkedHashMap<PsiClass, PsiMethod>();
+    final Map<PsiClass, PsiMethod> suggestions = new LinkedHashMap<PsiClass, PsiMethod>();
     class RegisterMethodsProcessor {
       private void registerMethod(PsiClass containingClass, PsiMethod method) {
         final Boolean alreadyMentioned = possibleClasses.get(containingClass);
@@ -200,20 +201,38 @@ public class StaticImportMethodFix implements IntentionAction {
             //do not show methods from default package
             && !((PsiJavaFile)file).getPackageName().isEmpty()
             && PsiUtil.isAccessible(file.getProject(), method, element, containingClass)) {
-          if (method.isDeprecated()) {
+          if (isEffectivelyDeprecated(method)) {
             deprecated.put(containingClass, method);
             return processCondition();
           }
-          registrar.registerMethod(containingClass, method);
+          suggestions.put(containingClass, method);
         }
         return processCondition();
       }
 
+      private boolean isEffectivelyDeprecated(PsiMethod method) {
+        if (method.isDeprecated()) {
+          return true;
+        }
+        PsiClass aClass = method.getContainingClass();
+        while (aClass != null) {
+          if (aClass.isDeprecated()) {
+            return true;
+          }
+          aClass = aClass.getContainingClass();
+        }
+        return false;
+      }
+
       private boolean processCondition() {
-        return (applicableList.isEmpty() ? list : applicableList).size() + deprecated.size() < 50;
+        return suggestions.size() + deprecated.size() < 50;
       }
     });
 
+    for (Map.Entry<PsiClass, PsiMethod> methodEntry : suggestions.entrySet()) {
+      registrar.registerMethod(methodEntry.getKey(), methodEntry.getValue());
+    }
+    
     for (Map.Entry<PsiClass, PsiMethod> deprecatedMethod : deprecated.entrySet()) {
       registrar.registerMethod(deprecatedMethod.getKey(), deprecatedMethod.getValue());
     }
@@ -343,6 +362,20 @@ public class StaticImportMethodFix implements IntentionAction {
       @Override
       protected ListCellRenderer getListElementRenderer() {
         return new MethodCellRenderer(true, PsiFormatUtilBase.SHOW_NAME){
+
+          @Nullable
+          @Override
+          protected TextAttributes getNavigationItemAttributes(Object value) {
+            TextAttributes attrs = super.getNavigationItemAttributes(value);
+            if (value instanceof PsiMethod && !((PsiMethod)value).isDeprecated()) {
+              PsiClass psiClass = ((PsiMethod)value).getContainingClass();
+              if (psiClass != null && psiClass.isDeprecated()) {
+                return TextAttributes.merge(attrs, super.getNavigationItemAttributes(psiClass));
+              }
+            }
+            return attrs;
+          }
+
           @Override
           protected DefaultListCellRenderer getRightCellRenderer(final Object value) {
             final DefaultListCellRenderer moduleRenderer = super.getRightCellRenderer(value);

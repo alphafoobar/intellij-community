@@ -17,6 +17,7 @@ package com.intellij.refactoring.encapsulateFields;
 
 import com.intellij.codeInsight.generation.GenerateMembersUtil;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
@@ -25,9 +26,12 @@ import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 /**
  * @author Max Medvedev
@@ -236,19 +240,10 @@ public class JavaEncapsulateFieldHelper extends EncapsulateFieldHelper {
                                                           PsiReferenceExpression expr,
                                                           PsiClass aClass,
                                                           PsiMethod setter) throws IncorrectOperationException {
-    PsiElementFactory factory = JavaPsiFacade.getInstance(expr.getProject()).getElementFactory();
     final String setterName = fieldDescriptor.getSetterName();
     @NonNls String text = setterName + "(a)";
-    PsiExpression qualifier = expr.getQualifierExpression();
-    if (qualifier != null){
-      text = "q." + text;
-    }
-    PsiMethodCallExpression methodCall = (PsiMethodCallExpression)factory.createExpressionFromText(text, expr);
-
+    PsiMethodCallExpression methodCall = prepareMethodCall(expr,  text);
     methodCall.getArgumentList().getExpressions()[0].replace(setterArgument);
-    if (qualifier != null){
-      methodCall.getMethodExpression().getQualifierExpression().replace(qualifier);
-    }
     methodCall = checkMethodResolvable(methodCall, setter, expr, aClass);
     if (methodCall == null) {
       VisibilityUtil.escalateVisibility(fieldDescriptor.getField(), expr);
@@ -261,24 +256,26 @@ public class JavaEncapsulateFieldHelper extends EncapsulateFieldHelper {
                                                           PsiReferenceExpression expr,
                                                           PsiClass aClass,
                                                           PsiMethod getter) throws IncorrectOperationException {
-    PsiElementFactory factory = JavaPsiFacade.getInstance(expr.getProject()).getElementFactory();
     final String getterName = fieldDescriptor.getGetterName();
     @NonNls String text = getterName + "()";
-    PsiExpression qualifier = expr.getQualifierExpression();
-    if (qualifier != null) {
-      text = "q." + text;
-    }
-    PsiMethodCallExpression methodCall = (PsiMethodCallExpression)factory.createExpressionFromText(text, expr);
-
-    if (qualifier != null) {
-      methodCall.getMethodExpression().getQualifierExpression().replace(qualifier);
-    }
-
+    PsiMethodCallExpression methodCall = prepareMethodCall(expr, text);
     methodCall = checkMethodResolvable(methodCall, getter, expr, aClass);
     if (methodCall == null) {
       VisibilityUtil.escalateVisibility(fieldDescriptor.getField(), expr);
     }
     return methodCall;
+  }
+
+  private static PsiMethodCallExpression prepareMethodCall(PsiReferenceExpression expr, String text) {
+    PsiExpression qualifier = expr.getQualifierExpression();
+    if (qualifier != null) {
+      final PsiElement referenceNameElement = expr.getReferenceNameElement();
+      if (referenceNameElement != null) {
+        text = expr.getText().substring(0, referenceNameElement.getStartOffsetInParent()) + text;
+      }
+    }
+    final PsiElementFactory factory = JavaPsiFacade.getInstance(expr.getProject()).getElementFactory();
+    return (PsiMethodCallExpression)factory.createExpressionFromText(text, expr);
   }
 
   @Nullable
@@ -314,19 +311,25 @@ public class JavaEncapsulateFieldHelper extends EncapsulateFieldHelper {
   @NotNull
   @Override
   public PsiField[] getApplicableFields(@NotNull PsiClass aClass) {
-    return aClass.getFields();
+    final List<PsiField> fields = ContainerUtil.filter(aClass.getFields(), new Condition<PsiField>() {
+      @Override
+      public boolean value(PsiField field) {
+        return !(field instanceof PsiEnumConstant);
+      }
+    });
+    return fields.toArray(new PsiField[fields.size()]);
   }
 
   @Override
   @NotNull
   public String suggestSetterName(@NotNull PsiField field) {
-    return PropertyUtil.suggestSetterName(field);
+    return GenerateMembersUtil.suggestSetterName(field);
   }
 
   @Override
   @NotNull
   public String suggestGetterName(@NotNull PsiField field) {
-    return PropertyUtil.suggestGetterName(field);
+    return GenerateMembersUtil.suggestGetterName(field);
   }
 
   @Override

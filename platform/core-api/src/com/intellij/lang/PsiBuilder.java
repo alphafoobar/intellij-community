@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.diff.FlyweightCapableTreeStructure;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -139,6 +140,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      *
      * @return the new marker instance.
      */
+    @NotNull
     Marker precede();
 
     /**
@@ -159,7 +161,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      *
      * @param type the type of the node in the AST tree.
      */
-    void done(IElementType type);
+    void done(@NotNull IElementType type);
 
     /**
      * Like {@linkplain #done(IElementType)}, but collapses all tokens between start and end markers
@@ -167,7 +169,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      *
      * @param type the type of the node in the AST tree.
      */
-    void collapse(IElementType type);
+    void collapse(@NotNull IElementType type);
 
     /**
      * Like {@linkplain #done(IElementType)}, but the marker is completed (end marker inserted)
@@ -177,7 +179,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      * @param type   the type of the node in the AST tree.
      * @param before marker to complete this one before.
      */
-    void doneBefore(IElementType type, Marker before);
+    void doneBefore(@NotNull IElementType type, @NotNull Marker before);
 
     /**
      * Like {@linkplain #doneBefore(IElementType, Marker)}, but in addition an error element with given text
@@ -187,7 +189,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      * @param before       marker to complete this one before.
      * @param errorMessage for error element.
      */
-    void doneBefore(IElementType type, Marker before, String errorMessage);
+    void doneBefore(@NotNull IElementType type, @NotNull Marker before, String errorMessage);
 
     /**
      * Completes this marker and labels it as error element with specified message. Before calling this method,
@@ -203,7 +205,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
      * @param message for error element.
      * @param before  marker to complete this one before.
      */
-    void errorBefore(String message, Marker before);
+    void errorBefore(String message, @NotNull Marker before);
 
     /**
      * Allows to define custom edge token binders instead of default ones. If any of parameters is null
@@ -221,6 +223,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
    *
    * @return the new marker instance.
    */
+  @NotNull
   Marker mark();
 
   /**
@@ -243,6 +246,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
    *
    * @return the built tree.
    */
+  @NotNull
   ASTNode getTreeBuilt();
 
   /**
@@ -252,6 +256,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
    *
    * @return the light tree built.
    */
+  @NotNull
   FlyweightCapableTreeStructure<LighterASTNode> getLightTree();
 
   /**
@@ -262,7 +267,7 @@ public interface PsiBuilder extends UserDataHolder, UserDataHolderUnprotected {
    */
   void setDebugMode(boolean dbgMode);
 
-  void enforceCommentTokens(TokenSet tokens);
+  void enforceCommentTokens(@NotNull TokenSet tokens);
 
   /**
    * @return latest left done node for context dependent parsing.

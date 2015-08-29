@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import com.intellij.util.ReflectionUtil;
 import com.intellij.util.RetinaImage;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.WeakHashMap;
+import com.intellij.util.ui.JBImageIcon;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -33,7 +35,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.FilteredImageSource;
-import java.awt.image.ImageObserver;
 import java.awt.image.ImageProducer;
 import java.lang.ref.Reference;
 import java.lang.reflect.Field;
@@ -47,6 +48,7 @@ public final class IconLoader {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.util.IconLoader");
   public static boolean STRICT = false;
   private static boolean USE_DARK_ICONS = UIUtil.isUnderDarcula();
+  private static float SCALE = JBUI.scale(1f);
 
   @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
   private static final ConcurrentMap<URL, CachedImageIcon> ourIconsCache = ContainerUtil.newConcurrentMap(100, 0.9f, 2);
@@ -98,15 +100,25 @@ public final class IconLoader {
 
   @Deprecated
   public static Icon getIcon(@NotNull final Image image) {
-    return new MyImageIcon(image);
+    return new JBImageIcon(image);
   }
 
   public static void setUseDarkIcons(boolean useDarkIcons) {
     USE_DARK_ICONS = useDarkIcons;
+    clearCache();
+  }
+
+  public static void setScale(float scale) {
+    if (scale != SCALE) {
+      SCALE = scale;
+      clearCache();
+    }
+  }
+
+  private static void clearCache() {
     ourIconsCache.clear();
     ourIcon2DisabledIcon.clear();
   }
-
 
   //TODO[kb] support iconsets
   //public static Icon getIcon(@NotNull final String path, @NotNull final String darkVariantPath) {
@@ -115,14 +127,8 @@ public final class IconLoader {
 
   @NotNull
   public static Icon getIcon(@NonNls @NotNull final String path) {
-    int stackFrameCount = 2;
-    Class callerClass = ReflectionUtil.findCallerClass(stackFrameCount);
-    while (callerClass != null && callerClass.getClassLoader() == null) { // looks like a system class
-      callerClass = ReflectionUtil.findCallerClass(++stackFrameCount);
-    }
-    if (callerClass == null) {
-      callerClass = ReflectionUtil.findCallerClass(1);
-    }
+    Class callerClass = ReflectionUtil.getGrandCallerClass();
+
     assert callerClass != null : path;
     return getIcon(path, callerClass);
   }
@@ -147,14 +153,7 @@ public final class IconLoader {
    * Use only if you expected null return value, otherwise see {@link IconLoader#getIcon(java.lang.String)}
    */
   public static Icon findIcon(@NonNls @NotNull String path) {
-    int stackFrameCount = 2;
-    Class callerClass = ReflectionUtil.findCallerClass(stackFrameCount);
-    while (callerClass != null && callerClass.getClassLoader() == null) { // looks like a system class
-      callerClass = ReflectionUtil.findCallerClass(++stackFrameCount);
-    }
-    if (callerClass == null) {
-      callerClass = ReflectionUtil.findCallerClass(1);
-    }
+    Class callerClass = ReflectionUtil.getGrandCallerClass();
     if (callerClass == null) return null;
     return findIcon(path, callerClass);
   }
@@ -211,13 +210,20 @@ public final class IconLoader {
 
   @Nullable
   public static Icon findIcon(URL url) {
+    return findIcon(url, true);
+  }
+
+  @Nullable
+  public static Icon findIcon(URL url, boolean useCache) {
     if (url == null) {
       return null;
     }
     CachedImageIcon icon = ourIconsCache.get(url);
     if (icon == null) {
       icon = new CachedImageIcon(url);
-      icon = ConcurrencyUtil.cacheOrGet(ourIconsCache, url, icon);
+      if (useCache) {
+        icon = ConcurrencyUtil.cacheOrGet(ourIconsCache, url, icon);
+      }
     }
     return icon;
   }
@@ -281,7 +287,7 @@ public final class IconLoader {
       Image img = createDisabled(image);
       if (UIUtil.isRetina()) img = RetinaImage.createFrom(img, 2, ImageLoader.ourComponent);
 
-      disabledIcon = new MyImageIcon(img);
+      disabledIcon = new JBImageIcon(img);
       ourIcon2DisabledIcon.put(icon, disabledIcon);
     }
     return disabledIcon;
@@ -325,19 +331,22 @@ public final class IconLoader {
     @NotNull
     private final URL myUrl;
     private boolean dark;
+    private float scale;
 
     public CachedImageIcon(@NotNull URL url) {
       myUrl = url;
       dark = USE_DARK_ICONS;
+      scale = SCALE;
     }
 
     @NotNull
     private synchronized Icon getRealIcon() {
-      if (isLoaderDisabled()) return EMPTY_ICON;
+      if (isLoaderDisabled() && (myRealIcon == null || dark != USE_DARK_ICONS || scale != SCALE)) return EMPTY_ICON;
 
-      if (dark != USE_DARK_ICONS) {
+      if (dark != USE_DARK_ICONS || scale != SCALE) {
         myRealIcon = null;
         dark = USE_DARK_ICONS;
+        scale = SCALE;
       }
       Object realIcon = myRealIcon;
       if (realIcon instanceof Icon) return (Icon)realIcon;
@@ -385,23 +394,11 @@ public final class IconLoader {
     }
   }
 
-  private static final class MyImageIcon extends ImageIcon {
-    public MyImageIcon(final Image image) {
-      super(image);
-    }
-
-    @Override
-    public final synchronized void paintIcon(final Component c, final Graphics g, final int x, final int y) {
-      final ImageObserver observer = getImageObserver();
-
-      UIUtil.drawImage(g, getImage(), x, y, observer == null ? c : observer);
-    }
-  }
-
   public abstract static class LazyIcon implements Icon {
     private boolean myWasComputed;
     private Icon myIcon;
     private boolean isDarkVariant = USE_DARK_ICONS;
+    private float scale = SCALE;
 
     @Override
     public void paintIcon(Component c, Graphics g, int x, int y) {
@@ -424,8 +421,9 @@ public final class IconLoader {
     }
 
     protected final synchronized Icon getOrComputeIcon() {
-      if (!myWasComputed || isDarkVariant != USE_DARK_ICONS) {
+      if (!myWasComputed || isDarkVariant != USE_DARK_ICONS || scale != SCALE) {
         isDarkVariant = USE_DARK_ICONS;
+        scale = SCALE;
         myWasComputed = true;
         myIcon = compute();
       }

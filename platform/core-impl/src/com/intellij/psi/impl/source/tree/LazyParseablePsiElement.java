@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.navigation.ItemPresentation;
 import com.intellij.navigation.NavigationItem;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectCoreUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.CheckUtil;
 import com.intellij.psi.impl.ResolveScopeManager;
@@ -38,7 +39,6 @@ import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.ReflectionCache;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -54,6 +54,7 @@ public class LazyParseablePsiElement extends LazyParseableElement implements Psi
     setPsi(this);
   }
 
+  @NotNull
   @Override
   public LazyParseablePsiElement clone() {
     LazyParseablePsiElement clone = (LazyParseablePsiElement)super.clone();
@@ -70,7 +71,7 @@ public class LazyParseablePsiElement extends LazyParseableElement implements Psi
   @Nullable
   protected <T> T findChildByClass(Class<T> aClass) {
     for (PsiElement cur = getFirstChild(); cur != null; cur = cur.getNextSibling()) {
-      if (ReflectionCache.isInstance(cur, aClass)) return (T)cur;
+      if (aClass.isInstance(cur)) return (T)cur;
     }
     return null;
   }
@@ -79,7 +80,7 @@ public class LazyParseablePsiElement extends LazyParseableElement implements Psi
   protected <T> T[] findChildrenByClass(Class<T> aClass) {
     List<T> result = new ArrayList<T>();
     for (PsiElement cur = getFirstChild(); cur != null; cur = cur.getNextSibling()) {
-      if (ReflectionCache.isInstance(cur, aClass)) result.add((T)cur);
+      if (aClass.isInstance(cur)) result.add((T)cur);
     }
     return result.toArray((T[])Array.newInstance(aClass, result.size()));
   }
@@ -319,6 +320,10 @@ public class LazyParseablePsiElement extends LazyParseableElement implements Psi
   @Override
   @NotNull
   public Project getProject() {
+    Project project = ProjectCoreUtil.theOnlyOpenProject();
+    if (project != null) {
+      return project;
+    }
     final PsiManager manager = getManager();
     if (manager == null) throw new PsiInvalidElementAccessException(this);
 

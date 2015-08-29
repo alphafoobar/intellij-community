@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.testFramework;
 
-import com.intellij.history.integration.LocalHistoryImpl;
 import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.ide.startup.impl.StartupManagerImpl;
@@ -24,7 +23,6 @@ import com.intellij.idea.IdeaTestApplication;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandProcessor;
@@ -33,27 +31,26 @@ import com.intellij.openapi.command.impl.UndoManagerImpl;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.event.DocumentListener;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.EmptyModuleType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
-import com.intellij.openapi.module.impl.ModuleManagerImpl;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.project.impl.TooManyProjectLeakedException;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
-import com.intellij.openapi.roots.impl.DirectoryIndex;
-import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualDirectoryImpl;
@@ -68,7 +65,6 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.impl.DocumentCommitThread;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
-import com.intellij.util.PatchedWeakReference;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.indexing.IndexableSetContributor;
 import com.intellij.util.indexing.IndexedRootsProvider;
@@ -125,6 +121,15 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     return DEFAULT_TEST_TIME;
   }
 
+  /**
+   * If a temp directory is reused from some previous test run, there might be cached children in its VFS.
+   * Ensure they're removed
+   */
+  public static void synchronizeTempDirVfs(VirtualFile tempDir) {
+    tempDir.getChildren();
+    tempDir.refresh(false, true);
+  }
+
   @Nullable
   protected String getApplicationConfigDirPath() throws Exception {
     return null;
@@ -132,7 +137,6 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
 
   protected void initApplication() throws Exception {
     boolean firstTime = ourApplication == null;
-    autodetectPlatformPrefix();
     ourApplication = IdeaTestApplication.getInstance(getApplicationConfigDirPath());
     ourApplication.setDataProvider(this);
 
@@ -141,9 +145,18 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
-  private static String[] PREFIX_CANDIDATES = new String[] { "AppCode", "CppIde", "Python", "PyCharmCore", "UltimateLangXml", "Idea" };
+  private static final String[] PREFIX_CANDIDATES = {
+    "AppCode", "CLion", "CidrCommon", 
+    "Python", "PyCharmCore", "Ruby", "UltimateLangXml", "Idea", "PlatformLangXml" };
 
+  /**
+   * @deprecated calling this method is no longer necessary
+   */
   public static void autodetectPlatformPrefix() {
+    doAutodetectPlatformPrefix();
+  }
+
+  public static void doAutodetectPlatformPrefix() {
     if (ourPlatformPrefixInitialized) {
       return;
     }
@@ -197,6 +210,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
 
     DocumentCommitThread.getInstance().clearQueue();
+    UIUtil.dispatchAllInvocationEvents();
   }
 
   public Project getProject() {
@@ -221,6 +235,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     myProjectManager.openTestProject(myProject);
     LocalFileSystem.getInstance().refreshIoFiles(myFilesToDelete);
 
+    myProjectManager.openTestProject(myProject);
     setUpModule();
 
     setUpJdk();
@@ -228,6 +243,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     LightPlatformTestCase.clearUncommittedDocuments(getProject());
 
     runStartupActivities();
+    ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue();
   }
 
   protected Project doCreateProject(File projectFile) throws Exception {
@@ -268,7 +284,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     catch (Exception e) {
       base = " (" + e + " while getting base dir)";
     }
-    return project.toString() + (place != null ? place : "") + base;
+    return project + (place != null ? place : "") + base;
   }
 
   protected void runStartupActivities() {
@@ -308,14 +324,14 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   protected static Module doCreateRealModuleIn(String moduleName, final Project project, final ModuleType moduleType) {
     final VirtualFile baseDir = project.getBaseDir();
     assertNotNull(baseDir);
-    final File moduleFile = new File(baseDir.getPath().replace('/', File.separatorChar),
-                                     moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
+    final File moduleFile = new File(FileUtil.toSystemDependentName(baseDir.getPath()), moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
     FileUtil.createIfDoesntExist(moduleFile);
     myFilesToDelete.add(moduleFile);
     return new WriteAction<Module>() {
       @Override
-      protected void run(Result<Module> result) throws Throwable {
-        final VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(moduleFile);
+      protected void run(@NotNull Result<Module> result) throws Throwable {
+        VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(moduleFile);
+        assertNotNull(virtualFile);
         Module module = ModuleManager.getInstance(project).newModule(virtualFile.getPath(), moduleType.getId());
         module.getModuleFile();
         result.setResult(module);
@@ -338,14 +354,17 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       ((PsiManagerEx)PsiManager.getInstance(project)).getFileManager().cleanupForNextTest();
     }
 
+    ProjectManagerImpl projectManager = (ProjectManagerImpl)ProjectManager.getInstance();
+    if (projectManager.isDefaultProjectInitialized()) {
+      Project defaultProject = projectManager.getDefaultProject();
+      ((PsiManagerEx)PsiManager.getInstance(defaultProject)).getFileManager().cleanupForNextTest();
+    }
+
     LocalFileSystemImpl localFileSystem = (LocalFileSystemImpl)LocalFileSystem.getInstance();
     if (localFileSystem != null) {
       localFileSystem.cleanupForNextTest();
     }
 
-    LocalHistoryImpl.getInstanceImpl().cleanupForNextTest();
-
-    PatchedWeakReference.clearAll();
   }
 
   private static Set<VirtualFile> eternallyLivingFiles() {
@@ -402,15 +421,13 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
 
     try {
-      checkForSettingsDamage();
+      result.addAll(checkForSettingsDamage());
     }
     catch (Throwable e) {
       result.add(e);
     }
     try {
       Project project = getProject();
-      DirectoryIndexImpl directoryIndex =
-      project != null ? (DirectoryIndexImpl)DirectoryIndex.getInstance(project) : null;
       disposeProject(result);
 
       if (project != null) {
@@ -444,15 +461,18 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
         result.add(e);
       }
 
-      //cleanTheWorld();
       try {
-        myEditorListenerTracker.checkListenersLeak();
+        if (myEditorListenerTracker != null) {
+          myEditorListenerTracker.checkListenersLeak();
+        }
       }
       catch (AssertionError error) {
         result.add(error);
       }
       try {
-        myThreadTracker.checkLeak();
+        if (myThreadTracker != null) {
+          myThreadTracker.checkLeak();
+        }
       }
       catch (AssertionError error) {
         result.add(error);
@@ -463,9 +483,6 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       catch (Throwable error) {
         result.add(error);
       }
-      //if (directoryIndex != null) {
-      //  directoryIndex.assertAncestorConsistent();
-      //}
     }
     finally {
       myProjectManager = null;
@@ -482,7 +499,10 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   private void disposeProject(@NotNull CompositeException result) /* throws nothing */ {
     try {
       DocumentCommitThread.getInstance().clearQueue();
-      UIUtil.dispatchAllInvocationEvents();
+      // sometimes SwingUtilities maybe confused about EDT at this point
+      if (SwingUtilities.isEventDispatchThread()) {
+        UIUtil.dispatchAllInvocationEvents();
+      }
     }
     catch (Exception e) {
       result.add(e);
@@ -492,16 +512,22 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
         ApplicationManager.getApplication().runWriteAction(new Runnable() {
           @Override
           public void run() {
-            Disposer.dispose(myProject);
             ProjectManagerEx projectManager = ProjectManagerEx.getInstanceEx();
             if (projectManager instanceof ProjectManagerImpl) {
               Collection<Project> projectsStillOpen = projectManager.closeTestProject(myProject);
               if (!projectsStillOpen.isEmpty()) {
                 Project project = projectsStillOpen.iterator().next();
-                projectsStillOpen.clear();
-                throw new AssertionError("Test project is not disposed: " + project+";\n created in: "+getCreationPlace(project));
+                String message = "Test project is not disposed: " + project + ";\n created in: " + getCreationPlace(project);
+                try {
+                  projectManager.closeAndDispose(project);
+                }
+                catch (Exception e) {
+                  // ignore, we already have something to throw
+                }
+                throw new AssertionError(message);
               }
             }
+            Disposer.dispose(myProject);
           }
         });
       }
@@ -510,18 +536,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       result.add(e);
     }
     finally {
-      if (myProject != null) {
-        try {
-          PsiDocumentManager documentManager = myProject.getComponent(PsiDocumentManager.class, null);
-          if (documentManager != null) {
-            EditorFactory.getInstance().getEventMulticaster().removeDocumentListener((DocumentListener)documentManager);
-          }
-        }
-        catch (Exception ignored) {
-
-        }
-        myProject = null;
-      }
+      myProject = null;
     }
   }
 
@@ -558,18 +573,6 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
-  protected void simulateProjectOpen() {
-    ModuleManagerImpl mm = (ModuleManagerImpl)ModuleManager.getInstance(myProject);
-    StartupManagerImpl sm = (StartupManagerImpl)StartupManager.getInstance(myProject);
-
-    mm.projectOpened();
-    setUpJdk();
-    sm.runStartupActivities();
-    sm.startCacheUpdate();
-    // extra init for libraries
-    sm.runPostStartupActivities();
-  }
-
   protected void setUpJdk() {
     //final ProjectJdkEx jdk = ProjectJdkUtil.getDefaultJdk("java 1.4");
     final Sdk jdk = getTestProjectJdk();
@@ -589,18 +592,19 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   public void runBare() throws Throwable {
     if (!shouldRunTest()) return;
 
+    TestRunnerUtil.replaceIdeEventQueueSafely();
     try {
       runBareImpl();
     }
     finally {
       try {
-        ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+        SwingUtilities.invokeAndWait(new Runnable() {
           @Override
           public void run() {
             cleanupApplicationCaches(getProject());
             resetAllFields();
           }
-        }, ModalityState.NON_MODAL);
+        });
       }
       catch (Throwable e) {
         // Ignore
@@ -621,7 +625,12 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
           }
           catch (Throwable e) {
             CompositeException result = new CompositeException(e);
-            disposeProject(result);
+            try {
+              tearDown();
+            }
+            catch (Throwable th) {
+              result.add(th);
+            }
             throw result;
           }
           try {
@@ -684,8 +693,17 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
+  protected boolean isRunInEdt() {
+    return true;
+  }
+
   protected void runBareRunnable(Runnable runnable) throws Throwable {
-    SwingUtilities.invokeAndWait(runnable);
+    if (isRunInEdt()) {
+      SwingUtilities.invokeAndWait(runnable);
+    }
+    else {
+      runnable.run();
+    }
   }
 
   protected boolean isRunInWriteAction() {
@@ -693,7 +711,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   @Override
-  protected void invokeTestRunnable(final Runnable runnable) throws Exception {
+  protected void invokeTestRunnable(@NotNull final Runnable runnable) throws Exception {
     final Exception[] e = new Exception[1];
     Runnable runnable1 = new Runnable() {
       @Override
@@ -767,7 +785,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     return file;
   }
 
-  public static void setContentOnDisk(File file, byte[] bom, String content, Charset charset) throws IOException {
+  public static void setContentOnDisk(@NotNull File file, byte[] bom, @NotNull String content, @NotNull Charset charset) throws IOException {
     FileOutputStream stream = new FileOutputStream(file);
     if (bom != null) {
       stream.write(bom);
@@ -781,12 +799,12 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
-  public static VirtualFile createTempFile(@NonNls String ext, @Nullable byte[] bom, @NonNls String content, Charset charset) throws IOException {
+  public static VirtualFile createTempFile(@NonNls @NotNull String ext, @Nullable byte[] bom, @NonNls @NotNull String content, @NotNull Charset charset) throws IOException {
     File temp = FileUtil.createTempFile("copy", "." + ext);
     setContentOnDisk(temp, bom, content, charset);
 
     myFilesToDelete.add(temp);
-    final VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(temp);
+    final VirtualFile file = getVirtualFile(temp);
     assert file != null : temp;
     return file;
   }
@@ -796,8 +814,10 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     return PsiDocumentManager.getInstance(getProject()).getPsiFile(document);
   }
 
+  /**
+   * @deprecated calling this method is no longer necessary
+   */
   public static void initPlatformLangPrefix() {
-    initPlatformPrefix(IDEA_MARKER_CLASS, "PlatformLangXml");
   }
 
   /**
@@ -808,8 +828,9 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
    * is NOT present in classpath.
    * Also, only the very FIRST call to this method will take effect.
    *
-   * @param classToTest marker class qualified name e.g. {@link #IDEA_MARKER_CLASS}.
+   * @param classToTest marker class qualified name
    * @param prefix platform prefix to be set up if marker class not found in classpath.
+   * @deprecated calling this method is no longer necessary
    */
   public static void initPlatformPrefix(String classToTest, String prefix) {
     if (!ourPlatformPrefixInitialized) {
@@ -829,6 +850,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
 
   private static void setPlatformPrefix(String prefix) {
     System.setProperty(PlatformUtils.PLATFORM_PREFIX_KEY, prefix);
+    ourPlatformPrefixInitialized = true;
   }
 
   @Retention(RetentionPolicy.RUNTIME)
@@ -839,7 +861,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   protected static VirtualFile createChildData(@NotNull final VirtualFile dir, @NotNull @NonNls final String name) {
     return new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         result.setResult(dir.createChildData(null, name));
       }
     }.execute().throwException().getResultObject();
@@ -848,7 +870,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   protected static VirtualFile createChildDirectory(@NotNull final VirtualFile dir, @NotNull @NonNls final String name) {
     return new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         result.setResult(dir.createChildDirectory(null, name));
       }
     }.execute().throwException().getResultObject();
@@ -873,6 +895,45 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       @Override
       protected void run() throws Throwable {
         vFile1.rename(this, newName);
+      }
+    }.execute().throwException();
+  }
+
+  protected static void move(@NotNull final VirtualFile vFile1, @NotNull final VirtualFile newFile) {
+    new WriteCommandAction.Simple(null) {
+      @Override
+      protected void run() throws Throwable {
+        vFile1.move(this, newFile);
+      }
+    }.execute().throwException();
+  }
+
+  protected static VirtualFile copy(@NotNull final VirtualFile file, @NotNull final VirtualFile newParent, @NotNull final String copyName) {
+    final VirtualFile[] copy = new VirtualFile[1];
+
+    new WriteCommandAction.Simple(null) {
+      @Override
+      protected void run() throws Throwable {
+        copy[0] = file.copy(this, newParent, copyName);
+      }
+    }.execute().throwException();
+    return copy[0];
+  }
+
+  public static void setFileText(@NotNull final VirtualFile file, @NotNull final String text) throws IOException {
+    new WriteAction() {
+      @Override
+      protected void run(@NotNull Result result) throws Throwable {
+        VfsUtil.saveText(file, text);
+      }
+    }.execute().throwException();
+  }
+
+  public static void setBinaryContent(final VirtualFile file, final byte[] content) {
+    new WriteAction() {
+      @Override
+      protected void run(@NotNull Result result) throws Throwable {
+        file.setBinaryContent(content);
       }
     }.execute().throwException();
   }

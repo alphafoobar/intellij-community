@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,75 +13,66 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.psi.impl.source.codeStyle;
 
-import com.intellij.openapi.components.ExportableComponent;
-import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.options.BaseSchemeProcessor;
-import com.intellij.openapi.options.SchemeProcessor;
 import com.intellij.openapi.options.SchemesManager;
 import com.intellij.openapi.options.SchemesManagerFactory;
-import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.psi.PsiBundle;
 import com.intellij.psi.codeStyle.CodeStyleScheme;
 import com.intellij.psi.codeStyle.CodeStyleSchemes;
-import org.jdom.Document;
-import org.jdom.JDOMException;
+import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
 
-/**
- * @author MYakovlev
- *         Date: Jul 16, 2002
- */
-public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes implements ExportableComponent {
-  @NonNls public static final String DEFAULT_SCHEME_NAME = "Default";
+public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes {
+  protected static final String DEFAULT_SCHEME_NAME = "Default";
 
-  public String CURRENT_SCHEME_NAME = DEFAULT_SCHEME_NAME;
-  private boolean myIsInitialized = false;
-  @NonNls static final String CODESTYLES_DIRECTORY = "codestyles";
+  @NonNls
+  static final String CODE_STYLES_DIR_PATH = "codestyles";
 
-  private final SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> mySchemesManager;
-  @NonNls private static final String FILE_SPEC = "$ROOT_CONFIG$/" + CODESTYLES_DIRECTORY;
+  protected final SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> mySchemesManager;
 
-  public CodeStyleSchemesImpl(SchemesManagerFactory schemesManagerFactory) {
-    SchemeProcessor<CodeStyleSchemeImpl> processor = new BaseSchemeProcessor<CodeStyleSchemeImpl>() {
+  public CodeStyleSchemesImpl(@NotNull SchemesManagerFactory schemesManagerFactory) {
+    mySchemesManager = schemesManagerFactory.create(CODE_STYLES_DIR_PATH, new BaseSchemeProcessor<CodeStyleSchemeImpl>() {
+      @NotNull
       @Override
-      public CodeStyleSchemeImpl readScheme(@NotNull final Document schemeContent) throws IOException, JDOMException, InvalidDataException {
-        return CodeStyleSchemeImpl.readScheme(schemeContent);
+      public CodeStyleSchemeImpl readScheme(@NotNull Element element) {
+        return new CodeStyleSchemeImpl(element.getAttributeValue("name"), element.getAttributeValue("parent"), element);
       }
 
       @Override
-      public Document writeScheme(@NotNull final CodeStyleSchemeImpl scheme) throws WriteExternalException {
-        return scheme.saveToDocument();
+      public Element writeScheme(@NotNull CodeStyleSchemeImpl scheme) throws WriteExternalException {
+        Element newElement = new Element("code_scheme");
+        newElement.setAttribute("name", scheme.getName());
+        scheme.writeExternal(newElement);
+        return newElement;
+      }
+
+      @NotNull
+      @Override
+      public State getState(@NotNull CodeStyleSchemeImpl scheme) {
+        return scheme.isDefault() ? State.NON_PERSISTENT : State.POSSIBLY_CHANGED;
       }
 
       @Override
-      public boolean shouldBeSaved(@NotNull final CodeStyleSchemeImpl scheme) {
-        return !scheme.isDefault();
-      }
-
-      @Override
-      public void initScheme(@NotNull final CodeStyleSchemeImpl scheme) {
+      public void initScheme(@NotNull CodeStyleSchemeImpl scheme) {
         scheme.init(CodeStyleSchemesImpl.this);
       }
-    };
+    });
 
-    mySchemesManager = schemesManagerFactory.createSchemesManager(FILE_SPEC, processor, RoamingType.PER_USER);
-
-    init();
+    mySchemesManager.loadSchemes();
     addScheme(new CodeStyleSchemeImpl(DEFAULT_SCHEME_NAME, true, null));
     setCurrentScheme(getDefaultScheme());
   }
 
   @Override
   public CodeStyleScheme[] getSchemes() {
-    final Collection<CodeStyleScheme> schemes = mySchemesManager.getAllSchemes();
+    Collection<CodeStyleScheme> schemes = mySchemesManager.getAllSchemes();
     return schemes.toArray(new CodeStyleScheme[schemes.size()]);
   }
 
@@ -92,20 +83,20 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes implements E
 
   @Override
   public void setCurrentScheme(CodeStyleScheme scheme) {
-    String schemeName = scheme == null ? null : scheme.getName();
-    mySchemesManager.setCurrentSchemeName(schemeName);
-    CURRENT_SCHEME_NAME = schemeName;
+    mySchemesManager.setCurrent(scheme);
   }
 
+  @SuppressWarnings("ForLoopThatDoesntUseLoopVariable")
   @Override
   public CodeStyleScheme createNewScheme(String preferredName, CodeStyleScheme parentScheme) {
     String name;
     if (preferredName == null) {
+      if (parentScheme == null) throw new IllegalArgumentException("parentScheme must not be null");
       // Generate using parent name
       name = null;
       for (int i = 1; name == null; i++) {
         String currName = parentScheme.getName() + " (" + i + ")";
-        if (null == findSchemeByName(currName)) {
+        if (findSchemeByName(currName) == null) {
           name = currName;
         }
       }
@@ -114,7 +105,7 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes implements E
       name = null;
       for (int i = 0; name == null; i++) {
         String currName = i == 0 ? preferredName : preferredName + " (" + i + ")";
-        if (null == findSchemeByName(currName)) {
+        if (findSchemeByName(currName) == null) {
           name = currName;
         }
       }
@@ -139,39 +130,28 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes implements E
   }
 
   @Override
+  public void setSchemes(@NotNull List<CodeStyleScheme> schemes) {
+    mySchemesManager.setSchemes(schemes);
+  }
+
+  @NotNull
+  public SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> getSchemeManager() {
+    return mySchemesManager;
+  }
+
+  @Override
   public CodeStyleScheme getDefaultScheme() {
     return findSchemeByName(DEFAULT_SCHEME_NAME);
   }
 
+  @Nullable
   @Override
-  public CodeStyleScheme findSchemeByName(String name) {
+  public CodeStyleScheme findSchemeByName(@NotNull String name) {
     return mySchemesManager.findSchemeByName(name);
   }
 
   @Override
-  public void addScheme(CodeStyleScheme scheme) {
-    mySchemesManager.addNewScheme(scheme, true);
+  public void addScheme(@NotNull CodeStyleScheme scheme) {
+    mySchemesManager.addScheme(scheme);
   }
-
-  protected void removeScheme(CodeStyleScheme scheme) {
-    mySchemesManager.removeScheme(scheme);
-  }
-
-  protected void init() {
-    if (myIsInitialized) return;
-    myIsInitialized = true;
-    mySchemesManager.loadSchemes();
-  }
-
-  @Override
-  @NotNull
-  public String getPresentableName() {
-    return PsiBundle.message("codestyle.export.display.name");
-  }
-
-  public SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> getSchemesManager() {
-    return mySchemesManager;
-  }
-
-
 }

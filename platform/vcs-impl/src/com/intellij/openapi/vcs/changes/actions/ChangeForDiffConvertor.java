@@ -15,19 +15,14 @@
  */
 package com.intellij.openapi.vcs.changes.actions;
 
-import com.intellij.openapi.diff.DiffRequest;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Getter;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
-import com.intellij.openapi.vcs.changes.patch.ApplyPatchForBaseRevisionTexts;
-import com.intellij.openapi.vcs.changes.patch.MergedDiffRequestPresentable;
-import com.intellij.openapi.vcs.merge.MergeProvider;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.Convertor;
 
@@ -57,13 +52,11 @@ public class ChangeForDiffConvertor implements Convertor<Change, DiffRequestPres
     }
     if (ChangesUtil.isTextConflictingChange(ch)) {
       final AbstractVcs vcs = ChangesUtil.getVcsForChange(ch, myProject);
-      final MergeProvider mergeProvider = vcs.getMergeProvider();
-      if (mergeProvider == null) return null;
+      if (vcs == null || vcs.getMergeProvider() == null) return null;
       final FilePath path = ChangesUtil.getFilePath(ch);
       VirtualFile vf = path.getVirtualFile();
       if (vf == null) {
-        path.hardRefresh();
-        vf = path.getVirtualFile();
+        vf = LocalFileSystem.getInstance().refreshAndFindFileByPath(path.getPath());
       }
       if (vf == null) return null;
 

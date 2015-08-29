@@ -21,6 +21,7 @@ import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.RunProfileWithCompileBeforeLaunchOption;
+import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.execution.remote.RemoteConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.icons.AllIcons;
@@ -82,10 +83,20 @@ public class CompileStepBeforeRun extends BeforeRunTaskProvider<CompileStepBefor
     return AllIcons.Actions.Compile;
   }
 
-  public MakeBeforeRunTask createTask(RunConfiguration runConfiguration) {
-    return !(runConfiguration instanceof RemoteConfiguration) && runConfiguration instanceof RunProfileWithCompileBeforeLaunchOption
-           ? new MakeBeforeRunTask()
-           : null;
+  @Nullable
+  public MakeBeforeRunTask createTask(RunConfiguration configuration) {
+    MakeBeforeRunTask task = null;
+    if (shouldCreateTask(configuration)) {
+      task = new MakeBeforeRunTask();
+      if (configuration instanceof RunConfigurationBase) {
+        task.setEnabled(((RunConfigurationBase)configuration).isCompileBeforeLaunchAddedByDefault());
+      }
+    }
+    return task;
+  }
+
+  static boolean shouldCreateTask(RunConfiguration configuration) {
+    return !(configuration instanceof RemoteConfiguration) && configuration instanceof RunProfileWithCompileBeforeLaunchOption;
   }
 
   public boolean configureTask(RunConfiguration runConfiguration, MakeBeforeRunTask task) {
@@ -101,7 +112,11 @@ public class CompileStepBeforeRun extends BeforeRunTaskProvider<CompileStepBefor
     return doMake(myProject, configuration, env, false);
   }
 
-   static boolean doMake(final Project myProject, final RunConfiguration configuration, final ExecutionEnvironment env, final boolean ignoreErrors) {
+  static boolean doMake(final Project myProject, final RunConfiguration configuration, final ExecutionEnvironment env, final boolean ignoreErrors) {
+    return doMake(myProject, configuration, env, ignoreErrors, Boolean.getBoolean(MAKE_PROJECT_ON_RUN_KEY));
+  }
+
+  static boolean doMake(final Project myProject, final RunConfiguration configuration, final ExecutionEnvironment env, final boolean ignoreErrors, final boolean forceMakeProject) {
     if (!(configuration instanceof RunProfileWithCompileBeforeLaunchOption)) {
       return true;
     }
@@ -129,7 +144,7 @@ public class CompileStepBeforeRun extends BeforeRunTaskProvider<CompileStepBefor
         public void run() {
           CompileScope scope;
           final CompilerManager compilerManager = CompilerManager.getInstance(myProject);
-          if (Boolean.valueOf(System.getProperty(MAKE_PROJECT_ON_RUN_KEY, Boolean.FALSE.toString())).booleanValue()) {
+          if (forceMakeProject) {
             // user explicitly requested whole-project make
             scope = compilerManager.createProjectCompileScope(myProject);
           }
@@ -142,7 +157,7 @@ public class CompileStepBeforeRun extends BeforeRunTaskProvider<CompileStepBefor
                             runConfiguration.getClass().getName());
                 }
               }
-              scope = compilerManager.createModulesCompileScope(modules, true);
+              scope = compilerManager.createModulesCompileScope(modules, true, true);
             }
             else {
               scope = compilerManager.createProjectCompileScope(myProject);
@@ -152,6 +167,7 @@ public class CompileStepBeforeRun extends BeforeRunTaskProvider<CompileStepBefor
           if (!myProject.isDisposed()) {
             scope.putUserData(RUN_CONFIGURATION, configuration);
             scope.putUserData(RUN_CONFIGURATION_TYPE_ID, configuration.getType().getId());
+            ExecutionManagerImpl.EXECUTION_SESSION_ID_KEY.set(scope, ExecutionManagerImpl.EXECUTION_SESSION_ID_KEY.get(env));
             compilerManager.make(scope, callback);
           }
           else {

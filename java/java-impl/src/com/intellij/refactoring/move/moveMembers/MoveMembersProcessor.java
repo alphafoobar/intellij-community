@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.refactoring.move.moveMembers;
 
+import com.intellij.ide.util.EditorHelper;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
@@ -56,6 +57,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
   private PsiClass myTargetClass;
   private final Set<PsiMember> myMembersToMove = new LinkedHashSet<PsiMember>();
   private final MoveCallback myMoveCallback;
+  private final boolean myOpenInEditor;
   private String myNewVisibility; // "null" means "as is"
   private String myCommandName = MoveMembersImpl.REFACTORING_NAME;
   private MoveMembersOptions myOptions;
@@ -65,8 +67,13 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
   }
 
   public MoveMembersProcessor(Project project, @Nullable MoveCallback moveCallback, MoveMembersOptions options) {
+    this(project, moveCallback, options, false);
+  }
+
+  public MoveMembersProcessor(Project project, @Nullable MoveCallback moveCallback, MoveMembersOptions options, boolean openInEditor) {
     super(project);
     myMoveCallback = moveCallback;
+    myOpenInEditor = openInEditor;
     setOptions(options);
   }
 
@@ -104,7 +111,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new MoveMemberViewDescriptor(PsiUtilCore.toPsiElementArray(myMembersToMove));
   }
 
@@ -134,7 +141,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
     return usageInfos;
   }
 
-  protected void refreshElements(PsiElement[] elements) {
+  protected void refreshElements(@NotNull PsiElement[] elements) {
     LOG.assertTrue(myMembersToMove.size() == elements.length);
     myMembersToMove.clear();
     for (PsiElement resolved : elements) {
@@ -149,7 +156,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
     return false;
   }
 
-  protected void performRefactoring(final UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull final UsageInfo[] usages) {
     try {
       PsiClass targetClass = JavaPsiFacade.getInstance(myProject).findClass(myOptions.getTargetClassName(),
                                                                             GlobalSearchScope.projectScope(myProject));
@@ -231,6 +238,13 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
       if (myMoveCallback != null) {
         myMoveCallback.refactoringCompleted();
       }
+
+      if (myOpenInEditor && !movedMembers.isEmpty()) {
+        final PsiMember item = ContainerUtil.getFirstItem(movedMembers.values());
+        if (item != null) {
+          EditorHelper.openInEditor(item);
+        }
+      }
     }
     catch (IncorrectOperationException e) {
       LOG.error(e);
@@ -262,7 +276,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
     VisibilityUtil.fixVisibility(UsageViewUtil.toElements(infos), newMember, myNewVisibility);
   }
 
-  protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull Ref<UsageInfo[]> refUsages) {
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
     final UsageInfo[] usages = refUsages.get();
 
@@ -299,7 +313,7 @@ public class MoveMembersProcessor extends BaseRefactoringProcessor {
   private static void analyzeConflictsOnUsages(UsageInfo[] usages,
                                                Set<PsiMember> membersToMove,
                                                String newVisibility,
-                                               PsiClass targetClass,
+                                               @NotNull PsiClass targetClass,
                                                Map<PsiMember, PsiModifierList> modifierListCopies,
                                                MultiMap<PsiElement, String> conflicts) {
     for (UsageInfo usage : usages) {

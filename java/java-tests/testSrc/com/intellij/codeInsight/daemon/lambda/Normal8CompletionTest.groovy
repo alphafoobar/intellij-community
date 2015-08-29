@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 package com.intellij.codeInsight.daemon.lambda
-
 import com.intellij.JavaTestUtil
 import com.intellij.codeInsight.completion.LightFixtureCompletionTestCase
+import com.intellij.codeInsight.lookup.LookupElementPresentation
 import com.intellij.testFramework.LightProjectDescriptor
 import org.jetbrains.annotations.NotNull
 /**
@@ -26,7 +26,7 @@ public class Normal8CompletionTest extends LightFixtureCompletionTestCase {
   @NotNull
   @Override
   protected LightProjectDescriptor getProjectDescriptor() {
-    return JAVA_LATEST;
+    return JAVA_8;
   }
 
   @Override
@@ -57,5 +57,69 @@ class Foo {{ Object o = StringBuilder::append.<caret> }}
     myFixture.configureByText "a.java", text
     assertEmpty(myFixture.completeBasic())
     myFixture.checkResult(text)
+  }
+
+  public void "test suggest lambda signature"() {
+    myFixture.configureByText "a.java", """
+interface I {
+  void m(int x);
+}
+
+class Test {
+  public static void main(String[] args) {
+    I i = <caret>
+  }
+}"""
+    def items = myFixture.completeBasic()
+    assert LookupElementPresentation.renderElement(items[0]).itemText == 'x -> {}'
+  }
+
+
+  public void "test constructor ref"() {
+    myFixture.configureByText "a.java", """
+interface Foo9 {
+  Bar test(int p);
+}
+
+class Bar {
+  public Bar(int p) {}
+}
+
+class Test88 {
+  {
+    Foo9 f = Bar::<caret>;
+  }
+}
+"""
+    myFixture.completeBasic()
+    myFixture.type('\n')
+
+    myFixture.checkResult """
+interface Foo9 {
+  Bar test(int p);
+}
+
+class Bar {
+  public Bar(int p) {}
+}
+
+class Test88 {
+  {
+    Foo9 f = Bar::new;
+  }
+}
+"""
+  }
+
+  public void testCollectorsToList() {
+    configureByTestName()
+    selectItem(myItems.find { it.lookupString.contains('toList') })
+    checkResultByFile(getTestName(false) + "_after.java")
+  }
+
+  public void testCollectorsToSet() {
+    configureByTestName()
+    selectItem(myItems.find { it.lookupString.contains('toSet') })
+    checkResultByFile(getTestName(false) + "_after.java")
   }
 }

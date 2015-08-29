@@ -1,11 +1,15 @@
 package org.jetbrains.idea.svn.api;
 
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.add.AddClient;
 import org.jetbrains.idea.svn.annotate.AnnotateClient;
 import org.jetbrains.idea.svn.browse.BrowseClient;
 import org.jetbrains.idea.svn.change.ChangeListClient;
+import org.jetbrains.idea.svn.checkin.CheckinClient;
 import org.jetbrains.idea.svn.checkin.ImportClient;
 import org.jetbrains.idea.svn.checkout.CheckoutClient;
 import org.jetbrains.idea.svn.checkout.ExportClient;
@@ -14,16 +18,20 @@ import org.jetbrains.idea.svn.conflict.ConflictClient;
 import org.jetbrains.idea.svn.content.ContentClient;
 import org.jetbrains.idea.svn.copy.CopyMoveClient;
 import org.jetbrains.idea.svn.delete.DeleteClient;
+import org.jetbrains.idea.svn.diff.DiffClient;
 import org.jetbrains.idea.svn.history.HistoryClient;
+import org.jetbrains.idea.svn.info.InfoClient;
 import org.jetbrains.idea.svn.integrate.MergeClient;
 import org.jetbrains.idea.svn.lock.LockClient;
-import org.jetbrains.idea.svn.portable.SvnStatusClientI;
-import org.jetbrains.idea.svn.update.UpdateClient;
-import org.jetbrains.idea.svn.portable.SvnWcClientI;
 import org.jetbrains.idea.svn.properties.PropertyClient;
 import org.jetbrains.idea.svn.revert.RevertClient;
+import org.jetbrains.idea.svn.status.StatusClient;
 import org.jetbrains.idea.svn.update.RelocateClient;
+import org.jetbrains.idea.svn.update.UpdateClient;
 import org.jetbrains.idea.svn.upgrade.UpgradeClient;
+import org.tmatesoft.svn.core.wc.ISVNStatusFileProvider;
+
+import java.util.Map;
 
 /**
  * @author Konstantin Kolosovsky.
@@ -39,8 +47,8 @@ public abstract class ClientFactory {
   protected HistoryClient historyClient;
   protected RevertClient revertClient;
   protected DeleteClient deleteClient;
-  protected SvnStatusClientI statusClient;
-  protected SvnWcClientI infoClient;
+  protected StatusClient statusClient;
+  protected InfoClient infoClient;
   protected CopyMoveClient copyMoveClient;
   protected ConflictClient conflictClient;
   protected PropertyClient propertyClient;
@@ -55,6 +63,11 @@ public abstract class ClientFactory {
   protected ExportClient myExportClient;
   protected UpgradeClient myUpgradeClient;
   protected BrowseClient myBrowseClient;
+  protected DiffClient myDiffClient;
+  protected CheckinClient myCheckinClient;
+  protected RepositoryFeaturesClient myRepositoryFeaturesClient;
+
+  @NotNull private final Map<Class, Class> myClientImplementations = ContainerUtil.newHashMap();
 
   protected ClientFactory(@NotNull SvnVcs vcs) {
     myVcs = vcs;
@@ -62,6 +75,33 @@ public abstract class ClientFactory {
   }
 
   protected abstract void setup();
+
+  protected <T extends SvnClient> void put(@NotNull Class<T> type, @NotNull Class<? extends T> implementation) {
+    myClientImplementations.put(type, implementation);
+  }
+
+  @SuppressWarnings("unchecked")
+  @NotNull
+  protected <T extends SvnClient> Class<? extends T> get(@NotNull Class<T> type) {
+    Class<? extends T> implementation = myClientImplementations.get(type);
+
+    if (implementation == null) {
+      throw new IllegalArgumentException("No implementation registered for " + type);
+    }
+
+    return implementation;
+  }
+
+  /**
+   * TODO: Provide more robust way for the default settings here - probably some default Command instance could be used.
+   */
+  @NotNull
+  public <T extends SvnClient> T create(@NotNull Class<T> type, boolean isActive) {
+    T client = prepare(ReflectionUtil.newInstance(get(type)));
+    client.setIsActive(isActive);
+
+    return client;
+  }
 
   @NotNull
   public AddClient createAddClient() {
@@ -89,15 +129,18 @@ public abstract class ClientFactory {
   }
 
   @NotNull
-  public SvnStatusClientI createStatusClient() {
-    // TODO: Update this in same like other clients - move to corresponding package, rename clients
-    return statusClient;
+  public StatusClient createStatusClient() {
+    return prepare(statusClient);
   }
 
   @NotNull
-  public SvnWcClientI createInfoClient() {
-    // TODO: Update this in same like other clients - move to corresponding package, rename clients
-    return infoClient;
+  public StatusClient createStatusClient(@Nullable ISVNStatusFileProvider provider, @NotNull ProgressTracker handler) {
+    return createStatusClient();
+  }
+
+  @NotNull
+  public InfoClient createInfoClient() {
+    return prepare(infoClient);
   }
 
   // TODO: Update this in same like other clients - move to corresponding package, rename clients
@@ -181,9 +224,25 @@ public abstract class ClientFactory {
   }
 
   @NotNull
+  public DiffClient createDiffClient() {
+    return prepare(myDiffClient);
+  }
+
+  @NotNull
+  public CheckinClient createCheckinClient() {
+    return prepare(myCheckinClient);
+  }
+
+  @NotNull
+  public RepositoryFeaturesClient createRepositoryFeaturesClient() {
+    return prepare(myRepositoryFeaturesClient);
+  }
+
+  @NotNull
   protected <T extends SvnClient> T prepare(@NotNull T client) {
     client.setVcs(myVcs);
     client.setFactory(this);
+    client.setIsActive(true);
 
     return client;
   }

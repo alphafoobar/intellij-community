@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  */
 package com.intellij.xdebugger.impl.frame;
 
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.ui.ColoredListCellRenderer;
-import com.intellij.ui.ColoredTextContainer;
 import com.intellij.ui.FileColorManager;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.ui.TextTransferable;
@@ -28,6 +28,7 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XStackFrame;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,13 +40,83 @@ import java.awt.datatransfer.Transferable;
  * @author nik
  */
 public class XDebuggerFramesList extends DebuggerFramesList {
-  private static final TransferHandler defaultTransferHandler = new MyListTransferHandler();
+  private static final TransferHandler DEFAULT_TRANSFER_HANDLER = new TransferHandler() {
+    @Override
+    protected Transferable createTransferable(JComponent c) {
+      if (!(c instanceof XDebuggerFramesList)) {
+        return null;
+      }
+      XDebuggerFramesList list = (XDebuggerFramesList)c;
+      //noinspection deprecation
+      Object[] values = list.getSelectedValues();
+      if (values == null || values.length == 0) {
+        return null;
+      }
+
+      StringBuilder plainBuf = new StringBuilder();
+      StringBuilder htmlBuf = new StringBuilder();
+      TextTransferable.ColoredStringBuilder coloredTextContainer = new TextTransferable.ColoredStringBuilder();
+      htmlBuf.append("<html>\n<body>\n<ul>\n");
+      for (Object value : values) {
+        htmlBuf.append("  <li>");
+        if (value != null) {
+          if (value instanceof XStackFrame) {
+            ((XStackFrame)value).customizePresentation(coloredTextContainer);
+            coloredTextContainer.appendTo(plainBuf, htmlBuf);
+          }
+          else {
+            String text = value.toString();
+            plainBuf.append(text);
+            htmlBuf.append(text);
+          }
+        }
+        plainBuf.append('\n');
+        htmlBuf.append("</li>\n");
+      }
+
+      // remove the last newline
+      plainBuf.setLength(plainBuf.length() - 1);
+      htmlBuf.append("</ul>\n</body>\n</html>");
+      return new TextTransferable(htmlBuf.toString(), plainBuf.toString());
+    }
+
+    @Override
+    public int getSourceActions(@NotNull JComponent c) {
+      return COPY;
+    }
+  };
 
   private XStackFrame mySelectedFrame;
 
-  public XDebuggerFramesList(Project project) {
+  public XDebuggerFramesList(@NotNull final Project project) {
     super(project);
+
     doInit();
+    setTransferHandler(DEFAULT_TRANSFER_HANDLER);
+    setDataProvider(new DataProvider() {
+      @Nullable
+      @Override
+      public Object getData(@NonNls String dataId) {
+        if (mySelectedFrame != null) {
+          if (CommonDataKeys.VIRTUAL_FILE.is(dataId)) {
+            return getFile(mySelectedFrame);
+          }
+          else if (CommonDataKeys.PSI_FILE.is(dataId)) {
+            VirtualFile file = getFile(mySelectedFrame);
+            if (file != null && file.isValid()) {
+              return PsiManager.getInstance(myProject).findFile(file);
+            }
+          }
+        }
+        return null;
+      }
+    });
+  }
+
+  @Nullable
+  private static VirtualFile getFile(XStackFrame frame) {
+    XSourcePosition position = frame.getSourcePosition();
+    return position != null ? position.getFile() : null;
   }
 
   @Override
@@ -73,10 +144,8 @@ public class XDebuggerFramesList extends DebuggerFramesList {
 
   private static class XDebuggerFrameListRenderer extends ColoredListCellRenderer {
     private final FileColorManager myColorsManager;
-    private final PsiManager myPsiManager;
 
     public XDebuggerFrameListRenderer(Project project) {
-      myPsiManager = PsiManager.getInstance(project);
       myColorsManager = FileColorManager.getInstance(project);
     }
 
@@ -106,84 +175,12 @@ public class XDebuggerFramesList extends DebuggerFramesList {
         if (position != null) {
           final VirtualFile virtualFile = position.getFile();
           if (virtualFile.isValid()) {
-            PsiFile f = myPsiManager.findFile(virtualFile);
-            if (f != null) {
-              Color c = myColorsManager.getFileColor(f);
-              if (c != null) setBackground(c);
-            }
+            Color c = myColorsManager.getFileColor(virtualFile);
+            if (c != null) setBackground(c);
           }
         }
       }
       stackFrame.customizePresentation(this);
-    }
-  }
-
-  @Override
-  public TransferHandler getTransferHandler() {
-    return defaultTransferHandler;
-  }
-
-  private static class MyColoredTextContainer implements ColoredTextContainer {
-    private final StringBuilder builder = new StringBuilder();
-    @Override
-    public void append(@NotNull String fragment, @NotNull SimpleTextAttributes attributes) {
-      builder.append(fragment);
-    }
-
-    @Override
-    public void setIcon(@Nullable Icon icon) {
-    }
-
-    @Override
-    public void setToolTipText(String text) {
-    }
-  }
-
-  private static class MyListTransferHandler extends TransferHandler {
-    @Override
-    protected Transferable createTransferable(JComponent c) {
-      if (!(c instanceof XDebuggerFramesList)) {
-        return null;
-      }
-      XDebuggerFramesList list = (XDebuggerFramesList)c;
-      Object[] values = list.getSelectedValues();
-      if (values == null || values.length == 0) {
-        return null;
-      }
-
-      StringBuilder plainBuf = new StringBuilder();
-      StringBuilder htmlBuf = new StringBuilder();
-      MyColoredTextContainer coloredTextContainer = new MyColoredTextContainer();
-
-      htmlBuf.append("<html>\n<body>\n<ul>\n");
-      for (Object value : values) {
-        htmlBuf.append("  <li>");
-        if (value != null) {
-          if (value instanceof XStackFrame) {
-            ((XStackFrame)value).customizePresentation(coloredTextContainer);
-            plainBuf.append(coloredTextContainer.builder);
-            htmlBuf.append(coloredTextContainer.builder);
-            coloredTextContainer.builder.setLength(0);
-          }
-          else {
-            String text = value.toString();
-            plainBuf.append(text);
-            htmlBuf.append(text);
-          }
-        }
-        plainBuf.append('\n');
-        htmlBuf.append("</li>\n");
-      }
-
-      // remove the last newline
-      plainBuf.setLength(plainBuf.length() - 1);
-      htmlBuf.append("</ul>\n</body>\n</html>");
-      return new TextTransferable(htmlBuf.toString(), plainBuf.toString());
-    }
-
-    @Override
-    public int getSourceActions(JComponent c) {
-      return COPY;
     }
   }
 }

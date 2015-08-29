@@ -36,10 +36,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- *
- * @author Kirill Likhodedov
- */
 class GitBranchPopupActions {
 
   private final Project myProject;
@@ -115,7 +111,7 @@ class GitBranchPopupActions {
         .showInputDialog(myProject, "Enter reference (branch, tag) name or commit hash", "Checkout", Messages.getQuestionIcon());
       if (reference != null) {
         GitBrancher brancher = ServiceManager.getService(myProject, GitBrancher.class);
-        brancher.checkout(reference, Collections.singletonList(myRepository), null);
+        brancher.checkout(reference, true, Collections.singletonList(myRepository), null);
       }
     }
 
@@ -123,7 +119,7 @@ class GitBranchPopupActions {
     public void update(AnActionEvent e) {
       if (myRepository.isFresh()) {
         e.getPresentation().setEnabled(false);
-        e.getPresentation().setDescription("Checkout is not possible before the first commit.");
+        e.getPresentation().setDescription("Checkout is not possible before the first commit");
       }
     }
   }
@@ -181,7 +177,7 @@ class GitBranchPopupActions {
       };
     }
 
-    private static class CheckoutAction extends DumbAwareAction {
+    static class CheckoutAction extends DumbAwareAction {
       private final Project myProject;
       private final List<GitRepository> myRepositories;
       private final String myBranchName;
@@ -196,7 +192,7 @@ class GitBranchPopupActions {
       @Override
       public void actionPerformed(AnActionEvent e) {
         GitBrancher brancher = ServiceManager.getService(myProject, GitBrancher.class);
-        brancher.checkout(myBranchName, myRepositories, null);
+        brancher.checkout(myBranchName, false, myRepositories, null);
       }
 
     }
@@ -277,7 +273,7 @@ class GitBranchPopupActions {
       };
     }
 
-    private static class CheckoutRemoteBranchAction extends DumbAwareAction {
+    static class CheckoutRemoteBranchAction extends DumbAwareAction {
       private final Project myProject;
       private final List<GitRepository> myRepositories;
       private final String myRemoteBranchName;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,6 @@ import com.intellij.psi.*;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -56,7 +55,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author cdr
  */
 public class WolfTheProblemSolverImpl extends WolfTheProblemSolver {
-  private final Map<VirtualFile, ProblemFileInfo> myProblems = new THashMap<VirtualFile, ProblemFileInfo>();
+  private final Map<VirtualFile, ProblemFileInfo> myProblems = new THashMap<VirtualFile, ProblemFileInfo>(); // guarded by myProblems
   private final Collection<VirtualFile> myCheckingQueue = new THashSet<VirtualFile>(10);
 
   private final Project myProject;
@@ -218,31 +217,6 @@ public class WolfTheProblemSolverImpl extends WolfTheProblemSolver {
     }
   }
 
-  @Override
-  public void projectOpened() {
-  }
-
-  @Override
-  public void projectClosed() {
-  }
-
-  @Override
-  @NotNull
-  @NonNls
-  public String getComponentName() {
-    return "Problems";
-  }
-
-  @Override
-  public void initComponent() {
-
-  }
-
-  @Override
-  public void disposeComponent() {
-
-  }
-
   public void startCheckingIfVincentSolvedProblemsYet(@NotNull ProgressIndicator progress,
                                                       @NotNull ProgressableTextEditorHighlightingPass pass)
     throws ProcessCanceledException {
@@ -265,7 +239,9 @@ public class WolfTheProblemSolverImpl extends WolfTheProblemSolver {
       if (!virtualFile.isValid() || orderVincentToCleanTheCar(virtualFile, progress)) {
         doRemove(virtualFile);
       }
-      if (virtualFile.isValid()) pass.advanceProgress(virtualFile.getLength());
+      if (virtualFile.isValid()) {
+        pass.advanceProgress(virtualFile.getLength());
+      }
     }
   }
 
@@ -346,8 +322,7 @@ public class WolfTheProblemSolverImpl extends WolfTheProblemSolver {
     if (!myProject.isOpen()) return false;
     synchronized (myProblems) {
       if (!myProblems.isEmpty()) {
-        Set<VirtualFile> problemFiles = myProblems.keySet();
-        for (VirtualFile problemFile : problemFiles) {
+        for (VirtualFile problemFile : myProblems.keySet()) {
           if (problemFile.isValid() && condition.value(problemFile)) return true;
         }
       }
@@ -439,6 +414,12 @@ public class WolfTheProblemSolverImpl extends WolfTheProblemSolver {
   public void weHaveGotProblems(@NotNull final VirtualFile virtualFile, @NotNull List<Problem> problems) {
     if (problems.isEmpty()) return;
     if (!isToBeHighlighted(virtualFile)) return;
+    weHaveGotNonIgnorableProblems(virtualFile, problems);
+  }
+
+  @Override
+  public void weHaveGotNonIgnorableProblems(@NotNull VirtualFile virtualFile, @NotNull List<Problem> problems) {
+    if (problems.isEmpty()) return;
     boolean fireListener = false;
     synchronized (myProblems) {
       ProblemFileInfo storedProblems = myProblems.get(virtualFile);

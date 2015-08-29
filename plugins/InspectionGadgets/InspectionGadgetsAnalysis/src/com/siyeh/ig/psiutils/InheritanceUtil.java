@@ -15,6 +15,7 @@
  */
 package com.siyeh.ig.psiutils;
 
+import com.intellij.codeInspection.inheritance.ImplementedAtRuntimeCondition;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.psi.CommonClassNames;
 import com.intellij.psi.PsiClass;
@@ -23,8 +24,10 @@ import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
+import com.intellij.psi.search.searches.FunctionalExpressionSearch;
 import com.intellij.util.Processor;
 import com.intellij.util.Query;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -75,8 +78,14 @@ public class InheritanceUtil {
     return result[0];
   }
 
-  public static boolean hasImplementation(PsiClass aClass) {
+  public static boolean hasImplementation(@NotNull PsiClass aClass) {
     final SearchScope scope = GlobalSearchScope.projectScope(aClass.getProject());
+    if (aClass.isInterface() && FunctionalExpressionSearch.search(aClass, scope).findFirst() != null) return true;
+    for (ImplementedAtRuntimeCondition condition : ImplementedAtRuntimeCondition.EP_NAME.getExtensions()) {
+      if (condition.isImplementedAtRuntime(aClass)) {
+        return true;
+      }
+    }
     final Query<PsiClass> search = ClassInheritorsSearch.search(aClass, scope, true, true);
     return !search.forEach(new Processor<PsiClass>() {
       @Override

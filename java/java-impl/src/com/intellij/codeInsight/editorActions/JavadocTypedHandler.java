@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,9 @@ import com.intellij.psi.impl.source.javadoc.PsiDocParamRef;
 import com.intellij.psi.impl.source.tree.JavaDocElementType;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.javadoc.PsiDocTagValue;
+import com.intellij.psi.javadoc.PsiInlineDocTag;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.xml.util.HtmlUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,10 +42,11 @@ public class JavadocTypedHandler extends TypedHandlerDelegate {
   private static final char START_TAG_SYMBOL = '<';
   private static final char CLOSE_TAG_SYMBOL = '>';
   private static final char SLASH = '/';
+  private static final String COMMENT_PREFIX = "!--";
   
   @Override
   public Result charTyped(char c, Project project, @NotNull Editor editor, @NotNull PsiFile file) {
-    if (project == null || editor == null || file == null) {
+    if (project == null) {
       return Result.CONTINUE;
     }
     insertClosingTagIfNecessary(c, project, editor, file);
@@ -73,8 +77,8 @@ public class JavadocTypedHandler extends TypedHandlerDelegate {
     // (e.g. don't insert anything on single '>' symbol typing).
     int offset = editor.getCaretModel().getOffset();
     Document document = editor.getDocument();
-    CharSequence tagName = getTagName(document.getText(), offset);
-    if (tagName == null) {
+    String tagName = getTagName(document.getText(), offset);
+    if (tagName == null || HtmlUtil.isSingleHtmlTag(tagName) || tagName.startsWith(COMMENT_PREFIX)) {
       return false;
     }
 
@@ -99,7 +103,7 @@ public class JavadocTypedHandler extends TypedHandlerDelegate {
    * @return                tag name if the one is parsed; <code>null</code> otherwise
    */
   @Nullable
-  static CharSequence getTagName(@NotNull CharSequence text, int afterTagOffset) {
+  static String getTagName(@NotNull CharSequence text, int afterTagOffset) {
     if (afterTagOffset > text.length()) {
       return null;
     }
@@ -167,7 +171,12 @@ public class JavadocTypedHandler extends TypedHandlerDelegate {
         if (value == null || value.getTextRange().getEndOffset() == offset) {
           return false;
         } 
-      } 
+      }
+    }
+
+    // The contents of inline tags is not HTML, so the paired tag completion isn't appropriate there.
+    if (PsiTreeUtil.getParentOfType(element, PsiInlineDocTag.class, false) != null) {
+      return false;
     }
     
     ASTNode node = element.getNode();

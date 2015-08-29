@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.openapi.ui.MessageDialogBuilder;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.*;
@@ -34,7 +35,7 @@ import com.intellij.openapi.vcs.changes.committed.CommittedChangesTreeBrowser;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchDifferentiatedDialog;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchExecutor;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchMode;
-import com.intellij.openapi.vcs.changes.patch.FilePatchInProgress;
+import com.intellij.openapi.vcs.changes.patch.TextFilePatchInProgress;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vcs.versionBrowser.ChangeBrowserSettings;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
@@ -42,6 +43,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.MultiMap;
@@ -49,16 +51,15 @@ import com.intellij.util.continuation.Continuation;
 import com.intellij.util.continuation.ContinuationContext;
 import com.intellij.util.continuation.TaskDescriptor;
 import com.intellij.util.continuation.Where;
+import com.intellij.vcsUtil.VcsUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.svn.*;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.conflict.TreeConflictDescription;
 import org.jetbrains.idea.svn.history.SvnChangeList;
 import org.jetbrains.idea.svn.history.SvnRepositoryLocation;
-import org.tmatesoft.svn.core.SVNDepth;
-import org.tmatesoft.svn.core.SVNException;
-import org.tmatesoft.svn.core.SVNNodeKind;
 import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNTreeConflictDescription;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
@@ -70,7 +71,7 @@ import java.util.*;
  */
 public class MergeFromTheirsResolver {
   private final SvnVcs myVcs;
-  private final SVNTreeConflictDescription myDescription;
+  private final TreeConflictDescription myDescription;
   private final Change myChange;
   private final FilePath myOldFilePath;
   private final FilePath myNewFilePath;
@@ -85,7 +86,7 @@ public class MergeFromTheirsResolver {
   private List<TextFilePatch> myTextPatches;
   private VirtualFile myBaseForPatch;
 
-  public MergeFromTheirsResolver(SvnVcs vcs, SVNTreeConflictDescription description, Change change, SvnRevisionNumber revision) {
+  public MergeFromTheirsResolver(SvnVcs vcs, TreeConflictDescription description, Change change, SvnRevisionNumber revision) {
     myVcs = vcs;
     myDescription = description;
     myChange = change;
@@ -125,11 +126,7 @@ public class MergeFromTheirsResolver {
     });
 
     final List<TaskDescriptor> tasks = new SmartList<TaskDescriptor>();
-    if (SVNNodeKind.DIR.equals(myDescription.getNodeKind())) {
-      tasks.add(new PreloadChangesContentsForDir());
-    } else {
-      tasks.add(new PreloadChangesContentsForFile());
-    }
+    tasks.add(myDescription.isDirectory() ? new PreloadChangesContentsForDir() : new PreloadChangesContentsForFile());
     tasks.add(new ConvertTextPaths());
     tasks.add(new PatchCreator());
     tasks.add(new SelectPatchesInApplyPatchDialog());
@@ -182,7 +179,7 @@ public class MergeFromTheirsResolver {
     @Override
     public void run(ContinuationContext context) {
       try {
-        new SvnTreeConflictResolver(myVcs, myOldFilePath, myCommittedRevision, null).resolveSelectMineFull(myDescription);
+        new SvnTreeConflictResolver(myVcs, myOldFilePath, null).resolveSelectMineFull();
       }
       catch (VcsException e1) {
         context.handleException(e1, false);
@@ -229,7 +226,7 @@ public class MergeFromTheirsResolver {
     }
   }
 
-  private class TreeConflictApplyTheirsPatchExecutor implements ApplyPatchExecutor {
+  private class TreeConflictApplyTheirsPatchExecutor implements ApplyPatchExecutor<TextFilePatchInProgress> {
     private final SvnVcs myVcs;
     private final ContinuationContext myInner;
     private final VirtualFile myBaseDir;
@@ -246,7 +243,7 @@ public class MergeFromTheirsResolver {
     }
 
     @Override
-    public void apply(MultiMap<VirtualFile, FilePatchInProgress> patchGroups, LocalChangeList localList, String fileName,
+    public void apply(MultiMap<VirtualFile, TextFilePatchInProgress> patchGroups, LocalChangeList localList, String fileName,
                       TransparentlyFailedValueI<Map<String, Map<String, CharSequence>>, PatchSyntaxException> additionalInfo) {
       final List<FilePatch> patches;
       try {
@@ -259,7 +256,7 @@ public class MergeFromTheirsResolver {
 
       final PatchApplier<BinaryFilePatch> patchApplier =
         new PatchApplier<BinaryFilePatch>(myVcs.getProject(), myBaseDir, patches, localList, null, null);
-      patchApplier.scheduleSelf(false, myInner, true);  // 3
+      patchApplier.execute(false, true);  // 3
       boolean thereAreCreations = false;
       for (FilePatch patch : patches) {
         if (patch.isNewFile() || ! Comparing.equal(patch.getAfterName(), patch.getBeforeName())) {
@@ -285,9 +282,13 @@ public class MergeFromTheirsResolver {
     @Override
     public void run(ContinuationContext context) {
       try {
-        myVcs.createWCClient().doAdd(myOldFilePath.getIOFile(), true, true, true, SVNDepth.EMPTY, false, true);
+        // TODO: Previously SVNKit client was invoked with mkDir=true option - so corresponding directory would be created. Now mkDir=false
+        // TODO: is used. Command line also does not support automatic directory creation.
+        // TODO: Need to check additionally if there are cases when directory does not exist and add corresponding code.
+        myVcs.getFactory(myOldFilePath.getIOFile()).createAddClient()
+          .add(myOldFilePath.getIOFile(), Depth.EMPTY, true, false, true, null);
       }
-      catch (SVNException e) {
+      catch (VcsException e) {
         context.handleException(e, true);
       }
     }
@@ -355,55 +356,56 @@ public class MergeFromTheirsResolver {
     public void run(final ContinuationContext context) {
       if (myTheirsBinaryChanges.isEmpty()) return;
       final Application application = ApplicationManager.getApplication();
-      final VcsException[] exc = new VcsException[1];
       final List<FilePath> dirtyPaths = new ArrayList<FilePath>();
       for (final Change change : myTheirsBinaryChanges) {
-        application.runWriteAction(new Runnable() {
-          public void run() {
-            try {
-              if (change.getAfterRevision() != null) {
-                final FilePath file = change.getAfterRevision().getFile();
-                dirtyPaths.add(file);
-                final String parentPath = file.getParentPath().getPath();
-                final VirtualFile parentFile = VfsUtil.createDirectoryIfMissing(parentPath);
-                if (parentFile == null) {
-                  context.handleException(new VcsException("Can not create directory: " + parentPath, true), false);
-                  return;
+        try {
+          application.runWriteAction(new ThrowableComputable<Void, VcsException>() {
+            @Override
+            public Void compute() throws VcsException {
+              try {
+                if (change.getAfterRevision() == null) {
+                  final FilePath path = change.getBeforeRevision().getFile();
+                  dirtyPaths.add(path);
+                  final VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(path.getIOFile());
+                  if (file == null) {
+                    context.handleException(new VcsException("Can not delete file: " + file.getPath(), true), false);
+                    return null;
+                  }
+                  file.delete(TreeConflictRefreshablePanel.class);
                 }
-                final VirtualFile child = parentFile.createChildData(TreeConflictRefreshablePanel.class, file.getName());
-                if (child == null) {
-                  context.handleException(new VcsException("Can not create file: " + file.getPath(), true), false);
-                  return;
+                else {
+                  final FilePath file = change.getAfterRevision().getFile();
+                  dirtyPaths.add(file);
+                  final String parentPath = file.getParentPath().getPath();
+                  final VirtualFile parentFile = VfsUtil.createDirectoryIfMissing(parentPath);
+                  if (parentFile == null) {
+                    context.handleException(new VcsException("Can not create directory: " + parentPath, true), false);
+                    return null;
+                  }
+                  final VirtualFile child = parentFile.createChildData(TreeConflictRefreshablePanel.class, file.getName());
+                  if (child == null) {
+                    context.handleException(new VcsException("Can not create file: " + file.getPath(), true), false);
+                    return null;
+                  }
+                  final BinaryContentRevision revision = (BinaryContentRevision)change.getAfterRevision();
+                  final byte[] content = revision.getBinaryContent();
+                  // actually it was the fix for IDEA-91572 Error saving merged data: Argument 0 for @NotNull parameter of > com/intellij/
+                  if (content == null) {
+                    context.handleException(new VcsException("Can not load Theirs content for file " + file.getPath()), false);
+                    return null;
+                  }
+                  child.setBinaryContent(content);
                 }
-                final BinaryContentRevision revision = (BinaryContentRevision)change.getAfterRevision();
-                final byte[] content = revision.getBinaryContent();
-                // actually it was the fix for IDEA-91572 Error saving merged data: Argument 0 for @NotNull parameter of > com/intellij/
-                if (content == null) {
-                  context.handleException(new VcsException("Can not load Theirs content for file " + file.getPath()), false);
-                  return;
-                }
-                child.setBinaryContent(content);
-              } else {
-                final FilePath path = change.getBeforeRevision().getFile();
-                dirtyPaths.add(path);
-                final VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(path.getIOFile());
-                if (file == null) {
-                  context.handleException(new VcsException("Can not delete file: " + file.getPath(), true), false);
-                  return;
-                }
-                file.delete(TreeConflictRefreshablePanel.class);
               }
+              catch (IOException e) {
+                throw new VcsException(e);
+              }
+              return null;
             }
-            catch (IOException e) {
-              exc[0] = new VcsException(e);
-            }
-            catch (VcsException e) {
-              exc[0] = e;
-            }
-          }
-        });
-        if (exc[0] != null) {
-          context.handleException(exc[0], true);
+          });
+        }
+        catch (VcsException e) {
+          context.handleException(e, true);
           return;
         }
       }
@@ -489,10 +491,10 @@ public class MergeFromTheirsResolver {
     return false;
   }
 
-  private FilePath rebasePath(final FilePath oldBase, final FilePath newBase, final FilePath path) {
-    final String relativePath = FileUtil.getRelativePath(oldBase.getPath(), path.getPath(), File.separatorChar);
-    //if (StringUtil.isEmptyOrSpaces(relativePath)) return path;
-    return ((FilePathImpl) newBase).createChild(relativePath, path.isDirectory());
+  @NotNull
+  private static FilePath rebasePath(@NotNull FilePath oldBase, @NotNull FilePath newBase, @NotNull FilePath path) {
+    String relativePath = ObjectUtils.assertNotNull(FileUtil.getRelativePath(oldBase.getPath(), path.getPath(), '/'));
+    return VcsUtil.getFilePath(newBase.getPath() + "/" + relativePath, path.isDirectory());
   }
 
   private class PreloadChangesContentsForFile extends TaskDescriptor {
@@ -558,7 +560,7 @@ public class MergeFromTheirsResolver {
     }
   }
 
-  private List<CommittedChangeList> loadSvnChangeListsForPatch(SVNTreeConflictDescription description) throws VcsException {
+  private List<CommittedChangeList> loadSvnChangeListsForPatch(TreeConflictDescription description) throws VcsException {
     long max = description.getSourceRightVersion().getPegRevision();
     long min = description.getSourceLeftVersion().getPegRevision();
 
@@ -587,8 +589,8 @@ public class MergeFromTheirsResolver {
 
   private boolean getAddedFilesPlaceOption() {
     final SvnConfiguration configuration = SvnConfiguration.getInstance(myVcs.getProject());
-    boolean add = Boolean.TRUE.equals(configuration.TREE_CONFLICT_MERGE_THEIRS_NEW_INTO_OLD_PLACE);
-    if (configuration.TREE_CONFLICT_MERGE_THEIRS_NEW_INTO_OLD_PLACE != null) {
+    boolean add = Boolean.TRUE.equals(configuration.isKeepNewFilesAsIsForTreeConflictMerge());
+    if (configuration.isKeepNewFilesAsIsForTreeConflictMerge() != null) {
       return add;
     }
     if (!containAdditions(myTheirsChanges) && !containAdditions(myTheirsBinaryChanges)) {
@@ -606,10 +608,10 @@ public class MergeFromTheirsResolver {
           if (!value) {
             if (exitCode == 0) {
               // yes
-              configuration.TREE_CONFLICT_MERGE_THEIRS_NEW_INTO_OLD_PLACE = true;
+              configuration.setKeepNewFilesAsIsForTreeConflictMerge(true);
             }
             else {
-              configuration.TREE_CONFLICT_MERGE_THEIRS_NEW_INTO_OLD_PLACE = false;
+              configuration.setKeepNewFilesAsIsForTreeConflictMerge(false);
             }
           }
         }
@@ -624,6 +626,7 @@ public class MergeFromTheirsResolver {
           return true;
         }
 
+        @NotNull
         @Override
         public String getDoNotShowMessage() {
           return CommonBundle.message("dialog.options.do.not.ask");

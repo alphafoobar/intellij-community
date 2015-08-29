@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,31 +15,39 @@
  */
 package com.intellij.openapi.components.impl.stores;
 
+import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.StateStorage;
-import com.intellij.openapi.components.StateStorageException;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.io.fs.IFile;
+import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
 public interface IComponentStore {
-  void initComponent(@NotNull Object component, boolean service);
-  void reinitComponents(@NotNull Set<String> componentNames, boolean reloadData);
-  boolean isReloadPossible(@NotNull Set<String> componentNames);
+  /**
+   * @param path System-independent path.
+   */
+  void setPath(@NotNull String path);
 
-  void load() throws IOException, StateStorageException;
-  boolean isSaving();
+  void initComponent(@NotNull Object component, boolean service);
+
+  void reloadStates(@NotNull Set<String> componentNames, @NotNull MessageBus messageBus);
+
+  void reloadState(@NotNull Class<? extends PersistentStateComponent<?>> componentClass);
+
+  @NotNull
+  Collection<String> getNotReloadableComponents(@NotNull Collection<String> componentNames);
+
+  boolean isReloadPossible(@NotNull Set<String> componentNames);
 
   @NotNull
   StateStorageManager getStateStorageManager();
 
-
-  class SaveCancelledException extends IOException {
+  class SaveCancelledException extends RuntimeException {
     public SaveCancelledException() {
     }
 
@@ -48,23 +56,8 @@ public interface IComponentStore {
     }
   }
 
-  //todo:remove throws
-  @NotNull
-  SaveSession startSave() throws IOException;
+  void save(@NotNull List<Pair<StateStorage.SaveSession, VirtualFile>> readonlyFiles);
 
-  interface SaveSession {
-    @NotNull
-    List<IFile> getAllStorageFilesToSave(final boolean includingSubStructures) throws IOException;
-    @NotNull
-    SaveSession save() throws IOException;
-    void finishSave();
-    void reset();
-
-    @Nullable
-    Set<String> analyzeExternalChanges(@NotNull Set<Pair<VirtualFile,StateStorage>> changedFiles);
-
-    @NotNull
-    List<IFile> getAllStorageFiles(final boolean includingSubStructures);
-  }
-
+  @TestOnly
+  void saveApplicationComponent(@NotNull Object component);
 }

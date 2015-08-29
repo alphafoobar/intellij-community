@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,13 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ProcessingContext;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.documentation.DocStringUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.regex.Pattern;
 
 /**
  * @author yole
@@ -35,6 +38,23 @@ public class PythonPatterns extends PlatformPatterns {
     return new PyElementPattern.Capture<PyLiteralExpression>(new InitialPatternCondition<PyLiteralExpression>(PyLiteralExpression.class) {
       public boolean accepts(@Nullable final Object o, final ProcessingContext context) {
         return o instanceof PyLiteralExpression;
+      }
+    });
+  }
+
+  public static PyElementPattern.Capture<PyStringLiteralExpression> pyStringLiteralMatches(final String regexp) {
+    final Pattern pattern = Pattern.compile(regexp, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    return new PyElementPattern.Capture<PyStringLiteralExpression>(new InitialPatternCondition<PyStringLiteralExpression>(PyStringLiteralExpression.class) {
+      @Override
+      public boolean accepts(@Nullable Object o, ProcessingContext context) {
+        if (o instanceof PyStringLiteralExpression) {
+          final PyStringLiteralExpression expr = (PyStringLiteralExpression)o;
+          if (!DocStringUtil.isDocStringExpression(expr)) {
+            final String value = expr.getStringValue();
+            return pattern.matcher(value).matches();
+          }
+        }
+        return false;
       }
     });
   }
@@ -50,7 +70,7 @@ public class PythonPatterns extends PlatformPatterns {
   public static PyElementPattern.Capture<PyExpression> pyModuleFunctionArgument(final String functionName, final int index, final String moduleName) {
     return new PyElementPattern.Capture<PyExpression>(new InitialPatternCondition<PyExpression>(PyExpression.class) {
       public boolean accepts(@Nullable final Object o, final ProcessingContext context) {
-        Callable function = resolveCalledFunction(o, functionName, index);
+        PyCallable function = resolveCalledFunction(o, functionName, index);
         if (!(function instanceof PyFunction)) {
           return false;
         }
@@ -66,7 +86,7 @@ public class PythonPatterns extends PlatformPatterns {
   public static PyElementPattern.Capture<PyExpression> pyMethodArgument(final String functionName, final int index, final String classQualifiedName) {
     return new PyElementPattern.Capture<PyExpression>(new InitialPatternCondition<PyExpression>(PyExpression.class) {
       public boolean accepts(@Nullable final Object o, final ProcessingContext context) {
-        Callable function = resolveCalledFunction(o, functionName, index);
+        PyCallable function = resolveCalledFunction(o, functionName, index);
         if (!(function instanceof PyFunction)) {
           return false;
         }
@@ -79,7 +99,7 @@ public class PythonPatterns extends PlatformPatterns {
     });
   }
 
-  private static Callable resolveCalledFunction(Object o, String functionName, int index) {
+  private static PyCallable resolveCalledFunction(Object o, String functionName, int index) {
     if (!isCallArgument(o, functionName, index)) {
       return null;
     }
@@ -88,7 +108,7 @@ public class PythonPatterns extends PlatformPatterns {
 
     // TODO is it better or worse to allow implicits here?
     PyResolveContext context = PyResolveContext.noImplicits()
-      .withTypeEvalContext(TypeEvalContext.codeAnalysis(expression.getContainingFile()));
+      .withTypeEvalContext(TypeEvalContext.codeAnalysis(expression.getProject(), expression.getContainingFile()));
 
     PyCallExpression.PyMarkedCallee callee = call.resolveCallee(context);
     return callee != null ? callee.getCallable() : null;

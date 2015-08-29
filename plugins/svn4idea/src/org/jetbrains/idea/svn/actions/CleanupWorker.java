@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,10 +30,10 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.svn.SvnBundle;
 import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.api.ProgressEvent;
+import org.jetbrains.idea.svn.api.ProgressTracker;
 import org.tmatesoft.svn.core.SVNCancelException;
 import org.tmatesoft.svn.core.SVNException;
-import org.tmatesoft.svn.core.wc.ISVNEventHandler;
-import org.tmatesoft.svn.core.wc.SVNEvent;
 
 import java.io.File;
 import java.util.LinkedList;
@@ -69,9 +69,9 @@ public class CleanupWorker {
             final File path = new File(root.getPath());
 
             indicator.setText(SvnBundle.message("action.Subversion.cleanup.progress.text", path));
-            ISVNEventHandler handler = new ISVNEventHandler() {
+            ProgressTracker handler = new ProgressTracker() {
               @Override
-              public void handleEvent(SVNEvent event, double progress) throws SVNException {
+              public void consume(ProgressEvent event) throws SVNException {
               }
 
               @Override
@@ -83,7 +83,7 @@ public class CleanupWorker {
             vcs.getFactory(path).createCleanupClient().cleanup(path, handler);
           }
           catch (VcsException ex) {
-            exceptions.add(new Pair<VcsException, VirtualFile>(ex, currentRoot));
+            exceptions.add(Pair.create(ex, currentRoot));
           }
         }
       }

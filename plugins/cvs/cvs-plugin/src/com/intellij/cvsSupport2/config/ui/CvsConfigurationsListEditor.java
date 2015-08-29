@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import com.intellij.openapi.ui.InputException;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.AnActionButton;
 import com.intellij.ui.AnActionButtonRunnable;
+import com.intellij.ui.DumbAwareActionButton;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.PlatformIcons;
@@ -94,17 +95,17 @@ public class CvsConfigurationsListEditor extends DialogWrapper implements DataPr
   }
 
   @Nullable
-  public static CvsRootConfiguration reconfigureCvsRoot(String root, Project project){
+  public static CvsRootConfiguration reconfigureCvsRoot(String root, Project project) {
     final CvsApplicationLevelConfiguration configuration = CvsApplicationLevelConfiguration.getInstance();
     final CvsRootConfiguration selectedConfig = configuration.getConfigurationForCvsRoot(root);
     final ArrayList<CvsRootConfiguration> modifiableList = new ArrayList<CvsRootConfiguration>(configuration.CONFIGURATIONS);
     final CvsConfigurationsListEditor editor = new CvsConfigurationsListEditor(modifiableList, project, true);
     editor.select(selectedConfig);
-    editor.show();
-    if (editor.isOK()){
+    if (editor.showAndGet()) {
       configuration.CONFIGURATIONS = modifiableList;
       return configuration.getConfigurationForCvsRoot(root);
-    } else {
+    }
+    else {
       return null;
     }
   }
@@ -130,13 +131,13 @@ public class CvsConfigurationsListEditor extends DialogWrapper implements DataPr
 
   private void fillModel(List<CvsRootConfiguration> configurations) {
     for (final CvsRootConfiguration configuration : configurations) {
-      myModel.addElement(configuration.getMyCopy());
+      myModel.addElement(configuration.clone());
     }
   }
 
   private JComponent createListPanel() {
     final AnActionButton duplicateButton =
-      new AnActionButton(CvsBundle.message("action.name.copy"), PlatformIcons.COPY_ICON) {
+      new DumbAwareActionButton(CvsBundle.message("action.name.copy"), PlatformIcons.COPY_ICON) {
 
         @Override
         public void updateButton(AnActionEvent e) {
@@ -197,8 +198,7 @@ public class CvsConfigurationsListEditor extends DialogWrapper implements DataPr
 
   private void copySelectedConfiguration() {
     if (!saveSelectedConfiguration()) return;
-    final CvsRootConfiguration newConfig = mySelection.getMyCopy();
-    myModel.addElement(newConfig);
+    myModel.addElement(mySelection.clone());
     myList.setSelectedIndex(myModel.getSize() - 1);
   }
 

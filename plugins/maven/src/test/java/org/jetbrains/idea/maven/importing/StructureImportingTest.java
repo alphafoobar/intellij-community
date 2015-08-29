@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,11 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.roots.LanguageLevelModuleExtension;
+import com.intellij.openapi.roots.LanguageLevelModuleExtensionImpl;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 import org.jetbrains.idea.maven.project.MavenProject;
 
@@ -361,7 +362,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
     executeGoal("parent", "install");
 
     new WriteAction() {
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         parent.delete(null);
       }
     }.execute();
@@ -669,7 +670,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
                   "<version>1</version>");
 
     assertModules("project");
-    assertNull(getLanguageLevelForModule());
+    assertEquals(LanguageLevel.JDK_1_5, getLanguageLevelForModule());
   }
 
   public void testLanguageLevelWhenConfigurationIsNotSpecified() throws Exception {
@@ -687,7 +688,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
                   "</build>");
 
     assertModules("project");
-    assertNull(getLanguageLevelForModule());
+    assertEquals(LanguageLevel.JDK_1_5, getLanguageLevelForModule());
   }
 
   public void testLanguageLevelWhenSourceLanguageLevelIsNotSpecified() throws Exception {
@@ -707,7 +708,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
                   "</build>");
 
     assertModules("project");
-    assertNull(getLanguageLevelForModule());
+    assertEquals(LanguageLevel.JDK_1_5, getLanguageLevelForModule());
   }
 
   public void testLanguageLevelFromPluginManagementSection() throws Exception {
@@ -834,7 +835,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
   }
 
   private LanguageLevel getLanguageLevelForModule() {
-    return LanguageLevelModuleExtension.getInstance(getModule("project")).getLanguageLevel();
+    return LanguageLevelModuleExtensionImpl.getInstance(getModule("project")).getLanguageLevel();
   }
 
   public void testSettingTargetLevel() throws Exception {

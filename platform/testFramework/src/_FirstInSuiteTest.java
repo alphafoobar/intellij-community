@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,66 @@
  * limitations under the License.
  */
 
-import com.intellij.testFramework.LightPlatformTestCase;
+import com.intellij.TestAll;
+import com.intellij.testFramework.TestRunnerUtil;
+import junit.framework.TestCase;
+
+import javax.swing.*;
+import java.util.List;
 
 /**
  * This is should be first test in all tests so we can measure how long tests are starting up.
+ *
  * @author max
  */
-public class _FirstInSuiteTest extends LightPlatformTestCase {
-  public void testNothing() throws Exception {
+@SuppressWarnings({"JUnitTestClassNamingConvention", "UseOfSystemOutOrSystemErr"})
+public class _FirstInSuiteTest extends TestCase {
+  public static long suiteStarted = 0L;
+  public static boolean nothingIsCalled = false;
 
+  public void testReportClassLoadingProblems() {
+    List<Throwable> problems = TestAll.getLoadingClassProblems();
+    if (problems.isEmpty()) return;
+
+    StringBuilder builder = new StringBuilder("The following test classes were not loaded:\n");
+    for (Throwable each : problems) {
+      builder.append(each.toString()).append("\n");
+      each.printStackTrace(System.out);
+    }
+
+    throw new AssertionError(builder.toString());
+  }
+
+  @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod")
+  public void testNothing() throws Exception {
+    if (nothingIsCalled) return;
+
+    nothingIsCalled = true;
+    suiteStarted = System.nanoTime();
+
+    SwingUtilities.invokeAndWait(new Runnable() {
+      @Override
+      public void run() {
+        System.out.println("EDT is " + Thread.currentThread());
+      }
+    });
+    // in tests EDT inexplicably shuts down sometimes during the first access,
+    // which leads to nasty problems in ApplicationImpl which assumes there is only one EDT.
+    // so we try to forcibly terminate EDT here to urge JVM to re-spawn new shiny permanent EDT-1
+    TestRunnerUtil.replaceIdeEventQueueSafely();
+    SwingUtilities.invokeAndWait(new Runnable() {
+      @Override
+      public void run() {
+        System.out.println("EDT is " + Thread.currentThread());
+      }
+    });
+
+    // force platform JNA load
+    Class.forName("com.sun.jna.Native");
+  }
+
+  // performance tests
+  public void testNothingPerformance() throws Exception {
+    testNothing();
   }
 }

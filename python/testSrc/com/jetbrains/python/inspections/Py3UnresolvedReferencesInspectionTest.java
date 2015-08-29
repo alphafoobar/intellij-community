@@ -15,10 +15,19 @@
  */
 package com.jetbrains.python.inspections;
 
+import com.intellij.openapi.project.Project;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.testFramework.LightProjectDescriptor;
 import com.jetbrains.python.fixtures.PyTestCase;
+import com.jetbrains.python.inspections.unresolvedReference.PyUnresolvedReferencesInspection;
 import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.stubs.PyClassNameIndex;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Collection;
 
 /**
  * @author vlan
@@ -73,12 +82,43 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
     doTest();
   }
 
+  public void testMetaclassStub() {
+    doMultiFileTest("a.py");
+    final Project project = myFixture.getProject();
+    Collection<PyClass> classes = PyClassNameIndex.find("M", project, GlobalSearchScope.allScope(project));
+    for (PyClass cls : classes) {
+      final PsiFile file = cls.getContainingFile();
+      if (file instanceof PyFile) {
+        assertNotParsed((PyFile)file);
+      }
+    }
+  }
+
   // PY-9011
   public void testDatetimeDateAttributesOutsideClass() {
     doMultiFileTest("a.py");
   }
 
   public void testObjectNewAttributes() {
+    doTest();
+  }
+
+  public void testEnumMemberAttributes() {
+    doMultiFileTest("a.py");
+  }
+
+  // PY-12864
+  public void testAttributesOfUnresolvedTypeFile() {
+    doTest();
+  }
+
+  // PY-14385
+  public void testNotImportedSubmodulesOfNamespacePackage() {
+    doMultiFileTest("main.py");
+  }
+
+  // PY-15017
+  public void testClassLevelReferenceInMethodAnnotation() {
     doTest();
   }
 }

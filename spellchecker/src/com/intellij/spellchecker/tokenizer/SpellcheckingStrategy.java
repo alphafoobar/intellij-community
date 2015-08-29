@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,18 @@
 package com.intellij.spellchecker.tokenizer;
 
 import com.intellij.codeInspection.SuppressionUtil;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.impl.CustomSyntaxTableFileType;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlText;
+import com.intellij.psi.xml.XmlToken;
+import com.intellij.psi.xml.XmlTokenType;
 import com.intellij.spellchecker.inspections.PlainTextSplitter;
 import com.intellij.spellchecker.inspections.TextSplitter;
 import com.intellij.spellchecker.quickfixes.AcceptWordAsCorrect;
@@ -49,6 +54,9 @@ public class SpellcheckingStrategy {
 
   @NotNull
   public Tokenizer getTokenizer(PsiElement element) {
+    if (element instanceof PsiLanguageInjectionHost && InjectedLanguageUtil.hasInjections((PsiLanguageInjectionHost)element)) {
+      return EMPTY_TOKENIZER;
+    }
     if (element instanceof PsiNameIdentifierOwner) return new PsiIdentifierOwnerTokenizer();
     if (element instanceof PsiComment) {
       if (SuppressionUtil.isSuppressionComment(element)) {
@@ -58,7 +66,23 @@ public class SpellcheckingStrategy {
     }
     if (element instanceof XmlAttributeValue) return myXmlAttributeTokenizer;
     if (element instanceof XmlText) return myXmlTextTokenizer;
-    if (element instanceof PsiPlainText) return TEXT_TOKENIZER;
+    if (element instanceof PsiPlainText) {
+      PsiFile file = element.getContainingFile();
+      FileType fileType = file == null ? null : file.getFileType();
+      if (fileType instanceof CustomSyntaxTableFileType) {
+        return new CustomFileTypeTokenizer(((CustomSyntaxTableFileType)fileType).getSyntaxTable());
+      }
+      return TEXT_TOKENIZER;
+    }
+    if (element instanceof XmlToken) {
+      if (((XmlToken)element).getTokenType() == XmlTokenType.XML_DATA_CHARACTERS) {
+        PsiElement injection = InjectedLanguageManager.getInstance(element.getProject()).findInjectedElementAt(element.getContainingFile(), element.getTextOffset());
+        if (injection == null) {
+          return TEXT_TOKENIZER;
+        }
+      }
+
+    }
     return EMPTY_TOKENIZER;
   }
 
@@ -72,13 +96,9 @@ public class SpellcheckingStrategy {
 
   public static SpellCheckerQuickFix[] getDefaultRegularFixes(boolean useRename, String wordWithTypo) {
     return new SpellCheckerQuickFix[]{
-      (useRename ? new RenameTo(wordWithTypo) : new ChangeTo(wordWithTypo)),
+      useRename ? new RenameTo(wordWithTypo) : new ChangeTo(wordWithTypo),
       new AcceptWordAsCorrect(wordWithTypo)
     };
-  }
-
-  public SpellCheckerQuickFix[] getBatchFixes(PsiElement element, int offset, @NotNull TextRange textRange) {
-    return getDefaultBatchFixes();
   }
 
   public static SpellCheckerQuickFix[] getDefaultBatchFixes() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,8 @@ import com.intellij.util.text.LiteralFormatUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Locale;
 
 public class PsiLiteralExpressionImpl
        extends ExpressionPsiElement
@@ -93,7 +95,7 @@ public class PsiLiteralExpressionImpl
   @Override
   public Object getValue() {
     final IElementType type = getLiteralElementType();
-    String text = NUMERIC_LITERALS.contains(type) ? getCanonicalText().toLowerCase() : getCanonicalText();
+    String text = NUMERIC_LITERALS.contains(type) ? getCanonicalText().toLowerCase(Locale.ENGLISH) : getCanonicalText();
     final int textLength = text.length();
 
     if (type == JavaTokenType.INTEGER_LITERAL) {
@@ -370,6 +372,7 @@ public class PsiLiteralExpressionImpl
     }
   }
 
+  @Override
   public String toString() {
     return "PsiLiteralExpression:" + getText();
   }

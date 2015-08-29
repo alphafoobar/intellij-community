@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiElementFactory;
 import com.intellij.psi.PsiManager;
-import com.intellij.testFramework.IdeaTestCase;
+import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.builders.JavaModuleFixtureBuilder;
 import org.jetbrains.annotations.NonNls;
@@ -34,11 +34,6 @@ import java.io.File;
 public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
   protected JavaCodeInsightTestFixture myFixture;
   protected Module myModule;
-
-  @SuppressWarnings({"JUnitTestCaseWithNonTrivialConstructors"})
-  protected JavaCodeInsightFixtureTestCase() {
-    IdeaTestCase.initPlatformPrefix();
-  }
 
   @Override
   protected void setUp() throws Exception {
@@ -66,14 +61,20 @@ public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
   @Override
   protected void tearDown() throws Exception {
     myModule = null;
-    myFixture.tearDown();
-    myFixture = null;
-    super.tearDown();
+
+    try {
+      myFixture.tearDown();
+    }
+    finally {
+      myFixture = null;
+
+      super.tearDown();
+    }
   }
 
   /**
    * Return relative path to the test data. Path is relative to the
-   * {@link com.intellij.openapi.application.PathManager#getHomePath()}
+   * {@link PathManager#getHomePath()}
    *
    * @return relative path to the test data.
    */
@@ -99,8 +100,8 @@ public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
     return myFixture.getProject();
   }
 
-  protected PsiManager getPsiManager() {
-    return PsiManager.getInstance(getProject());
+  protected PsiManagerEx getPsiManager() {
+    return (PsiManagerEx)PsiManager.getInstance(getProject());
   }
 
   public PsiElementFactory getElementFactory() {

@@ -20,6 +20,8 @@ import com.intellij.execution.*;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.DataManager;
+import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
@@ -109,7 +111,7 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
     settings.setSingleton(mySingleton);
     settings.setFolderName(myFolderName);
     super.apply();
-    RunManagerImpl.getInstanceImpl(getConfiguration().getProject()).fireRunConfigurationChanged(settings);
+    runManager.addConfiguration(settings, myStoreProjectConfiguration, runManager.getBeforeRunTasks(settings.getConfiguration()), false);
   }
 
   @Override
@@ -123,10 +125,19 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
     myComponent.doReset(configuration);
   }
 
+  void updateWarning() {
+    myValidationResultValid = false;
+    if (myComponent != null) {
+      myComponent.updateWarning();
+    }
+  }
+
   @Override
   public final JComponent createComponent() {
     myComponent.myNameText.setEnabled(!myBrokenConfiguration);
-    return myComponent.getWholePanel();
+    JComponent result = myComponent.getWholePanel();
+    DataManager.registerDataProvider(result, new MyDataProvider());
+    return result;
   }
 
   final JComponent getValidationComponent() {
@@ -145,24 +156,38 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
   private ValidationResult getValidationResult() {
     if (!myValidationResultValid) {
       myLastValidationResult = null;
+      RunnerAndConfigurationSettings snapshot = null;
       try {
-        RunnerAndConfigurationSettings snapshot = getSnapshot();
+        snapshot = getSnapshot();
         if (snapshot != null) {
           snapshot.setName(getNameText());
           snapshot.checkSettings(myExecutor);
-          for (ProgramRunner runner : RunnerRegistry.getInstance().getRegisteredRunners()) {
-            for (Executor executor : ExecutorRegistry.getInstance().getRegisteredExecutors()) {
-              if (runner.canRun(executor.getId(), snapshot.getConfiguration())) {
-                checkConfiguration(runner, snapshot);
-                break;
-              }
+          for (Executor executor : ExecutorRegistry.getInstance().getRegisteredExecutors()) {
+            ProgramRunner runner = RunnerRegistry.getInstance().getRunner(executor.getId(), snapshot.getConfiguration());
+            if (runner != null) {
+              checkConfiguration(runner, snapshot);
             }
           }
         }
       }
       catch (RuntimeConfigurationException exception) {
-        myLastValidationResult =
-            exception != null ? new ValidationResult(exception.getLocalizedMessage(), exception.getTitle(), exception.getQuickFix()) : null;
+        final Runnable quickFix = exception.getQuickFix();
+        Runnable resultQuickFix;
+        if (quickFix != null && snapshot != null) {
+          final RunnerAndConfigurationSettings fixedSettings = snapshot;
+          resultQuickFix = new Runnable() {
+
+            @Override
+            public void run() {
+              quickFix.run();
+              getEditor().resetFrom(fixedSettings);
+            }
+          };
+        }
+        else {
+          resultQuickFix = quickFix;
+        }
+        myLastValidationResult = new ValidationResult(exception.getLocalizedMessage(), exception.getTitle(), resultQuickFix);
       }
       catch (ConfigurationException e) {
         myLastValidationResult = new ValidationResult(e.getLocalizedMessage(), ExecutionBundle.message("invalid.data.dialog.title"), null);
@@ -374,7 +399,7 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
           myFixButton.setVisible(true);
           myQuickFix = quickFix;
         }
-
+        myValidationPanel.setVisible(true);
       }
       else {
         mySeparator.setVisible(false);
@@ -387,6 +412,18 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
     @NonNls
     private String generateWarningLabelText(final ValidationResult configurationException) {
       return "<html><body><b>" + configurationException.getTitle() + ": </b>" + configurationException.getMessage() + "</body></html>";
+    }
+  }
+
+  private class MyDataProvider implements DataProvider {
+
+    @Nullable
+    @Override
+    public Object getData(@NonNls String dataId) {
+      if (ConfigurationSettingsEditorWrapper.CONFIGURATION_EDITOR_KEY.is(dataId)) {
+        return getEditor();
+      }
+      return null;
     }
   }
 }

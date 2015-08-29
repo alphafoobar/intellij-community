@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileElement;
 import com.intellij.openapi.fileChooser.ex.FileChooserKeys;
+import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.playback.PlaybackContext;
 import com.intellij.openapi.ui.playback.PlaybackRunner;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
-import com.intellij.openapi.vfs.encoding.EncodingRegistry;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
@@ -39,10 +39,12 @@ import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.debugger.UiDebuggerExtension;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.WaitFor;
 import com.intellij.util.ui.PlatformColors;
 import com.intellij.util.ui.UIUtil;
-import org.jdom.Element;
+import com.intellij.util.xmlb.XmlSerializerUtil;
+import com.intellij.util.xmlb.annotations.Attribute;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -155,7 +157,7 @@ public class PlaybackDebugger implements UiDebuggerExtension, PlaybackRunner.Sta
 
     myVfsListener = new VirtualFileAdapter() {
       @Override
-      public void contentsChanged(VirtualFileEvent event) {
+      public void contentsChanged(@NotNull VirtualFileEvent event) {
         final VirtualFile file = pathToFile();
         if (file != null && file.equals(event.getFile())) {
           loadFrom(event.getFile());
@@ -273,14 +275,9 @@ public class PlaybackDebugger implements UiDebuggerExtension, PlaybackRunner.Sta
   }
 
   private void loadFrom(@NotNull VirtualFile file) {
-    try {
-      final String text = CharsetToolkit.bytesToString(file.contentsToByteArray(), EncodingRegistry.getInstance().getDefaultCharset());
-      fillDocument(text);
-      myChanged = false;
-    }
-    catch (IOException e) {
-      Messages.showErrorDialog(e.getMessage(), "Cannot load file");
-    }
+    final String text = LoadTextUtil.loadText(file).toString();
+    fillDocument(text);
+    myChanged = false;
   }
 
   private File getScriptsFile() {
@@ -403,10 +400,10 @@ public class PlaybackDebugger implements UiDebuggerExtension, PlaybackRunner.Sta
       }
     }
 
-    new Thread() {
+    new Thread("playback debugger") {
       @Override
       public void run() {
-        new WaitFor() {
+        new WaitFor(60000) {
           @Override
           protected boolean condition() {
             return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() instanceof IdeFrame || myRunner == null;
@@ -420,10 +417,7 @@ public class PlaybackDebugger implements UiDebuggerExtension, PlaybackRunner.Sta
 
         message(null, "Starting script...", -1, Type.message, true);
 
-        try {
-          sleep(1000);
-        }
-        catch (InterruptedException e) {}
+        TimeoutUtil.sleep(1000);
 
 
         if (myRunner == null) {
@@ -500,28 +494,21 @@ public class PlaybackDebugger implements UiDebuggerExtension, PlaybackRunner.Sta
   }
 
   @State(
-      name = "PlaybackDebugger",
-      storages = {
-          @Storage(
-              file = StoragePathMacros.APP_CONFIG + "/other.xml")}
+    name = "PlaybackDebugger",
+    storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/playbackDebugger.xml", roamingType = RoamingType.PER_OS)
   )
-  public static class PlaybackDebuggerState implements PersistentStateComponent<Element> {
-    private static final String ATTR_CURRENT_SCRIPT = "currentScript";
+  public static class PlaybackDebuggerState implements PersistentStateComponent<PlaybackDebuggerState> {
+    @Attribute
     public String currentScript = "";
 
     @Override
-    public Element getState() {
-      final Element element = new Element("playback");
-      element.setAttribute(ATTR_CURRENT_SCRIPT, currentScript);
-      return element;
+    public PlaybackDebuggerState getState() {
+      return this;
     }
 
     @Override
-    public void loadState(Element state) {
-      final String path = state.getAttributeValue(ATTR_CURRENT_SCRIPT);
-      if (path != null) {
-        currentScript = path;
-      }
+    public void loadState(PlaybackDebuggerState state) {
+      XmlSerializerUtil.copyBean(state, this);
     }
   }
 

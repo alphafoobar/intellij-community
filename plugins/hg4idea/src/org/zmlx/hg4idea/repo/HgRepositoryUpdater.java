@@ -15,7 +15,7 @@
  */
 package org.zmlx.hg4idea.repo;
 
-import com.intellij.dvcs.repo.RepositoryUtil;
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -34,14 +34,13 @@ import java.util.List;
 
 /**
  * Listens to .hg service files changes and updates {@link HgRepository} when needed.
- *
- * @author Nadya Zabrodina
  */
 final class HgRepositoryUpdater implements Disposable, BulkFileListener {
   @NotNull private final HgRepositoryFiles myRepositoryFiles;
   @Nullable private final MessageBusConnection myMessageBusConnection;
   @NotNull private final QueueProcessor<Object> myUpdateQueue;
   @Nullable private final VirtualFile myBranchHeadsDir;
+  @Nullable private VirtualFile myMqDir;
   @Nullable private final LocalFileSystem.WatchRequest myWatchRequest;
   @NotNull private final QueueProcessor<Object> myUpdateConfigQueue;
 
@@ -50,11 +49,13 @@ final class HgRepositoryUpdater implements Disposable, BulkFileListener {
     VirtualFile hgDir = repository.getHgDir();
     myWatchRequest = LocalFileSystem.getInstance().addRootToWatch(hgDir.getPath(), true);
     myRepositoryFiles = HgRepositoryFiles.getInstance(hgDir);
-    RepositoryUtil.visitVcsDirVfs(hgDir, HgRepositoryFiles.getSubDirRelativePaths());
+    DvcsUtil.visitVcsDirVfs(hgDir, HgRepositoryFiles.getSubDirRelativePaths());
 
     myBranchHeadsDir = VcsUtil.getVirtualFile(myRepositoryFiles.getBranchHeadsDirPath());
+    myMqDir = VcsUtil.getVirtualFile(myRepositoryFiles.getMQDirPath());
+
     Project project = repository.getProject();
-    myUpdateQueue = new QueueProcessor<Object>(new RepositoryUtil.Updater(repository), project.getDisposed());
+    myUpdateQueue = new QueueProcessor<Object>(new DvcsUtil.Updater(repository), project.getDisposed());
     myUpdateConfigQueue = new QueueProcessor<Object>(new Consumer<Object>() {
       @Override
       public void consume(Object dummy) {
@@ -90,11 +91,15 @@ final class HgRepositoryUpdater implements Disposable, BulkFileListener {
     // which files in .hg were changed
     boolean branchHeadsChanged = false;
     boolean branchFileChanged = false;
+    boolean dirstateFileChanged = false;
     boolean mergeFileChanged = false;
+    boolean rebaseFileChanged = false;
     boolean bookmarksFileChanged = false;
     boolean tagsFileChanged = false;
     boolean localTagsFileChanged = false;
     boolean currentBookmarkFileChanged = false;
+    boolean mqChanged = false;
+
     boolean configHgrcChanged = false;
     for (VFileEvent event : events) {
       String filePath = event.getPath();
@@ -106,10 +111,16 @@ final class HgRepositoryUpdater implements Disposable, BulkFileListener {
       }
       else if (myRepositoryFiles.isBranchFile(filePath)) {
         branchFileChanged = true;
-        RepositoryUtil.visitAllChildrenRecursively(myBranchHeadsDir);
+        DvcsUtil.ensureAllChildrenInVfs(myBranchHeadsDir);
+      }
+      else if (myRepositoryFiles.isDirstateFile(filePath)) {
+        dirstateFileChanged = true;
       }
       else if (myRepositoryFiles.isMergeFile(filePath)) {
         mergeFileChanged = true;
+      }
+      else if (myRepositoryFiles.isRebaseFile(filePath)) {
+        rebaseFileChanged = true;
       }
       else if (myRepositoryFiles.isBookmarksFile(filePath)) {
         bookmarksFileChanged = true;
@@ -123,19 +134,21 @@ final class HgRepositoryUpdater implements Disposable, BulkFileListener {
       else if (myRepositoryFiles.isCurrentBookmarksFile(filePath)) {
         currentBookmarkFileChanged = true;
       }
-
+      else if (myRepositoryFiles.isMqFile(filePath)) {
+        mqChanged = true;
+        if (myMqDir == null) {
+          myMqDir = VcsUtil.getVirtualFile(myRepositoryFiles.getMQDirPath());
+        }
+        DvcsUtil.ensureAllChildrenInVfs(myMqDir);
+      }
       else if (myRepositoryFiles.isConfigHgrcFile(filePath)) {
         configHgrcChanged = true;
       }
     }
 
-    if (branchHeadsChanged ||
-        branchFileChanged ||
-        mergeFileChanged ||
-        bookmarksFileChanged ||
-        currentBookmarkFileChanged ||
-        tagsFileChanged ||
-        localTagsFileChanged) {
+    if (branchHeadsChanged || branchFileChanged || dirstateFileChanged || mergeFileChanged || rebaseFileChanged ||
+        bookmarksFileChanged || currentBookmarkFileChanged || tagsFileChanged || localTagsFileChanged ||
+        mqChanged) {
       myUpdateQueue.add(Void.TYPE);
     }
     if (configHgrcChanged) {

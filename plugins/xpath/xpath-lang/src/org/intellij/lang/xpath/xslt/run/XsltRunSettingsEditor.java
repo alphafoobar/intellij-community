@@ -135,7 +135,7 @@ class XsltRunSettingsEditor extends SettingsEditor<XsltRunConfiguration> {
           return text.length() > 0 ? text : (baseDir != null ? baseDir.getPresentableUrl() : "");
         }
 
-        public void setText(JTextField component, String text) {
+        public void setText(JTextField component, @NotNull String text) {
           component.setText(text);
         }
       };
@@ -182,7 +182,7 @@ class XsltRunSettingsEditor extends SettingsEditor<XsltRunConfiguration> {
 
       myXmlInputFile.getComboBox().setEditable(true);
 
-      myXmlDescriptor = new AnyXMLDescriptor();
+      myXmlDescriptor = new AnyXMLDescriptor(false);
       myXmlInputFile.addBrowseFolderListener("Choose XML File", null, project, myXmlDescriptor, new TextComponentAccessor<JComboBox>() {
         public String getText(JComboBox comboBox) {
           Object item = comboBox.getEditor().getItem();
@@ -199,7 +199,7 @@ class XsltRunSettingsEditor extends SettingsEditor<XsltRunConfiguration> {
           return item.toString();
         }
 
-        public void setText(JComboBox comboBox, String text) {
+        public void setText(JComboBox comboBox, @NotNull String text) {
           comboBox.getEditor().setItem(text);
         }
       });

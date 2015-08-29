@@ -29,9 +29,9 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Convertor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.svn.status.Status;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.util.SVNURLUtil;
-import org.tmatesoft.svn.core.wc.SVNStatus;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -64,8 +64,8 @@ public class SvnRootsDetector {
 
   public void detectCopyRoots(final VirtualFile[] roots, final boolean clearState, Runnable callback) {
     for (final VirtualFile vcsRoot : roots) {
-      // go into nested = false => only find a working copys below passed roots, but not nested
-      final List<Node> foundRoots = new ForNestedRootChecker(myVcs).getAllNestedWorkingCopies(vcsRoot, false);
+      List<Node> foundRoots = new ForNestedRootChecker(myVcs).getAllNestedWorkingCopies(vcsRoot);
+
       registerLonelyRoots(vcsRoot, foundRoots);
       registerTopRoots(vcsRoot, foundRoots);
     }
@@ -165,7 +165,7 @@ public class SvnRootsDetector {
     // TODO: No checked exceptions are thrown - remove catch/LOG.error/rethrow to fix real cause if any
     try {
       final File infoFile = VfsUtilCore.virtualToIoFile(info.getFile());
-      final SVNStatus svnStatus = SvnUtil.getStatus(myVcs, infoFile);
+      final Status svnStatus = SvnUtil.getStatus(myVcs, infoFile);
 
       if (svnStatus != null && svnStatus.getURL() != null) {
         info.setUrl(svnStatus.getURL());

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,16 @@ import com.intellij.openapi.util.io.FileSystemUtil;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.UsefulTestCase;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.containers.hash.HashMap;
 import com.intellij.util.io.TestFileSystemBuilder;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.api.CanceledStatus;
 import org.jetbrains.jps.builders.impl.BuildDataPathsImpl;
 import org.jetbrains.jps.builders.impl.BuildRootIndexImpl;
 import org.jetbrains.jps.builders.impl.BuildTargetIndexImpl;
+import org.jetbrains.jps.builders.impl.BuildTargetRegistryImpl;
 import org.jetbrains.jps.builders.logging.BuildLoggingManager;
 import org.jetbrains.jps.builders.storage.BuildDataPaths;
 import org.jetbrains.jps.cmdline.ClasspathBootstrap;
@@ -67,7 +70,7 @@ import static org.jetbrains.jps.builders.CompileScopeTestBuilder.make;
  */
 public abstract class JpsBuildTestCase extends UsefulTestCase {
   private File myProjectDir;
-  protected JpsProject myProject;
+  @NotNull protected JpsProject myProject;
   protected JpsModel myModel;
   private JpsSdk<JpsDummyElement> myJdk;
   protected File myDataStorageRoot;
@@ -152,12 +155,7 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
     //we need this to ensure that the file won't be treated as changed by user during compilation and therefore marked for recompilation
     long delta;
     while ((delta = time - System.currentTimeMillis()) > 0) {
-      try {
-        //noinspection BusyWait
-        Thread.sleep(delta);
-      }
-      catch (InterruptedException ignored) {
-      }
+      TimeoutUtil.sleep(delta);
     }
   }
 
@@ -196,11 +194,12 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
 
   protected ProjectDescriptor createProjectDescriptor(final BuildLoggingManager buildLoggingManager) {
     try {
-      BuildTargetIndexImpl targetIndex = new BuildTargetIndexImpl(myModel);
+      BuildTargetRegistryImpl targetRegistry = new BuildTargetRegistryImpl(myModel);
       ModuleExcludeIndex index = new ModuleExcludeIndexImpl(myModel);
       IgnoredFileIndexImpl ignoredFileIndex = new IgnoredFileIndexImpl(myModel);
       BuildDataPaths dataPaths = new BuildDataPathsImpl(myDataStorageRoot);
-      BuildRootIndexImpl buildRootIndex = new BuildRootIndexImpl(targetIndex, myModel, index, dataPaths, ignoredFileIndex);
+      BuildRootIndexImpl buildRootIndex = new BuildRootIndexImpl(targetRegistry, myModel, index, dataPaths, ignoredFileIndex);
+      BuildTargetIndexImpl targetIndex = new BuildTargetIndexImpl(targetRegistry, buildRootIndex);
       BuildTargetsState targetsState = new BuildTargetsState(dataPaths, myModel, buildRootIndex);
       ProjectTimestamps timestamps = new ProjectTimestamps(myDataStorageRoot, targetsState);
       BuildDataManager dataManager = new BuildDataManager(dataPaths, targetsState, true);
@@ -224,7 +223,7 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
       Map<String, String> allPathVariables = new HashMap<String, String>(pathVariables.size() + 1);
       allPathVariables.putAll(pathVariables);
       allPathVariables.put(PathMacroUtil.APPLICATION_HOME_DIR, PathManager.getHomePath());
-      addPathVariables(allPathVariables);
+      allPathVariables.putAll(getAdditionalPathVariables());
       JpsProjectLoader.loadProject(myProject, allPathVariables, fullProjectPath);
     }
     catch (IOException e) {
@@ -232,7 +231,9 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
     }
   }
 
-  protected void addPathVariables(Map<String, String> pathVariables) {
+  @NotNull
+  protected Map<String, String> getAdditionalPathVariables() {
+    return Collections.emptyMap();
   }
 
   @Nullable
@@ -289,7 +290,7 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
   protected BuildResult doBuild(CompileScopeTestBuilder scope) {
     ProjectDescriptor descriptor = createProjectDescriptor(new BuildLoggingManager(myLogger));
     try {
-      myLogger.clear();
+      myLogger.clearFilesData();
       return doBuild(descriptor, scope);
     }
     finally {
@@ -297,8 +298,16 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
     }
   }
 
+  protected void clearBuildLog() {
+    myLogger.clearLog();
+  }
+
   public void assertCompiled(String builderName, String... paths) {
     myLogger.assertCompiled(builderName, new File[]{myProjectDir, myDataStorageRoot}, paths);
+  }
+
+  public void checkFullLog(File expectedLogFile) {
+    assertSameLinesWithFile(expectedLogFile.getAbsolutePath(), myLogger.getFullLog(myProjectDir, myDataStorageRoot));
   }
 
   protected void assertDeleted(String... paths) {
@@ -310,16 +319,45 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
     BuildResult result = new BuildResult();
     builder.addMessageHandler(result);
     try {
+      beforeBuildStarted(descriptor);
       builder.build(scopeBuilder.build(), false);
+      result.storeMappingsDump(descriptor);
     }
     catch (RebuildRequestedException e) {
+      throw new RuntimeException(e);
+    }
+    catch (IOException e) {
       throw new RuntimeException(e);
     }
     return result;
   }
 
+  protected void beforeBuildStarted(@NotNull ProjectDescriptor descriptor) {
+  }
+
+  protected void deleteFile(String relativePath) {
+    delete(new File(getOrCreateProjectDir(), relativePath).getAbsolutePath());
+  }
+
+  protected void changeFile(String relativePath) {
+    changeFile(relativePath, null);
+  }
+
+  protected void changeFile(String relativePath, String newContent) {
+    change(new File(getOrCreateProjectDir(), relativePath).getAbsolutePath(), newContent);
+  }
+
   protected String createFile(String relativePath) {
     return createFile(relativePath, "");
+  }
+
+  protected String createDir(String relativePath) {
+    File dir = new File(getOrCreateProjectDir(), relativePath);
+    boolean created = dir.mkdirs();
+    if (!created && !dir.isDirectory()) {
+      fail("Cannot create " + dir.getAbsolutePath() + " directory");
+    }
+    return FileUtil.toSystemIndependentName(dir.getAbsolutePath());
   }
 
   public String createFile(String relativePath, final String text) {
@@ -338,12 +376,7 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
     String fullTargetPath = getAbsolutePath(relativeTargetPath);
     File target = new File(fullTargetPath);
     try {
-      if (source.isDirectory()) {
-        FileUtil.copyDir(source, target);
-      }
-      else {
-        FileUtil.copy(source, target);
-      }
+      FileUtil.copyFileOrDir(source, target);
     }
     catch (IOException e) {
       throw new RuntimeException(e);
@@ -380,5 +413,13 @@ public abstract class JpsBuildTestCase extends UsefulTestCase {
       myJdk = addJdk("1.6");
     }
     return addModule(moduleName, srcPaths, getAbsolutePath("out/production/" + moduleName), null, myJdk);
+  }
+
+  protected void checkMappingsAreSameAfterRebuild(BuildResult makeResult) {
+    String makeDump = makeResult.getMappingsDump();
+    BuildResult rebuildResult = doBuild(CompileScopeTestBuilder.rebuild().allModules());
+    rebuildResult.assertSuccessful();
+    String rebuildDump = rebuildResult.getMappingsDump();
+    assertEquals(rebuildDump, makeDump);
   }
 }

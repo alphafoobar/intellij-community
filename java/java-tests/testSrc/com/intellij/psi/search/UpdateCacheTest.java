@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.JavaPsiFacadeEx;
 import com.intellij.psi.impl.PsiManagerImpl;
-import com.intellij.psi.impl.cache.impl.id.IdIndex;
 import com.intellij.psi.impl.cache.impl.todo.TodoIndex;
 import com.intellij.psi.impl.cache.impl.todo.TodoIndexEntry;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
@@ -45,21 +44,14 @@ import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 
 import java.io.File;
 import java.util.*;
 
 @PlatformTestCase.WrapInCommand
-public class UpdateCacheTest extends PsiTestCase{
-  @Override
-  protected void setUp() throws Exception {
-    super.setUp();
-
-    FileBasedIndex.getInstance().requestRebuild(IdIndex.NAME);
-    FileBasedIndex.getInstance().requestRebuild(TodoIndex.NAME);
-  }
-
+public class UpdateCacheTest extends PsiTestCase {
   @Override
   protected void setUpProject() throws Exception {
     myProjectManager = ProjectManagerEx.getInstanceEx();
@@ -180,6 +172,8 @@ public class UpdateCacheTest extends PsiTestCase{
     setUpModule();
     setUpJdk();
     ProjectManagerEx.getInstanceEx().openTestProject(myProject);
+    UIUtil.dispatchAllInvocationEvents(); // startup activities
+
     runStartupActivities();
     PsiTestUtil.addSourceContentToRoots(getModule(), content);
 

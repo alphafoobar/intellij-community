@@ -16,6 +16,8 @@
 package com.theoryinpractice.testng.ui;
 
 import com.intellij.execution.testframework.PoolOfTestIcons;
+import com.intellij.execution.testframework.TestFrameworkRunningModel;
+import com.intellij.execution.testframework.ui.TestsProgressAnimator;
 import com.intellij.icons.AllIcons;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
@@ -34,10 +36,11 @@ import javax.swing.tree.DefaultMutableTreeNode;
  */
 public class ResultTreeRenderer extends ColoredTreeCellRenderer
 {
-    private final TestNGConsoleProperties consoleProperties;
 
-    public ResultTreeRenderer(TestNGConsoleProperties consoleProperties) {
-        this.consoleProperties = consoleProperties;
+  private TestFrameworkRunningModel model;
+
+    public ResultTreeRenderer(TestFrameworkRunningModel model) {
+      this.model = model;
     }
 
     @Override
@@ -47,7 +50,7 @@ public class ResultTreeRenderer extends ColoredTreeCellRenderer
             TestProxy proxy = ((TestNodeDescriptor) node.getUserObject()).getElement();
             if (node == tree.getModel().getRoot()) {
                 TreeRootNode root = (TreeRootNode) proxy;
-                if (node.getChildCount() == 0) {
+                if (node.getChildCount() == 0 && !((TestNGResults)model).hasFinishedTests()) {
                     if ((root.isStarted() && root.isInProgress()) || (root.isInProgress() && !root.isStarted())) {
                         setIcon(PoolOfTestIcons.NOT_RAN);
                         append("Instantiating tests... ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
@@ -60,25 +63,25 @@ public class ResultTreeRenderer extends ColoredTreeCellRenderer
                     }
 
                 } else {
-                    setIcon(root.isInProgress() ? Animator.getCurrentFrame() : getIcon(proxy));
+                    setIcon(root.isInProgress() ? TestsProgressAnimator.getCurrentFrame() : getIcon(proxy));
                     append(root.isInProgress() ? "Running tests..." : "Test Results", SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 }
 
-                if (consoleProperties.isPaused()) {
+                if (model.getProperties().isPaused()) {
                     setIcon(AllIcons.RunConfigurations.TestPaused);
                 }
             } else {
                 if (proxy.getResultMessage() != null) {
                   final TestResultMessage result = proxy.getResultMessage();
-                  final String name = TestProxy.toDisplayText(result, consoleProperties.getProject());
+                  final String name = TestProxy.toDisplayText(result, model.getProperties().getProject());
                   append(name, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 } else {
                     append(proxy.getName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 }
-                setIcon(proxy.isInProgress() ? Animator.getCurrentFrame() : proxy.isInterrupted() ? PoolOfTestIcons.NOT_RAN : getIcon(proxy));
+                setIcon(proxy.isInProgress() ? TestsProgressAnimator.getCurrentFrame() : proxy.isInterrupted() ? PoolOfTestIcons.NOT_RAN : getIcon(proxy));
             }
         } else {
-            setIcon(Animator.getCurrentFrame());
+            setIcon(TestsProgressAnimator.getCurrentFrame());
             append(node.getUserObject() != null ? node.getUserObject().toString() : "null", SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
     }

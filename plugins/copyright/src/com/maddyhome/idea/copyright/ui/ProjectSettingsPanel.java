@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,7 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.util.scopeChooser.PackageSetChooserCombo;
 import com.intellij.ide.util.scopeChooser.ScopeChooserConfigurable;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.options.Configurable;
-import com.intellij.openapi.options.newEditor.OptionsEditor;
+import com.intellij.openapi.options.ex.Settings;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.util.Comparing;
@@ -108,12 +107,9 @@ public class ProjectSettingsPanel {
         if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
           DataContext context = DataManager.getInstance().getDataContextFromFocus().getResult();
           if (context != null) {
-            OptionsEditor optionsEditor = OptionsEditor.KEY.getData(context);
-            if (optionsEditor != null) {
-              Configurable configurable = optionsEditor.findConfigurableById(ScopeChooserConfigurable.PROJECT_SCOPES);
-              if (configurable != null) {
-                optionsEditor.clearSearchAndSelect(configurable);
-              }
+            Settings settings = Settings.KEY.getData(context);
+            if (settings != null) {
+              settings.select(settings.find(ScopeChooserConfigurable.PROJECT_SCOPES));
             }
           }
         }
@@ -131,12 +127,11 @@ public class ProjectSettingsPanel {
   }
 
   public JComponent getMainComponent() {
-    final JPanel panel = new JPanel(new BorderLayout(0, 10));
+
     final LabeledComponent<JComboBox> component = new LabeledComponent<JComboBox>();
     component.setText("Default &project copyright:");
     component.setLabelLocation(BorderLayout.WEST);
     component.setComponent(myProfilesComboBox);
-    panel.add(component, BorderLayout.NORTH);
     ElementProducer<ScopeSetting> producer = new ElementProducer<ScopeSetting>() {
       @Override
       public ScopeSetting createElement() {
@@ -149,9 +144,10 @@ public class ProjectSettingsPanel {
       }
     };
     ToolbarDecorator decorator = ToolbarDecorator.createDecorator(myScopeMappingTable, producer);
-    panel.add(decorator.createPanel(), BorderLayout.CENTER);
-    panel.add(myScopesLink, BorderLayout.SOUTH);
-    return panel;
+    return JBUI.Panels.simplePanel(0, 10)
+      .addToTop(component)
+      .addToCenter(decorator.createPanel())
+      .addToBottom(myScopesLink);
   }
 
   public boolean isModified() {

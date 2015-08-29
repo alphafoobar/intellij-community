@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.facet.impl.ui;
 
 import com.intellij.facet.ui.FacetConfigurationQuickFix;
@@ -25,7 +24,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ui.UserActivityListener;
 import com.intellij.ui.UserActivityWatcher;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.NonNls;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -39,8 +38,6 @@ import java.util.List;
  * @author nik
  */
 public class FacetErrorPanel {
-  @NonNls private static final String HTML_PREFIX = "<html><body>";
-  @NonNls private static final String HTML_SUFFIX = "</body></html>";
   private final JPanel myMainPanel;
   private JPanel myButtonPanel;
   private JButton myQuickFixButton;
@@ -54,9 +51,10 @@ public class FacetErrorPanel {
     myValidatorsManager = new FacetValidatorsManagerImpl();
     myWarningLabel = new JLabel();
     myWarningLabel.setIcon(AllIcons.General.WarningDialog);
+    myWarningLabel.setIconTextGap(5);
     myQuickFixButton.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(final ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         if (myCurrentQuickFix != null) {
           myCurrentQuickFix.run(myQuickFixButton);
           myValidatorsManager.validate();
@@ -128,7 +126,7 @@ public class FacetErrorPanel {
         ValidationResult validationResult = validator.check();
         if (!validationResult.isOk()) {
           myMainPanel.setVisible(true);
-          myWarningLabel.setText(HTML_PREFIX + validationResult.getErrorMessage() + HTML_SUFFIX);
+          myWarningLabel.setText(XmlStringUtil.wrapInHtml(validationResult.getErrorMessage()));
           myWarningLabel.setVisible(true);
           myCurrentQuickFix = validationResult.getQuickFix();
           myQuickFixButton.setVisible(myCurrentQuickFix != null);

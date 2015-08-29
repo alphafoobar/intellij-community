@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPolyVariantReference;
 import com.intellij.psi.PsiReference;
+import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.PythonDialectsTokenSetProvider;
@@ -29,6 +30,9 @@ import com.jetbrains.python.psi.types.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * @author yole
  */
@@ -37,8 +41,19 @@ public class PySubscriptionExpressionImpl extends PyElementImpl implements PySub
     super(astNode);
   }
 
+  @NotNull
   public PyExpression getOperand() {
     return childToPsiNotNull(PythonDialectsTokenSetProvider.INSTANCE.getExpressionTokens(), 0);
+  }
+
+  @NotNull
+  @Override
+  public PyExpression getRootOperand() {
+    PyExpression operand = getOperand();
+    while (operand instanceof PySubscriptionExpression) {
+      operand = ((PySubscriptionExpression)operand).getOperand();
+    }
+    return operand;
   }
 
   @Nullable
@@ -54,31 +69,32 @@ public class PySubscriptionExpressionImpl extends PyElementImpl implements PySub
   @Nullable
   @Override
   public PyType getType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key) {
-    PyType res = null;
-    final PsiReference ref = getReference(PyResolveContext.noImplicits().withTypeEvalContext(context));
-    if (ref != null) {
-      final PsiElement resolved = ref.resolve();
-      if (resolved instanceof Callable) {
-        res = ((Callable)resolved).getReturnType(context, this);
+    final PsiPolyVariantReference reference = getReference(PyResolveContext.noImplicits().withTypeEvalContext(context));
+    final List<PyType> members = new ArrayList<PyType>();
+    for (PsiElement resolved : PyUtil.multiResolveTopPriority(reference)) {
+      PyType res = null;
+      if (resolved instanceof PyCallable) {
+        res = ((PyCallable)resolved).getCallType(context, this);
       }
-    }
-    if (PyTypeChecker.isUnknown(res) || res instanceof PyNoneType) {
-      final PyExpression indexExpression = getIndexExpression();
-      if (indexExpression != null) {
-        final PyType type = context.getType(getOperand());
-        final PyClass cls = (type instanceof PyClassType) ? ((PyClassType)type).getPyClass() : null;
-        if (cls != null && PyABCUtil.isSubclass(cls, PyNames.MAPPING)) {
-          return res;
-        }
-        if (type instanceof PySubscriptableType) {
-          res = ((PySubscriptableType)type).getElementType(indexExpression, context);
-        }
-        else if (type instanceof PyCollectionType) {
-          res = ((PyCollectionType) type).getElementType(context);
+      if (PyTypeChecker.isUnknown(res) || res instanceof PyNoneType) {
+        final PyExpression indexExpression = getIndexExpression();
+        if (indexExpression != null) {
+          final PyType type = context.getType(getOperand());
+          final PyClass cls = (type instanceof PyClassType) ? ((PyClassType)type).getPyClass() : null;
+          if (cls != null && PyABCUtil.isSubclass(cls, PyNames.MAPPING)) {
+            return res;
+          }
+          if (type instanceof PySubscriptableType) {
+            res = ((PySubscriptableType)type).getElementType(indexExpression, context);
+          }
+          else if (type instanceof PyCollectionType) {
+            res = ((PyCollectionType)type).getElementType(context);
+          }
         }
       }
+      members.add(res);
     }
-    return res;
+    return PyUnionType.union(members);
   }
 
   @Override
@@ -86,6 +102,7 @@ public class PySubscriptionExpressionImpl extends PyElementImpl implements PySub
     return getReference(PyResolveContext.noImplicits());
   }
 
+  @NotNull
   @Override
   public PsiPolyVariantReference getReference(PyResolveContext context) {
     return new PyOperatorReference(this, context);
@@ -94,6 +111,17 @@ public class PySubscriptionExpressionImpl extends PyElementImpl implements PySub
   @Override
   public PyExpression getQualifier() {
     return getOperand();
+  }
+
+  @Nullable
+  @Override
+  public QualifiedName asQualifiedName() {
+    return PyPsiUtils.asQualifiedName(this);
+  }
+
+  @Override
+  public boolean isQualified() {
+    return getQualifier() != null;
   }
 
   @Override

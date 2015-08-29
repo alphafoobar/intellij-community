@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,139 +15,86 @@
  */
 package com.intellij.openapi.options;
 
-import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.Condition;
+import com.intellij.util.ThrowableConvertor;
+import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
-public interface SchemesManager <T extends Scheme, E extends ExternalizableScheme>{
-  SchemesManager EMPTY = new SchemesManager(){
-    @Override
-    @NotNull
-    public Collection loadSchemes() {
-      return Collections.emptySet();
-    }
+@SuppressWarnings("UnusedParameters")
+public abstract class SchemesManager<T extends Scheme, E extends ExternalizableScheme> {
+  @NotNull
+  public abstract Collection<E> loadSchemes();
 
-    @Override
-    @NotNull
-    public Collection loadSharedSchemes() {
-      return Collections.emptySet();
-    }
+  public abstract void addNewScheme(@NotNull T scheme, boolean replaceExisting);
 
-    @Override
-    public void exportScheme(@NotNull final ExternalizableScheme scheme, final String name, final String description) {
-    }
+  public void addScheme(@NotNull T scheme) {
+    addNewScheme(scheme, true);
+  }
 
-    @Override
-    public boolean isImportAvailable() {
-      return false;
-    }
+  /**
+   * Consider to use {@link #setSchemes}
+   */
+  public abstract void clearAllSchemes();
 
-    @Override
-    public boolean isExportAvailable() {
-      return false;
-    }
+  @SuppressWarnings("NullableProblems")
+  @NotNull
+  public abstract List<T> getAllSchemes();
 
-    @Override
-    public boolean isShared(final Scheme scheme) {
-      return false;
-    }
+  @Nullable
+  public abstract T findSchemeByName(@NotNull String schemeName);
 
-    @Override
-    public void addNewScheme(@NotNull final Scheme scheme, final boolean replaceExisting) {
+  @Deprecated
+  /**
+   * @deprecated Use {@link #setCurrent}
+   */
+  public void setCurrentSchemeName(@Nullable String schemeName) {
+  }
 
-    }
+  public final void setCurrent(@Nullable T scheme) {
+    setCurrent(scheme, true);
+  }
 
-    @Override
-    public void clearAllSchemes() {
-    }
+  public void setCurrent(@Nullable T scheme, boolean notify) {
+    //noinspection deprecation
+    setCurrentSchemeName(scheme == null ? null : scheme.getName());
+  }
 
-    @Override
-    @NotNull
-    public List getAllSchemes() {
-      return Collections.emptyList();
-    }
+  @Nullable
+  public abstract T getCurrentScheme();
 
-    @Override
-    public Scheme findSchemeByName(final String schemeName) {
-      return null;
-    }
-
-    @Override
-    public void save() {
-    }
-
-    @Override
-    public void setCurrentSchemeName(final String schemeName) {
-
-    }
-
-    @Override
-    public Scheme getCurrentScheme() {
-      return null;
-    }
-
-    @Override
-    public void removeScheme(final Scheme scheme) {
-
-    }
-
-    @Override
-    @NotNull
-    public Collection getAllSchemeNames() {
-      return Collections.emptySet();
-    }
-
-    @Override
-    @NotNull
-    public Collection loadSharedSchemes(final Collection currentSchemeList) {
-      return loadSharedSchemes();
-    }
-
-    @Override
-    public File getRootDirectory() {
-      return null;
-    }
-  };
-
-  @NotNull Collection<E> loadSchemes();
-
-  @NotNull Collection<SharedScheme<E>> loadSharedSchemes();
-  @NotNull Collection<SharedScheme<E>> loadSharedSchemes(Collection<T> currentSchemeList);
-
-  void exportScheme(@NotNull E scheme, final String name, final String description) throws WriteExternalException, IOException;
-
-  boolean isImportAvailable();
-
-  boolean isExportAvailable();
-
-  boolean isShared(final Scheme scheme);
-
-  void addNewScheme(@NotNull T scheme, final boolean replaceExisting);
-
-  void clearAllSchemes();
+  public abstract void removeScheme(@NotNull T scheme);
 
   @NotNull
-  List<T> getAllSchemes();
+  public abstract Collection<String> getAllSchemeNames();
 
-  @Nullable
-  T findSchemeByName(final String schemeName);
+  public abstract File getRootDirectory();
 
-  void save() throws WriteExternalException;
+  /**
+   * Must be called before {@link #loadSchemes}
+   */
+  public void loadBundledScheme(@NotNull String resourceName, @NotNull Object requestor, @NotNull ThrowableConvertor<Element, T, Throwable> convertor) {
+  }
 
-  void setCurrentSchemeName(final String schemeName);
+  public final void setSchemes(@NotNull List<T> newSchemes) {
+    setSchemes(newSchemes, null, null);
+  }
 
-  @Nullable
-  T getCurrentScheme();
+  public final void setSchemes(@NotNull List<T> newSchemes, @Nullable T newCurrentScheme) {
+    setSchemes(newSchemes, newCurrentScheme, null);
+  }
 
-  void removeScheme(final T scheme);
+  public void setSchemes(@NotNull List<T> newSchemes, @Nullable T newCurrentScheme, @Nullable Condition<T> removeCondition) {
+  }
 
-  @NotNull Collection<String> getAllSchemeNames();
-
-  File getRootDirectory();
+  /**
+   * Bundled / read-only (or overriding) scheme cannot be renamed or deleted.
+   */
+  public boolean isMetadataEditable(@NotNull E scheme) {
+    return true;
+  }
 }

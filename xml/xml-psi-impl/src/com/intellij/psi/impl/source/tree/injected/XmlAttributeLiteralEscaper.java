@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,10 @@
  */
 package com.intellij.psi.impl.source.tree.injected;
 
+import com.intellij.openapi.util.TextRange;
+import com.intellij.psi.LiteralTextEscaper;
 import com.intellij.psi.impl.source.xml.XmlAttributeValueImpl;
 import com.intellij.psi.xml.XmlAttribute;
-import com.intellij.psi.LiteralTextEscaper;
-import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.ProperTextRange;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -33,8 +32,8 @@ public class XmlAttributeLiteralEscaper extends LiteralTextEscaper<XmlAttributeV
     myXmlAttribute = (XmlAttribute)host.getParent();
   }
 
+  @Override
   public boolean decode(@NotNull final TextRange rangeInsideHost, @NotNull StringBuilder outChars) {
-    ProperTextRange.assertProperRange(rangeInsideHost);
     TextRange valueTextRange = myXmlAttribute.getValueTextRange();
     int startInDecoded = myXmlAttribute.physicalToDisplay(rangeInsideHost.getStartOffset() - valueTextRange.getStartOffset());
     int endInDecoded = myXmlAttribute.physicalToDisplay(rangeInsideHost.getEndOffset() - valueTextRange.getStartOffset());
@@ -47,6 +46,7 @@ public class XmlAttributeLiteralEscaper extends LiteralTextEscaper<XmlAttributeV
     return true;
   }
 
+  @Override
   public int getOffsetInHost(final int offsetInDecoded, @NotNull final TextRange rangeInsideHost) {
     TextRange valueTextRange = myXmlAttribute.getValueTextRange();
     int displayStart = myXmlAttribute.physicalToDisplay(rangeInsideHost.getStartOffset());
@@ -56,6 +56,7 @@ public class XmlAttributeLiteralEscaper extends LiteralTextEscaper<XmlAttributeV
     return dp + valueTextRange.getStartOffset();
   }
 
+  @Override
   public boolean isOneLine() {
     return true;
   }

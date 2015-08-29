@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.refactoring.move.MoveHandler;
 import com.intellij.testFramework.PsiTestUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -28,29 +29,18 @@ import org.jetbrains.annotations.Nullable;
  * @since Aug 31, 2010
  */
 public class DndMoveTest extends CodeInsightTestCase {
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/dndMove/";
   }
 
   public void testPublicJavaClass() throws Exception {
-    doTest("d", new Computable<PsiElement>() {
-      @Nullable
-      @Override
-      public PsiElement compute() {
-        return getJavaFacade().findClass("d.MyClass");
-      }
-    }, true);
+    doTest("d", () -> getJavaFacade().findClass("d.MyClass"), true);
   }
 
   public void testSecondJavaClass() throws Exception {
-    doTest("d", new Computable<PsiElement>() {
-      @Nullable
-      @Override
-      public PsiElement compute() {
-        return getJavaFacade().findClass("d.Second");
-      }
-    }, false);
+    doTest("d", () -> getJavaFacade().findClass("d.Second"), false);
   }
 
   private void doTest(final String targetDirName, final Computable<PsiElement> source, final boolean expected) throws Exception {

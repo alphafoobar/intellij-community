@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,17 +25,19 @@ import javax.swing.tree.TreeCellRenderer;
 import java.awt.*;
 
 public abstract class GroupedElementsRenderer {
-  public static final Color POPUP_SEPARATOR_FOREGROUND = new JBColor(Color.gray.brighter(), Gray._43);
+  public static final Color POPUP_SEPARATOR_FOREGROUND = new JBColor(Color.gray.brighter(), Gray.x51);
   public static final Color POPUP_SEPARATOR_TEXT_FOREGROUND = Color.gray;
   public static final Color SELECTED_FRAME_FOREGROUND = Color.black;
 
-  protected SeparatorWithText mySeparatorComponent = new SeparatorWithText();
+  protected SeparatorWithText mySeparatorComponent = createSeparator();
+
+  protected abstract JComponent createItemComponent();
+
   protected JComponent myComponent;
   protected MyComponent myRendererComponent;
 
   protected ErrorLabel myTextLabel;
-
-
+  
   public GroupedElementsRenderer() {
     myRendererComponent = new MyComponent();
 
@@ -46,7 +48,9 @@ public abstract class GroupedElementsRenderer {
 
   protected abstract void layout();
 
-  protected abstract JComponent createItemComponent();
+  protected SeparatorWithText createSeparator() {
+    return new SeparatorWithText();
+  }
 
   protected final JComponent configureComponent(String text, String tooltip, Icon icon, Icon disabledIcon, boolean isSelected, boolean hasSeparatorAbove, String separatorTextAbove, int preferredForcedWidth) {
     mySeparatorComponent.setVisible(hasSeparatorAbove);
@@ -54,29 +58,28 @@ public abstract class GroupedElementsRenderer {
     mySeparatorComponent.setMinimumWidth(preferredForcedWidth);
 
     myTextLabel.setText(text);
-    myTextLabel.setToolTipText(tooltip);
+    myRendererComponent.setToolTipText(tooltip);
 
     myTextLabel.setIcon(icon);
     myTextLabel.setDisabledIcon(disabledIcon);
 
     if (isSelected) {
-      myComponent.setBorder(getSelectedBorder());
+      //myComponent.setBorder(getSelectedBorder());
       setSelected(myComponent);
       setSelected(myTextLabel);
-    }
-    else {
-      myComponent.setBorder(getBorder());
+    } else {
+      //myComponent.setBorder(getBorder());
       setDeselected(myComponent);
       setDeselected(myTextLabel);
     }
-
-    adjustOpacity(myTextLabel, isSelected);
 
     myRendererComponent.setPrefereedWidth(preferredForcedWidth);
 
     return myRendererComponent;
   }
 
+  /** @deprecated backgrounds are set uniformly via setSelected() / setDeselected() (to be removed in IDEA 16) */
+  @SuppressWarnings("UnusedDeclaration")
   protected static void adjustOpacity(JComponent component, boolean selected) {
     if (selected) {
       if (UIUtil.isUnderNimbusLookAndFeel()) {
@@ -91,13 +94,12 @@ public abstract class GroupedElementsRenderer {
   }
 
   protected final void setSelected(JComponent aComponent) {
-    aComponent.setBackground(getSelectionBackground());
+    UIUtil.setBackgroundRecursively(aComponent, getSelectionBackground());
     aComponent.setForeground(getSelectionForeground());
   }
 
-
-  protected final  void setDeselected(JComponent aComponent) {
-    aComponent.setBackground(getBackground());
+  protected final void setDeselected(JComponent aComponent) {
+    UIUtil.setBackgroundRecursively(aComponent, getBackground());
     aComponent.setForeground(getForeground());
   }
 
@@ -123,7 +125,7 @@ public abstract class GroupedElementsRenderer {
 
   public abstract static class List extends GroupedElementsRenderer {
     @Override
-    protected final void layout() {
+    protected void layout() {
       myRendererComponent.add(mySeparatorComponent, BorderLayout.NORTH);
       myRendererComponent.add(myComponent, BorderLayout.CENTER);
     }
@@ -139,12 +141,12 @@ public abstract class GroupedElementsRenderer {
     }
 
     @Override
-    protected final Color getBackground() {
+    protected Color getBackground() {
       return UIUtil.getListBackground();
     }
 
     @Override
-    protected final Color getForeground() {
+    protected Color getForeground() {
       return UIUtil.getListForeground();
     }
   }
@@ -158,22 +160,22 @@ public abstract class GroupedElementsRenderer {
     }
 
     @Override
-    protected final Color getSelectionBackground() {
+    protected Color getSelectionBackground() {
       return UIUtil.getTreeSelectionBackground();
     }
 
     @Override
-    protected final Color getSelectionForeground() {
+    protected Color getSelectionForeground() {
       return UIUtil.getTreeSelectionForeground();
     }
 
     @Override
-    protected final Color getBackground() {
+    protected Color getBackground() {
       return UIUtil.getTreeTextBackground();
     }
 
     @Override
-    protected final Color getForeground() {
+    protected Color getForeground() {
       return UIUtil.getTreeTextForeground();
     }
   }

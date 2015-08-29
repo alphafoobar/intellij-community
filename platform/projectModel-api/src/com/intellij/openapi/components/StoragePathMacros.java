@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,11 @@ import org.jetbrains.annotations.NotNull;
  * @since 5/2/12 12:57 PM
  */
 public class StoragePathMacros {
-  /** Points to the application-level settings root directory. */
+  @Deprecated @NotNull public static final String ROOT_CONFIG = "$ROOT_CONFIG$";
+
+  /**
+   * Points to the application-level options root directory.
+   */
   @NonNls @NotNull public static final String APP_CONFIG = "$APP_CONFIG$";
 
   /** <code>'.ipr'</code> file path key. */
@@ -48,6 +52,8 @@ public class StoragePathMacros {
    */
   @NonNls @NotNull public static final String WORKSPACE_FILE = "$WORKSPACE_FILE$";
 
+  @NonNls @NotNull public static final String MODULE_FILE = "$MODULE_FILE$";
+
   private StoragePathMacros() {
   }
 
@@ -61,6 +67,7 @@ public class StoragePathMacros {
    * @throws IllegalArgumentException   if given macro definition has unexpected format
    */
   @NotNull
+  @Deprecated
   public static String getMacroName(@NotNull String macro) throws IllegalArgumentException {
     if (macro.length() < 3 || macro.charAt(0) != '$' || macro.charAt(macro.length() - 1) != '$') {
       throw new IllegalArgumentException("Malformed macro definition (" + macro + ")");

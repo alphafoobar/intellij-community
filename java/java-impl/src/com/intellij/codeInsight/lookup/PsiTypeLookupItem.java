@@ -39,7 +39,7 @@ import java.util.Set;
 /**
  * @author peter
  */
-public class PsiTypeLookupItem extends LookupItem {
+public class PsiTypeLookupItem extends LookupItem implements TypedLookupItem {
   private static final InsertHandler<PsiTypeLookupItem> DEFAULT_IMPORT_FIXER = new InsertHandler<PsiTypeLookupItem>() {
     @Override
     public void handleInsert(InsertionContext context, PsiTypeLookupItem item) {
@@ -65,13 +65,14 @@ public class PsiTypeLookupItem extends LookupItem {
   }
 
   @NotNull
-  public PsiType getPsiType() {
+  @Override
+  public PsiType getType() {
     Object object = getObject();
     PsiType type = object instanceof PsiType ? (PsiType)object : JavaPsiFacade.getElementFactory(((PsiClass) object).getProject()).createType((PsiClass)object);
     for (int i = 0; i < getBracketsCount(); i++) {
       type = new PsiArrayType(type);
     }
-    return type;
+    return getSubstitutor().substitute(type);
   }
 
 
@@ -103,10 +104,11 @@ public class PsiTypeLookupItem extends LookupItem {
     myImportFixer.handleInsert(context, this);
 
     PsiElement position = context.getFile().findElementAt(context.getStartOffset());
-    assert position != null;
-    int genericsStart = context.getTailOffset();
-    context.getDocument().insertString(genericsStart, JavaCompletionUtil.escapeXmlIfNeeded(context, calcGenerics(position, context)));
-    JavaCompletionUtil.shortenReference(context.getFile(), genericsStart - 1);
+    if (position != null) {
+      int genericsStart = context.getTailOffset();
+      context.getDocument().insertString(genericsStart, JavaCompletionUtil.escapeXmlIfNeeded(context, calcGenerics(position, context)));
+      JavaCompletionUtil.shortenReference(context.getFile(), genericsStart - 1);
+    }
 
     int tail = context.getTailOffset();
     String braces = StringUtil.repeat("[]", getBracketsCount());
@@ -190,18 +192,14 @@ public class PsiTypeLookupItem extends LookupItem {
   }
 
 
-    public static PsiTypeLookupItem createLookupItem(@NotNull PsiType type, @Nullable PsiElement context, boolean isDiamond, InsertHandler<PsiTypeLookupItem> importFixer) {
-    final PsiType original = type;
+  public static PsiTypeLookupItem createLookupItem(@NotNull PsiType type, @Nullable PsiElement context, boolean isDiamond, InsertHandler<PsiTypeLookupItem> importFixer) {
     int dim = 0;
     while (type instanceof PsiArrayType) {
       type = ((PsiArrayType)type).getComponentType();
       dim++;
     }
 
-    PsiTypeLookupItem item = doCreateItem(type, context, dim, isDiamond, importFixer);
-
-    item.setAttribute(TYPE, original);
-    return item;
+    return doCreateItem(type, context, dim, isDiamond, importFixer);
   }
 
   private static PsiTypeLookupItem doCreateItem(final PsiType type,
@@ -274,7 +272,7 @@ public class PsiTypeLookupItem extends LookupItem {
       }
 
       presentation.setItemText(((PsiType)object).getCanonicalText());
-      presentation.setItemTextBold(getAttribute(LookupItem.HIGHLIGHTED_ATTR) != null || object instanceof PsiPrimitiveType);
+      presentation.setItemTextBold(object instanceof PsiPrimitiveType);
       if (isAddArrayInitializer()) {
         presentation.setTailText("{...}");
       }

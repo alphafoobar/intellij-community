@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.intellij.ide.actions;
 
-import com.intellij.ide.RecentProjectsManagerBase;
+import com.intellij.ide.RecentProjectsManager;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -28,24 +28,19 @@ import org.jetbrains.annotations.Nullable;
 
 public class RecentProjectsGroup extends ActionGroup implements DumbAware {
   public RecentProjectsGroup() {
-    super();
-
-    final Presentation templatePresentation = getTemplatePresentation();
-    // Let's make tile more macish
-    if (SystemInfo.isMac) {
-      templatePresentation.setText(ActionsBundle.message("group.reopen.mac.text"));
-    } else {
-      templatePresentation.setText(ActionsBundle.message("group.reopen.win.text"));
-    }
+    Presentation presentation = getTemplatePresentation();
+    presentation.setText(ActionsBundle.message(SystemInfo.isMac ? "group.reopen.mac.text": "group.reopen.win.text"));
   }
 
+  @Override
   @NotNull
   public AnAction[] getChildren(@Nullable AnActionEvent e) {
-    return RecentProjectsManagerBase.getInstance().getRecentProjectsActions(true);
+    return RecentProjectsManager.getInstance().getRecentProjectsActions(true);
   }
 
+  @Override
   public void update(AnActionEvent event) {
     Presentation presentation = event.getPresentation();
-    presentation.setEnabled(RecentProjectsManagerBase.getInstance().getRecentProjectsActions(true).length > 0);
+    presentation.setEnabled(RecentProjectsManager.getInstance().getRecentProjectsActions(true).length > 0);
   }
 }

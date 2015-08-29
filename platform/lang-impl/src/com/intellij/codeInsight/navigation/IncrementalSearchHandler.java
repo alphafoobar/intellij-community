@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
@@ -87,17 +88,17 @@ public class IncrementalSearchHandler {
   }
 
   public void invoke(Project project, final Editor editor) {
-    if (!ourActionsRegistered){
-      ourActionsRegistered = true;
-
+    if (!ourActionsRegistered) {
       EditorActionManager actionManager = EditorActionManager.getInstance();
 
       TypedAction typedAction = actionManager.getTypedAction();
-      typedAction.setupHandler(new MyTypedHandler(typedAction.getHandler()));
+      typedAction.setupRawHandler(new MyTypedHandler(typedAction.getRawHandler()));
 
       actionManager.setActionHandler(IdeActions.ACTION_EDITOR_BACKSPACE, new BackSpaceHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_BACKSPACE)));
       actionManager.setActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_UP, new UpHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_UP)));
       actionManager.setActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_DOWN, new DownHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_DOWN)));
+
+      ourActionsRegistered = true;
     }
 
     FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.incremental.search");
@@ -151,6 +152,7 @@ public class IncrementalSearchHandler {
 
         if (documentListener[0] != null){
           document.removeDocumentListener(documentListener[0]);
+          documentListener[0] = null;
         }
 
         if (caretListener[0] != null){
@@ -169,7 +171,7 @@ public class IncrementalSearchHandler {
     };
     document.addDocumentListener(documentListener[0]);
 
-    caretListener[0] = new CaretListener() {
+    caretListener[0] = new CaretAdapter() {
       @Override
       public void caretPositionChanged(CaretEvent e) {
         PerHintSearchData data = hint.getUserData(SEARCH_DATA_IN_HINT_KEY);
@@ -372,7 +374,8 @@ public class IncrementalSearchHandler {
         MyPanel comp = (MyPanel)hint.getComponent();
         if (comp.getTruePreferredSize().width > comp.getSize().width){
           Rectangle bounds = hint.getBounds();
-          hint.updateBounds(bounds.x, bounds.y);
+          hint.pack();
+          hint.updateLocation(bounds.x, bounds.y);
         }
         updatePosition(editor, hintData, false, false);
       }
@@ -387,10 +390,10 @@ public class IncrementalSearchHandler {
     }
 
     @Override
-    public void execute(Editor editor, DataContext dataContext) {
+    public void doExecute(Editor editor, Caret caret, DataContext dataContext) {
       PerEditorSearchData data = editor.getUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY);
       if (data == null || data.hint == null){
-        myOriginalHandler.execute(editor, dataContext);
+        myOriginalHandler.execute(editor, caret, dataContext);
       }
       else{
         LightweightHint hint = data.hint;
@@ -413,10 +416,10 @@ public class IncrementalSearchHandler {
     }
 
     @Override
-    public void execute(Editor editor, DataContext dataContext) {
+    public void doExecute(Editor editor, Caret caret, DataContext dataContext) {
       PerEditorSearchData data = editor.getUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY);
       if (data == null || data.hint == null){
-        myOriginalHandler.execute(editor, dataContext);
+        myOriginalHandler.execute(editor, caret, dataContext);
       }
       else{
         LightweightHint hint = data.hint;
@@ -446,10 +449,10 @@ public class IncrementalSearchHandler {
     }
 
     @Override
-    public void execute(Editor editor, DataContext dataContext) {
+    public void doExecute(Editor editor, Caret caret, DataContext dataContext) {
       PerEditorSearchData data = editor.getUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY);
       if (data == null || data.hint == null){
-        myOriginalHandler.execute(editor, dataContext);
+        myOriginalHandler.execute(editor, caret, dataContext);
       }
       else{
         LightweightHint hint = data.hint;

@@ -15,7 +15,10 @@
  */
 package org.jetbrains.idea.svn.commandLine;
 
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.idea.svn.auth.AuthenticationService;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.auth.ISVNAuthenticationManager;
 import org.tmatesoft.svn.core.auth.SVNAuthentication;
@@ -32,6 +35,7 @@ import java.util.regex.Pattern;
  */
 public class UsernamePasswordCallback extends AuthCallbackCase {
 
+  private static final String COULD_NOT_AUTHENTICATE_TO_SERVER_MESSAGE = "could not authenticate to server";
   private static final String UNABLE_TO_CONNECT_MESSAGE = "Unable to connect to a repository";
   private static final String AUTHENTICATION_FAILED_MESSAGE = "Authentication failed";
   private static final String INVALID_CREDENTIALS_FOR_SVN_PROTOCOL = "svn: E170001: Can't get";
@@ -40,25 +44,30 @@ public class UsernamePasswordCallback extends AuthCallbackCase {
 
   protected SVNAuthentication myAuthentication;
 
-  UsernamePasswordCallback(@NotNull AuthenticationCallback callback, SVNURL url) {
-    super(callback, url);
+  UsernamePasswordCallback(@NotNull AuthenticationService authenticationService, SVNURL url) {
+    super(authenticationService, url);
   }
 
   @Override
   public boolean canHandle(String error) {
+    boolean useSvnKit = Registry.is("svn.use.svnkit.for.https.server.certificate.check");
+
     return
       // http/https protocol invalid credentials
       error.contains(AUTHENTICATION_FAILED_MESSAGE) ||
       // svn protocol invalid credentials - messages could be "Can't get password", "Can't get username or password"
       error.contains(INVALID_CREDENTIALS_FOR_SVN_PROTOCOL) && error.contains(PASSWORD_STRING) ||
       // http/https protocol, svn 1.7, non-interactive
-      error.contains(UNABLE_TO_CONNECT_MESSAGE);
+      // we additionally check that error is not related to certificate verification - as CertificateCallbackCase could only handle
+      // untrusted certificates, but not invalid when useSvnKit = false
+      (error.contains(UNABLE_TO_CONNECT_MESSAGE) && (useSvnKit || !CertificateCallbackCase.isCertificateVerificationFailed(error))) ||
+      // http, svn 1.6, non-interactive
+      StringUtil.containsIgnoreCase(error, COULD_NOT_AUTHENTICATE_TO_SERVER_MESSAGE);
   }
 
   @Override
   boolean getCredentials(String errText) throws SvnBindException {
-    myAuthentication = myAuthenticationCallback.requestCredentials(myUrl != null ? myUrl : parseUrlFromError(errText),
-                                                                   getType());
+    myAuthentication = myAuthenticationService.requestCredentials(myUrl != null ? myUrl : parseUrlFromError(errText), getType());
 
     return myAuthentication != null;
   }

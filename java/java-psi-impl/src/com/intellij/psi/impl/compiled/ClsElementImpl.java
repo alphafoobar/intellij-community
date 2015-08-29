@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import com.intellij.psi.impl.source.tree.TreeElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
@@ -95,7 +96,7 @@ public abstract class ClsElementImpl extends PsiElementBase implements PsiCompil
       return PsiElement.EMPTY_ARRAY;
     }
 
-    List<PsiElement> list = ContainerUtil.newArrayListWithExpectedSize(children.length);
+    List<PsiElement> list = ContainerUtil.newArrayListWithCapacity(children.length);
     for (PsiElement child : children) {
       if (child != null) {
         list.add(child);
@@ -177,9 +178,11 @@ public abstract class ClsElementImpl extends PsiElementBase implements PsiCompil
 
   @Override
   public PsiElement findElementAt(int offset) {
-    PsiElement mirrorAt = getMirror().findElementAt(offset);
+    PsiElement mirror = getMirror();
+    if (mirror == null) return null;
+    PsiElement mirrorAt = mirror.findElementAt(offset);
     while (true) {
-      if (mirrorAt == null) return null;
+      if (mirrorAt == null || mirrorAt instanceof PsiFile) return null;
       PsiElement elementAt = mirrorToElement(mirrorAt);
       if (elementAt != null) return elementAt;
       mirrorAt = mirrorAt.getParent();
@@ -188,7 +191,9 @@ public abstract class ClsElementImpl extends PsiElementBase implements PsiCompil
 
   @Override
   public PsiReference findReferenceAt(int offset) {
-    PsiReference mirrorRef = getMirror().findReferenceAt(offset);
+    PsiElement mirror = getMirror();
+    if (mirror == null) return null;
+    PsiReference mirrorRef = mirror.findReferenceAt(offset);
     if (mirrorRef == null) return null;
     PsiElement mirrorElement = mirrorRef.getElement();
     PsiElement element = mirrorToElement(mirrorElement);
@@ -228,14 +233,15 @@ public abstract class ClsElementImpl extends PsiElementBase implements PsiCompil
 
     StringBuilder buffer = new StringBuilder();
     appendMirrorText(0, buffer);
-    LOG.error("Mirror wasn't set for " + this + ", expected text:\n" + buffer);
+    LOG.warn("Mirror wasn't set for " + this + " in " + getContainingFile() + ", expected text '" + buffer + "'");
     return buffer.toString();
   }
 
   @Override
   @NotNull
   public char[] textToCharArray() {
-    return getMirror().textToCharArray();
+    PsiElement mirror = getMirror();
+    return mirror != null ? mirror.textToCharArray() : ArrayUtil.EMPTY_CHAR_ARRAY;
   }
 
   @Override

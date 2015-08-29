@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,11 +83,12 @@ public class PythonDocCommentUtil {
         boolean lookNext = false;
         boolean add = true;
         for (String s : subLines) {
-          if (s.trim().equals(prefix + "param")) {
+          final String trimmedLine = s.trim();
+          if (trimmedLine.equals(prefix + "param") || trimmedLine.equals(prefix + "type")) {
             lookNext = true;
           }
-          if (lookNext && s.trim().endsWith(":")) {
-            String tmp = s.trim().substring(0, s.trim().length() - 1);
+          if (lookNext && trimmedLine.endsWith(":")) {
+            String tmp = trimmedLine.substring(0, trimmedLine.length() - 1);
             if (paramName.equals(tmp)) {
               lookNext = false;
               skipNext = true;

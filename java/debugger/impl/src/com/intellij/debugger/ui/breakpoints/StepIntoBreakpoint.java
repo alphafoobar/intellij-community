@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,14 @@ import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.LambdaMethodFilter;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.sun.jdi.*;
 import com.sun.jdi.request.BreakpointRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.java.debugger.breakpoints.properties.JavaBreakpointProperties;
 
 import java.util.*;
 
@@ -35,7 +37,7 @@ import java.util.*;
  * @author Eugene Zhuravlev
  *         Date: Sep 13, 2006
  */
-public class StepIntoBreakpoint extends RunToCursorBreakpoint {
+public class StepIntoBreakpoint<P extends JavaBreakpointProperties> extends RunToCursorBreakpoint<P> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.breakpoints.StepIntoBreakpoint");
   @NotNull
   private final BreakpointStepMethodFilter myFilter;
@@ -45,24 +47,19 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
     myFilter = filter;
   }
 
-  protected void createOrWaitPrepare(DebugProcessImpl debugProcess, SourcePosition classPosition) {
-    super.createOrWaitPrepare(debugProcess, classPosition);
-  }
-
   protected void createRequestForPreparedClass(DebugProcessImpl debugProcess, ReferenceType classType) {
     try {
       final CompoundPositionManager positionManager = debugProcess.getPositionManager();
-      final SourcePosition startPosition = getSourcePosition();
-      List<Location> locations = positionManager.locationsOfLine(classType, startPosition);
+      List<Location> locations = positionManager.locationsOfLine(classType, myCustomPosition);
 
       if (locations.isEmpty()) {
         // sometimes first statements are mapped to some weird line number, or there are no executable instructions at first statement's line
         // so if lambda or method body spans for more than one lines, try get some locations from these lines
         final int lastLine = myFilter.getLastStatementLine();
         if (lastLine >= 0) {
-          int nextLine = startPosition.getLine() + 1;
+          int nextLine = myCustomPosition.getLine() + 1;
           while (nextLine <= lastLine && locations.isEmpty()) {
-            locations = positionManager.locationsOfLine(classType, SourcePosition.createFromLine(startPosition.getFile(), nextLine++));
+            locations = positionManager.locationsOfLine(classType, SourcePosition.createFromLine(myCustomPosition.getFile(), nextLine++));
           }
         }
       }
@@ -84,11 +81,7 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
             final LambdaMethodFilter lambdaFilter = (LambdaMethodFilter)myFilter;
             if (lambdaFilter.getLambdaOrdinal() < methodsFound) {
               final Method[] candidates = methods.toArray(new Method[methodsFound]);
-              Arrays.sort(candidates, new Comparator<Method>() {
-                public int compare(Method m1, Method m2) {
-                  return getMethodOrdinal(m1) - getMethodOrdinal(m2);
-                }
-              });
+              Arrays.sort(candidates, DebuggerUtilsEx.LAMBDA_ORDINAL_COMPARATOR);
               location = candidates[lambdaFilter.getLambdaOrdinal()].location();
             }
           }
@@ -123,20 +116,6 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
     }
   }
 
-  private static int getMethodOrdinal(Method m) {
-    final String name = m.name();
-    final int dollarIndex = name.lastIndexOf("$");
-    if (dollarIndex < 0) {
-      return 0;
-    }
-    try {
-      return Integer.parseInt(name.substring(dollarIndex + 1));
-    }
-    catch (NumberFormatException e) {
-      return 0;
-    }
-  }
-
   protected boolean acceptLocation(DebugProcessImpl debugProcess, ReferenceType classType, Location loc) {
     try {
       return myFilter.locationMatches(debugProcess, loc);
@@ -153,7 +132,6 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
     if (pos != null) {
       final StepIntoBreakpoint breakpoint = new StepIntoBreakpoint(project, pos, filter);
       breakpoint.init();
-      breakpoint.LOG_ENABLED = false;
       return breakpoint;
     }
     return null;

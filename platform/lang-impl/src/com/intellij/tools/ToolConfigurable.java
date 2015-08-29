@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.io.IOException;
 
 public class ToolConfigurable implements SearchableConfigurable, Configurable.NoScroll {
   private BaseToolsPanel myPanel;
@@ -35,28 +34,29 @@ public class ToolConfigurable implements SearchableConfigurable, Configurable.No
 
   @Override
   public JComponent createComponent() {
-    myPanel = new ToolsPanel();
+    if (myPanel == null) {
+      myPanel = new ToolsPanel();
+    }
     return myPanel;
   }
 
   @Override
   public void apply() throws ConfigurationException {
-    try {
+    if (myPanel != null) {
       myPanel.apply();
-    }
-    catch (IOException e) {
-      throw new ConfigurationException(e.getMessage());
     }
   }
 
   @Override
   public boolean isModified() {
-    return myPanel.isModified();
+    return myPanel != null && myPanel.isModified();
   }
 
   @Override
   public void reset() {
-    myPanel.reset();
+    if (myPanel != null) {
+      myPanel.reset();
+    }
   }
 
   @Override
@@ -73,7 +73,7 @@ public class ToolConfigurable implements SearchableConfigurable, Configurable.No
   @Override
   @NotNull
   public String getId() {
-    return getHelpTopic();
+    return "preferences.externalTools";
   }
 
   @Override

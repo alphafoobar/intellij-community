@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor;
@@ -89,7 +88,7 @@ public class CreateParameterFromUsageFix extends CreateVarFromUsageFix {
 
     final List<ParameterInfoImpl> parameterInfos =
       new ArrayList<ParameterInfoImpl>(Arrays.asList(ParameterInfoImpl.fromMethod(method)));
-    ParameterInfoImpl parameterInfo = new ParameterInfoImpl(-1, varName, type, PsiTypesUtil.getDefaultValueOfType(type), false);
+    ParameterInfoImpl parameterInfo = new ParameterInfoImpl(-1, varName, type, varName, false);
     if (!method.isVarArgs()) {
       parameterInfos.add(parameterInfo);
     }
@@ -112,18 +111,19 @@ public class CreateParameterFromUsageFix extends CreateVarFromUsageFix {
         public void run() {
           if (project.isDisposed()) return;
           try {
-            JavaChangeSignatureDialog dialog = JavaChangeSignatureDialog.createAndPreselectNew(project, finalMethod, parameterInfos, true, myReferenceExpression);
+            JavaChangeSignatureDialog dialog =
+              JavaChangeSignatureDialog.createAndPreselectNew(project, finalMethod, parameterInfos, true, myReferenceExpression);
             dialog.setParameterInfos(parameterInfos);
-            dialog.show();
-            if (dialog.isOK()) {
+            if (dialog.showAndGet()) {
               for (ParameterInfoImpl info : parameterInfos) {
                 if (info.getOldIndex() == -1) {
                   final String newParamName = info.getName();
                   if (!Comparing.strEqual(varName, newParamName)) {
-                    final PsiExpression newExpr = JavaPsiFacade.getElementFactory(project).createExpressionFromText(newParamName, finalMethod);
-                    new WriteCommandAction(project){
+                    final PsiExpression newExpr =
+                      JavaPsiFacade.getElementFactory(project).createExpressionFromText(newParamName, finalMethod);
+                    new WriteCommandAction(project) {
                       @Override
-                      protected void run(Result result) throws Throwable {
+                      protected void run(@NotNull Result result) throws Throwable {
                         final PsiReferenceExpression[] refs =
                           CreateFromUsageUtils.collectExpressions(myReferenceExpression, PsiMember.class, PsiFile.class);
                         for (PsiReferenceExpression ref : refs) {

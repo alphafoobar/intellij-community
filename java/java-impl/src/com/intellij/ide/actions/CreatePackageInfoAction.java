@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.generate.tostring.util.StringUtil;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 
 /**
@@ -41,7 +40,7 @@ import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
  */
 public class CreatePackageInfoAction extends CreateFromTemplateActionBase implements DumbAware {
 
-  protected CreatePackageInfoAction() {
+  public CreatePackageInfoAction() {
     super(IdeBundle.message("action.create.new.package-info.title"),
           IdeBundle.message("action.create.new.package-info.description"), AllIcons.FileTypes.Java);
   }
@@ -92,14 +91,14 @@ public class CreatePackageInfoAction extends CreateFromTemplateActionBase implem
     }
     final ProjectFileIndex projectFileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     final JavaDirectoryService directoryService = JavaDirectoryService.getInstance();
-    final PsiNameHelper nameHelper = JavaPsiFacade.getInstance(project).getNameHelper();
+    final PsiNameHelper nameHelper = PsiNameHelper.getInstance(project);
     for (PsiDirectory directory : directories) {
       if (projectFileIndex.isUnderSourceRootOfType(directory.getVirtualFile(), JavaModuleSourceRootTypes.SOURCES) &&
           PsiUtil.isLanguageLevel5OrHigher(directory)) {
         final PsiPackage aPackage = directoryService.getPackage(directory);
         if (aPackage != null) {
           final String qualifiedName = aPackage.getQualifiedName();
-          if (StringUtil.isEmpty(qualifiedName) || nameHelper.isQualifiedName(qualifiedName)) {
+          if (com.intellij.openapi.util.text.StringUtil.isEmpty(qualifiedName) || nameHelper.isQualifiedName(qualifiedName)) {
             return true;
           }
         }
@@ -123,6 +122,6 @@ public class CreatePackageInfoAction extends CreateFromTemplateActionBase implem
 
   @Override
   protected FileTemplate getTemplate(Project project, PsiDirectory dir) {
-    return FileTemplateManager.getInstance().getInternalTemplate(FileTemplateUtil.INTERNAL_PACKAGE_INFO_TEMPLATE_NAME);
+    return FileTemplateManager.getInstance(project).getInternalTemplate(FileTemplateUtil.INTERNAL_PACKAGE_INFO_TEMPLATE_NAME);
   }
 }

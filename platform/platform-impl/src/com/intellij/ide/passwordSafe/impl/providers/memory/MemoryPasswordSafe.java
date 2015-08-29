@@ -15,13 +15,17 @@
  */
 package com.intellij.ide.passwordSafe.impl.providers.memory;
 
+import com.intellij.ide.passwordSafe.impl.PasswordSafeTimed;
 import com.intellij.ide.passwordSafe.impl.providers.BasePasswordSafeProvider;
 import com.intellij.ide.passwordSafe.impl.providers.ByteArrayWrapper;
 import com.intellij.ide.passwordSafe.impl.providers.EncryptionUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.util.containers.HashMap;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.security.SecureRandom;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,14 +42,24 @@ public class MemoryPasswordSafe extends BasePasswordSafeProvider {
   /**
    * The password database
    */
-  private transient final Map<ByteArrayWrapper, byte[]> database = new HashMap<ByteArrayWrapper, byte[]>();
+  private transient final PasswordSafeTimed<Map<ByteArrayWrapper, byte[]>> database = new PasswordSafeTimed<Map<ByteArrayWrapper, byte[]>>() {
+    protected Map<ByteArrayWrapper, byte[]> compute() {
+      return Collections.synchronizedMap(ContainerUtil.<ByteArrayWrapper, byte[]>newHashMap());
+    }
 
-  /**
-   * @param project the project to use
-   * @return the secret key used by provider
-   */
+    @Override
+    protected int getMinutesToLive() {
+      return MemoryPasswordSafe.this.getMinutesToLive();
+    }
+  };
+
+  protected int getMinutesToLive() {
+    return Registry.intValue("passwordSafe.memorySafe.ttl");
+  }
+
+  @NotNull
   @Override
-  protected byte[] key(Project project) {
+  protected byte[] key(Project project, @NotNull Class requestor) {
     if (key.get() == null) {
       byte[] rnd = new byte[EncryptionUtil.SECRET_KEY_SIZE_BYTES * 16];
       new SecureRandom().nextBytes(rnd);
@@ -54,57 +68,37 @@ public class MemoryPasswordSafe extends BasePasswordSafeProvider {
     return key.get();
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected byte[] getEncryptedPassword(byte[] key) {
-    synchronized (database) {
-      return database.get(new ByteArrayWrapper(key));
-    }
+    return database.get().get(new ByteArrayWrapper(key));
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected void removeEncryptedPassword(byte[] key) {
-    synchronized (database) {
-      database.remove(new ByteArrayWrapper(key));
-    }
+    database.get().remove(new ByteArrayWrapper(key));
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected void storeEncryptedPassword(byte[] key, byte[] encryptedPassword) {
-    synchronized (database) {
-      database.put(new ByteArrayWrapper(key), encryptedPassword);
-    }
+    database.get().put(new ByteArrayWrapper(key), encryptedPassword);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public boolean isSupported() {
     return true;
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public String getDescription() {
     return "Memory-based password safe provider. The passwords are stored only for the duration of IDEA process.";
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public String getName() {
     return "Memory PasswordSafe";
+  }
+
+  public void clear() {
+    database.get().clear();
   }
 }

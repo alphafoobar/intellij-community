@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.execution;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,7 +28,5 @@ import org.jetbrains.annotations.Nullable;
  */
 public abstract class RunProfileStarter {
   @Nullable
-  public abstract RunContentDescriptor execute(@NotNull Project project, @NotNull Executor executor, @NotNull RunProfileState state,
-                                               @Nullable RunContentDescriptor contentToReuse, @NotNull ExecutionEnvironment env) throws ExecutionException;
-
+  public abstract RunContentDescriptor execute(@NotNull RunProfileState state, @NotNull ExecutionEnvironment environment) throws ExecutionException;
 }

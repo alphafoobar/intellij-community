@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.codeStyle.ReferenceAdjuster;
 import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.impl.source.PsiJavaCodeReferenceElementImpl;
@@ -37,7 +38,7 @@ import java.util.List;
 
 public class JavaReferenceAdjuster implements ReferenceAdjuster {
   @Override
-  public ASTNode process(ASTNode element, boolean addImports, boolean incompleteCode, boolean useFqInJavadoc, boolean useFqInCode) {
+  public ASTNode process(@NotNull ASTNode element, boolean addImports, boolean incompleteCode, boolean useFqInJavadoc, boolean useFqInCode) {
     IElementType elementType = element.getElementType();
     if ((elementType == JavaElementType.JAVA_CODE_REFERENCE || elementType == JavaElementType.REFERENCE_EXPRESSION) && !isAnnotated(element)) {
       IElementType parentType = element.getTreeParent().getElementType();
@@ -55,11 +56,18 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
 
         boolean rightKind = true;
         if (elementType == JavaElementType.JAVA_CODE_REFERENCE) {
-          int kind = ((PsiJavaCodeReferenceElementImpl)element).getKind();
+          PsiJavaCodeReferenceElementImpl impl = (PsiJavaCodeReferenceElementImpl)element;
+          int kind = impl.getKind(impl.getContainingFile());
           rightKind = kind == PsiJavaCodeReferenceElementImpl.CLASS_NAME_KIND || kind == PsiJavaCodeReferenceElementImpl.CLASS_OR_PACKAGE_NAME_KIND;
         }
 
         if (rightKind) {
+          // annotations may jump out of reference (see PsiJavaCodeReferenceImpl#setAnnotations()) so they should be processed first
+          List<PsiAnnotation> annotations = PsiTreeUtil.getChildrenOfTypeAsList(ref, PsiAnnotation.class);
+          for (PsiAnnotation annotation : annotations) {
+            process(annotation.getNode(), addImports, incompleteCode, useFqInJavadoc, useFqInCode);
+          }
+
           boolean isInsideDocComment = TreeUtil.findParent(element, JavaDocElementType.DOC_COMMENT) != null;
           boolean isShort = !ref.isQualified();
           if (isInsideDocComment ? !useFqInJavadoc : !useFqInCode) {
@@ -124,9 +132,10 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
   }
 
   @Override
-  public ASTNode process(ASTNode element, boolean addImports, boolean incompleteCode, Project project) {
+  public ASTNode process(@NotNull ASTNode element, boolean addImports, boolean incompleteCode, Project project) {
     final CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(project);
-    return process(element, addImports, incompleteCode, settings.USE_FQ_CLASS_NAMES_IN_JAVADOC, settings.USE_FQ_CLASS_NAMES);
+    JavaCodeStyleSettings javaSettings = settings.getCustomSettings(JavaCodeStyleSettings.class);
+    return process(element, addImports, incompleteCode, javaSettings.useFqNamesInJavadocAlways(), settings.USE_FQ_CLASS_NAMES);
   }
 
   private static boolean isAnnotated(ASTNode element) {
@@ -155,7 +164,7 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
   }
 
   @Override
-  public void processRange(ASTNode element, int startOffset, int endOffset, boolean useFqInJavadoc, boolean useFqInCode) {
+  public void processRange(@NotNull ASTNode element, int startOffset, int endOffset, boolean useFqInJavadoc, boolean useFqInCode) {
     List<ASTNode> array = new ArrayList<ASTNode>();
     addReferencesInRange(array, element, startOffset, endOffset);
     for (ASTNode ref : array) {
@@ -166,9 +175,10 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
   }
 
   @Override
-  public void processRange(ASTNode element, int startOffset, int endOffset, Project project) {
+  public void processRange(@NotNull ASTNode element, int startOffset, int endOffset, Project project) {
     final CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(project);
-    processRange(element, startOffset, endOffset, settings.USE_FQ_CLASS_NAMES_IN_JAVADOC, settings.USE_FQ_CLASS_NAMES);
+    JavaCodeStyleSettings javaSettings = settings.getCustomSettings(JavaCodeStyleSettings.class);
+    processRange(element, startOffset, endOffset, javaSettings.useFqNamesInJavadocAlways(), settings.USE_FQ_CLASS_NAMES);
   }
 
   private static void addReferencesInRange(List<ASTNode> array, ASTNode parent, int startOffset, int endOffset) {
@@ -181,7 +191,9 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
       JspFile jspFile = JspPsiUtil.getJspFile(parent.getPsi());
       if (jspFile != null) {
         JspClass jspClass = (JspClass)jspFile.getJavaClass();
-        addReferencesInRange(array, jspClass.getNode(), startOffset, endOffset);
+        if (jspClass != null) {
+          addReferencesInRange(array, jspClass.getNode(), startOffset, endOffset);
+        }
         return;
       }
     }
@@ -206,6 +218,7 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
     }
   }
 
+  @NotNull
   private static ASTNode makeShortReference(@NotNull CompositeElement reference, @NotNull PsiClass refClass, boolean addImports) {
     @NotNull final PsiJavaCodeReferenceElement psiReference = (PsiJavaCodeReferenceElement)reference.getPsi();
     final PsiQualifiedReferenceElement reference1 = getClassReferenceToShorten(refClass, addImports, psiReference);
@@ -248,8 +261,10 @@ public class JavaReferenceAdjuster implements ReferenceAdjuster {
     final JavaPsiFacade facade = JavaPsiFacade.getInstance(manager.getProject());
     final PsiResolveHelper helper = facade.getResolveHelper();
     if (manager.areElementsEquivalent(refClass, helper.resolveReferencedClass(referenceText, psiReference))) {
-      PsiElement parent = psiReference.getParent();
-      if (parent instanceof PsiJavaCodeReferenceElement && parent.getParent() instanceof PsiNewExpression) return true;
+      if (psiReference instanceof PsiJavaCodeReferenceElement) {
+        PsiElement parent = psiReference.getParent();
+        if (parent instanceof PsiNewExpression || parent.getParent() instanceof PsiNewExpression) return true;
+      }
       return helper.resolveReferencedVariable(referenceText, psiReference) == null;
     }
     return false;

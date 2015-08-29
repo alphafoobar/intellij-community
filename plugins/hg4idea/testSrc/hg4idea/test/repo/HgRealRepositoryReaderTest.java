@@ -19,7 +19,8 @@ import com.intellij.dvcs.repo.Repository;
 import com.intellij.openapi.vcs.VcsTestUtil;
 import hg4idea.test.HgPlatformTest;
 import org.jetbrains.annotations.NotNull;
-import org.zmlx.hg4idea.HgVcs;
+import org.zmlx.hg4idea.repo.HgRepository;
+import org.zmlx.hg4idea.repo.HgRepositoryImpl;
 import org.zmlx.hg4idea.repo.HgRepositoryReader;
 import org.zmlx.hg4idea.util.HgUtil;
 
@@ -28,10 +29,8 @@ import java.util.Arrays;
 
 import static com.intellij.openapi.vcs.Executor.*;
 import static hg4idea.test.HgExecutor.hg;
+import static hg4idea.test.HgExecutor.hgMergeWith;
 
-/**
- * @author Nadya Zabrodina
- */
 public class HgRealRepositoryReaderTest extends HgPlatformTest {
 
   @NotNull private HgRepositoryReader myRepositoryReader;
@@ -42,11 +41,11 @@ public class HgRealRepositoryReaderTest extends HgPlatformTest {
     File hgDir = new File(myRepository.getPath(), ".hg");
     assertTrue(hgDir.exists());
     createBranchesAndTags();
-    myRepositoryReader = new HgRepositoryReader(myProject, hgDir);
+    myRepositoryReader = new HgRepositoryReader(myVcs, hgDir);
   }
 
   public void testMergeState() {
-    hg("merge branchB");
+    hgMergeWith("branchB");
     assertEquals(myRepositoryReader.readState(), Repository.State.MERGING);
   }
 
@@ -59,18 +58,29 @@ public class HgRealRepositoryReaderTest extends HgPlatformTest {
   }
 
   public void testBranches() {
-    VcsTestUtil.assertEqualCollections(HgUtil.getNamesWithoutHashes(myRepositoryReader.readBranches()),
-                                              Arrays.asList("default", "branchA", "branchB"));
+    VcsTestUtil.assertEqualCollections(myRepositoryReader.readBranches().keySet(),
+                                       Arrays.asList("default", "branchA", "branchB"));
+  }
+
+  public void testOpenedBranches() {
+    cd(myRepository);
+    myRepository.refresh(false, true);
+    HgRepository hgRepository = HgRepositoryImpl.getInstance(myRepository, myProject, myProject);
+    hg("up branchA");
+    hg("commit -m 'close branch' --close-branch");
+    hgRepository.update();
+    VcsTestUtil.assertEqualCollections(hgRepository.getOpenedBranches(),
+                                       Arrays.asList("default", "branchB"));
   }
 
   public void testTags() {
     VcsTestUtil.assertEqualCollections(HgUtil.getNamesWithoutHashes(myRepositoryReader.readTags()),
-                                              Arrays.asList("tag1", "tag2"));
+                                       Arrays.asList("tag1", "tag2"));
   }
 
   public void testLocalTags() {
     VcsTestUtil.assertEqualCollections(HgUtil.getNamesWithoutHashes(myRepositoryReader.readLocalTags()),
-                                              Arrays.asList("localTag"));
+                                       Arrays.asList("localTag"));
   }
 
   public void testCurrentBookmark() {
@@ -80,7 +90,7 @@ public class HgRealRepositoryReaderTest extends HgPlatformTest {
 
   public void testBookmarks() {
     VcsTestUtil.assertEqualCollections(HgUtil.getNamesWithoutHashes(myRepositoryReader.readBookmarks()),
-                                              Arrays.asList("A_BookMark", "B_BookMark", "C_BookMark"));
+                                       Arrays.asList("A_BookMark", "B_BookMark", "C_BookMark"));
   }
 
   private void createBranchesAndTags() {

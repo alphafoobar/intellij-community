@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 package com.intellij.ide.ui.laf.darcula.ui;
+
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.ui.Gray;
+import com.intellij.ui.ScreenUtil;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import javax.swing.event.MouseInputAdapter;
@@ -99,7 +105,8 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
       LookAndFeel.uninstallBorder(root);
     }
     else {
-      LookAndFeel.installBorder(root, "RootPane.border");
+      root.setBorder(JBUI.Borders.customLine(Gray._73, 1, 1, 1, 1));
+      //LookAndFeel.installBorder(root, "RootPane.border");
     }
   }
 
@@ -109,12 +116,7 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
 
 
   private void installWindowListeners(JRootPane root, Component parent) {
-    if (parent instanceof Window) {
-      myWindow = (Window)parent;
-    }
-    else {
-      myWindow = SwingUtilities.getWindowAncestor(parent);
-    }
+    myWindow = UIUtil.getWindow(parent);
 
     if (myWindow != null) {
       if (myMouseInputListener == null) {
@@ -177,13 +179,7 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
           });
         }
 
-        Window currWindow;
-        if (parent instanceof Window) {
-          currWindow = (Window)parent;
-        }
-        else {
-          currWindow = SwingUtilities.getWindowAncestor(parent);
-        }
+        Window currWindow = UIUtil.getWindow(parent);
         if (myWindowListener != null) {
           myCurrentWindow
             .removeWindowListener(myWindowListener);
@@ -358,7 +354,7 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
   }
 
   protected LayoutManager createLayoutManager() {
-    return new SubstanceRootLayout();
+    return new DarculaRootLayout();
   }
 
   private void setTitlePane(JRootPane root, JComponent titlePane) {
@@ -376,13 +372,15 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
   }
 
   public void setMaximized() {
+    if (Registry.is("darcula.fix.maximized.frame.bounds")) return;
+
     Component tla = myRootPane.getTopLevelAncestor();
     GraphicsConfiguration gc = (currentRootPaneGC != null) ? currentRootPaneGC
                                                            : tla.getGraphicsConfiguration();
     Rectangle screenBounds = gc.getBounds();
     screenBounds.x = 0;
     screenBounds.y = 0;
-    Insets screenInsets = Toolkit.getDefaultToolkit().getScreenInsets(gc);
+    Insets screenInsets = ScreenUtil.getScreenInsets(gc);
     Rectangle maxBounds = new Rectangle(
       (screenBounds.x + screenInsets.left),
       (screenBounds.y + screenInsets.top), screenBounds.width
@@ -428,7 +426,7 @@ public class DarculaRootPaneUI extends BasicRootPaneUI {
     }
   }
 
-  protected class SubstanceRootLayout implements LayoutManager2 {
+  protected class DarculaRootLayout implements LayoutManager2 {
     public Dimension preferredLayoutSize(Container parent) {
       Dimension cpd, mbd, tpd;
       int cpWidth = 0;

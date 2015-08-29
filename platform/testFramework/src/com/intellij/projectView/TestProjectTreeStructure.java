@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.projectView;
 
-import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.ide.projectView.impl.AbstractProjectTreeStructure;
 import com.intellij.ide.projectView.impl.AbstractProjectViewPSIPane;
 import com.intellij.openapi.Disposable;
@@ -24,7 +23,7 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.testFramework.ProjectViewTestUtil;
-import junit.framework.Assert;
+import org.junit.Assert;
 
 public class TestProjectTreeStructure extends AbstractProjectTreeStructure implements Disposable {
   protected boolean myShowMembers = false;
@@ -46,7 +45,7 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
   }
 
   public AbstractProjectViewPSIPane createPane() {
-    final AbstractProjectViewPSIPane pane = new TestProjectViewPSIPane(myProject, this);
+    final AbstractProjectViewPSIPane pane = new TestProjectViewPSIPane(myProject, this, 9);
     pane.createComponent();
     Disposer.register(this, pane);
     return pane;
@@ -96,9 +95,5 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
 
   @Override
   public void dispose() {
-  }
-
-  public String getProjectFileRepresentation() {
-    return " " + myProject.getName() + ProjectFileType.DOT_DEFAULT_EXTENSION + "\n";
   }
 }

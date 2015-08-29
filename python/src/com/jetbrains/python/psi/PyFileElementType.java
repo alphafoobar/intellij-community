@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ import com.intellij.psi.stubs.StubOutputStream;
 import com.intellij.psi.tree.IStubFileElementType;
 import com.intellij.util.io.StringRef;
 import com.jetbrains.python.PythonLanguage;
-import com.jetbrains.python.console.parsing.PythonConsoleData;
-import com.jetbrains.python.console.parsing.PyConsoleParser;
 import com.jetbrains.python.console.PydevConsoleRunner;
+import com.jetbrains.python.console.parsing.PyConsoleParser;
+import com.jetbrains.python.console.parsing.PythonConsoleData;
 import com.jetbrains.python.console.parsing.PythonConsoleLexer;
 import com.jetbrains.python.parsing.PyParser;
 import com.jetbrains.python.parsing.StatementParsing;
@@ -63,7 +63,7 @@ public class PyFileElementType extends IStubFileElementType<PyFileStub> {
   @Override
   public int getStubVersion() {
     // Don't forget to update versions of indexes that use the updated stub-based elements
-    return 48;
+    return 50;
   }
 
   @Nullable

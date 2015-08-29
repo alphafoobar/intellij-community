@@ -22,13 +22,16 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.indexing.*;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -48,29 +51,14 @@ public class StubTreeLoaderImpl extends StubTreeLoader {
       return fromIndices;
     }
 
-    if (!canHaveStub(vFile)) {
-      return null;
-    }
-
     try {
       final FileContent fc = new FileContentImpl(vFile, vFile.contentsToByteArray());
       fc.putUserData(IndexingDataKeys.PROJECT, project);
-      if (psiFile != null) {
-        fc.putUserData(IndexingDataKeys.PSI_FILE, psiFile);
-        if (!vFile.getFileType().isBinary()) {
-          fc.putUserData(IndexingDataKeys.FILE_TEXT_CONTENT_KEY, psiFile.getViewProvider().getContents());
-        }
-        psiFile.putUserData(PsiFileImpl.BUILDING_STUB, true);
+      if (psiFile != null && !vFile.getFileType().isBinary()) {
+        fc.putUserData(IndexingDataKeys.FILE_TEXT_CONTENT_KEY, psiFile.getViewProvider().getContents());
+        // but don't reuse psiFile itself to avoid loading its contents. If we load AST, the stub will be thrown out anyway.
       }
-      Stub element;
-      try {
-        element = StubTreeBuilder.buildStubTree(fc);
-      }
-      finally {
-        if (psiFile != null) {
-          psiFile.putUserData(PsiFileImpl.BUILDING_STUB, null);
-        }
-      }
+      Stub element = StubTreeBuilder.buildStubTree(fc);
       if (element instanceof PsiFileStub) {
         StubTree tree = new StubTree((PsiFileStub)element);
         tree.setDebugInfo("created from file content");
@@ -111,7 +99,9 @@ public class StubTreeLoaderImpl extends StubTreeLoader {
       if (!stubTree.contentLengthMatches(vFile.getLength(), getCurrentTextContentLength(project, vFile, document))) {
         return processError(vFile,
                             "Outdated stub in index: " + StubUpdatingIndex.getIndexingStampInfo(vFile) +
+                            ", doc=" + document +
                             ", docSaved=" + saved +
+                            ", wasIndexedAlready=" + wasIndexedAlready +
                             ", queried at " + vFile.getTimeStamp(),
                             null);
       }
@@ -145,7 +135,7 @@ public class StubTreeLoaderImpl extends StubTreeLoader {
     }
     
     if (document != null) {
-      return document.getTextLength();
+      return PsiDocumentManager.getInstance(project).getLastCommittedText(document).length();
     }
     return -1;
   }
@@ -173,12 +163,29 @@ public class StubTreeLoaderImpl extends StubTreeLoader {
   }
 
   @Override
-  public long getStubTreeTimestamp(VirtualFile vFile) {
-    return IndexingStamp.getIndexStamp(vFile, StubUpdatingIndex.INDEX_ID);
+  public boolean canHaveStub(VirtualFile file) {
+    return StubUpdatingIndex.canHaveStub(file);
+  }
+
+  private boolean hasPsiInManyProjects(@NotNull final VirtualFile virtualFile) {
+    VirtualFile file = virtualFile;
+    int count = 0;
+    for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+      if (((PsiManagerEx)PsiManager.getInstance(project)).getFileManager().findCachedViewProvider(file) != null) {
+        count++;
+      }
+    }
+    return count > 1;
   }
 
   @Override
-  public boolean canHaveStub(VirtualFile file) {
-    return StubUpdatingIndex.canHaveStub(file);
+  public String getStubAstMismatchDiagnostics(@NotNull VirtualFile file,
+                                              @NotNull PsiFile psiFile,
+                                              @NotNull ObjectStubTree stubTree,
+                                              Document prevCachedDocument) {
+    String msg = super.getStubAstMismatchDiagnostics(file, psiFile, stubTree, prevCachedDocument);
+    msg += "\nin many projects: " + hasPsiInManyProjects(file);
+    msg += "\nindexing info: " + StubUpdatingIndex.getIndexingStampInfo(file);
+    return msg;
   }
 }

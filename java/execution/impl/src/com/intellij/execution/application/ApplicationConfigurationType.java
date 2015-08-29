@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,18 +17,13 @@ package com.intellij.execution.application;
 
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.configuration.ConfigurationFactoryEx;
-import com.intellij.execution.configurations.ConfigurationFactory;
-import com.intellij.execution.configurations.ConfigurationType;
-import com.intellij.execution.configurations.ModuleBasedConfiguration;
-import com.intellij.execution.configurations.RunConfiguration;
+import com.intellij.execution.configurations.*;
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.util.PsiMethodUtil;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,10 +33,9 @@ import javax.swing.*;
 public class ApplicationConfigurationType implements ConfigurationType {
   private final ConfigurationFactory myFactory;
 
-
-  /**reflection*/
   public ApplicationConfigurationType() {
     myFactory = new ConfigurationFactoryEx(this) {
+      @Override
       public RunConfiguration createTemplateConfiguration(Project project) {
         return new ApplicationConfiguration("", project, ApplicationConfigurationType.this);
       }
@@ -53,18 +47,22 @@ public class ApplicationConfigurationType implements ConfigurationType {
     };
   }
 
+  @Override
   public String getDisplayName() {
     return ExecutionBundle.message("application.configuration.name");
   }
 
+  @Override
   public String getConfigurationTypeDescription() {
     return ExecutionBundle.message("application.configuration.description");
   }
 
+  @Override
   public Icon getIcon() {
     return AllIcons.RunConfigurations.Application;
   }
 
+  @Override
   public ConfigurationFactory[] getConfigurationFactories() {
     return new ConfigurationFactory[]{myFactory};
   }
@@ -92,15 +90,15 @@ public class ApplicationConfigurationType implements ConfigurationType {
   }
 
 
+  @Override
   @NotNull
   @NonNls
   public String getId() {
     return "Application";
   }
 
-  @Nullable
+  @NotNull
   public static ApplicationConfigurationType getInstance() {
-    return ContainerUtil.findInstance(Extensions.getExtensions(CONFIGURATION_TYPE_EP), ApplicationConfigurationType.class);
+    return ConfigurationTypeUtil.findConfigurationType(ApplicationConfigurationType.class);
   }
-
 }

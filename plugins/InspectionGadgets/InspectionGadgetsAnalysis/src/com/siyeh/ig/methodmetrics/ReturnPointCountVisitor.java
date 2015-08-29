@@ -18,13 +18,13 @@ package com.siyeh.ig.methodmetrics;
 import com.intellij.psi.*;
 import org.jetbrains.annotations.NotNull;
 
-class ReturnPointCountVisitor extends JavaRecursiveElementVisitor {
+class ReturnPointCountVisitor extends JavaRecursiveElementWalkingVisitor {
 
-  private int m_count = 0;
+  private int m_count;
   private final boolean ignoreGuardClauses;
   private boolean previousWasGuardClause = true;
 
-  public ReturnPointCountVisitor(boolean ignoreGuardClauses) {
+  ReturnPointCountVisitor(boolean ignoreGuardClauses) {
     this.ignoreGuardClauses = ignoreGuardClauses;
   }
 
@@ -89,5 +89,13 @@ class ReturnPointCountVisitor extends JavaRecursiveElementVisitor {
 
   public int getCount() {
     return m_count;
+  }
+
+  @Override
+  public void visitLambdaExpression(PsiLambdaExpression expression) {
+  }
+
+  @Override
+  public void visitClass(PsiClass aClass) {
   }
 }

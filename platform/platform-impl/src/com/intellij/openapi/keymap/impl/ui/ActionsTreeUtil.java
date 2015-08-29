@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.keymap.impl.ui;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.DataManager;
 import com.intellij.ide.actionMacro.ActionMacro;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManagerCore;
@@ -30,6 +31,7 @@ import com.intellij.openapi.keymap.KeyMapBundle;
 import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapExtension;
 import com.intellij.openapi.keymap.ex.KeymapManagerEx;
+import com.intellij.openapi.keymap.impl.ActionShortcutRestrictions;
 import com.intellij.openapi.keymap.impl.KeymapImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
@@ -138,21 +140,38 @@ public class ActionsTreeUtil {
 
   @Nullable
   private static Condition<AnAction> wrapFilter(@Nullable final Condition<AnAction> filter, final Keymap keymap, final ActionManager actionManager) {
-    if (Registry.is("keymap.show.alias.actions")) return filter;
-
+    final ActionShortcutRestrictions shortcutRestrictions = ActionShortcutRestrictions.getInstance();
     return new Condition<AnAction>() {
       @Override
       public boolean value(final AnAction action) {
         if (action == null) return false;
         final String id = action instanceof ActionStub ? ((ActionStub)action).getId() : actionManager.getId(action);
         if (id != null) {
-          boolean actionBound = isActionBound(keymap, id);
-          return filter == null ? !actionBound : !actionBound && filter.value(action);
+          if (!Registry.is("keymap.show.alias.actions")) {
+            String binding = getActionBinding(keymap, id);
+            boolean bound = binding != null
+                            && actionManager.getAction(binding) != null // do not hide bound action, that miss the 'bound-with'
+                            && !hasAssociatedShortcutsInHierarchy(id, keymap); // do not hide bound actions when they are redefined
+            if (bound) {
+              return false;
+            }
+          }
+          if (!shortcutRestrictions.getForActionId(id).allowChanging) {
+            return false;
+          }
         }
 
         return filter == null || filter.value(action);
       }
     };
+  }
+
+  private static boolean hasAssociatedShortcutsInHierarchy(String id, Keymap keymap) {
+    while (keymap != null) {
+      if (((KeymapImpl)keymap).hasOwnActionId(id)) return true;
+      keymap = keymap.getParent();
+    }
+    return false;
   }
 
   private static void fillGroupIgnorePopupFlag(ActionGroup actionGroup, Group group, Condition<AnAction> filtered) {
@@ -229,7 +248,7 @@ public class ActionsTreeUtil {
             group.addGroup(subGroup);
           }
         }
-        else if (filtered == null || filtered.value(actionGroup)) {
+        else if (filtered == null || filtered.value(action)) {
           group.addGroup(subGroup);
         }
       }
@@ -267,10 +286,16 @@ public class ActionsTreeUtil {
     return group;
   }
 
-  private static boolean isActionBound(final Keymap keymap, final String id) {
-    if (keymap == null) return false;
+  @Nullable
+  private static String getActionBinding(final Keymap keymap, final String id) {
+    if (keymap == null) return null;
+    
     Keymap parent = keymap.getParent();
-    return ((KeymapImpl)keymap).isActionBound(id) || (parent != null && ((KeymapImpl)parent).isActionBound(id));
+    String result = ((KeymapImpl)keymap).getActionBinding(id);
+    if (result == null && parent != null) {
+      result = ((KeymapImpl)parent).getActionBinding(id);
+    }
+    return result;
   }
 
   private static void addEditorActions(final Condition<AnAction> filtered,
@@ -285,10 +310,6 @@ public class ActionsTreeUtil {
       else {
         String actionId = editorAction instanceof ActionStub ? ((ActionStub)editorAction).getId() : actionManager.getId(editorAction);
         if (actionId == null) continue;
-        if (actionId.startsWith(EDITOR_PREFIX)) {
-          AnAction action = actionManager.getActionOrStub('$' + actionId.substring(6));
-          if (action != null) continue;
-        }
         if (filtered == null || filtered.value(editorAction)) {
           ids.add(actionId);
         }
@@ -324,7 +345,7 @@ public class ActionsTreeUtil {
     for (QuickList quickList : quickLists) {
       if (filtered != null && filtered.value(ActionManagerEx.getInstanceEx().getAction(quickList.getActionId()))) {
         group.addQuickList(quickList);
-      } else if (SearchUtil.isComponentHighlighted(quickList.getDisplayName(), filter, forceFiltering, null)) {
+      } else if (SearchUtil.isComponentHighlighted(quickList.getName(), filter, forceFiltering, null)) {
         group.addQuickList(quickList);
       } else if (filtered == null && StringUtil.isEmpty(filter)) {
         group.addQuickList(quickList);
@@ -357,7 +378,8 @@ public class ActionsTreeUtil {
     final KeymapManagerEx keymapManager = KeymapManagerEx.getInstanceEx();
     String[] registeredActionIds = actionManager.getActionIds("");
     for (String id : registeredActionIds) {
-      if (actionManager.getActionOrStub(id)instanceof ActionGroup) {
+      final AnAction actionOrStub = actionManager.getActionOrStub(id);
+      if (actionOrStub instanceof ActionGroup && !((ActionGroup)actionOrStub).canBePerformed(DataManager.getInstance().getDataContext())) {
         continue;
       }
       if (id.startsWith(QuickList.QUICK_LIST_PREFIX) || addedActions.containsId(id) || result.contains(id)) {
@@ -485,26 +507,18 @@ public class ActionsTreeUtil {
         if (filter == null) return true;
         if (action == null) return false;
         final String insensitiveFilter = filter.toLowerCase();
-        final String text = action.getTemplatePresentation().getText();
-        if (text != null) {
-          final String lowerText = text.toLowerCase();
-          if (SearchUtil
-            .isComponentHighlighted(lowerText, insensitiveFilter, force, null)) {
-            return true;
-          }
-          else if (lowerText.contains(insensitiveFilter)) {
-            return true;
-          }
-        }
-        final String description = action.getTemplatePresentation().getDescription();
-        if (description != null) {
-          final String insensitiveDescription = description.toLowerCase();
-          if (SearchUtil
-            .isComponentHighlighted(insensitiveDescription, insensitiveFilter, force, null)) {
-            return true;
-          }
-          else if (insensitiveDescription.contains(insensitiveFilter)) {
-            return true;
+        for (String text : new String[]{action.getTemplatePresentation().getText(),
+                                        action.getTemplatePresentation().getDescription(),
+                                        action instanceof ActionStub ? ((ActionStub)action).getId() : ActionManager.getInstance().getId(action)}) {
+          if (text != null) {
+            final String lowerText = text.toLowerCase();
+
+            if (SearchUtil.isComponentHighlighted(lowerText, insensitiveFilter, force, null)) {
+              return true;
+            }
+            else if (lowerText.contains(insensitiveFilter)) {
+              return true;
+            }
           }
         }
         return false;
@@ -532,5 +546,14 @@ public class ActionsTreeUtil {
         return false;
       }
     };
+  }
+
+  public static Condition<AnAction> isActionFiltered(final ActionManager actionManager,
+                                                     final Keymap keymap,
+                                                     final KeyboardShortcut shortcut,
+                                                     final String filter,
+                                                     final boolean force) {
+    return filter != null && filter.length() > 0 ? isActionFiltered(filter, force) :
+           shortcut != null ? isActionFiltered(actionManager, keymap, shortcut) : null;
   }
 }

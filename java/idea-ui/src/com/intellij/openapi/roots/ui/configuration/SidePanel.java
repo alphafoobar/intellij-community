@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,20 @@ package com.intellij.openapi.roots.ui.configuration;
 
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.ui.popup.ListItemDescriptor;
-import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.navigation.History;
 import com.intellij.ui.navigation.Place;
 import com.intellij.ui.popup.list.GroupedItemsListRenderer;
+import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
@@ -52,7 +58,10 @@ public class SidePanel extends JPanel {
 
     myModel = new DefaultListModel();
     myList = new JBList(myModel);
-
+    if (Registry.is("ide.new.project.settings")) {
+      myList.setBackground(UIUtil.SIDE_PANEL_BACKGROUND);
+      myList.setBorder(new EmptyBorder(5, 0, 0, 0));
+    }
     final ListItemDescriptor descriptor = new ListItemDescriptor() {
       @Override
       public String getTextFor(final Object value) {
@@ -66,26 +75,97 @@ public class SidePanel extends JPanel {
 
       @Override
       public Icon getIconFor(final Object value) {
-        return null;
+        return Registry.is("ide.new.project.settings") ? EmptyIcon.create(16, 20) : null;
         //return myPlace2Presentation.get(value).getIcon();
       }
 
       @Override
       public boolean hasSeparatorAboveOf(final Object value) {
-        final int index = myPlaces.indexOf(value);
-        return myIndex2Separator.get(index) != null;
+        return getSeparatorAbove((Place)value) != null;
       }
 
       @Override
       public String getCaptionAboveOf(final Object value) {
-        return myIndex2Separator.get(myPlaces.indexOf(value));
+        return getSeparatorAbove((Place)value);
       }
     };
 
-    myList.setCellRenderer(new GroupedItemsListRenderer(descriptor));
+    myList.setCellRenderer(new GroupedItemsListRenderer(descriptor) {
+      JPanel myExtraPanel;
+      SidePanelCountLabel myCountLabel;
+      CellRendererPane myValidationParent = new CellRendererPane();
+      {
+        mySeparatorComponent.setCaptionCentered(false);
+        myList.add(myValidationParent);
+      }
 
+      @Override
+      protected Color getForeground() {
+        return Registry.is("ide.new.project.settings") ? new JBColor(Gray._60, Gray._140) : super.getForeground();
+      }
 
-    add(ScrollPaneFactory.createScrollPane(myList), BorderLayout.CENTER);
+      @Override
+      protected SeparatorWithText createSeparator() {
+        return new SidePanelSeparator();
+      }
+
+      @Override
+      protected void layout() {
+        if (Registry.is("ide.new.project.settings")) {
+          myRendererComponent.add(mySeparatorComponent, BorderLayout.NORTH);
+          myExtraPanel.add(myComponent, BorderLayout.CENTER);
+          myExtraPanel.add(myCountLabel, BorderLayout.EAST);
+          myRendererComponent.add(myExtraPanel, BorderLayout.CENTER);
+        } else {
+          super.layout();
+        }
+      }
+
+      @Override
+      public Component getListCellRendererComponent(JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+        layout();
+        myCountLabel.setText("");
+        final Component component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+        if ("Problems".equals(descriptor.getTextFor(value))) {
+          final ErrorPaneConfigurable errorPane = (ErrorPaneConfigurable)((Place)value).getPath("category");
+          int errorsCount;
+          if (errorPane != null && (errorsCount = errorPane.getErrorsCount()) > 0) {
+            myCountLabel.setSelected(isSelected);
+            myCountLabel.setText(errorsCount > 100 ? "100+" : String.valueOf(errorsCount));
+          }
+        }
+        if (UIUtil.getClientProperty(list, ExpandableItemsHandler.EXPANDED_RENDERER) == Boolean.TRUE) {
+          Rectangle bounds = list.getCellBounds(index, index);
+          bounds.setSize((int)component.getPreferredSize().getWidth(), (int)bounds.getHeight());
+          AbstractExpandableItemsHandler.setRelativeBounds(component, bounds, myExtraPanel, myValidationParent);
+          myExtraPanel.setSize((int)myExtraPanel.getPreferredSize().getWidth(), myExtraPanel.getHeight());
+          UIUtil.putClientProperty(myExtraPanel, ExpandableItemsHandler.USE_RENDERER_BOUNDS, true);
+          return myExtraPanel;
+        }
+        return component;
+      }
+
+      @Override
+      protected JComponent createItemComponent() {
+        myExtraPanel = new NonOpaquePanel(new BorderLayout());
+        myCountLabel = new SidePanelCountLabel();
+        final JComponent component = super.createItemComponent();
+
+        if (Registry.is("ide.new.project.settings")) {
+          myTextLabel.setForeground(Gray._240);
+          myTextLabel.setOpaque(true);
+        }
+
+        return component;
+      }
+
+      @Override
+      protected Color getBackground() {
+        return Registry.is("ide.new.project.settings") ? UIUtil.SIDE_PANEL_BACKGROUND : super.getBackground();
+      }
+    });
+
+    add(ScrollPaneFactory.createScrollPane(myList, Registry.is("ide.new.project.settings")), BorderLayout.CENTER);
     myList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
     myList.addListSelectionListener(new ListSelectionListener() {
@@ -100,6 +180,10 @@ public class SidePanel extends JPanel {
     });
   }
 
+  public JList getList() {
+    return myList;
+  }
+
   public void addPlace(Place place, @NotNull Presentation presentation) {
     myModel.addElement(place);
     myPlaces.add(place);
@@ -108,8 +192,25 @@ public class SidePanel extends JPanel {
     repaint();
   }
 
+  public void clear() {
+    myModel.clear();
+    myPlaces.clear();
+    myPlace2Presentation.clear();
+    myIndex2Separator.clear();
+  }
+
+  public void updatePlace(Place place) {
+    int index = myPlaces.indexOf(place);
+    myModel.set(index, place);
+  }
+
   public void addSeparator(String text) {
     myIndex2Separator.put(myPlaces.size(), text);
+  }
+
+  @Nullable
+  public String getSeparatorAbove(final Place place) {
+    return myIndex2Separator.get(myPlaces.indexOf(place));
   }
 
   public Collection<Place> getPlaces() {
@@ -119,4 +220,5 @@ public class SidePanel extends JPanel {
   public void select(final Place place) {
     myList.setSelectedValue(place, true);
   }
+
 }

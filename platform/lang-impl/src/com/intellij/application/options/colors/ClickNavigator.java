@@ -1,6 +1,5 @@
 /*
-/*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +24,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.HighlighterColors;
 import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
+import com.intellij.openapi.editor.event.CaretAdapter;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -32,7 +32,7 @@ import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
 import com.intellij.openapi.fileTypes.SyntaxHighlighter;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.ui.ListScrollingUtil;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.annotations.JdkConstants;
 
@@ -56,7 +56,7 @@ public class ClickNavigator {
       }
     });
 
-    CaretListener listener = new CaretListener() {
+    CaretListener listener = new CaretAdapter() {
       @Override
       public void caretPositionChanged(CaretEvent e) {
         setSelectedItem(HighlighterColors.TEXT.getExternalName(), true);
@@ -73,7 +73,7 @@ public class ClickNavigator {
       if (o instanceof EditorSchemeAttributeDescriptor) {
         if (type.equals(((EditorSchemeAttributeDescriptor)o).getType())) {
           if (select) {
-            ListScrollingUtil.selectItem(myOptionsList, i);
+            ScrollingUtil.selectItem(myOptionsList, i);
           }
           return true;
         }
@@ -98,7 +98,7 @@ public class ClickNavigator {
                                 final boolean isBackgroundImportant) {
     addMouseMotionListener(view, highlighter, data, isBackgroundImportant);
 
-    CaretListener listener = new CaretListener() {
+    CaretListener listener = new CaretAdapter() {
       @Override
       public void caretPositionChanged(CaretEvent e) {
         navigate(view, true, e.getNewPosition(), highlighter, data, isBackgroundImportant);

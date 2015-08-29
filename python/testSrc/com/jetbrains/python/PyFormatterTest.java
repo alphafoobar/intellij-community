@@ -15,16 +15,17 @@
  */
 package com.jetbrains.python;
 
+import com.intellij.formatting.WrapType;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.codeStyle.CodeStyleSettings;
-import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.formatter.PyCodeStyleSettings;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyElementGenerator;
+import com.jetbrains.python.psi.PyStatement;
 import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
 
 /**
@@ -36,7 +37,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testBlankLineAroundClasses() {
-    CodeStyleSettingsManager.getSettings(myFixture.getProject()).BLANK_LINES_AROUND_CLASS = 2;
+    getCommonCodeStyleSettings().BLANK_LINES_AROUND_CLASS = 2;
     doTest();
   }
 
@@ -61,6 +62,11 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testBlankLineAfterImports() {
+    doTest();
+  }
+
+  // PY-15701
+  public void testNoBlankLinesAfterLocalImports() {
     doTest();
   }
 
@@ -118,11 +124,25 @@ public class PyFormatterTest extends PyTestCase {
     doTest();
   }
 
+  public void testCommentInEmptyTuple() { //PY-11904
+    doTest();
+  }
+
   public void testTwoLinesBetweenTopLevelClasses() { // PY-2765
     doTest();
   }
 
   public void testTwoLinesBetweenTopLevelFunctions() { // PY-2765
+    doTest();
+  }
+
+  // PY-9923
+  public void testTwoLinesBetweenTopLevelDeclarationsWithComment() { // PY-9923
+    doTest();
+  }
+
+  // PY-9923
+  public void testTwoLinesBetweenTopLevelStatementAndDeclarationsWithComment() {
     doTest();
   }
 
@@ -139,17 +159,17 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSpaceInMethodDeclaration() {  // PY-4241
-    settings().SPACE_BEFORE_METHOD_PARENTHESES = true;
+    getCommonCodeStyleSettings().SPACE_BEFORE_METHOD_PARENTHESES = true;
     doTest();
   }
 
   public void testOptionalAlignForMethodParameters() {  // PY-3995
-    settings().ALIGN_MULTILINE_PARAMETERS = false;
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS = false;
     doTest();
   }
 
   public void testNoAlignForMethodArguments() {  // PY-3995
-    settings().getCommonSettings(PythonLanguage.getInstance()).ALIGN_MULTILINE_PARAMETERS_IN_CALLS = false;
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = false;
     doTest();
   }
 
@@ -174,7 +194,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSetLiteralInArgList() {  // PY-6672
-    settings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     doTest();
   }
 
@@ -183,7 +203,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testTupleInArgList() {
-    settings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     doTest();
   }
 
@@ -196,6 +216,14 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testContinuationIndent() {
+    doTest();
+  }
+
+  public void testContinuationIndentInIndentingStatement() { // PY-9573
+    doTest();
+  }
+
+  public void testContinuationIndentInIndentingStatement2() { // PY-11868
     doTest();
   }
 
@@ -216,7 +244,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSpaceWithinBraces() {  // PY-8069
-    settings().getCustomSettings(PyCodeStyleSettings.class).SPACE_WITHIN_BRACES = true;
+    getPythonCodeStyleSettings().SPACE_WITHIN_BRACES = true;
     doTest();
   }
 
@@ -235,7 +263,7 @@ public class PyFormatterTest extends PyTestCase {
       " desired_response_parameters,\n" +
       " inverse_filter_length, \n" +
       " observed_impulse_response):\n" +
-      " #  Extract from here to ...\n" +
+      " # Extract from here to ...\n" +
       "   desired_impulse_response = {'dirac, 'gaussian', logistic_derivative'}\n" +
       "return desired,                o";
 
@@ -248,7 +276,7 @@ public class PyFormatterTest extends PyTestCase {
       "        desired_response_parameters,\n" +
       "        inverse_filter_length,\n" +
       "        observed_impulse_response):\n" +
-      "    #  Extract from here to ...\n" +
+      "    # Extract from here to ...\n" +
       "    desired_impulse_response = {'dirac, '\n" +
       "    gaussian\n" +
       "    ', logistic_derivative'}\n" +
@@ -257,29 +285,37 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testWrapDefinitionWithLongLine() { // IDEA-92081
-    settings().RIGHT_MARGIN = 30;
-    settings().WRAP_LONG_LINES = true;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 30);
+    getCommonCodeStyleSettings().WRAP_LONG_LINES = true;
     doTest();
   }
 
   public void testWrapAssignment() {  // PY-8572
-    settings().RIGHT_MARGIN = 120;
-    settings().WRAP_LONG_LINES = false;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 120);
+    getCommonCodeStyleSettings().WRAP_LONG_LINES = false;
     doTest();
   }
 
   public void testIndentInSlice() {  // PY-8572
-    settings().RIGHT_MARGIN = 120;
-    settings().WRAP_LONG_LINES = false;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 120);
+    getCommonCodeStyleSettings().WRAP_LONG_LINES = false;
     doTest();
   }
 
   public void testIndentInComprehensions() {  // PY-8516
-    settings().getCustomSettings(PyCodeStyleSettings.class).ALIGN_COLLECTIONS_AND_COMPREHENSIONS = false;
+    getPythonCodeStyleSettings().ALIGN_COLLECTIONS_AND_COMPREHENSIONS = false;
     doTest();
   }
 
   public void testAlignInGenerators() {  // PY-8822
+    doTest();
+  }
+
+  public void testAlignInCallExpression() {
+    doTest();
+  }
+
+  public void _testAlignInNestedCallInWith() { //PY-11337 TODO:
     doTest();
   }
 
@@ -291,7 +327,7 @@ public class PyFormatterTest extends PyTestCase {
     doTest();
   }
 
-  public void _testIndentInNestedCall() {  // PY-8195
+  public void _testIndentInNestedCall() {  // PY-11919 TODO: required changes in formatter to be able to make indent relative to block or alignment
     doTest();
   }
 
@@ -300,12 +336,12 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSpaceBeforeBackslash() {
-    settings().getCustomSettings(PyCodeStyleSettings.class).SPACE_BEFORE_BACKSLASH = false;
+    getPythonCodeStyleSettings().SPACE_BEFORE_BACKSLASH = false;
     doTest();
   }
 
   public void testNewLineAfterColon() {
-    settings().getCustomSettings(PyCodeStyleSettings.class).NEW_LINE_AFTER_COLON = true;
+    getPythonCodeStyleSettings().NEW_LINE_AFTER_COLON = true;
     doTest();
   }
 
@@ -323,17 +359,23 @@ public class PyFormatterTest extends PyTestCase {
     }
   }
 
-  public void testSpaceInAnnotations() {  // PY-8961
+  // PY-8961, PY-16050
+  public void testSpaceInAnnotations() {
+    doTestPy3();
+  }
+
+  // PY-15791
+  public void testForceSpacesAroundEqualSignInAnnotatedParameter() {
     doTestPy3();
   }
 
   public void testWrapInBinaryExpression() {  // PY-9032
-    settings().RIGHT_MARGIN = 80;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 80);
     doTest(true);
   }
 
   public void testSpaceWithinDeclarationParentheses() {  // PY-8818
-    settings().SPACE_WITHIN_METHOD_PARENTHESES = true;
+    getCommonCodeStyleSettings().SPACE_WITHIN_METHOD_PARENTHESES = true;
     doTest();
   }
 
@@ -346,7 +388,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testWrapImports() {  // PY-9163
-    settings().RIGHT_MARGIN = 80;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 80);
     doTest();
   }
 
@@ -355,6 +397,26 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testWrapOnDot() {  // PY-6359
+    doTest();
+  }
+
+  public void testIndentParensInImport() { // PY-9075
+    doTest();
+  }
+
+  public void testAlignInParenthesizedExpression() {
+    doTest();
+  }
+
+  public void testAlignInParameterList() {
+    doTest();
+  }
+
+  public void testAlignListComprehensionInDict() { //PY-10076
+    doTest();
+  }
+
+  public void testParenthesisAroundGeneratorExpression() {
     doTest();
   }
 
@@ -380,7 +442,210 @@ public class PyFormatterTest extends PyTestCase {
     myFixture.checkResultByFile("formatter/" + getTestName(true) + "_after.py");
   }
 
-  private CodeStyleSettings settings() {
-    return CodeStyleSettingsManager.getInstance().getSettings(myFixture.getProject());
+  // PY-12861
+  public void testSpacesInsideParenthesisAreStripped() {
+    doTest();
+  }
+
+  // PY-14838
+  public void testNoAlignmentAfterDictHangingIndentInFunctionCall() {
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    doTest();
+  }
+
+  // PY-13955
+  public void testNoAlignmentAfterDictHangingIndentInFunctionCallOnTyping() {
+    getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    final String testName = "formatter/" + getTestName(true);
+    myFixture.configureByFile(testName + ".py");
+    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
+      @Override
+      public void run() {
+        myFixture.type("\n(");
+      }
+    });
+    myFixture.checkResultByFile(testName + "_after.py");
+  }
+
+  // PY-12145
+  public void testAlignmentOfClosingBraceInDictLiteralWhenNoHangingIndent() {
+    doTest();
+  }
+
+  // PY-13004
+  public void testAlignmentOfClosingParenthesisOfArgumentListWhenNoHangingIndent() {
+    doTest();
+  }
+
+  // PY-14408
+  public void testIndentsWithTabsInsideDictLiteral() {
+    getCommonCodeStyleSettings().getIndentOptions().USE_TAB_CHARACTER = true;
+    doTest();
+  }
+
+  // PY-12749
+  public void testContinuationIndentIsNotUsedForNestedFunctionCallsInWithStatement() {
+    doTest();
+  }
+
+  public void testAlignmentOfClosingParenthesisInNestedFunctionCallsWithSingleArgument() {
+    doTest();
+  }
+
+  // PY-12748
+  public void testIndentCommentariesInsideFromImportStatement() {
+    doTest();
+  }
+
+  public void testClosingParenthesisInFromImportStatementWithNoHangingIndent() {
+    doTest();
+  }
+
+  // PY-12932
+  public void testCommentedCodeFragmentIgnored() {
+    doTest();
+  }
+
+  // PY-12932
+  public void testTrailingComment() {
+    doTest();
+  }
+
+  // PY-12938
+  public void testDoubleHashCommentIgnored() {
+    doTest();
+  }
+
+  // PY-12938
+  public void testDocCommentIgnored() {
+    doTest();
+  }
+
+  // PY-12775
+  public void testShebangCommentIgnored() {
+    doTest();
+  }
+
+  // PY-13232
+  public void testWhitespaceInsertedAfterHashSignInMultilineComment() {
+    doTest();
+  }
+
+  /**
+   * This test merely checks that call to {@link com.intellij.psi.codeStyle.CodeStyleManager#reformat(com.intellij.psi.PsiElement)}
+   * is possible for Python sources.
+   */
+  public void testReformatOfSingleElementPossible() {
+    myFixture.configureByFile("formatter/" + getTestName(true) + ".py");
+    WriteCommandAction.runWriteCommandAction(myFixture.getProject(), new Runnable() {
+      @Override
+      public void run() {
+        final PsiElement elementAtCaret = myFixture.getFile().findElementAt(myFixture.getCaretOffset());
+        assertNotNull(elementAtCaret);
+        final PyStatement statement = PsiTreeUtil.getParentOfType(elementAtCaret, PyStatement.class, false);
+        assertNotNull(statement);
+        final CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myFixture.getProject());
+        codeStyleManager.reformat(statement);
+      }
+    });
+    myFixture.checkResultByFile("formatter/" + getTestName(true) + "_after.py");
+  }
+
+  // PY-11552
+  public void testExtraBlankLinesBetweenMethodsAndAtTheEnd() {
+    getCommonCodeStyleSettings().KEEP_BLANK_LINES_IN_DECLARATIONS = 1;
+    doTest();
+  }
+
+  // PY-11552
+  public void testTrailingBlankLinesWithBackslashesAtFileEnd() {
+    doTest();
+  }
+
+  // PY-11552
+  public void testTrailingBlankLinesWithBackslashesAtFunctionEnd() {
+    doTest();
+  }
+
+  // PY-11552
+  public void testTrailingBlankLinesWithBackslashesAtFunctionEndNoNewLine() {
+    doTest();
+  }
+
+  // PY-11552
+  public void testTrailingBlankLinesWithBackslashesMixed() {
+    doTest();
+  }
+
+  // PY-11552
+  public void testTrailingBlankLinesInEmptyFile() {
+    doTest();
+  }
+
+  // PY-14962
+  public void testAlignDictLiteralOnValue() {
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_VALUE;
+    doTest();
+  }
+
+  // PY-14962
+  public void testAlignDictLiteralOnColon() {
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
+    doTest();
+  }
+
+  // PY-14962
+  public void testDictWrappingChopDownIfLong() {
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 80);
+    getPythonCodeStyleSettings().DICT_WRAPPING = WrapType.CHOP_DOWN_IF_LONG.getLegacyRepresentation();
+    doTest();
+  }
+
+  // PY-14962
+  public void testForceNewLineAfterLeftBraceInDict() {
+    getPythonCodeStyleSettings().DICT_NEW_LINE_AFTER_LEFT_BRACE = true;
+    doTest();
+  }
+
+  // PY-14962
+  public void testForceNewLineBeforeRightBraceInDict() {
+    getPythonCodeStyleSettings().DICT_NEW_LINE_BEFORE_RIGHT_BRACE = true;
+    doTest();
+  }
+
+  // PY-16393
+  public void testHangingIndentDetectionIgnoresComments() {
+    doTest();
+  }
+  
+  // PY-15530
+  public void testAlignmentInArgumentListWhereFirstArgumentIsEmptyCall() {
+    doTest();
+  }
+
+  public void testAlignmentInListLiteralWhereFirstItemIsEmptyTuple() {
+    doTest();
+  }
+
+  public void testHangingIndentInNamedArgumentValue() {
+    doTest();
+  }
+
+  public void testHangingIndentInParameterDefaultValue() {
+    doTest();
+  }
+
+  // PY-15171
+  public void testHangingIndentInKeyValuePair() {
+    doTest();
+  }
+
+  public void testDoNotDestroyAlignment_OnPostponedFormatting() throws Exception {
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
+    doTest();
+  }
+
+  public void testAlignmentOfEmptyCollectionLiterals() {
+    doTest();
   }
 }

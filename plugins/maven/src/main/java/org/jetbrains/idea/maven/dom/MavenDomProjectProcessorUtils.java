@@ -182,13 +182,11 @@ public class MavenDomProjectProcessorUtils {
     final Set<MavenDomDependency> usages = new HashSet<MavenDomDependency>();
     Processor<MavenDomProjectModel> collectProcessor = new Processor<MavenDomProjectModel>() {
       public boolean process(MavenDomProjectModel mavenDomProjectModel) {
-        if (!model.equals(mavenDomProjectModel)) {
-          for (MavenDomDependency domDependency : mavenDomProjectModel.getDependencies().getDependencies()) {
-            if (excludes.contains(domDependency)) continue;
+        for (MavenDomDependency domDependency : mavenDomProjectModel.getDependencies().getDependencies()) {
+          if (excludes.contains(domDependency)) continue;
 
-            if (dependencyId.equals(DependencyConflictId.create(domDependency))) {
-              usages.add(domDependency);
-            }
+          if (dependencyId.equals(DependencyConflictId.create(domDependency))) {
+            usages.add(domDependency);
           }
         }
         return false;
@@ -516,11 +514,12 @@ public class MavenDomProjectProcessorUtils {
                                              MavenProject mavenProjectOrNull,
                                              Processor<T> processor,
                                              Function<? super MavenDomProfile, T> f) {
-    Collection<String> activePropfiles = mavenProjectOrNull == null ? null : mavenProjectOrNull.getActivatedProfilesIds();
+    Collection<String> activeProfiles =
+      mavenProjectOrNull == null ? null : mavenProjectOrNull.getActivatedProfilesIds().getEnabledProfiles();
     for (MavenDomProfile each : profilesDom.getProfiles()) {
       XmlTag idTag = each.getId().getXmlTag();
       if (idTag == null) continue;
-      if (activePropfiles != null && !activePropfiles.contains(idTag.getValue().getTrimmedText())) continue;
+      if (activeProfiles != null && !activeProfiles.contains(idTag.getValue().getTrimmedText())) continue;
 
       if (processProfile(each, processor, f)) return true;
     }

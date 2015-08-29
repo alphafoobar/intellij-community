@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,13 @@ import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.codeInsight.lookup.impl.LookupImpl
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.actionSystem.IdeActions
-import com.intellij.openapi.editor.LogicalPosition
+import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings
+import com.intellij.psi.impl.PsiDocumentManagerBase
+import com.siyeh.ig.style.UnqualifiedFieldAccessInspection
 
 public class NormalCompletionTest extends LightFixtureCompletionTestCase {
   @Override
@@ -389,7 +391,7 @@ public class NormalCompletionTest extends LightFixtureCompletionTestCase {
    checkResult()
   }
 
-  public void testFieldType() throws Throwable { doTest('\n'); }
+  public void testFieldType() { doTest(); }
 
   public void testPackageInAnnoParam() throws Throwable {
     doTest();
@@ -459,7 +461,7 @@ public class NormalCompletionTest extends LightFixtureCompletionTestCase {
   }
 
   public void testAtUnderClass() throws Throwable {
-    doTest();
+    doTest('\n');
   }
 
   public void testLocalClassName() throws Throwable { doTest(); }
@@ -675,6 +677,9 @@ public class ListUtils {
   }
 
   public void testNothingAfterNumericLiteral() throws Throwable { doAntiTest(); }
+  public void testNothingAfterTypeParameterQualifier() { doAntiTest(); }
+  public void testExcludeVariableBeingDeclared() { doAntiTest(); }
+  public void testExcludeVariableBeingDeclared2() { doAntiTest(); }
 
   public void testSpacesAroundEq() throws Throwable { doTest('='); }
 
@@ -755,10 +760,19 @@ public class ListUtils {
     assertStringItems("bar", "foo");
   }
 
+  public void testAddExplicitValueInAnnotation() throws Throwable {
+    configureByTestName()
+    assertStringItems("bar", "goo")
+    selectItem(myItems[0])
+    checkResult()
+  }
+
   public void testUnnecessaryMethodMerging() throws Throwable {
     configureByFile(getTestName(false) + ".java");
     assertStringItems("fofoo", "fofoo");
   }
+
+  public void testMethodMergingMinimalTail() { doTest() }
 
   public void testAnnotationQualifiedName() throws Throwable {
     doTest();
@@ -784,7 +798,7 @@ public class ListUtils {
 
   public void testDoubleFalse() throws Throwable {
     configureByFile(getTestName(false) + ".java");
-    assertFirstStringItems("false", "fefefef", "float", "finalize");
+    assertFirstStringItems("fefefef", "false", "float", "finalize");
   }
 
   public void testSameNamedVariableInNestedClasses() throws Throwable {
@@ -833,6 +847,11 @@ public class ListUtils {
     assertStringItems 'Inner'
   }
 
+  public void testNoThisClassInExtends() throws Throwable {
+    configure()
+    assertStringItems 'Fooxxxx2'
+  }
+
   public void testPrimitiveTypesInForLoop() throws Throwable { doPrimitiveTypeTest() }
   public void testPrimitiveTypesInForLoop2() throws Throwable { doPrimitiveTypeTest() }
   public void testPrimitiveTypesInForLoop3() throws Throwable { doPrimitiveTypeTest() }
@@ -866,6 +885,7 @@ public class ListUtils {
   public void testProtectedInaccessibleOnSecondInvocation() throws Throwable {
     myFixture.configureByFile(getTestName(false) + ".java");
     myFixture.complete(CompletionType.BASIC, 2);
+    myFixture.type('\n')
     checkResult()
   }
 
@@ -885,7 +905,7 @@ public class ListUtils {
     checkResult();
   }
 
-  public void testSecondAnonymousClassParameter() throws Throwable { doTest('\n'); }
+  public void testSecondAnonymousClassParameter() { doTest(); }
 
   public void testSpaceAfterReturn() throws Throwable {
     configure()
@@ -912,8 +932,14 @@ public class ListUtils {
   }
 
   public void testSmartEnterWrapsConstructorCall() throws Throwable { doTest(Lookup.COMPLETE_STATEMENT_SELECT_CHAR as String) }
+  public void testSmartEnterNoNewLine() { doTest(Lookup.COMPLETE_STATEMENT_SELECT_CHAR as String) }
+  public void testSmartEnterWithNewLine() { doTest(Lookup.COMPLETE_STATEMENT_SELECT_CHAR as String) }
+  public void testSmartEnterGuessArgumentCount() throws Throwable { doTest(Lookup.COMPLETE_STATEMENT_SELECT_CHAR as String) }
+  public void testSmartEnterInsideArrayBrackets() { doTest(Lookup.COMPLETE_STATEMENT_SELECT_CHAR as String) }
+
   public void testTabReplacesMethodNameWithLocalVariableName() throws Throwable { doTest('\t'); }
   public void testMethodParameterAnnotationClass() throws Throwable { doTest(); }
+  public void testInnerAnnotation() { doTest('\n'); }
   public void testPrimitiveCastOverwrite() throws Throwable { doTest '\t' }
   public void testClassReferenceInFor() throws Throwable { doTest ' ' }
   public void testClassReferenceInFor2() throws Throwable { doTest ' ' }
@@ -929,6 +955,13 @@ public class ListUtils {
   public void testNewExpectedClassParens() throws Throwable { doTest('\n'); }
 
   public void testQualifyInnerMembers() throws Throwable { doTest('\n') }
+
+  public void testDeepInner() throws Throwable {
+    configure()
+    assert myFixture.lookupElementStrings == ['ClassInner1', 'ClassInner1.ClassInner2']
+    selectItem(lookup.items[1])
+    checkResult()
+  }
 
   public void testSuggestExpectedTypeMembers() throws Throwable { doTest('\n') }
   public void testSuggestExpectedTypeMembersInCall() throws Throwable { doTest('\n') }
@@ -972,6 +1005,7 @@ public class ListUtils {
 
   public void testOnlyAnnotationsAfterAt() throws Throwable { doTest() }
   public void testOnlyAnnotationsAfterAt2() throws Throwable { doTest('\n') }
+  public void testAnnotationBeforeIdentifier() { doTest('\n') }
 
   public void testOnlyExceptionsInCatch1() throws Exception { doTest('\n') }
   public void testOnlyExceptionsInCatch2() throws Exception { doTest('\n') }
@@ -1046,6 +1080,7 @@ public class ListUtils {
 
   public void testKeywordSmartEnter() {
     configure()
+    myFixture.assertPreferredCompletionItems 0, 'null', 'nullity'
     myFixture.performEditorAction(IdeActions.ACTION_CHOOSE_LOOKUP_ITEM_COMPLETE_STATEMENT)
     checkResult()
   }
@@ -1072,24 +1107,17 @@ public class ListUtils {
   }
 
   public void testSuggestMembersOfStaticallyImportedClassesUnqualifiedOnly() throws Exception {
-    def old = CodeInsightSettings.instance.SHOW_STATIC_AFTER_INSTANCE
-    CodeInsightSettings.instance.SHOW_STATIC_AFTER_INSTANCE = true
-
-    try {
-      myFixture.addClass("""package foo;
-      public class Foo {
-        public static void foo() {}
-        public static void bar() {}
-      }
-      """)
-      configure()
-      assertOneElement(myFixture.getLookupElements())
-      myFixture.type '\t'
-      checkResult()
+    myFixture.addClass("""package foo;
+    public class Foo {
+      public static void foo() {}
+      public static void bar() {}
     }
-    finally {
-      CodeInsightSettings.instance.SHOW_STATIC_AFTER_INSTANCE = old
-    }
+    """)
+    configure()
+    complete()
+    assertOneElement(myFixture.getLookupElements())
+    myFixture.type '\t'
+    checkResult()
   }
 
   public void testInstanceMagicMethod() throws Exception { doTest() }
@@ -1127,6 +1155,12 @@ class XInternalError {}
     assertFirstStringItems "XInternalError", "XInternalTimerServiceController"
   }
 
+  public void testMetaAnnotation() {
+    myFixture.configureByText "a.java", "@<caret> @interface Anno {}"
+    myFixture.complete(CompletionType.BASIC)
+    assert myFixture.lookup.items.find { it.lookupString == 'Retention' }
+  }
+
   public void testAnnotationClassFromWithinAnnotation() { doTest() }
 
   public void testStaticallyImportedFieldsTwice() {
@@ -1143,6 +1177,7 @@ class XInternalError {}
     """)
     assertOneElement myFixture.completeBasic()
   }
+  public void testStaticallyImportedFieldsTwiceSwitch() { doTest() }
 
   public void testStatementKeywords() {
     myFixture.configureByText("a.java", """
@@ -1200,6 +1235,12 @@ class XInternalError {}
 
   public void testConstantInAnno() { doTest() }
 
+  public void testCharsetName() {
+    myFixture.addClass("package java.nio.charset; public class Charset { public static Charset forName(String s) {} }")
+    configureByTestName()
+    assert myFixture.lookupElementStrings.contains('UTF-8')
+  }
+
   public void testInnerClassInExtendsGenerics() {
     def text = "package bar; class Foo extends List<Inne<caret>> { public static class Inner {} }"
     myFixture.configureFromExistingVirtualFile(myFixture.addClass(text).containingFile.virtualFile)
@@ -1231,7 +1272,13 @@ class XInternalError {}
     configure()
     def items = myFixture.lookupElements.findAll { it.lookupString == 'String' }
     assert items.size() == 1
-    assert LookupElementPresentation.renderElement(items[0]).tailText?.contains('java.lang')
+    assert LookupElementPresentation.renderElement(items[0]).tailText == ' (java.lang)'
+  }
+
+  public void testDuplicateInnerClass() {
+    configure()
+    def items = myFixture.lookupElements.findAll { it.lookupString == 'Inner' }
+    assert items.size() == 1
   }
 
   public void testSameSignature() {
@@ -1274,9 +1321,18 @@ class XInternalError {}
     lookup.currentItem = lookup.items[1]
     type '\n'
     checkResult()
-
   }
 
+  public void testMakeMultipleArgumentsFinalWhenInInner() {
+    configure()
+    def item = lookup.items.find { 'a, b' == it.lookupString }
+    assert item
+    lookup.currentItem = item
+    type '\n'
+    checkResult()
+  }
+
+  public void testNoFinalInAnonymousConstructor() { doTest() }
   public void testListArrayListCast() { doTest('\n') }
   public void testInterfaceImplementationNoCast() { doTest() }
   public void testStaticallyImportedMethodsBeforeExpression() { doTest() }
@@ -1309,6 +1365,14 @@ class XInternalError {}
     assert p.typeText == 'Foo'
 
     lookup.currentItem = item
+    myFixture.type('\n')
+    checkResult()
+  }
+
+  public void testImplementViaOverrideCompletion() {
+    configure()
+    myFixture.assertPreferredCompletionItems 0, 'Override', 'public void run'
+    lookup.currentItem = lookup.items[1]
     myFixture.type('\n')
     checkResult()
   }
@@ -1346,22 +1410,30 @@ class XInternalError {}
     doTest('\n')
   }
 
-  public void "test block selection from bottom to top with single-item insertion"() {
-    myFixture.configureByText "a.java", """
-class Foo {{
-  ret<caret>;
-  ret;
-}}"""
-    edt {
-      def caret = myFixture.editor.offsetToLogicalPosition(myFixture.editor.caretModel.offset)
-      myFixture.editor.selectionModel.setBlockSelection(new LogicalPosition(caret.line + 1, caret.column), caret)
-    }
-    myFixture.completeBasic()
-    myFixture.checkResult '''
-class Foo {{
-  return<caret>;
-  return;
-}}'''
+  public void testMulticaretSingleItemInsertion() {
+    doTest()
+  }
+
+  public void testMulticaretMethodWithParen() {
+    doTest()
+  }
+
+  public void testMulticaretTyping() {
+    configure()
+    assert lookup
+    type('p')
+    assert lookup
+    type('\n')
+    checkResult()
+  }
+
+  public void testMulticaretCompletionFromNonPrimaryCaret() {
+    configure()
+    myFixture.assertPreferredCompletionItems(0, "arraycopy")
+  }
+
+  public void testMulticaretCompletionFromNonPrimaryCaretWithTab() {
+    doTest '\t'
   }
 
   public void "test complete lowercase class name"() {
@@ -1369,8 +1441,7 @@ class Foo {{
     myFixture.configureByText "a.java", """
 class Foo extends my<caret>
 """
-    myFixture.completeBasic()
-    myFixture.type('\n')
+    myFixture.complete(CompletionType.BASIC, 2)
     myFixture.checkResult '''import foo.myClass;
 
 class Foo extends myClass
@@ -1404,4 +1475,69 @@ class Bar {
 
   public void testNoMathTargetMethods() { doAntiTest() }
 
+  public void testNoLowercaseClasses() {
+    myFixture.addClass("package foo; public class abcdefgXxx {}")
+    doAntiTest()
+    myFixture.complete(CompletionType.BASIC, 2)
+    assertStringItems('abcdefgXxx')
+  }
+
+  public void testProtectedFieldInAnotherPackage() {
+    myFixture.addClass("package foo; public class Super { protected String myString; }");
+    doTest()
+  }
+
+  public void testUnimportedStaticInnerClass() {
+    myFixture.addClass("package foo; public class Super { public static class Inner {} }");
+    doTest()
+  }
+
+  public void testNoJavaLangPackagesInImport() { doAntiTest() }
+
+  public void testNoStaticDuplicatesFromExpectedMemberFactories() {
+    configure()
+    myFixture.complete(CompletionType.BASIC, 2)
+    myFixture.assertPreferredCompletionItems(0, "xcreateZoo", "xcreateElephant");
+  }
+
+  public void testNoInaccessibleCompiledElements() {
+    configure()
+    myFixture.complete(CompletionType.BASIC, 2)
+    checkResultByFile(getTestName(false) + ".java");
+    assertEmpty(myItems);
+    assertNull(getLookup());
+  }
+
+  public void "test code cleanup during completion generation"() {
+    myFixture.configureByText "a.java", "class Foo {int i; ge<caret>}"
+    myFixture.enableInspections(new UnqualifiedFieldAccessInspection())
+    myFixture.complete(CompletionType.BASIC)
+    myFixture.checkResult '''class Foo {int i;
+
+    public int getI() {
+        return this.i;
+    }
+}'''
+  }
+  
+  public void testIndentingForSwitchCase() { doTest() }
+
+  public void testIncrementalCopyReparse() {
+    ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(project)).disableBackgroundCommit(testRootDisposable)
+    
+    myFixture.configureByText('a.java', 'class Fooxxxxxxxxxx { Fooxxxxx<caret>a f;\n' + 'public void foo() {}\n' * 10000 + '}')
+    def items = myFixture.completeBasic()
+    PsiClass c1 = items[0].object
+    assert !c1.physical
+    assert CompletionUtil.getOriginalElement(c1)
+    
+    getLookup().hide()
+    myFixture.type('x')
+    items = myFixture.completeBasic()
+    PsiClass c2 = items[0].object
+    assert !c2.physical
+    assert CompletionUtil.getOriginalElement(c2)
+
+    assert c1.is(c2)
+  }
 }

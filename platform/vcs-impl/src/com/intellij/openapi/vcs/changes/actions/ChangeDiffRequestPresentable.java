@@ -16,6 +16,7 @@
 package com.intellij.openapi.vcs.changes.actions;
 
 import com.intellij.CommonBundle;
+import com.intellij.diff.FileAwareSimpleContent;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.DiffContent;
@@ -150,8 +151,9 @@ public class ChangeDiffRequestPresentable implements DiffRequestPresentable {
       final VirtualFile vFile = current.getVirtualFile();
       return vFile != null ? new FileContent(myProject, vFile) : new SimpleContent("");
     }
+    FilePath filePath = revision.getFile();
     if (revision instanceof BinaryContentRevision) {
-      final String name = revision.getFile().getName();
+      final String name = filePath.getName();
       try {
         return FileContent.createFromTempFile(myProject, name, name, ((BinaryContentRevision)revision).getBinaryContent());
       }
@@ -188,8 +190,8 @@ public class ChangeDiffRequestPresentable implements DiffRequestPresentable {
     }
     SimpleContent content = revisionContent == null
                             ? new SimpleContent("")
-                            : new SimpleContent(revisionContent, revision.getFile().getFileType());
-    VirtualFile vFile = revision.getFile().getVirtualFile();
+                            : new FileAwareSimpleContent(myProject, filePath, revisionContent, filePath.getFileType());
+    VirtualFile vFile = filePath.getVirtualFile();
     if (vFile != null) {
       content.setCharset(vFile.getCharset());
       content.setBOM(vFile.getBOM());
@@ -222,7 +224,7 @@ public class ChangeDiffRequestPresentable implements DiffRequestPresentable {
     final FileType type = rev.getFile().getFileType();
     if (! type.isBinary()) return true;
     if (FileTypes.UNKNOWN.equals(type)) {
-      final boolean associatedToText = checkAssociate(myProject, rev.getFile(), context);
+      final boolean associatedToText = checkAssociate(myProject, rev.getFile().getName(), context);
     }
     return true;
   }
@@ -245,20 +247,25 @@ public class ChangeDiffRequestPresentable implements DiffRequestPresentable {
 
   private static boolean checkContentsAvailable(@Nullable final ContentRevision bRev, @Nullable final ContentRevision aRev, final List<String> errSb) {
     if (hasContents(bRev, errSb)) return true;
-    return hasContents(aRev, errSb);
+    if (hasContents(aRev, errSb)) return true;
+    errSb.add("Can't load revisions content:");
+    if (bRev != null) errSb.add("Can't load content of " + bRev.getFile().getPresentableUrl() + " at " + bRev.getRevisionNumber().asString());
+    if (aRev != null) errSb.add("Can't load content of " + aRev.getFile().getPresentableUrl() + " at " + aRev.getRevisionNumber().asString());
+    if (aRev == null && bRev == null) errSb.add("Both revisions are empty");
+    return false;
   }
 
-  public static boolean checkAssociate(final Project project, final FilePath file, DiffChainContext context) {
-    final String pattern = FileUtilRt.getExtension(file.getName()).toLowerCase();
+  public static boolean checkAssociate(final Project project, String fileName, DiffChainContext context) {
+    final String pattern = FileUtilRt.getExtension(fileName).toLowerCase();
     if (context.contains(pattern)) return false;
     int rc = Messages.showOkCancelDialog(project,
-                                 VcsBundle.message("diff.unknown.file.type.prompt", file.getName()),
+                                 VcsBundle.message("diff.unknown.file.type.prompt", fileName),
                                  VcsBundle.message("diff.unknown.file.type.title"),
                                    VcsBundle.message("diff.unknown.file.type.associate"),
                                    CommonBundle.getCancelButtonText(),
                                  Messages.getQuestionIcon());
     if (rc == Messages.OK) {
-      FileType fileType = FileTypeChooser.associateFileType(file.getName());
+      FileType fileType = FileTypeChooser.associateFileType(fileName);
       return fileType != null && !fileType.isBinary();
     } else {
       context.add(pattern);

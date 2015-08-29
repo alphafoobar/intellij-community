@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlElement;
 import com.intellij.psi.xml.XmlTag;
@@ -87,31 +88,36 @@ public class DomElementProblemDescriptorImpl implements DomElementProblemDescrip
       final PsiElement psiElement = getPsiElement();
       LOG.assertTrue(psiElement != null, "Problems with explicit text range can't be created for DOM elements without underlying XML element");
       assert psiElement.isValid();
-      myPair = new Pair<TextRange, PsiElement>(textRange, psiElement);
+      myPair = Pair.create(textRange, psiElement);
     }
     myHighlightType = highlightType;
   }
 
+  @Override
   @NotNull
   public DomElement getDomElement() {
     return myDomElement;
   }
 
+  @Override
   @NotNull
   public HighlightSeverity getHighlightSeverity() {
     return mySeverity;
   }
 
+  @Override
   @NotNull
   public String getDescriptionTemplate() {
     return myMessage == null ? "" : myMessage;
   }
 
+  @Override
   @NotNull
   public LocalQuickFix[] getFixes() {
     return myFixes;
   }
 
+  @Override
   @NotNull
   public final List<Annotation> getAnnotations() {
     if (myAnnotations == null) {
@@ -120,6 +126,7 @@ public class DomElementProblemDescriptorImpl implements DomElementProblemDescrip
     return myAnnotations;
   }
 
+  @Override
   public void highlightWholeElement() {
     final PsiElement psiElement = getPsiElement();
     if (psiElement instanceof XmlAttributeValue) {
@@ -140,7 +147,7 @@ public class DomElementProblemDescriptorImpl implements DomElementProblemDescrip
     }
     PsiElement element = myPair.second;
     if (element != null) {
-      assert element.isValid();
+      PsiUtilCore.ensureValid(element);
     }
     return myPair;
   }
@@ -230,6 +237,7 @@ public class DomElementProblemDescriptorImpl implements DomElementProblemDescrip
     return null;
   }
 
+  @Override
   @Nullable
   public ProblemHighlightType getHighlightType() {
     return myHighlightType;

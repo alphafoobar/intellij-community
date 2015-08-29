@@ -68,16 +68,18 @@ public abstract class BreakpointItem extends ItemWrapper implements Comparable<B
     }
 
     final Editor editor = panel.getEditor();
-    final MarkupModel editorModel = editor.getMarkupModel();
-    final MarkupModel documentModel =
-      DocumentMarkupModel.forDocument(editor.getDocument(), editor.getProject(), false);
+    if (editor != null) {
+      final MarkupModel editorModel = editor.getMarkupModel();
+      final MarkupModel documentModel =
+        DocumentMarkupModel.forDocument(editor.getDocument(), editor.getProject(), false);
 
-    for (RangeHighlighter highlighter : documentModel.getAllHighlighters()) {
-      if (highlighter.getUserData(DebuggerColors.BREAKPOINT_HIGHLIGHTER_KEY) == Boolean.TRUE) {
-        final int line1 = editor.offsetToLogicalPosition(highlighter.getStartOffset()).line;
-        if (line1 != line) {
-          editorModel.addLineHighlighter(line1,
-                                         DebuggerColors.BREAKPOINT_HIGHLIGHTER_LAYER + 1, softerAttributes);
+      for (RangeHighlighter highlighter : documentModel.getAllHighlighters()) {
+        if (highlighter.getUserData(DebuggerColors.BREAKPOINT_HIGHLIGHTER_KEY) == Boolean.TRUE) {
+          final int line1 = editor.offsetToLogicalPosition(highlighter.getStartOffset()).line;
+          if (line1 != line) {
+            editorModel.addLineHighlighter(line1,
+                                           DebuggerColors.BREAKPOINT_HIGHLIGHTER_LAYER + 1, softerAttributes);
+          }
         }
       }
     }
@@ -107,6 +109,7 @@ public abstract class BreakpointItem extends ItemWrapper implements Comparable<B
 
   public abstract String getDisplayText();
 
+  protected void dispose() {}
 
   @Override
   public boolean equals(Object o) {

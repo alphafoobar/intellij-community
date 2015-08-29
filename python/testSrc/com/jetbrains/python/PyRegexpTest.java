@@ -17,9 +17,13 @@ package com.jetbrains.python;
 
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.lexer.Lexer;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLanguageInjectionHost;
 import com.jetbrains.python.codeInsight.regexp.PythonRegexpParserDefinition;
 import com.jetbrains.python.codeInsight.regexp.PythonVerboseRegexpParserDefinition;
@@ -127,7 +131,7 @@ public class PyRegexpTest extends PyTestCase {
                        "\n" +
                        "def f(x, y):\n" +
                        "    re.search('<caret>.*(' + x + ')' + y, 'foo')\n",
-                       ".*(missing)missing");
+                       ".*(missing_value)missing_value");
   }
 
   public void testPercentFormattingRegexpAutoInjection() {
@@ -135,7 +139,7 @@ public class PyRegexpTest extends PyTestCase {
                        "\n" +
                        "def f(x, y):\n" +
                        "    re.search('<caret>.*%s-%d' % (x, y), 'foo')\n",
-                       ".*missing-missing");
+                       ".*missing_value-missing_value");
   }
 
   public void testNewStyleFormattingRegexpAutoInjection() {
@@ -143,7 +147,7 @@ public class PyRegexpTest extends PyTestCase {
                        "\n" +
                        "def f(x, y):\n" +
                        "    re.search('<caret>.*{foo}-{}'.format(x, foo=y), 'foo')\n",
-                       ".*missing-missing");
+                       ".*missing_value-missing_value");
   }
 
   public void testNewStyleFormattingEndsWithConstant() {
@@ -151,19 +155,30 @@ public class PyRegexpTest extends PyTestCase {
                        "\n" +
                        "def f(**kwargs):" +
                        "    re.search('<caret>(foo{bar}baz$)'.format(**kwargs), 'foo')\n",
-                       "(foomissingbaz$)");
+                       "(foomissing_valuebaz$)");
   }
 
   private void doTestInjectedText(@NotNull String text, @NotNull String expected) {
     myFixture.configureByText(PythonFileType.INSTANCE, text);
     final InjectedLanguageManager languageManager = InjectedLanguageManager.getInstance(myFixture.getProject());
-    final PsiLanguageInjectionHost host = languageManager.getInjectionHost(myFixture.getElementAtCaret());
+    final PsiLanguageInjectionHost host = languageManager.getInjectionHost(getElementAtCaret());
     assertNotNull(host);
     final List<Pair<PsiElement, TextRange>> files = languageManager.getInjectedPsiFiles(host);
     assertNotNull(files);
     assertFalse(files.isEmpty());
     final PsiElement injected = files.get(0).getFirst();
     assertEquals(expected, injected.getText());
+  }
+
+  @NotNull
+  private PsiElement getElementAtCaret() {
+    final Editor editor = myFixture.getEditor();
+    final Document document = editor.getDocument();
+    final PsiFile file = PsiDocumentManager.getInstance(myFixture.getProject()).getPsiFile(document);
+    assertNotNull(file);
+    final PsiElement element = file.findElementAt(myFixture.getCaretOffset());
+    assertNotNull(element);
+    return element;
   }
 
   private void doTestHighlighting() {

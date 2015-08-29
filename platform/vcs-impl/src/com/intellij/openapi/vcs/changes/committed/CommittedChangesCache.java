@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,10 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressManagerQueue;
@@ -43,7 +46,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
 import com.intellij.util.MessageBusUtil;
 import com.intellij.util.NotNullFunction;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusConnection;
@@ -63,12 +66,8 @@ import java.util.concurrent.TimeUnit;
  * @author yole
  */
 @State(
-  name="CommittedChangesCache",
-  roamingType = RoamingType.DISABLED,
-  storages= {
-    @Storage(
-      file = StoragePathMacros.WORKSPACE_FILE
-    )}
+  name = "CommittedChangesCache",
+  storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)}
 )
 public class CommittedChangesCache implements PersistentStateComponent<CommittedChangesCache.State> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vcs.changes.committed.CommittedChangesCache");
@@ -85,7 +84,6 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
   private final Set<CommittedChangeList> myNewIncomingChanges = new LinkedHashSet<CommittedChangeList>();
   private final ProjectLevelVcsManager myVcsManager;
 
-  public static final Change[] ALL_CHANGES = new Change[0];
   private MyRefreshRunnable myRefresnRunnable;
 
   private final Map<String, Pair<Long, List<CommittedChangeList>>> myExternallyLoadedChangeLists;
@@ -186,7 +184,7 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
         myConnection.disconnect();
       }
     });
-    myExternallyLoadedChangeLists = new ConcurrentHashMap<String, Pair<Long, List<CommittedChangeList>>>();
+    myExternallyLoadedChangeLists = ContainerUtil.newConcurrentMap();
   }
 
   public MessageBus getMessageBus() {
@@ -539,7 +537,7 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
     });
   }
 
-  // todo: fix - would externally loaded nesseccerily for file? i.e. just not efficient now
+  // todo: fix - would externally loaded necessarily for file? i.e. just not efficient now
   private List<CommittedChangeList> refreshCache(final ChangesCacheFile cacheFile) throws VcsException, IOException {
     final List<CommittedChangeList> newLists = new ArrayList<CommittedChangeList>();
 
@@ -572,6 +570,7 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
       defaultSettings.setDateAfter(date);
       defaultSettings.USE_DATE_AFTER_FILTER = true;
     }
+    defaultSettings.STRICTLY_AFTER = true;
     final List<CommittedChangeList> newChanges = provider.getCommittedChanges(defaultSettings, location, maxCount);
     debug("Loaded " + newChanges.size() + " new changelists");
     newLists.addAll(appendLoadedChanges(cacheFile, location, newChanges));
@@ -639,7 +638,7 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
         if (!cache.isEmpty()) {
           debug("Loading incoming changes for " + cache.getLocation());
           final List<CommittedChangeList> incomingChanges = cache.loadIncomingChanges();
-          byVcs.putValue(cache.getVcs(), new Pair<RepositoryLocation, List<CommittedChangeList>>(cache.getLocation(), incomingChanges));
+          byVcs.putValue(cache.getVcs(), Pair.create(cache.getLocation(), incomingChanges));
         }
       }
       catch (IOException e) {
@@ -688,14 +687,13 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
       if (lists.size() == 1) {
         return lists.get(0);
       }
-      final CommittedChangeList victim = lists.get(0) instanceof ReceivedChangeList ? (((ReceivedChangeList) lists.get(0)).getBaseList()) :
-                                         lists.get(0);
+      final CommittedChangeList victim = ReceivedChangeList.unwrap(lists.get(0));
       final ReceivedChangeList result = new ReceivedChangeList(victim);
       result.setForcePartial(false);
       final Set<Change> baseChanges = new HashSet<Change>();
 
       for (CommittedChangeList list : lists) {
-        baseChanges.addAll(list instanceof ReceivedChangeList ? ((ReceivedChangeList) list).getBaseList().getChanges() : list.getChanges());
+        baseChanges.addAll(ReceivedChangeList.unwrap(list).getChanges());
 
         final Collection<Change> changes = list.getChanges();
         for (Change change : changes) {
@@ -773,16 +771,21 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
   }
 
   public void processUpdatedFiles(final UpdatedFiles updatedFiles) {
+    processUpdatedFiles(updatedFiles, null);
+  }
+
+  public void processUpdatedFiles(final UpdatedFiles updatedFiles,
+                                  @Nullable final Consumer<List<CommittedChangeList>> incomingChangesConsumer) {
     final Runnable task = new Runnable() {
       @Override
       public void run() {
         debug("Processing updated files");
         final Collection<ChangesCacheFile> caches = myCachesHolder.getAllCaches();
+        myPendingUpdateCount += caches.size();
         for(final ChangesCacheFile cache: caches) {
-          myPendingUpdateCount++;
           try {
             if (cache.isEmpty()) {
-              pendingUpdateProcessed();
+              pendingUpdateProcessed(incomingChangesConsumer);
               continue;
             }
             debug("Processing updated files in " + cache.getLocation());
@@ -790,12 +793,12 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
             if (needRefresh) {
               debug("Found unaccounted files, requesting refresh");
               // todo do we need double-queueing here???
-              processUpdatedFilesAfterRefresh(cache, updatedFiles);
+              processUpdatedFilesAfterRefresh(cache, updatedFiles, incomingChangesConsumer);
             }
             else {
               debug("Clearing cached incoming changelists");
               myCachedIncomingChangeLists = null;
-              pendingUpdateProcessed();
+              pendingUpdateProcessed(incomingChangesConsumer);
             }
           }
           catch (IOException e) {
@@ -807,15 +810,20 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
     myTaskQueue.run(task);
   }
 
-  private void pendingUpdateProcessed() {
+  private void pendingUpdateProcessed(@Nullable Consumer<List<CommittedChangeList>> incomingChangesConsumer) {
     myPendingUpdateCount--;
     if (myPendingUpdateCount == 0) {
       notifyIncomingChangesUpdated(myNewIncomingChanges);
+      if (incomingChangesConsumer != null) {
+        incomingChangesConsumer.consume(ContainerUtil.newArrayList(myNewIncomingChanges));
+      }
       myNewIncomingChanges.clear();
     }
   }
 
-  private void processUpdatedFilesAfterRefresh(final ChangesCacheFile cache, final UpdatedFiles updatedFiles) {
+  private void processUpdatedFilesAfterRefresh(final ChangesCacheFile cache,
+                                               final UpdatedFiles updatedFiles,
+                                               @Nullable final Consumer<List<CommittedChangeList>> incomingChangesConsumer) {
     refreshCacheAsync(cache, false, new RefreshResultConsumer() {
       @Override
       public void receivedChanges(final List<CommittedChangeList> committedChangeLists) {
@@ -834,7 +842,7 @@ public class CommittedChangesCache implements PersistentStateComponent<Committed
             debug("Clearing cached incoming changelists");
             myCachedIncomingChangeLists = null;
           }
-          pendingUpdateProcessed();
+          pendingUpdateProcessed(incomingChangesConsumer);
         }
         catch (IOException e) {
           LOG.error(e);

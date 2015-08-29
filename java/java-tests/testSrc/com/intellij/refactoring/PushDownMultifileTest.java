@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,9 +29,11 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.memberPushDown.PushDownProcessor;
 import com.intellij.refactoring.util.DocCommentPolicy;
 import com.intellij.refactoring.util.classMembers.MemberInfo;
+import org.jetbrains.annotations.NotNull;
 
 //push first method from class a.A to class b.B
 public class PushDownMultifileTest extends MultiFileTestCase {
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/pushDown/";
@@ -52,28 +54,25 @@ public class PushDownMultifileTest extends MultiFileTestCase {
 
   private void doTest(final boolean fail, final String sourceClassName, final String targetClassName) throws Exception {
     try {
-      doTest(new PerformAction() {
-        @Override
-        public void performAction(final VirtualFile rootDir, final VirtualFile rootAfter) throws Exception {
-          final PsiClass srcClass = myJavaFacade.findClass(sourceClassName, GlobalSearchScope.allScope(myProject));
-          assertTrue("Source class not found", srcClass != null);
+      doTest((rootDir, rootAfter) -> {
+        final PsiClass srcClass = myJavaFacade.findClass(sourceClassName, GlobalSearchScope.allScope(myProject));
+        assertTrue("Source class not found", srcClass != null);
 
-          final PsiClass targetClass = myJavaFacade.findClass(targetClassName, GlobalSearchScope.allScope(myProject));
-          assertTrue("Target class not found", targetClass != null);
+        final PsiClass targetClass = myJavaFacade.findClass(targetClassName, GlobalSearchScope.allScope(myProject));
+        assertTrue("Target class not found", targetClass != null);
 
-          final PsiMethod[] methods = srcClass.getMethods();
-          assertTrue("No methods found", methods.length > 0);
-          final MemberInfo[] membersToMove = new MemberInfo[1];
-          final MemberInfo memberInfo = new MemberInfo(methods[0]);
-          memberInfo.setChecked(true);
-          membersToMove[0] = memberInfo;
+        final PsiMethod[] methods = srcClass.getMethods();
+        assertTrue("No methods found", methods.length > 0);
+        final MemberInfo[] membersToMove = new MemberInfo[1];
+        final MemberInfo memberInfo = new MemberInfo(methods[0]);
+        memberInfo.setChecked(true);
+        membersToMove[0] = memberInfo;
 
-          new PushDownProcessor(getProject(), membersToMove, srcClass, new DocCommentPolicy(DocCommentPolicy.ASIS)).run();
+        new PushDownProcessor(getProject(), membersToMove, srcClass, new DocCommentPolicy(DocCommentPolicy.ASIS)).run();
 
 
-          //LocalFileSystem.getInstance().refresh(false);
-          //FileDocumentManager.getInstance().saveAllDocuments();
-        }
+        //LocalFileSystem.getInstance().refresh(false);
+        //FileDocumentManager.getInstance().saveAllDocuments();
       });
     }
     catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
@@ -108,28 +107,25 @@ public class PushDownMultifileTest extends MultiFileTestCase {
 
   public void testUsagesInXml() throws Exception {
     try {
-      doTest(new PerformAction() {
-        @Override
-        public void performAction(final VirtualFile rootDir, final VirtualFile rootAfter) throws Exception {
-          final PsiClass srcClass = myJavaFacade.findClass("a.A", GlobalSearchScope.allScope(myProject));
-          assertTrue("Source class not found", srcClass != null);
+      doTest((rootDir, rootAfter) -> {
+        final PsiClass srcClass = myJavaFacade.findClass("a.A", GlobalSearchScope.allScope(myProject));
+        assertTrue("Source class not found", srcClass != null);
 
-          final PsiClass targetClass = myJavaFacade.findClass("b.B", GlobalSearchScope.allScope(myProject));
-          assertTrue("Target class not found", targetClass != null);
+        final PsiClass targetClass = myJavaFacade.findClass("b.B", GlobalSearchScope.allScope(myProject));
+        assertTrue("Target class not found", targetClass != null);
 
-          final PsiField[] fields = srcClass.getFields();
-          assertTrue("No methods found", fields.length > 0);
-          final MemberInfo[] membersToMove = new MemberInfo[1];
-          final MemberInfo memberInfo = new MemberInfo(fields[0]);
-          memberInfo.setChecked(true);
-          membersToMove[0] = memberInfo;
+        final PsiField[] fields = srcClass.getFields();
+        assertTrue("No methods found", fields.length > 0);
+        final MemberInfo[] membersToMove = new MemberInfo[1];
+        final MemberInfo memberInfo = new MemberInfo(fields[0]);
+        memberInfo.setChecked(true);
+        membersToMove[0] = memberInfo;
 
-          new PushDownProcessor(getProject(), membersToMove, srcClass, new DocCommentPolicy(DocCommentPolicy.ASIS)).run();
+        new PushDownProcessor(getProject(), membersToMove, srcClass, new DocCommentPolicy(DocCommentPolicy.ASIS)).run();
 
 
-          //LocalFileSystem.getInstance().refresh(false);
-          //FileDocumentManager.getInstance().saveAllDocuments();
-        }
+        //LocalFileSystem.getInstance().refresh(false);
+        //FileDocumentManager.getInstance().saveAllDocuments();
       });
     }
     catch (BaseRefactoringProcessor.ConflictsInTestsException e) {

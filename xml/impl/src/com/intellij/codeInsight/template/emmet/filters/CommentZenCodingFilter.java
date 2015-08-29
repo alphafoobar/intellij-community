@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.xml.XmlDocument;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.xml.util.HtmlUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,8 +48,8 @@ public class CommentZenCodingFilter extends ZenCodingFilter {
     if (document != null) {
       XmlTag tag = document.getRootTag();
       if (tag != null) {
-        String classAttr = tag.getAttributeValue("class");
-        String idAttr = tag.getAttributeValue("id");
+        String classAttr = tag.getAttributeValue(HtmlUtil.CLASS_ATTRIBUTE_NAME);
+        String idAttr = tag.getAttributeValue(HtmlUtil.ID_ATTRIBUTE_NAME);
         if (!isNullOrEmpty(classAttr) || !isNullOrEmpty(idAttr)) {
           String commentString = buildCommentString(classAttr, idAttr);
           return text + "\n<!-- /" + commentString + " -->";
@@ -67,5 +68,11 @@ public class CommentZenCodingFilter extends ZenCodingFilter {
   @Override
   public boolean isMyContext(@NotNull PsiElement context) {
     return context.getLanguage() instanceof XMLLanguage;
+  }
+
+  @NotNull
+  @Override
+  public String getDisplayName() {
+    return "Comment tags";
   }
 }

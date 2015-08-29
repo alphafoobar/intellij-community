@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@
 package com.intellij.openapi.actionSystem.impl;
 
 import com.intellij.openapi.actionSystem.AbbreviationManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.*;
 import gnu.trove.THashMap;
 import org.jdom.Element;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.util.*;
 
 /**
@@ -31,47 +28,35 @@ import java.util.*;
  */
 @State(
   name = "AbbreviationManager",
-  roamingType = RoamingType.PER_PLATFORM,
-  storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/abbreviations.xml"
-    )}
+  storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/abbreviations.xml", roamingType = RoamingType.PER_OS)}
 )
-public class AbbreviationManagerImpl extends AbbreviationManager implements
-                                                                 ExportableApplicationComponent, PersistentStateComponent<Element> {
+public class AbbreviationManagerImpl extends AbbreviationManager implements PersistentStateComponent<Element> {
   private final Map<String, List<String>> myAbbreviation2ActionId = new THashMap<String, List<String>>();
   private final Map<String, LinkedHashSet<String>> myActionId2Abbreviations = new THashMap<String, LinkedHashSet<String>>();
   private final Map<String, LinkedHashSet<String>> myPluginsActionId2Abbreviations = new THashMap<String, LinkedHashSet<String>>();
-
-  @Override
-  public void initComponent() {
-
-  }
-
-  @Override
-  public void disposeComponent() {
-
-  }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return "AbbreviationManager";
-  }
 
   @Nullable
   @Override
   public Element getState() {
     final Element actions = new Element("actions");
-    final Element abbreviations = new Element("abbreviations");
-    actions.addContent(abbreviations);
+    if (myActionId2Abbreviations.isEmpty()) {
+      return actions;
+    }
+
+    Element abbreviations = null;
     for (String key : myActionId2Abbreviations.keySet()) {
       final LinkedHashSet<String> abbrs = myActionId2Abbreviations.get(key);
       final LinkedHashSet<String> pluginAbbrs = myPluginsActionId2Abbreviations.get(key);
       if (abbrs == pluginAbbrs || (abbrs != null && abbrs.equals(pluginAbbrs))) {
         continue;
       }
+
       if (abbrs != null) {
+        if (abbreviations == null) {
+          abbreviations = new Element("abbreviations");
+          actions.addContent(abbreviations);
+        }
+
         final Element action = new Element("action");
         action.setAttribute("id", key);
         abbreviations.addContent(action);
@@ -106,24 +91,18 @@ public class AbbreviationManagerImpl extends AbbreviationManager implements
               final String abbrValue = abbr.getAttributeValue("name");
               if (abbrValue != null) {
                 values.add(abbrValue);
+                List<String> actionIds = myAbbreviation2ActionId.get(abbrValue);
+                if (actionIds == null) {
+                  actionIds = new ArrayList<String>();
+                  myAbbreviation2ActionId.put(abbrValue, actionIds);
+                }
+                actionIds.add(actionId);
               }
             }
           }
         }
       }
     }
-  }
-
-  @NotNull
-  @Override
-  public File[] getExportFiles() {
-    return new File[]{PathManager.getOptionsFile("abbreviations")};
-  }
-
-  @NotNull
-  @Override
-  public String getPresentableName() {
-    return "Actions";
   }
 
   @Override

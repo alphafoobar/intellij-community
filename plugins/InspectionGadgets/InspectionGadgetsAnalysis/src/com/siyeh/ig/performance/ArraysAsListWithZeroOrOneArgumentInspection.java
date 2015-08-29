@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -49,6 +50,11 @@ public class ArraysAsListWithZeroOrOneArgumentInspection extends BaseInspection 
     else {
       return InspectionGadgetsBundle.message("arrays.as.list.with.one.argument.problem.descriptor");
     }
+  }
+
+  @Override
+  public boolean isEnabledByDefault() {
+    return true;
   }
 
   @Nullable
@@ -91,11 +97,15 @@ public class ArraysAsListWithZeroOrOneArgumentInspection extends BaseInspection 
       }
       final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)element;
       if (myEmpty) {
-        replaceExpressionAndShorten(methodCallExpression, "java.util.Collections.emptyList()");
+        PsiReplacementUtil.replaceExpressionAndShorten(methodCallExpression, "java.util.Collections.emptyList()");
       }
       else {
         final PsiExpressionList argumentList = methodCallExpression.getArgumentList();
-        replaceExpressionAndShorten(methodCallExpression, "java.util.Collections.singletonList" + argumentList.getText());
+        final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
+        final PsiReferenceParameterList parameterList = methodExpression.getParameterList();
+        final String parameterText = parameterList != null ? parameterList.getText() : "";
+        PsiReplacementUtil.replaceExpressionAndShorten(methodCallExpression, "java.util.Collections." + parameterText +
+                                                                             "singletonList" + argumentList.getText());
       }
     }
   }

@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.openapi.vcs.changes.committed;
 
 import com.intellij.ide.CopyProvider;
@@ -10,12 +25,14 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.SplitterProportionsData;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vcs.VcsActions;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
@@ -110,9 +127,9 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
 
     updateBySelectionChange();
 
-    ActionManager.getInstance().getAction("CommittedChanges.Details").registerCustomShortcutSet(
-      new CustomShortcutSet(KeymapManager.getInstance().getActiveKeymap().getShortcuts(IdeActions.ACTION_QUICK_JAVADOC)),
-      this);
+    Keymap keymap = KeymapManager.getInstance().getActiveKeymap();
+    CustomShortcutSet quickdocShortcuts = new CustomShortcutSet(keymap.getShortcuts(IdeActions.ACTION_QUICK_JAVADOC));
+    EmptyAction.registerWithShortcutSet("CommittedChanges.Details", quickdocShortcuts, this);
 
     myCopyProvider = new TreeCopyProvider(myChangesTree);
     myTreeExpander = new DefaultTreeExpander(myChangesTree);
@@ -120,7 +137,7 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
 
     myHelpId = ourHelpId;
 
-    myDetailsView.getDiffAction().registerCustomShortcutSet(CommonShortcuts.getDiff(), myChangesTree);
+    myDetailsView.getDiffAction().registerCustomShortcutSet(myDetailsView.getDiffAction().getShortcutSet(), myChangesTree);
 
     myConnection = myProject.getMessageBus().connect();
     myConnection.subscribe(ITEMS_RELOADED, new CommittedChangesReloadListener() {
@@ -253,13 +270,11 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
     }
   }
 
-  public static List<Change> collectChanges(final List<CommittedChangeList> selectedChangeLists, final boolean withMovedTrees) {
+  @NotNull
+  public static List<Change> collectChanges(final List<? extends CommittedChangeList> selectedChangeLists, final boolean withMovedTrees) {
     List<Change> result = new ArrayList<Change>();
-    Collections.sort(selectedChangeLists, new Comparator<CommittedChangeList>() {
-      public int compare(final CommittedChangeList o1, final CommittedChangeList o2) {
-        return o1.getCommitDate().compareTo(o2.getCommitDate());
-      }
-    });
+    Collections.sort(selectedChangeLists, CommittedChangeListByDateComparator.ASCENDING);
+
     for(CommittedChangeList cl: selectedChangeLists) {
       final Collection<Change> changes = withMovedTrees ? cl.getChangesWithMovedTrees() : cl.getChanges();
       for(Change c: changes) {
@@ -269,8 +284,12 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
     return result;
   }
 
-  // changes are assumed to be sorted ascending
-  public static List<Change> zipChanges(final List<Change> changes) {
+  /**
+   * Zips changes by removing duplicates (changes in the same file) and compounding the diff.
+   * <b>NB:</b> changes must be given in the time-ascending order, i.e the first change in the list should be the oldest one.
+   */
+  @NotNull
+  public static List<Change> zipChanges(@NotNull List<Change> changes) {
     final List<Change> result = new ArrayList<Change>();
     for (Change change : changes) {
       addOrReplaceChange(result, change);
@@ -309,7 +328,7 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
     for (AnAction action : auxiliaryActions) {
       menuGroup.add(action);
     }
-    menuGroup.add(ActionManager.getInstance().getAction(IdeActions.ACTION_COPY));
+    menuGroup.add(ActionManager.getInstance().getAction(VcsActions.ACTION_COPY_REVISION_NUMBER));
     PopupHandler.installPopupHandler(myChangesTree, menuGroup, ActionPlaces.UNKNOWN, ActionManager.getInstance());
   }
 
@@ -355,7 +374,7 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
       myChangesTree);
     toolbarGroup.add(expandAllAction);
     toolbarGroup.add(collapseAllAction);
-    toolbarGroup.add(ActionManager.getInstance().getAction(IdeActions.ACTION_COPY));
+    toolbarGroup.add(ActionManager.getInstance().getAction(VcsActions.ACTION_COPY_REVISION_NUMBER));
     toolbarGroup.add(new ContextHelpAction(myHelpId));
     if (tailGroup != null) {
       toolbarGroup.add(tailGroup);
@@ -372,7 +391,7 @@ public class CommittedChangesTreeBrowser extends JPanel implements TypeSafeDataP
       sink.put(VcsDataKeys.CHANGES, changes.toArray(new Change[changes.size()]));
     } else if (key.equals(VcsDataKeys.HAVE_SELECTED_CHANGES)) {
       final int count = myChangesTree.getSelectionCount();
-      sink.put(VcsDataKeys.HAVE_SELECTED_CHANGES, count > 0 ? Boolean.TRUE : Boolean.FALSE);
+      sink.put(VcsDataKeys.HAVE_SELECTED_CHANGES, count > 0);
     }
     else if (key.equals(VcsDataKeys.CHANGES_WITH_MOVED_CHILDREN)) {
       final Collection<Change> changes = collectChanges(getSelectedChangeLists(), true);

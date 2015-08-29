@@ -53,7 +53,7 @@ public abstract class LibraryScopeBase extends GlobalSearchScope {
     if (myIndex.isInLibraryClasses(file)) {
       return myIndex.getClassRootForFile(file);
     }
-    if (myIndex.isInContent(file)) {
+    if (myIndex.isInLibrarySource(file)) {
       return myIndex.getSourceRootForFile(file);
     }
     return null;
@@ -78,5 +78,18 @@ public abstract class LibraryScopeBase extends GlobalSearchScope {
   @Override
   public boolean isSearchInLibraries() {
     return true;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof LibraryScopeBase)) return false;
+
+    return myEntries.equals(((LibraryScopeBase)o).myEntries);
+  }
+
+  @Override
+  public int hashCode() {
+    return myEntries.hashCode();
   }
 }

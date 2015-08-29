@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,10 @@ import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.template.Template;
 import com.intellij.codeInsight.template.TemplateEditingAdapter;
 import com.intellij.codeInsight.template.TemplateManager;
+import com.intellij.codeInspection.ex.GlobalInspectionContextBase;
 import com.intellij.ide.util.MemberChooser;
+import com.intellij.lang.ContextAwareActionHandler;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -40,11 +43,13 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.java.generate.exception.GenerateCodeException;
 
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
 
-public abstract class GenerateMembersHandlerBase implements CodeInsightActionHandler {
+public abstract class GenerateMembersHandlerBase implements CodeInsightActionHandler, ContextAwareActionHandler {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.generation.GenerateMembersHandlerBase");
 
   private final String myChooserTitle;
@@ -52,6 +57,16 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
 
   public GenerateMembersHandlerBase(String chooserTitle) {
     myChooserTitle = chooserTitle;
+  }
+
+  @Override
+  public boolean isAvailableForQuickList(@NotNull Editor editor, @NotNull PsiFile file, @NotNull DataContext dataContext) {
+    final PsiClass aClass = OverrideImplementUtil.getContextClass(file.getProject(), editor, file, false);
+    return aClass != null && hasMembers(aClass);
+  }
+
+  protected boolean hasMembers(@NotNull PsiClass aClass) {
+    return true;
   }
 
   @Override
@@ -72,7 +87,22 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
       WriteCommandAction.runWriteCommandAction(project, new Runnable() {
         @Override
         public void run() {
-          doGenerate(project, editor, aClass, members);
+          final int offset = editor.getCaretModel().getOffset();
+          try {
+            doGenerate(project, editor, aClass, members);
+          }
+          catch (GenerateCodeException e) {
+            final String message = e.getMessage();
+            ApplicationManager.getApplication().invokeLater(new Runnable() {
+              @Override
+              public void run() {
+                if (!editor.isDisposed()) {
+                  editor.getCaretModel().moveToOffset(offset);
+                  HintManager.getInstance().showErrorHint(editor, message);
+                }
+              }
+            }, project.getDisposed());
+          }
         }
       });
     }
@@ -121,6 +151,19 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
         HintManager.getInstance().showErrorHint(editor, getNothingFoundMessage());
       }
       return;
+    } 
+    else {
+      final List<PsiElement> elements = new ArrayList<PsiElement>();
+      for (GenerationInfo member : newMembers) {
+        if (!(member instanceof TemplateGenerationInfo)) {
+          final PsiMember psiMember = member.getPsiMember();
+          if (psiMember != null) {
+            elements.add(psiMember);
+          }
+        }
+      }
+
+      GlobalInspectionContextBase.cleanupElements(project, null, elements.toArray(new PsiElement[elements.size()]));
     }
 
     final ArrayList<TemplateGenerationInfo> templates = new ArrayList<TemplateGenerationInfo>();
@@ -162,7 +205,7 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
             public void run() {
               new WriteCommandAction(myProject) {
                 @Override
-                protected void run(Result result) throws Throwable {
+                protected void run(@NotNull Result result) throws Throwable {
                   runTemplates(myProject, editor, templates, index + 1);
                 }
               }.execute();
@@ -223,10 +266,25 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
                                                             boolean allowEmptySelection,
                                                             boolean copyJavadocCheckbox,
                                                             Project project) {
-    MemberChooser<ClassMember> chooser = new MemberChooser<ClassMember>(members, allowEmptySelection, true, project);
+    MemberChooser<ClassMember> chooser = new MemberChooser<ClassMember>(members, allowEmptySelection, true, project, false, getHeaderPanel(project)) {
+      @Nullable
+      @Override
+      protected String getHelpId() {
+        return GenerateMembersHandlerBase.this.getHelpId();
+      }
+    };
     chooser.setTitle(myChooserTitle);
     chooser.setCopyJavadocVisible(copyJavadocCheckbox);
     return chooser;
+  }
+
+  @Nullable
+  protected JComponent getHeaderPanel(Project project) {
+    return null;
+  }
+
+  protected String getHelpId() {
+    return null;
   }
 
   @NotNull

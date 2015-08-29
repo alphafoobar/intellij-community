@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,30 +15,38 @@
  */
 package git4idea.repo;
 
+import com.intellij.dvcs.branch.DvcsSyncSettings;
 import com.intellij.dvcs.repo.AbstractRepositoryManager;
+import com.intellij.dvcs.repo.VcsRepositoryManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vfs.VirtualFile;
 import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
+import git4idea.ui.branch.GitMultiRootBranchConfig;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * @author Kirill Likhodedov
- */
+import java.util.List;
+
 public class GitRepositoryManager extends AbstractRepositoryManager<GitRepository> {
 
   @NotNull private final GitPlatformFacade myPlatformFacade;
+  @NotNull private final Project myProject;
 
   public GitRepositoryManager(@NotNull Project project, @NotNull GitPlatformFacade platformFacade,
-                              @NotNull ProjectLevelVcsManager vcsManager) {
-    super(project, vcsManager, platformFacade.getVcs(project), GitUtil.DOT_GIT);
+                              @NotNull VcsRepositoryManager vcsRepositoryManager) {
+    super(vcsRepositoryManager, platformFacade.getVcs(project), GitUtil.DOT_GIT);
+    myProject = project;
     myPlatformFacade = platformFacade;
+  }
+
+  @Override
+  public boolean isSyncEnabled() {
+    return myPlatformFacade.getSettings(myProject).getSyncSetting() == DvcsSyncSettings.Value.SYNC &&
+           !new GitMultiRootBranchConfig(getRepositories()).diverged();
   }
 
   @NotNull
   @Override
-  protected GitRepository createRepository(@NotNull VirtualFile root) {
-    return GitRepositoryImpl.getFullInstance(root, myProject, myPlatformFacade, this);
+  public List<GitRepository> getRepositories() {
+    return getRepositories(GitRepository.class);
   }
 }

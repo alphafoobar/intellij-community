@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,9 +33,12 @@ import com.intellij.openapi.vcs.changes.CommitContext;
 import com.intellij.openapi.vcs.changes.LocalChangeList;
 import com.intellij.openapi.vcs.changes.TransparentlyFailedValueI;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchExecutor;
-import com.intellij.openapi.vcs.changes.patch.FilePatchInProgress;
 import com.intellij.openapi.vcs.changes.patch.PatchWriter;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vcs.changes.patch.TextFilePatchInProgress;
+import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileWrapper;
 import com.intellij.util.WaitForProgressToShow;
 import com.intellij.util.containers.MultiMap;
 
@@ -52,10 +55,11 @@ import java.util.Map;
  * Date: 5/17/12
  * Time: 6:02 PM
  */
-public class ApplyPatchSaveToFileExecutor implements ApplyPatchExecutor {
+public class ApplyPatchSaveToFileExecutor implements ApplyPatchExecutor<TextFilePatchInProgress> {
+  private static final Logger LOG = Logger.getInstance(ApplyPatchSaveToFileExecutor.class);
+
   private final Project myProject;
   private final VirtualFile myBaseForPatch;
-  private static final Logger LOG = Logger.getInstance("#org.jetbrains.idea.svn.treeConflict.ApplyPatchSaveToFileExecutor");
 
   public ApplyPatchSaveToFileExecutor(Project project, VirtualFile baseForPatch) {
     myProject = project;
@@ -68,7 +72,7 @@ public class ApplyPatchSaveToFileExecutor implements ApplyPatchExecutor {
   }
 
   @Override
-  public void apply(MultiMap<VirtualFile, FilePatchInProgress> patchGroups,
+  public void apply(MultiMap<VirtualFile, TextFilePatchInProgress> patchGroups,
                     LocalChangeList localList,
                     String fileName,
                     TransparentlyFailedValueI<Map<String, Map<String, CharSequence>>, PatchSyntaxException> additionalInfo) {
@@ -88,6 +92,7 @@ public class ApplyPatchSaveToFileExecutor implements ApplyPatchExecutor {
       catch (final IOException e) {
         LOG.info(e);
         WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable() {
+          @Override
           public void run() {
             Messages.showErrorDialog(myProject, VcsBundle.message("create.patch.error.title", e.getMessage()), CommonBundle.getErrorTitle());
           }
@@ -96,17 +101,17 @@ public class ApplyPatchSaveToFileExecutor implements ApplyPatchExecutor {
     }
   }
 
-  public static List<FilePatch> patchGroupsToOneGroup(MultiMap<VirtualFile, FilePatchInProgress> patchGroups, VirtualFile baseDir)
+  public static List<FilePatch> patchGroupsToOneGroup(MultiMap<VirtualFile, TextFilePatchInProgress> patchGroups, VirtualFile baseDir)
     throws IOException {
     final List<FilePatch> textPatches = new ArrayList<FilePatch>();
     final String baseDirPath = baseDir.getPath();
 
-    for (Map.Entry<VirtualFile, Collection<FilePatchInProgress>> entry : patchGroups.entrySet()) {
+    for (Map.Entry<VirtualFile, Collection<TextFilePatchInProgress>> entry : patchGroups.entrySet()) {
       final VirtualFile vf = entry.getKey();
       final String currBasePath = vf.getPath();
       final String relativePath = VfsUtilCore.getRelativePath(vf, baseDir, '/');
       final boolean toConvert = !StringUtil.isEmptyOrSpaces(relativePath) && !".".equals(relativePath);
-      for (FilePatchInProgress patchInProgress : entry.getValue()) {
+      for (TextFilePatchInProgress patchInProgress : entry.getValue()) {
         final TextFilePatch patch = patchInProgress.getPatch();
         if (toConvert) {
           //correct paths

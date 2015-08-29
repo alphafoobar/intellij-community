@@ -25,8 +25,9 @@ package com.intellij.openapi.vcs.changes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.impl.NullVirtualFile;
 import com.intellij.util.PatternUtil;
@@ -49,7 +50,8 @@ public class IgnoredFileBean {
     myType = type;
     if (IgnoreSettingsType.FILE.equals(type)) {
       myFilenameIfFile = new File(path).getName();
-    } else {
+    }
+    else {
       myFilenameIfFile = null;
     }
     myProject = project;
@@ -115,9 +117,10 @@ public class IgnoredFileBean {
     if (myType == IgnoreSettingsType.MASK) {
       myMatcher.reset(file.getName());
       return myMatcher.matches();
-    } else {
+    }
+    else {
       // quick check for 'file' == exact match pattern
-      if (IgnoreSettingsType.FILE.equals(myType) && ! myFilenameIfFile.equals(file.getName())) return false;
+      if (IgnoreSettingsType.FILE.equals(myType) && !StringUtil.equals(myFilenameIfFile, file.getNameSequence())) return false;
 
       VirtualFile selector = resolve();
       if (Comparing.equal(selector, NullVirtualFile.INSTANCE)) return false;
@@ -130,7 +133,7 @@ public class IgnoredFileBean {
           // special case for ignoring the project base dir (IDEADEV-16056)
           return !file.isDirectory() && Comparing.equal(file.getParent(), selector);
         }
-        return VfsUtil.isAncestor(selector, file, false);
+        return VfsUtilCore.isAncestor(selector, file, false);
       }
     }
   }
@@ -146,7 +149,9 @@ public class IgnoredFileBean {
 
   @Nullable
   private VirtualFile doResolve() {
-    if (myProject == null || myProject.isDisposed()) { return null; }
+    if (myProject == null || myProject.isDisposed()) {
+      return null;
+    }
     VirtualFile baseDir = myProject.getBaseDir();
 
     String path = FileUtil.toSystemIndependentName(myPath);

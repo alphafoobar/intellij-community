@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,14 +37,6 @@ import java.util.*;
 
 public class JavaMoveFilesOrDirectoriesHandler extends MoveFilesOrDirectoriesHandler {
   @Override
-  public boolean canMove(PsiElement[] elements, PsiElement targetContainer) {
-    final PsiElement[] srcElements = adjustForMove(null, elements, targetContainer);
-    assert srcElements != null;
-
-    return super.canMove(srcElements, targetContainer);
-  }
-
-  @Override
   public PsiElement adjustTargetForMove(DataContext dataContext, PsiElement targetContainer) {
     if (targetContainer instanceof PsiPackage) {
       final Module module = LangDataKeys.TARGET_MODULE.getData(dataContext);
@@ -59,7 +51,24 @@ public class JavaMoveFilesOrDirectoriesHandler extends MoveFilesOrDirectoriesHan
   }
 
   @Override
+  public boolean canMove(PsiElement[] elements, PsiElement targetContainer) {
+    if (elements.length > 0) {
+      final Project project = elements[0].getProject();
+      final PsiElement[] adjustForMove = adjustForMove(project, elements, targetContainer);
+      if (adjustForMove != null) {
+        return super.canMove(adjustForMove, targetContainer);
+      }
+    }
+    return super.canMove(elements, targetContainer);
+  }
+
+  @Override
   public PsiElement[] adjustForMove(Project project, PsiElement[] sourceElements, PsiElement targetElement) {
+    sourceElements = super.adjustForMove(project, sourceElements, targetElement);
+    if (sourceElements == null) {
+      return null;
+    }
+
     Set<PsiElement> result = new LinkedHashSet<PsiElement>();
     for (PsiElement sourceElement : sourceElements) {
       result.add(sourceElement instanceof PsiClass ? sourceElement.getContainingFile() : sourceElement);
@@ -70,13 +79,17 @@ public class JavaMoveFilesOrDirectoriesHandler extends MoveFilesOrDirectoriesHan
   @Override
   public void doMove(final Project project, PsiElement[] elements, PsiElement targetContainer, MoveCallback callback) {
 
+    elements = super.adjustForMove(project, elements, targetContainer);
+    if (elements == null) {
+      return;
+    }
     MoveFilesOrDirectoriesUtil
       .doMove(project, elements, new PsiElement[]{targetContainer}, callback, new Function<PsiElement[], PsiElement[]>() {
         @Override
         public PsiElement[] fun(final PsiElement[] elements) {
           return new WriteCommandAction<PsiElement[]>(project, "Regrouping ...") {
             @Override
-            protected void run(Result<PsiElement[]> result) throws Throwable {
+            protected void run(@NotNull Result<PsiElement[]> result) throws Throwable {
               final List<PsiElement> adjustedElements = new ArrayList<PsiElement>();
               for (int i = 0, length = elements.length; i < length; i++) {
                 PsiElement element = elements[i];
@@ -89,7 +102,7 @@ public class JavaMoveFilesOrDirectoriesHandler extends MoveFilesOrDirectoriesHan
                       adjustedElements.add(containingFile);
                       continue;
                     }
-                  } 
+                  }
                 }
                 adjustedElements.add(element);
               }

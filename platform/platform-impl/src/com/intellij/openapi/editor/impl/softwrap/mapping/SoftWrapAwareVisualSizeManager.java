@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.editor.impl.softwrap.SoftWrapDrawingType;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapPainter;
 import gnu.trove.TIntIntHashMap;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,13 +38,8 @@ public class SoftWrapAwareVisualSizeManager extends SoftWrapAwareDocumentParsing
   private final List<VisualSizeChangeListener> myListeners  = new ArrayList<VisualSizeChangeListener>();
   private final TIntIntHashMap                 myLineWidths = new TIntIntHashMap();
 
-  private final SoftWrapPainter myPainter;
+  private SoftWrapPainter myPainter;
 
-  /**
-   * There is a possible case that particular recalculation finished abruptly
-   * (see {@link #onRecalculationEnd(IncrementalCacheUpdateEvent, boolean)}). We need to know last processed logical line
-   * then in order to correctly notify the listeners.
-   */
   private int myLastLogicalLine;
 
   public SoftWrapAwareVisualSizeManager(@NotNull SoftWrapPainter painter) {
@@ -60,7 +56,7 @@ public class SoftWrapAwareVisualSizeManager extends SoftWrapAwareDocumentParsing
   }
 
   @Override
-  public void onRecalculationEnd(@NotNull IncrementalCacheUpdateEvent event, boolean normal) {
+  public void onRecalculationEnd(@NotNull IncrementalCacheUpdateEvent event) {
     if (myListeners.isEmpty()) {
       return;
     }
@@ -98,5 +94,10 @@ public class SoftWrapAwareVisualSizeManager extends SoftWrapAwareDocumentParsing
     if (width > storedWidth) {
       myLineWidths.put(line, width);
     }
+  }
+
+  @TestOnly
+  public void setSoftWrapPainter(SoftWrapPainter painter) {
+    myPainter = painter;
   }
 }

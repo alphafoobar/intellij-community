@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,8 @@
 package com.intellij.psi.impl.source.tree.injected;
 
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.ProperTextRange;
-import com.intellij.psi.impl.source.xml.XmlTextImpl;
 import com.intellij.psi.LiteralTextEscaper;
+import com.intellij.psi.impl.source.xml.XmlTextImpl;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -29,14 +28,15 @@ public class XmlTextLiteralEscaper extends LiteralTextEscaper<XmlTextImpl> {
     super(xmlText);
   }
 
+  @Override
   public boolean decode(@NotNull final TextRange rangeInsideHost, @NotNull StringBuilder outChars) {
-    ProperTextRange.assertProperRange(rangeInsideHost);
     int startInDecoded = myHost.physicalToDisplay(rangeInsideHost.getStartOffset());
     int endInDecoded = myHost.physicalToDisplay(rangeInsideHost.getEndOffset());
     outChars.append(myHost.getValue(), startInDecoded, endInDecoded);
     return true;
   }
 
+  @Override
   public int getOffsetInHost(final int offsetInDecoded, @NotNull final TextRange rangeInsideHost) {
     final int rangeInsideHostStartOffset = rangeInsideHost.getStartOffset();
     int displayStart = myHost.physicalToDisplay(rangeInsideHostStartOffset);
@@ -48,11 +48,13 @@ public class XmlTextLiteralEscaper extends LiteralTextEscaper<XmlTextImpl> {
     return i;
   }
 
+  @Override
   @NotNull
   public TextRange getRelevantTextRange() {
     return myHost.getCDATAInterior();
   }
 
+  @Override
   public boolean isOneLine() {
     return false;
   }

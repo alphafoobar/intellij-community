@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -269,8 +269,8 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
             uexpr = null;
           }
           else if (owner == originalOwner && !scope.isGlobal(referencedName)) {
-            final List<ReadWriteInstruction> instructions = PyDefUseUtil.getLatestDefs(owner, referencedName, myElement, false);
-            final ResolveResultList latest = resolveToLatestDefs(instructions, myElement, referencedName);
+            final List<ReadWriteInstruction> instructions = PyDefUseUtil.getLatestDefs(owner, referencedName, realContext, false);
+            final ResolveResultList latest = resolveToLatestDefs(instructions, realContext, referencedName);
             if (!latest.isEmpty()) {
               return latest;
             }
@@ -427,7 +427,7 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
         }
         else if (resolveResult instanceof PsiDirectory) {
           final PsiDirectory directory = (PsiDirectory)resolveResult;
-          if (PyUtil.isPackage(directory) && directory == element) {
+          if (PyUtil.isPackage(directory, null) && directory == element) {
             return true;
           }
         }
@@ -550,10 +550,10 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
   }
 
   private boolean haveQualifiers(PsiElement element) {
-    if (myElement.getQualifier() != null) {
+    if (myElement.isQualified()) {
       return true;
     }
-    if (element instanceof PyQualifiedExpression && ((PyQualifiedExpression)element).getQualifier() != null) {
+    if (element instanceof PyQualifiedExpression && ((PyQualifiedExpression)element).isQualified()) {
       return true;
     }
     return false;
@@ -578,8 +578,9 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
       PyResolveUtil.scopeCrawlUp(processor, owner, null, null);
     }
 
+    // This method is probably called for completion, so use appropriate context here
     // in a call, include function's arg names
-    KeywordArgumentCompletionUtil.collectFunctionArgNames(element, ret);
+    KeywordArgumentCompletionUtil.collectFunctionArgNames(element, ret, TypeEvalContext.codeCompletion(element.getProject(), element.getContainingFile()));
 
     // include builtin names
     final PyFile builtinsFile = PyBuiltinCache.getInstance(element).getBuiltinsFile();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.openapi.projectRoots;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.projectRoots.impl.SdkVersionUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -24,7 +23,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 
-public abstract class JavaSdk extends SdkType implements JavaSdkType, ApplicationComponent {
+public abstract class JavaSdk extends SdkType implements JavaSdkType {
   public JavaSdk(@NotNull @NonNls String name) {
     super(name);
   }
@@ -33,6 +32,7 @@ public abstract class JavaSdk extends SdkType implements JavaSdkType, Applicatio
     return ApplicationManager.getApplication().getComponent(JavaSdk.class);
   }
 
+  @NotNull
   public final Sdk createJdk(@NotNull String jdkName, @NotNull String jreHome) {
     return createJdk(jdkName, jreHome, true);
   }
@@ -42,6 +42,7 @@ public abstract class JavaSdk extends SdkType implements JavaSdkType, Applicatio
    */
   public abstract int compareTo(@NotNull String versionString, @NotNull String versionNumber);
 
+  @NotNull
   public abstract Sdk createJdk(@NonNls String jdkName, @NotNull String home, boolean isJre);
 
   @Nullable
@@ -52,16 +53,16 @@ public abstract class JavaSdk extends SdkType implements JavaSdkType, Applicatio
 
   public abstract boolean isOfVersionOrHigher(@NotNull Sdk sdk, @NotNull JavaSdkVersion version);
 
-  public static boolean checkForJdk(File file) {
+  public static boolean checkForJdk(@NotNull File file) {
     return JdkUtil.checkForJdk(file);
   }
 
-  public static boolean checkForJre(String file) {
+  public static boolean checkForJre(@NotNull String file) {
     return JdkUtil.checkForJre(file);
   }
 
   @Nullable
-  public static String getJdkVersion(final String sdkHome) {
+  public static String getJdkVersion(@NotNull String sdkHome) {
     return SdkVersionUtil.detectJdkVersion(sdkHome);
   }
 }

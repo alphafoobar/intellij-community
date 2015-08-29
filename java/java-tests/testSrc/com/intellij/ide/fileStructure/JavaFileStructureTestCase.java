@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,27 +18,22 @@ package com.intellij.ide.fileStructure;
 import com.intellij.JavaTestUtil;
 import com.intellij.ide.structureView.impl.java.JavaAnonymousClassesNodeProvider;
 import com.intellij.ide.structureView.impl.java.JavaInheritedMembersNodeProvider;
-import com.intellij.ide.util.FileStructurePopup;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.ide.util.treeView.smartTree.TreeStructureUtil;
 import com.intellij.testFramework.FileStructureTestBase;
-import com.intellij.testFramework.IdeaTestCase;
 
 /**
  * @author Konstantin Bulenkov
  */
 public abstract class JavaFileStructureTestCase extends FileStructureTestBase {
   private boolean myShowAnonymousByDefault;
-
-  protected JavaFileStructureTestCase() {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
+  
   protected abstract String getTestDataFolderName();
 
   @Override
   public void setUp() throws Exception {
     super.setUp();
-    myShowAnonymousByDefault = PropertiesComponent.getInstance().getBoolean(getAnonymousPropertyName(), false);
+    myShowAnonymousByDefault = PropertiesComponent.getInstance().getBoolean(getAnonymousPropertyName());
     if (getTestName(false).contains("Anonymous")) {
       setShowAnonymous(true);
     }
@@ -49,24 +44,24 @@ public abstract class JavaFileStructureTestCase extends FileStructureTestBase {
     return "java";
   }
 
-  public void setShowAnonymous(boolean show) throws Exception {
-    myPopup.setTreeActionState(JavaAnonymousClassesNodeProvider.class, show);
-    update();
+  public void setShowAnonymous(boolean show) {
+    myPopupFixture.getPopup().setTreeActionState(JavaAnonymousClassesNodeProvider.class, show);
+    myPopupFixture.update();
   }
 
-  public void setShowParents(boolean show) throws Exception {
-    myPopup.setTreeActionState(JavaInheritedMembersNodeProvider.class, show);
-    update();
+  public void setShowParents(boolean show) {
+    myPopupFixture.getPopup().setTreeActionState(JavaInheritedMembersNodeProvider.class, show);
+    myPopupFixture.update();
   }
 
   @Override
   public void tearDown() throws Exception {
-    PropertiesComponent.getInstance().setValue(getAnonymousPropertyName(), Boolean.toString(myShowAnonymousByDefault));
+    PropertiesComponent.getInstance().setValue(getAnonymousPropertyName(), myShowAnonymousByDefault);
     super.tearDown();
   }
 
   private static String getAnonymousPropertyName() {
-    return FileStructurePopup.getPropertyName(JavaAnonymousClassesNodeProvider.JAVA_ANONYMOUS_PROPERTY_NAME);
+    return TreeStructureUtil.getPropertyName(JavaAnonymousClassesNodeProvider.JAVA_ANONYMOUS_PROPERTY_NAME);
   }
 
   @Override

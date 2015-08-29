@@ -18,6 +18,7 @@ package com.intellij.codeInsight.intention.impl;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.LowPriorityAction;
 import com.intellij.injected.editor.DocumentWindow;
+import com.intellij.injected.editor.DocumentWindowImpl;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.application.ApplicationManager;
@@ -25,13 +26,20 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.ElementManipulators;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.impl.source.tree.injected.Place;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -90,14 +98,17 @@ public class QuickEditAction implements IntentionAction, LowPriorityAction {
   }
 
   public QuickEditHandler invokeImpl(@NotNull final Project project, final Editor editor, PsiFile file) throws IncorrectOperationException {
-    final int offset = editor.getCaretModel().getOffset();
-    final Pair<PsiElement, TextRange> pair = getRangePair(file, editor);
-    assert pair != null;
-    final PsiFile injectedFile = (PsiFile)pair.first;
-    final int injectedOffset = ((DocumentWindow)PsiDocumentManager.getInstance(project).getDocument(injectedFile)).hostToInjected(offset);
+    int offset = editor.getCaretModel().getOffset();
+    Pair<PsiElement, TextRange> pair = ObjectUtils.assertNotNull(getRangePair(file, editor));
+
+    PsiFile injectedFile = (PsiFile)pair.first;
     QuickEditHandler handler = getHandler(project, injectedFile, editor, file);
+
     if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      handler.navigate(injectedOffset);
+      DocumentWindow documentWindow = InjectedLanguageUtil.getDocumentWindow(injectedFile);
+      if (documentWindow != null) {
+        handler.navigate(((DocumentWindowImpl)documentWindow).hostToInjectedUnescaped(offset));
+      }
     }
     return handler;
   }
@@ -121,12 +132,15 @@ public class QuickEditAction implements IntentionAction, LowPriorityAction {
     return handler;
   }
 
-  public static QuickEditHandler getExistingHandler(PsiFile injectedFile) {
+  public static QuickEditHandler getExistingHandler(@NotNull PsiFile injectedFile) {
     Place shreds = InjectedLanguageUtil.getShreds(injectedFile);
-    if (shreds == null) return null;
+    DocumentWindow documentWindow = InjectedLanguageUtil.getDocumentWindow(injectedFile);
+    if (shreds == null || documentWindow == null) return null;
+
     TextRange hostRange = TextRange.create(shreds.get(0).getHostRangeMarker().getStartOffset(),
                                            shreds.get(shreds.size() - 1).getHostRangeMarker().getEndOffset());
     for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
+      if (editor.getDocument() != documentWindow.getDelegate()) continue;
       QuickEditHandler handler = editor.getUserData(QUICK_EDIT_HANDLER);
       if (handler != null && handler.changesRange(hostRange)) return handler;
     }
@@ -138,7 +152,7 @@ public class QuickEditAction implements IntentionAction, LowPriorityAction {
   }
   
   @Nullable
-  protected JComponent createBalloonComponent(PsiFile file, Ref<Balloon> ref) {
+  protected JComponent createBalloonComponent(@NotNull PsiFile file) {
     return null;
   }
 

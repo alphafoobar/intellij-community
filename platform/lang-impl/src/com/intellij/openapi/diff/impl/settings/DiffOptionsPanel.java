@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.ui.*;
 import com.intellij.util.EventDispatcher;
@@ -44,10 +43,10 @@ import java.util.Set;
 public class DiffOptionsPanel implements OptionsPanel {
   private final ColorAndFontOptions myOptions;
   private final EventDispatcher<ColorAndFontSettingsListener> myDispatcher = EventDispatcher.create(ColorAndFontSettingsListener.class);
-  private LabeledComponent<ColorPanel> myBackgoundColorPanelComponent;
+  private ColorPanel myBackgroundColorPanel;
   private JList myOptionsList;
   private JPanel myWholePanel;
-  private LabeledComponent<ColorPanel> myStripeMarkColorComponent;
+  private ColorPanel myStripeMarkColorPanel;
 
   public DiffOptionsPanel(ColorAndFontOptions options) {
 
@@ -62,18 +61,16 @@ public class DiffOptionsPanel implements OptionsPanel {
           @Override
           public void valueChanged(ListSelectionEvent e) {
             TextDiffType selection = getSelectedOption();
-            ColorPanel background = getBackgroundColorPanel();
-            ColorPanel stripeMark = getStripeMarkColorPanel();
             if (selection == null) {
-              background.setEnabled(false);
-              stripeMark.setEnabled(false);
+              myBackgroundColorPanel.setEnabled(false);
+              myStripeMarkColorPanel.setEnabled(false);
             } else {
-              background.setEnabled(true);
-              stripeMark.setEnabled(true);
+              myBackgroundColorPanel.setEnabled(true);
+              myStripeMarkColorPanel.setEnabled(true);
               MyColorAndFontDescription description = getSelectedDescription();
               if (description != null) {
-                background.setSelectedColor(description.getBackgroundColor());
-                stripeMark.setSelectedColor(description.getStripeMarkColor());
+                myBackgroundColorPanel.setSelectedColor(description.getBackgroundColor());
+                myStripeMarkColorPanel.setSelectedColor(description.getStripeMarkColor());
               }
             }
 
@@ -81,29 +78,27 @@ public class DiffOptionsPanel implements OptionsPanel {
           }
         });
 
-    getBackgroundColorPanel().addActionListener(new ActionListener() {
+    myBackgroundColorPanel.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
         MyColorAndFontDescription selectedDescription = getSelectedDescription();
-        ColorPanel colorPanel = getBackgroundColorPanel();
         if (!checkModifiableScheme()) {
-          colorPanel.setSelectedColor(selectedDescription.getBackgroundColor());
+          myBackgroundColorPanel.setSelectedColor(selectedDescription.getBackgroundColor());
           return;
         }
-        selectedDescription.setBackgroundColor(colorPanel.getSelectedColor());
+        selectedDescription.setBackgroundColor(myBackgroundColorPanel.getSelectedColor());
         myDispatcher.getMulticaster().settingsChanged();
       }
     });
-    getStripeMarkColorPanel().addActionListener(new ActionListener() {
+    myStripeMarkColorPanel.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
         MyColorAndFontDescription selectedDescription = getSelectedDescription();
-        ColorPanel colorPanel = getStripeMarkColorPanel();
         if (!checkModifiableScheme()) {
-          colorPanel.setSelectedColor(selectedDescription.getStripeMarkColor());
+          myStripeMarkColorPanel.setSelectedColor(selectedDescription.getStripeMarkColor());
           return;
         }
-        selectedDescription.setStripeMarkColor(colorPanel.getSelectedColor());
+        selectedDescription.setStripeMarkColor(myStripeMarkColorPanel.getSelectedColor());
         myDispatcher.getMulticaster().settingsChanged();
       }
     });
@@ -138,7 +133,7 @@ public class DiffOptionsPanel implements OptionsPanel {
         myDescriptions.put(type.getExternalName(), (MyColorAndFontDescription)description);
       }
     }
-    ListScrollingUtil.ensureSelectionExists(myOptionsList);
+    ScrollingUtil.ensureSelectionExists(myOptionsList);
   }
 
   @Override
@@ -156,7 +151,7 @@ public class DiffOptionsPanel implements OptionsPanel {
           return new Runnable() {
             @Override
             public void run() {
-              ListScrollingUtil.selectItem(myOptionsList, i1);
+              ScrollingUtil.selectItem(myOptionsList, i1);
             }
           };
 
@@ -202,7 +197,7 @@ public class DiffOptionsPanel implements OptionsPanel {
       Object o = myOptionsModel.get(i);
       if (o instanceof TextDiffType) {
         if (typeToSelect.equals(((TextDiffType)o).getDisplayName())) {
-          ListScrollingUtil.selectItem(myOptionsList, i);
+          ScrollingUtil.selectItem(myOptionsList, i);
           return;
         }
       }
@@ -236,14 +231,6 @@ public class DiffOptionsPanel implements OptionsPanel {
     TextDiffType selection = getSelectedOption();
     if (selection == null) return null;
     return myDescriptions.get(selection.getAttributesKey().getExternalName());
-  }
-
-  private ColorPanel getBackgroundColorPanel() {
-    return myBackgoundColorPanelComponent.getComponent();
-  }
-
-  private ColorPanel getStripeMarkColorPanel() {
-    return myStripeMarkColorComponent.getComponent();
   }
 
   public static void addSchemeDescriptions(@NotNull List<EditorSchemeAttributeDescriptor> descriptions, @NotNull EditorColorsScheme scheme) {

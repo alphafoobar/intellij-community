@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizerUtil;
 import com.intellij.util.ConcurrencyUtil;
-import com.intellij.util.containers.StripedLockConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -34,7 +34,7 @@ import java.awt.*;
 import java.util.concurrent.ConcurrentMap;
 
 public class AttributesFlyweight {
-  private static final ConcurrentMap<FlyweightKey, AttributesFlyweight> entries = new StripedLockConcurrentHashMap<FlyweightKey, AttributesFlyweight>();
+  private static final ConcurrentMap<FlyweightKey, AttributesFlyweight> entries = ContainerUtil.newConcurrentMap();
   private static final ThreadLocal<FlyweightKey> ourKey = new ThreadLocal<FlyweightKey>();
 
   private final int myHashCode;
@@ -146,7 +146,7 @@ public class AttributesFlyweight {
     int FONT_TYPE = fontType;
     int EFFECT_TYPE = DefaultJDOMExternalizer.toInt(JDOMExternalizerUtil.readField(element, "EFFECT_TYPE", "0"));
 
-    return new AttributesFlyweight(FOREGROUND, BACKGROUND, FONT_TYPE, EFFECT_COLOR, toEffectType(EFFECT_TYPE), ERROR_STRIPE_COLOR);
+    return create(FOREGROUND, BACKGROUND, FONT_TYPE, EFFECT_COLOR, toEffectType(EFFECT_TYPE), ERROR_STRIPE_COLOR);
   }
 
   private static void writeColor(Element element, String fieldName, Color color) {
@@ -165,7 +165,10 @@ public class AttributesFlyweight {
     }
     writeColor(element, "EFFECT_COLOR", getEffectColor());
     writeColor(element, "ERROR_STRIPE_COLOR", getErrorStripeColor());
-    JDOMExternalizerUtil.writeField(element, "EFFECT_TYPE", String.valueOf(fromEffectType(getEffectType())));
+    int effectType = fromEffectType(getEffectType());
+    if (effectType != 0) {
+      JDOMExternalizerUtil.writeField(element, "EFFECT_TYPE", String.valueOf(effectType));
+    }
   }
 
   private static final int EFFECT_BORDER = 0;
@@ -176,29 +179,16 @@ public class AttributesFlyweight {
   private static final int EFFECT_BOLD_DOTTED_LINE = 5;
 
   private static int fromEffectType(EffectType effectType) {
-    int EFFECT_TYPE;
-    if (effectType == EffectType.BOXED) {
-      EFFECT_TYPE = EFFECT_BORDER;
+    if (effectType == null) return -1;
+    switch (effectType) {
+      case BOXED: return EFFECT_BORDER;
+      case LINE_UNDERSCORE: return EFFECT_LINE;
+      case BOLD_LINE_UNDERSCORE: return EFFECT_BOLD_LINE;
+      case STRIKEOUT: return EFFECT_STRIKEOUT;
+      case WAVE_UNDERSCORE: return EFFECT_WAVE;
+      case BOLD_DOTTED_LINE: return EFFECT_BOLD_DOTTED_LINE;
+      default: return -1;
     }
-    else if (effectType == EffectType.LINE_UNDERSCORE) {
-      EFFECT_TYPE = EFFECT_LINE;
-    }
-    else if (effectType == EffectType.BOLD_LINE_UNDERSCORE) {
-      EFFECT_TYPE = EFFECT_BOLD_LINE;
-    }
-    else if (effectType == EffectType.STRIKEOUT) {
-      EFFECT_TYPE = EFFECT_STRIKEOUT;
-    }
-    else if (effectType == EffectType.WAVE_UNDERSCORE) {
-      EFFECT_TYPE = EFFECT_WAVE;
-    }
-    else if (effectType == EffectType.BOLD_DOTTED_LINE) {
-      EFFECT_TYPE = EFFECT_BOLD_DOTTED_LINE;
-    }
-    else {
-      EFFECT_TYPE = -1;
-    }
-    return EFFECT_TYPE;
   }
 
   private static EffectType toEffectType(int effectType) {

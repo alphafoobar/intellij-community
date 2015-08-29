@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.PsiTodoSearchHelper;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.usageView.UsageTreeColorsScheme;
+import com.intellij.util.Processor;
 import com.intellij.util.containers.HashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -202,7 +203,7 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
           return callback;
         }
 
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     };
   }
@@ -361,15 +362,36 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
     myDirtyFileSet.clear();
     myFile2Highlighter.clear();
 
+    collectFiles(new Processor<VirtualFile>() {
+      @Override
+      public boolean process(VirtualFile virtualFile) {
+        myFileTree.add(virtualFile);
+        return true;
+      }
+    });
+    getTodoTreeStructure().validateCache();
+  }
+
+  void collectFiles(Processor<VirtualFile> collector) {
     TodoTreeStructure treeStructure=getTodoTreeStructure();
     PsiFile[] psiFiles= mySearchHelper.findFilesWithTodoItems();
     for (PsiFile psiFile : psiFiles) {
       if (mySearchHelper.getTodoItemsCount(psiFile) > 0 && treeStructure.accept(psiFile)) {
-        myFileTree.add(psiFile.getVirtualFile());
+        collector.process(psiFile.getVirtualFile());
       }
     }
+  }
 
-    treeStructure.validateCache();
+  void rebuildCache(Set<VirtualFile> files){
+    myFileTree.clear();
+    myDirtyFileSet.clear();
+    myFile2Highlighter.clear();
+
+    for (VirtualFile virtualFile : files) {
+      myFileTree.add(virtualFile);
+    }
+
+    getTodoTreeStructure().validateCache();
   }
 
   private void validateCache() {

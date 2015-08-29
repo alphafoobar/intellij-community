@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.codeInsight.dataflow.DFALimitExceededException;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNamedElement;
 import com.jetbrains.python.psi.PyImportedNameDefiner;
+import com.jetbrains.python.psi.PyTargetExpression;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,8 +46,11 @@ public interface Scope {
   List<PyImportedNameDefiner> getImportedNameDefiners();
 
   @Nullable
-  PsiNamedElement getNamedElement(String name);
+  PsiNamedElement getNamedElement(String name, boolean includeNestedGlobals);
 
   @NotNull
   Collection<PsiNamedElement> getNamedElements();
+
+  @NotNull
+  Collection<PyTargetExpression> getTargetExpressions();
 }

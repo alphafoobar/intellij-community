@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,11 @@ package com.intellij.compiler.ant;
 
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.compiler.actions.GenerateAntBuildAction;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
-import com.intellij.openapi.roots.impl.DirectoryIndex;
-import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 
@@ -54,7 +51,7 @@ public class GenerateAntApplication {
         try {
           logMessage(0, "Starting app... ");
           application.doNotSave();
-          application.load(PathManager.getOptionsPath());
+          application.load();
           logMessageLn(0, "done");
 
           GenerateAntApplication.this.run();
@@ -63,7 +60,7 @@ public class GenerateAntApplication {
           GenerateAntApplication.LOG.error(e);
         }
         finally {
-          application.exit(true);
+          application.exit(true, true);
         }
       }
     });
@@ -80,9 +77,6 @@ public class GenerateAntApplication {
 
       logMessage(0, "Loading project...");
       myProject = ProjectManagerEx.getInstanceEx().loadProject(myProjectPath);
-
-      DirectoryIndexImpl dirIndex = (DirectoryIndexImpl)DirectoryIndex.getInstance(myProject);
-      dirIndex.initialize();
 
       logMessageLn(0, " done");
 

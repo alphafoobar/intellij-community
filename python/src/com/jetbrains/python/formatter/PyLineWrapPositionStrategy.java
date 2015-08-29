@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,9 +44,6 @@ public class PyLineWrapPositionStrategy extends GenericLineWrapPositionStrategy 
     addRule(new Rule('(', WrapCondition.AFTER));
     addRule(new Rule('[', WrapCondition.AFTER));
     addRule(new Rule('{', WrapCondition.AFTER));
-
-    // Symbols to wrap before
-    addRule(new Rule('.', WrapCondition.BEFORE));
   }
 
   @Override
@@ -75,11 +72,20 @@ public class PyLineWrapPositionStrategy extends GenericLineWrapPositionStrategy 
                                    int maxPreferredOffset,
                                    boolean allowToBeyondMaxPreferredOffset,
                                    boolean virtual) {
+
     int wrapPosition =
       super.calculateWrapPosition(document, project, startOffset, endOffset, maxPreferredOffset, allowToBeyondMaxPreferredOffset, virtual);
     if (wrapPosition < 0) return wrapPosition;
-    final CharSequence text = document.getCharsSequence();
+    final CharSequence text = document.getImmutableCharSequence();
 
+    if (wrapPosition > 0) {
+      char charBefore = text.charAt(wrapPosition - 1);
+      if (charBefore == '\'' || charBefore == '"') {
+        //don't wrap the first char of string literal
+        return wrapPosition + 1;
+      }
+    }
+    if (wrapPosition >= text.length()) return wrapPosition;
     char c = text.charAt(wrapPosition);
     if (!StringUtil.isWhiteSpace(c) || project == null) {
       return wrapPosition;

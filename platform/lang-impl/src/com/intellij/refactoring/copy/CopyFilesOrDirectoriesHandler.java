@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,15 @@ package com.intellij.refactoring.copy;
 import com.intellij.CommonBundle;
 import com.intellij.ide.CopyPasteDelegator;
 import com.intellij.ide.util.EditorHelper;
+import com.intellij.ide.util.PlatformPackageUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.ThrowableComputable;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingRegistry;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -32,6 +36,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,6 +46,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
+
+  private static Logger LOG = Logger.getInstance("com.intellij.refactoring.copy.CopyFilesOrDirectoriesHandler");
+
   @Override
   public boolean canCopy(PsiElement[] elements, boolean fromUpdate) {
     Set<String> names = new HashSet<String>();
@@ -71,10 +79,27 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
       if (defaultTargetDirectory == null) return;
     }
 
+    defaultTargetDirectory = tryNotNullizeDirectory(project, defaultTargetDirectory);
+
     copyAsFiles(elements, defaultTargetDirectory, project);
   }
 
-  public static void copyAsFiles(PsiElement[] elements, PsiDirectory defaultTargetDirectory, Project project) {
+  @Nullable
+  private static PsiDirectory tryNotNullizeDirectory(@NotNull Project project, @Nullable PsiDirectory defaultTargetDirectory) {
+    if (defaultTargetDirectory == null) {
+      VirtualFile root = ArrayUtil.getFirstElement(ProjectRootManager.getInstance(project).getContentRoots());
+      if (root == null) root = project.getBaseDir();
+      if (root == null) root = VfsUtil.getUserHomeDir();
+      defaultTargetDirectory = root != null ? PsiManager.getInstance(project).findDirectory(root) : null;
+
+      if (defaultTargetDirectory == null) {
+        LOG.warn("No directory found for project: " + project.getName() +", root: " + root);
+      }
+    }
+    return defaultTargetDirectory;
+  }
+
+  public static void copyAsFiles(PsiElement[] elements, @Nullable PsiDirectory defaultTargetDirectory, Project project) {
     PsiDirectory targetDirectory = null;
     String newName = null;
     boolean openInEditor = true;
@@ -84,8 +109,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
     }
     else {
       CopyFilesOrDirectoriesDialog dialog = new CopyFilesOrDirectoriesDialog(elements, defaultTargetDirectory, project, false);
-      dialog.show();
-      if (dialog.isOK()) {
+      if (dialog.showAndGet()) {
         newName = elements.length == 1 ? dialog.getNewName() : null;
         targetDirectory = dialog.getTargetDirectory();
         openInEditor = dialog.openInEditor();
@@ -119,16 +143,16 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
     PsiDirectory targetDirectory;
     if (element instanceof PsiDirectory) {
       targetDirectory = ((PsiDirectory)element).getParentDirectory();
-      assert targetDirectory != null : element;
     }
-    else  {
-      targetDirectory = ((PsiFile)element).getContainingDirectory();
+    else {
+      targetDirectory = PlatformPackageUtil.getDirectory(element);
     }
+    targetDirectory = tryNotNullizeDirectory(element.getProject(), targetDirectory);
+    if (targetDirectory == null) return;
 
     PsiElement[] elements = {element};
     CopyFilesOrDirectoriesDialog dialog = new CopyFilesOrDirectoriesDialog(elements, null, element.getProject(), true);
-    dialog.show();
-    if (dialog.isOK()) {
+    if (dialog.showAndGet()) {
       String newName = dialog.getNewName();
       copyImpl(elements, newName, targetDirectory, true, true);
     }
@@ -146,7 +170,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
         directory = directory.getParentDirectory();
       }
       else if (element instanceof PsiFile) {
-        directory = ((PsiFile)element).getContainingDirectory();
+        directory = PlatformPackageUtil.getDirectory(element);
       }
       else {
         throw new IllegalArgumentException("unexpected element " + element);
@@ -203,9 +227,9 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
                 }
               }
 
-              if (firstFile != null) {
+              if (firstFile != null && openInEditor) {
                 CopyHandler.updateSelectionInActiveProjectView(firstFile, project, doClone);
-                if (!(firstFile instanceof PsiBinaryFile) && openInEditor){
+                if (!(firstFile instanceof PsiBinaryFile)) {
                   EditorHelper.openInEditor(firstFile);
                   ApplicationManager.getApplication().invokeLater(new Runnable() {
                     @Override
@@ -302,7 +326,8 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
     }
   }
 
-  public static boolean checkFileExist(PsiDirectory targetDirectory, int[] choice, PsiFile file, String name, String title) {
+  public static boolean checkFileExist(@Nullable PsiDirectory targetDirectory, int[] choice, PsiFile file, String name, String title) {
+    if (targetDirectory == null) return false;
     final PsiFile existing = targetDirectory.findFile(name);
     if (existing != null && !existing.equals(file)) {
       int selection;

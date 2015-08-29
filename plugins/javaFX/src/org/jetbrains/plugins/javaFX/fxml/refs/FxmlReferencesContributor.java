@@ -21,6 +21,8 @@ import com.intellij.patterns.XmlAttributeValuePattern;
 import com.intellij.patterns.XmlPatterns;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.JavaClassReferenceProvider;
+import com.intellij.psi.xml.XmlAttribute;
+import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlProcessingInstruction;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.IncorrectOperationException;
@@ -29,6 +31,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.javaFX.fxml.FxmlConstants;
 import org.jetbrains.plugins.javaFX.fxml.JavaFxFileTypeFactory;
+import org.jetbrains.plugins.javaFX.fxml.JavaFxPsiUtil;
 
 import static com.intellij.patterns.PlatformPatterns.virtualFile;
 import static com.intellij.patterns.StandardPatterns.string;
@@ -41,7 +44,7 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
   public static final JavaClassReferenceProvider CLASS_REFERENCE_PROVIDER = new JavaClassReferenceProvider();
 
   @Override
-  public void registerReferenceProviders(PsiReferenceRegistrar registrar) {
+  public void registerReferenceProviders(@NotNull PsiReferenceRegistrar registrar) {
     final XmlAttributeValuePattern attributeValueInFxml = XmlPatterns.xmlAttributeValue().inVirtualFile(
       virtualFile().withExtension(JavaFxFileTypeFactory.FXML_EXTENSION));
     registrar.registerReferenceProvider(XmlPatterns.xmlAttributeValue().withParent(XmlPatterns.xmlAttribute().withName(FxmlConstants.FX_CONTROLLER))
@@ -52,7 +55,7 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
                                           .withParent(XmlPatterns.xmlAttribute().withName("type")
                                                         .withParent(XmlPatterns.xmlTag().withName(FxmlConstants.FX_ROOT)))
                                           .and(attributeValueInFxml),
-                                        CLASS_REFERENCE_PROVIDER);
+                                        new MyJavaClassReferenceProvider());
 
     registrar.registerReferenceProvider(XmlPatterns.xmlTag().inVirtualFile(virtualFile().withExtension(JavaFxFileTypeFactory.FXML_EXTENSION)),
                                         new MyJavaClassReferenceProvider());
@@ -115,7 +118,9 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
     @NotNull
     @Override
     public PsiReference[] getReferencesByElement(@NotNull PsiElement element) {
-      return getReferencesByString(((XmlTag)element).getName(), element, 1);
+      String name = element instanceof XmlAttributeValue ? ((XmlAttributeValue)element).getValue() 
+                                                         : ((XmlTag)element).getName();
+      return getReferencesByString(name, element, 1);
     }
 
     @NotNull
@@ -123,9 +128,11 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
     public PsiReference[] getReferencesByString(String str,
                                                 @NotNull final PsiElement position,
                                                 int offsetInPosition) {
+      if (str.length() == 0) return PsiReference.EMPTY_ARRAY;
       final PsiReference[] references = super.getReferencesByString(str, position, offsetInPosition);
-      if (references.length <= 1) return PsiReference.EMPTY_ARRAY;
-      final PsiReference[] results = new PsiReference[references.length - 1];
+      final int offset = position instanceof XmlTag ? 1 : 0;
+      if (references.length <= offset) return PsiReference.EMPTY_ARRAY;
+      final PsiReference[] results = new PsiReference[references.length - offset];
       for (int i = 0; i < results.length; i++) {
         results[i] = new JavaClassReferenceWrapper(references[i], position);
       }
@@ -175,6 +182,9 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
             }
           }
         }
+        else if (myPosition instanceof XmlAttributeValue) {
+          return JavaFxPsiUtil.findPsiClass(((XmlAttributeValue)myPosition).getValue(), myPosition);
+        }
         return null;
       }
 
@@ -184,20 +194,37 @@ public class FxmlReferencesContributor extends PsiReferenceContributor {
       }
 
       public PsiElement handleElementRename(String newElementName) throws IncorrectOperationException {
-        String oldText = ((XmlTag)myPosition).getName();
+        String oldText = getOldName();
         final TextRange range = getRangeInElement();
         final String newText =
           oldText.substring(0, range.getStartOffset() - 1) + newElementName + oldText.substring(range.getEndOffset() - 1);
-        return ((XmlTag)myPosition).setName(newText);
+        return setNewName(newText);
       }
 
       public PsiElement bindToElement(@NotNull PsiElement element)
         throws IncorrectOperationException {
-        String oldText = ((XmlTag)myPosition).getName();
+        String oldText = getOldName();
         final TextRange range = getRangeInElement();
         final String newText = (element instanceof PsiPackage ? ((PsiPackage)element).getQualifiedName() : ((PsiClass)element).getName()) +
                                oldText.substring(range.getEndOffset() - 1);
-        return ((XmlTag)myPosition).setName(newText);
+        return setNewName(newText);
+      }
+
+      private PsiElement setNewName(String newText) {
+        if (myPosition instanceof XmlTag) {
+          return ((XmlTag)myPosition).setName(newText);
+        }
+        else {
+          final XmlElementFactory xmlElementFactory = XmlElementFactory.getInstance(myPosition.getProject());
+          final XmlAttribute xmlAttribute = xmlElementFactory.createXmlAttribute("attributeName", newText);
+          final XmlAttributeValue valueElement = xmlAttribute.getValueElement();
+          assert valueElement != null;
+          return myPosition.replace(valueElement);
+        }
+      }
+
+      private String getOldName() {
+        return myPosition instanceof XmlTag ? ((XmlTag)myPosition).getName() : ((XmlAttributeValue)myPosition).getValue();
       }
 
       public boolean isReferenceTo(PsiElement element) {

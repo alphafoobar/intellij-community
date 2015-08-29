@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,16 +17,17 @@
 package com.intellij.openapi.util.registry;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationEx;
-import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ShadowAction;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.PlatformIcons;
@@ -43,6 +44,8 @@ import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumn;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.*;
 import java.util.List;
@@ -52,6 +55,7 @@ import java.util.List;
  * @author Konstantin Bulenkov
  */
 public class RegistryUi implements Disposable {
+  private static final String RECENT_PROPERTIES_KEY = "RegistryRecentKeys";
 
   private final JBTable myTable;
   private final JTextArea myDescriptionLabel;
@@ -99,7 +103,7 @@ public class RegistryUi implements Disposable {
 
     myTable.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
       @Override
-      public void valueChanged(ListSelectionEvent e) {
+      public void valueChanged(@NotNull ListSelectionEvent e) {
         if (e.getValueIsAdjusting()) return;
 
         final int selected = myTable.getSelectedRow();
@@ -107,11 +111,11 @@ public class RegistryUi implements Disposable {
           final RegistryValue value = myModel.getRegistryValue(selected);
           String desc = value.getDescription();
           if (value.isRestartRequired()) {
-            String required = "Requires IDE restart.";
+            String required = " Requires IDE restart.";
             if (desc.endsWith(".")) {
               desc += required;
             } else {
-              desc += (". " + required);
+              desc += "." + required;
             }
           }
           myDescriptionLabel.setText(desc);
@@ -131,9 +135,27 @@ public class RegistryUi implements Disposable {
     tb.setTargetComponent(myTable);
 
     myContent.add(tb.getComponent(), BorderLayout.NORTH);
-    new TableSpeedSearch(myTable).setComparator(new SpeedSearchComparator(false));
+    final TableSpeedSearch search = new TableSpeedSearch(myTable);
+    search.setComparator(new SpeedSearchComparator(false));
+    myTable.addKeyListener(new KeyAdapter() {
+      @Override
+      public void keyPressed(@NotNull KeyEvent e) {
+        if (e.getKeyCode() == KeyEvent.VK_SPACE) {
+          int row = myTable.getSelectedRow();
+          if (row != -1) {
+            RegistryValue rv = myModel.getRegistryValue(row);
+            if (rv.isBoolean()) {
+              rv.setValue(!rv.asBoolean());
+              keyChanged(rv.getKey());
+              for (int i : new int[]{0, 1, 2}) myModel.fireTableCellUpdated(row, i);
+              revaliateActions();
+              if (search.isPopupActive()) search.hidePopup();
+            }
+          }
+        }
+      }
+    });
   }
-
 
   private class RevertAction extends AnAction {
 
@@ -200,10 +222,21 @@ public class RegistryUi implements Disposable {
 
     private MyTableModel() {
       myAll = Registry.getAll();
+      final List<String> recent = getRecent();
+
       Collections.sort(myAll, new Comparator<RegistryValue>() {
         @Override
-        public int compare(RegistryValue o1, RegistryValue o2) {
-          return o1.getKey().compareTo(o2.getKey());
+        public int compare(@NotNull RegistryValue o1, @NotNull RegistryValue o2) {
+          final String key1 = o1.getKey();
+          final String key2 = o2.getKey();
+          final int i1 = recent.indexOf(key1);
+          final int i2 = recent.indexOf(key2);
+          final boolean c1 = i1 != -1;
+          final boolean c2 = i2 != -1;
+          if (c1 && !c2) return -1;
+          if (!c1 && c2) return 1;
+          if (c1 && c2) return i1 - i2;
+          return key1.compareToIgnoreCase(key2);
         }
       });
     }
@@ -247,7 +280,19 @@ public class RegistryUi implements Disposable {
     }
   }
 
-  public void show() {
+  private static List<String> getRecent() {
+    String value = PropertiesComponent.getInstance().getValue(RECENT_PROPERTIES_KEY);
+    return StringUtil.isEmpty(value) ? new ArrayList<String>(0) : StringUtil.split(value, "=");
+  }
+
+  private static void keyChanged(String key) {
+    final List<String> recent = getRecent();
+    recent.remove(key);
+    recent.add(0, key);
+    PropertiesComponent.getInstance().setValue(RECENT_PROPERTIES_KEY, StringUtil.join(recent, "="), "");
+  }
+
+  public boolean show() {
     DialogWrapper dialog = new DialogWrapper(true) {
       {
         setTitle("Registry");
@@ -255,6 +300,8 @@ public class RegistryUi implements Disposable {
         init();
         revaliateActions();
       }
+
+      private AbstractAction myCloseAction;
 
       @Override
       protected JComponent createCenterPanel() {
@@ -281,13 +328,20 @@ public class RegistryUi implements Disposable {
       @NotNull
       @Override
       protected Action[] createActions() {
-        return new Action[]{myRestoreDefaultsAction, new AbstractAction("Close") {
+        return new Action[]{myRestoreDefaultsAction, myCloseAction};
+      }
+
+      @Override
+      protected void createDefaultActions() {
+        super.createDefaultActions();
+        myCloseAction = new AbstractAction("Close") {
           @Override
-          public void actionPerformed(ActionEvent e) {
+          public void actionPerformed(@NotNull ActionEvent e) {
             processClose();
             doOKAction();
           }
-        }};
+        };
+        myCloseAction.putValue(DialogWrapper.DEFAULT_ACTION, true);
       }
 
       @Override
@@ -301,7 +355,7 @@ public class RegistryUi implements Disposable {
       }
     };
 
-    dialog.show();
+    return dialog.showAndGet();
   }
 
   private void processClose() {
@@ -310,15 +364,16 @@ public class RegistryUi implements Disposable {
       final ApplicationInfo info = ApplicationInfo.getInstance();
 
       final int r = Messages.showOkCancelDialog(myContent, "You need to restart " + info.getVersionName() + " for the changes to take effect", "Restart Required",
-              (app.isRestartCapable() ? "Restart Now" : "Shutdown Now"), (app.isRestartCapable() ? "Restart Later": "Shutdown Later")
+                                                app.isRestartCapable() ? "Restart Now" : "Shutdown Now",
+                                                app.isRestartCapable() ? "Restart Later": "Shutdown Later"
           , Messages.getQuestionIcon());
 
 
       if (r == Messages.OK) {
-        LaterInvocator.invokeLater(new Runnable() {
+        ApplicationManager.getApplication().invokeLater(new Runnable() {
           @Override
           public void run() {
-              app.restart(true);
+            app.restart(true);
           }
         }, ModalityState.NON_MODAL);
       }
@@ -346,12 +401,15 @@ public class RegistryUi implements Disposable {
 
     private final JLabel myLabel = new JLabel();
 
+    @NotNull
     @Override
-    public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+    public Component getTableCellRendererComponent(@NotNull JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
       final RegistryValue v = ((MyTableModel)table.getModel()).getRegistryValue(row);
       myLabel.setIcon(null);
       myLabel.setText(null);
       myLabel.setHorizontalAlignment(SwingConstants.LEFT);
+      Color fg = isSelected ? table.getSelectionForeground() : table.getForeground();
+      Color bg = isSelected ? table.getSelectionBackground() : table.getBackground();
       
       if (v != null) {
         switch (column) {
@@ -368,7 +426,7 @@ public class RegistryUi implements Disposable {
             } else if (v.isBoolean()) {
               final JCheckBox box = new JCheckBox();
               box.setSelected(v.asBoolean());
-              box.setBackground(table.getBackground());
+              box.setBackground(bg);
               return box;
             } else {
               myLabel.setText(v.asString());
@@ -378,8 +436,8 @@ public class RegistryUi implements Disposable {
         myLabel.setOpaque(true);
 
         myLabel.setFont(myLabel.getFont().deriveFont(v.isChangedFromDefault() ? Font.BOLD : Font.PLAIN));
-        myLabel.setForeground(isSelected ? table.getSelectionForeground() : table.getForeground());
-        myLabel.setBackground(isSelected ? table.getSelectionBackground() : table.getBackground());
+        myLabel.setForeground(fg);
+        myLabel.setBackground(bg);
       }
 
       return myLabel;
@@ -413,9 +471,10 @@ public class RegistryUi implements Disposable {
     public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
       myValue = ((MyTableModel)table.getModel()).getRegistryValue(row);
       if (myValue.asColor(null) != null) {
-        final Color color = ColorChooser.chooseColor(table, "Choose color", ((RegistryValue)value).asColor(Color.WHITE));
+        final Color color = ColorChooser.chooseColor(table, "Choose color", myValue.asColor(Color.WHITE));
         if (color != null) {
           myValue.setValue(color.getRed() + "," + color.getGreen() + "," + color.getBlue());
+          keyChanged(myValue.getKey());
         }
         return null;
       } else if (myValue.isBoolean()) {
@@ -438,6 +497,7 @@ public class RegistryUi implements Disposable {
         } else {
           myValue.setValue(myField.getText().trim());
         }
+        keyChanged(myValue.getKey());
       }
       revaliateActions();
       return super.stopCellEditing();
@@ -455,7 +515,7 @@ public class RegistryUi implements Disposable {
     }
 
     @Override
-    public void actionPerformed(ActionEvent e) {
+    public void actionPerformed(@NotNull ActionEvent e) {
       restoreDefaults();
     }
   }

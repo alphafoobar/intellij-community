@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,39 +16,47 @@
 package com.intellij.xdebugger.impl.ui;
 
 import com.intellij.codeInsight.hint.HintUtil;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorGutter;
 import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.colors.EditorColorsUtil;
+import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
+import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.popup.Balloon;
-import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.ui.popup.JBPopupListener;
-import com.intellij.openapi.ui.popup.LightweightWindowEvent;
-import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.DimensionService;
-import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.ui.popup.*;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.AppUIUtil;
 import com.intellij.ui.EditorTextField;
+import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.popup.list.ListPopupImpl;
 import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.XExpression;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XBreakpointAdapter;
 import com.intellij.xdebugger.breakpoints.XBreakpointListener;
 import com.intellij.xdebugger.breakpoints.XBreakpointManager;
 import com.intellij.xdebugger.frame.XFullValueEvaluator;
+import com.intellij.xdebugger.frame.XValue;
+import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
 import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointsDialogFactory;
 import com.intellij.xdebugger.impl.breakpoints.ui.XLightBreakpointPropertiesPanel;
+import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.Promise;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.MouseEvent;
+import java.awt.event.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DebuggerUIUtil {
@@ -89,7 +97,7 @@ public class DebuggerUIUtil {
     ApplicationManager.getApplication().invokeLater(runnable);
   }
 
-  public static RelativePoint calcPopupLocation(Editor editor, final int line) {
+  public static RelativePoint calcPopupLocation(@NotNull Editor editor, final int line) {
     Point p = editor.logicalPositionToXY(new LogicalPosition(line + 1, 0));
 
     final Rectangle visibleArea = editor.getScrollingModel().getVisibleArea();
@@ -99,12 +107,12 @@ public class DebuggerUIUtil {
     return new RelativePoint(editor.getContentComponent(), p);
   }
 
-  public static void showValuePopup(@NotNull XFullValueEvaluator text, @NotNull MouseEvent event, @NotNull Project project) {
+  public static void showValuePopup(@NotNull XFullValueEvaluator evaluator, @NotNull MouseEvent event, @NotNull Project project, @Nullable Editor editor) {
     EditorTextField textArea = new TextViewer("Evaluating...", project);
     textArea.setBackground(HintUtil.INFORMATION_COLOR);
 
     final FullValueEvaluationCallbackImpl callback = new FullValueEvaluationCallbackImpl(textArea);
-    text.startEvaluation(callback);
+    evaluator.startEvaluation(callback);
 
     Dimension size = DimensionService.getInstance().getSize(FULL_VALUE_POPUP_DIMENSION_KEY, project);
     if (size == null) {
@@ -114,19 +122,39 @@ public class DebuggerUIUtil {
 
     textArea.setPreferredSize(size);
 
-    JBPopupFactory.getInstance().createComponentPopupBuilder(textArea, null)
-      .setResizable(true)
+    JBPopup popup = createValuePopup(project, textArea, callback);
+    if (editor == null) {
+      Rectangle bounds = new Rectangle(event.getLocationOnScreen(), size);
+      ScreenUtil.fitToScreenVertical(bounds, 5, 5, true);
+      if (size.width != bounds.width || size.height != bounds.height) {
+        size = bounds.getSize();
+        textArea.setPreferredSize(size);
+      }
+      popup.showInScreenCoordinates(event.getComponent(), bounds.getLocation());
+    }
+    else {
+      popup.showInBestPositionFor(editor);
+    }
+  }
+
+  public static JBPopup createValuePopup(Project project,
+                                          JComponent component,
+                                          @Nullable final FullValueEvaluationCallbackImpl callback) {
+    ComponentPopupBuilder builder = JBPopupFactory.getInstance().createComponentPopupBuilder(component, null);
+    builder.setResizable(true)
       .setMovable(true)
-      .setDimensionServiceKey(project, FULL_VALUE_POPUP_DIMENSION_KEY, false)
-      .setRequestFocus(false)
-      .setCancelCallback(new Computable<Boolean>() {
-        @Override
-        public Boolean compute() {
-          callback.setObsolete();
-          return true;
-        }
-      })
-      .createPopup().show(new RelativePoint(event.getComponent(), new Point(event.getX() - size.width, event.getY() - size.height)));
+        .setDimensionServiceKey(project, FULL_VALUE_POPUP_DIMENSION_KEY, false)
+        .setRequestFocus(false);
+      if (callback != null) {
+        builder.setCancelCallback(new Computable<Boolean>() {
+          @Override
+          public Boolean compute() {
+            callback.setObsolete();
+            return true;
+          }
+        });
+      }
+    return builder.createPopup();
   }
 
   public static void showXBreakpointEditorBalloon(final Project project,
@@ -135,10 +163,13 @@ public class DebuggerUIUtil {
                                                   final boolean showAllOptions,
                                                   final XBreakpoint breakpoint) {
     final XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
-    final XLightBreakpointPropertiesPanel<XBreakpoint<?>> propertiesPanel = new XLightBreakpointPropertiesPanel<XBreakpoint<?>>(project, breakpointManager, breakpoint, showAllOptions);
+    final XLightBreakpointPropertiesPanel<XBreakpointBase<?, ?, ?>> propertiesPanel =
+      new XLightBreakpointPropertiesPanel<XBreakpointBase<?, ?, ?>>(project, breakpointManager, (XBreakpointBase)breakpoint,
+                                                                    showAllOptions);
 
     final Ref<Balloon> balloonRef = Ref.create(null);
     final Ref<Boolean> isLoading = Ref.create(Boolean.FALSE);
+    final Ref<Boolean> moreOptionsRequested = Ref.create(Boolean.FALSE);
 
     propertiesPanel.setDelegate(new XLightBreakpointPropertiesPanel.Delegate() {
       @Override
@@ -150,6 +181,7 @@ public class DebuggerUIUtil {
           balloonRef.get().hide();
         }
         showXBreakpointEditorBalloon(project, point, component, true, breakpoint);
+        moreOptionsRequested.set(true);
       }
     });
 
@@ -157,10 +189,15 @@ public class DebuggerUIUtil {
     propertiesPanel.loadProperties();
     isLoading.set(Boolean.FALSE);
 
+    if (moreOptionsRequested.get()) {
+      return;
+    }
+
     Runnable showMoreOptions = new Runnable() {
       @Override
       public void run() {
         propertiesPanel.saveProperties();
+        propertiesPanel.dispose();
         BreakpointsDialogFactory.getInstance(project).showDialog(breakpoint);
       }
     };
@@ -182,16 +219,10 @@ public class DebuggerUIUtil {
       @Override
       public void onClosed(LightweightWindowEvent event) {
         propertiesPanel.saveProperties();
+        propertiesPanel.dispose();
         breakpointManager.removeBreakpointListener(breakpointListener);
       }
     });
-
-    if (point == null) {
-      balloon.showInCenterOf(component);
-    }
-    else {
-      balloon.show(new RelativePoint(component, point), Balloon.Position.atRight);
-    }
 
     breakpointManager.addBreakpointListener(breakpointListener);
     ApplicationManager.getApplication().invokeLater(new Runnable() {
@@ -234,6 +265,20 @@ public class DebuggerUIUtil {
       }
     });
 
+    final ComponentAdapter moveListener = new ComponentAdapter() {
+      @Override
+      public void componentMoved(ComponentEvent e) {
+        balloon.hide();
+      }
+    };
+    component.addComponentListener(moveListener);
+    Disposer.register(balloon, new Disposable() {
+      @Override
+      public void dispose() {
+        component.removeComponentListener(moveListener);
+      }
+    });
+
     if (whereToShow == null) {
       balloon.showInCenterOf(component);
     }
@@ -253,6 +298,16 @@ public class DebuggerUIUtil {
     BreakpointsDialogFactory.getInstance(project).setBalloonToHide(balloon, breakpoint);
 
     return balloon;
+  }
+
+  @NotNull
+  public static EditorColorsScheme getColorScheme() {
+    return EditorColorsUtil.getGlobalOrDefaultColorScheme();
+  }
+
+  @NotNull
+  public static EditorColorsScheme getColorScheme(@Nullable JComponent component) {
+    return EditorColorsUtil.getColorSchemeForComponent(component);
   }
 
   private static class FullValueEvaluationCallbackImpl implements XFullValueEvaluator.XFullValueEvaluationCallback {
@@ -299,6 +354,41 @@ public class DebuggerUIUtil {
     @Override
     public boolean isObsolete() {
       return myObsolete.get();
+    }
+  }
+
+  @Nullable
+  public static String getNodeRawValue(@NotNull XValueNodeImpl valueNode) {
+    if (valueNode.getValueContainer() instanceof XValueTextProvider) {
+      return ((XValueTextProvider)valueNode.getValueContainer()).getValueText();
+    }
+    else {
+      return valueNode.getRawValue();
+    }
+  }
+
+  /**
+   * Checks if value has evaluation expression ready, or calculation is pending
+   */
+  public static boolean hasEvaluationExpression(@NotNull XValue value) {
+    Promise<XExpression> promise = value.calculateEvaluationExpression();
+    if (promise.getState() == Promise.State.PENDING) return true;
+    if (promise instanceof Getter) {
+      return ((Getter)promise).get() != null;
+    }
+    return true;
+  }
+
+  public static void registerExtraHandleShortcuts(final ListPopupImpl popup, String actionName) {
+    AnAction action = ActionManager.getInstance().getAction(actionName);
+    KeyStroke stroke = KeymapUtil.getKeyStroke(action.getShortcutSet());
+    if (stroke != null) {
+      popup.registerAction("handleSelection " + stroke, stroke, new AbstractAction() {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          popup.handleSelect(true);
+        }
+      });
     }
   }
 }

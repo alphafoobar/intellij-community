@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 package git4idea.rollback;
 
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.lifecycle.PeriodicalTasksCloser;
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.VcsException;
@@ -141,14 +143,20 @@ public class GitRollbackEnvironment implements RollbackEnvironment {
       }
     }
     // revert files from HEAD
-    for (Map.Entry<VirtualFile, List<FilePath>> entry : toRevert.entrySet()) {
-      listener.accept(entry.getValue());
-      try {
-        revert(entry.getKey(), entry.getValue());
+    AccessToken token = DvcsUtil.workingTreeChangeStarted(myProject);
+    try {
+      for (Map.Entry<VirtualFile, List<FilePath>> entry : toRevert.entrySet()) {
+        listener.accept(entry.getValue());
+        try {
+          revert(entry.getKey(), entry.getValue());
+        }
+        catch (VcsException e) {
+          exceptions.add(e);
+        }
       }
-      catch (VcsException e) {
-        exceptions.add(e);
-      }
+    }
+    finally {
+      DvcsUtil.workingTreeChangeFinished(myProject,token);
     }
     LocalFileSystem lfs = LocalFileSystem.getInstance();
     HashSet<File> filesToRefresh = new HashSet<File>();

@@ -23,11 +23,15 @@ import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class ActionUtil {
@@ -92,8 +96,7 @@ public class ActionUtil {
   public static boolean performDumbAwareUpdate(AnAction action, AnActionEvent e, boolean beforeActionPerformed) {
     final Presentation presentation = e.getPresentation();
     final Boolean wasEnabledBefore = (Boolean)presentation.getClientProperty(WAS_ENABLED_BEFORE_DUMB);
-    final Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
-    final boolean dumbMode = project != null && DumbService.getInstance(project).isDumb();
+    final boolean dumbMode = isDumbMode(CommonDataKeys.PROJECT.getData(e.getDataContext()));
     if (wasEnabledBefore != null && !dumbMode) {
       presentation.putClientProperty(WAS_ENABLED_BEFORE_DUMB, null);
       presentation.setEnabled(wasEnabledBefore.booleanValue());
@@ -131,6 +134,23 @@ public class ActionUtil {
     return false;
   }
 
+  /**
+   * @return whether a dumb mode is in progress for the passed project or, if the argument is null, for any open project.
+   * @see DumbService
+   */
+  public static boolean isDumbMode(@Nullable Project project) {
+    if (project != null) {
+      return DumbService.getInstance(project).isDumb();
+    }
+    for (Project proj : ProjectManager.getInstance().getOpenProjects()) {
+      if (DumbService.getInstance(proj).isDumb()) {
+        return true;
+      }
+    }
+    return false;
+
+  }
+
   public static boolean lastUpdateAndCheckDumb(AnAction action, AnActionEvent e, boolean visibilityMatters) {
     performDumbAwareUpdate(action, e, true);
 
@@ -166,5 +186,10 @@ public class ActionUtil {
     }
   }
 
-
+  @NotNull
+  public static List<AnAction> getActions(@NotNull JComponent component) {
+    Object property = component.getClientProperty(AnAction.ourClientProperty);
+    //noinspection unchecked
+    return property == null ? Collections.<AnAction>emptyList() : (List<AnAction>)property;
+  }
 }

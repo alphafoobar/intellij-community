@@ -16,14 +16,16 @@
 package com.intellij.refactoring.introduceField;
 
 import com.intellij.codeInsight.CodeInsightUtil;
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.codeInsight.unwrap.ScopeHighlighter;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pass;
 import com.intellij.psi.*;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.PsiExpressionTrimRenderer;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.IntroduceTargetChooser;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.introduceVariable.IntroduceVariableBase;
@@ -42,6 +44,7 @@ public class ElementToWorkOn {
   public static final Key<String> PREFIX = Key.create("prefix");
   public static final Key<String> SUFFIX = Key.create("suffix");
   public static final Key<RangeMarker> TEXT_RANGE = Key.create("range");
+  public static final Key<Boolean> REPLACE_NON_PHYSICAL = Key.create("replace_non_physical");
   public static final Key<Boolean> OUT_OF_CODE_BLOCK= Key.create("out_of_code_block");
 
   private ElementToWorkOn(PsiLocalVariable localVariable, PsiExpression expr) {
@@ -66,17 +69,17 @@ public class ElementToWorkOn {
     PsiExpression expr = null;
 
     if (!editor.getSelectionModel().hasSelection()) {
-      PsiElement element = TargetElementUtilBase.findTargetElement(editor, TargetElementUtilBase
-        .ELEMENT_NAME_ACCEPTED | TargetElementUtilBase
-        .REFERENCED_ELEMENT_ACCEPTED | TargetElementUtilBase
-        .LOOKUP_ITEM_ACCEPTED);
+      PsiElement element = TargetElementUtil.findTargetElement(editor, TargetElementUtil
+                                                                         .ELEMENT_NAME_ACCEPTED | TargetElementUtil
+                                                                         .REFERENCED_ELEMENT_ACCEPTED | TargetElementUtil
+                                                                         .LOOKUP_ITEM_ACCEPTED);
       if (element instanceof PsiLocalVariable) {
         localVar = (PsiLocalVariable) element;
         PsiElement elementAt = file.findElementAt(editor.getCaretModel().getOffset());
         if (elementAt instanceof PsiIdentifier && elementAt.getParent() instanceof PsiReferenceExpression) {
           expr = (PsiExpression) elementAt.getParent();
         } else {
-          final PsiReference reference = TargetElementUtilBase.findReference(editor);
+          final PsiReference reference = TargetElementUtil.findReference(editor);
           if (reference != null) {
             final PsiElement refElement = reference.getElement();
             if (refElement instanceof PsiReferenceExpression) {
@@ -90,7 +93,7 @@ public class ElementToWorkOn {
         final int offset = editor.getCaretModel().getOffset();
         final PsiElement[] statementsInRange = IntroduceVariableBase.findStatementsAtOffset(editor, file, offset);
 
-        if (statementsInRange.length == 1 && (PsiUtilCore.hasErrorElementChild(statementsInRange[0]) || !PsiUtil.isStatement(statementsInRange[0]))) {
+        if (statementsInRange.length == 1 && IntroduceVariableBase.selectLineAtCaret(offset, statementsInRange)) {
           editor.getSelectionModel().selectLineAtCaret();
           final ElementToWorkOn elementToWorkOn = getElementToWorkOn(editor, file, refactoringName, helpId, project, localVar, expr);
           if (elementToWorkOn == null || elementToWorkOn.getLocalVariable() == null && elementToWorkOn.getExpression() == null || !processor.accept(elementToWorkOn)) {
@@ -110,10 +113,11 @@ public class ElementToWorkOn {
           if (expressions.isEmpty()) {
             editor.getSelectionModel().selectLineAtCaret();
           }
-          else if (expressions.size() == 1) {
+          else if (!IntroduceVariableBase.isChooserNeeded(expressions)) {
             expr = expressions.get(0);
           }
           else {
+            final int selection = IntroduceVariableBase.preferredSelection(statementsInRange, expressions);
             IntroduceTargetChooser.showChooser(editor, expressions, new Pass<PsiExpression>() {
               @Override
               public void pass(final PsiExpression selectedValue) {
@@ -123,7 +127,7 @@ public class ElementToWorkOn {
                 }
                 processor.pass(getElementToWorkOn(editor, file, refactoringName, helpId, project, var, selectedValue));
               }
-            }, new PsiExpressionTrimRenderer.RenderFunction());
+            }, new PsiExpressionTrimRenderer.RenderFunction(), "Expressions", selection, ScopeHighlighter.NATURAL_RANGER);
             return;
           }
         }
@@ -169,21 +173,22 @@ public class ElementToWorkOn {
       expr = IntroduceVariableBase.getSelectedExpression(project, file, startOffset, endOffset);
     }
 
-    if (localVar == null) {
-      if (expr != null) {
-        final String errorMessage = IntroduceVariableBase.getErrorMessage(expr);
-        if (errorMessage != null) {
-          CommonRefactoringUtil.showErrorHint(project, editor, errorMessage, refactoringName, helpId);
-          return null;
-        }
-      }
-      if (expr == null) {
-        String message = RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("error.wrong.caret.position.local.or.expression.name"));
-        CommonRefactoringUtil.showErrorHint(project, editor, message, refactoringName, helpId);
+    if (localVar == null && expr != null) {
+      final String errorMessage = IntroduceVariableBase.getErrorMessage(expr);
+      if (errorMessage != null) {
+        CommonRefactoringUtil.showErrorHint(project, editor, errorMessage, refactoringName, helpId);
         return null;
       }
     }
     return new ElementToWorkOn(localVar, expr);
+  }
+
+  public static void showNothingSelectedErrorMessage(final Editor editor,
+                                                     final String refactoringName,
+                                                     final String helpId,
+                                                     final Project project) {
+    String message = RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("error.wrong.caret.position.local.or.expression.name"));
+    CommonRefactoringUtil.showErrorHint(project, editor, message, refactoringName, helpId);
   }
   
   public interface ElementsProcessor<T> {

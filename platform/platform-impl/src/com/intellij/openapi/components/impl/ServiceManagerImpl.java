@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,27 +15,39 @@
  */
 package com.intellij.openapi.components.impl;
 
+import com.intellij.ide.plugins.PluginManager;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.components.BaseComponent;
 import com.intellij.openapi.components.ComponentManager;
+import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.ServiceDescriptor;
 import com.intellij.openapi.components.ex.ComponentManagerEx;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.*;
+import com.intellij.openapi.extensions.impl.ExtensionComponentAdapter;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.PairProcessor;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.pico.AssignableToComponentAdapter;
+import com.intellij.util.pico.ConstructorInjectionComponentAdapter;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.picocontainer.*;
-import org.picocontainer.defaults.ConstructorInjectionComponentAdapter;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 public class ServiceManagerImpl implements BaseComponent {
+  private static final Logger LOG = Logger.getInstance(ServiceManagerImpl.class);
+
   private static final ExtensionPointName<ServiceDescriptor> APP_SERVICES = new ExtensionPointName<ServiceDescriptor>("com.intellij.applicationService");
   private static final ExtensionPointName<ServiceDescriptor> PROJECT_SERVICES = new ExtensionPointName<ServiceDescriptor>("com.intellij.projectService");
   private ExtensionPointName<ServiceDescriptor> myExtensionPointName;
@@ -52,26 +64,34 @@ public class ServiceManagerImpl implements BaseComponent {
   protected ServiceManagerImpl(boolean ignoreInit) {
   }
 
-  protected void installEP(final ExtensionPointName<ServiceDescriptor> pointName, final ComponentManager componentManager) {
+  protected void installEP(@NotNull ExtensionPointName<ServiceDescriptor> pointName, @NotNull final ComponentManager componentManager) {
+    LOG.assertTrue(myExtensionPointName == null, "Already called installEP with " + myExtensionPointName);
     myExtensionPointName = pointName;
     final ExtensionPoint<ServiceDescriptor> extensionPoint = Extensions.getArea(null).getExtensionPoint(pointName);
-    assert extensionPoint != null;
-
     final MutablePicoContainer picoContainer = (MutablePicoContainer)componentManager.getPicoContainer();
 
     myExtensionPointListener = new ExtensionPointListener<ServiceDescriptor>() {
+      @Override
       public void extensionAdded(@NotNull final ServiceDescriptor descriptor, final PluginDescriptor pluginDescriptor) {
         if (descriptor.overrides) {
-          ComponentAdapter oldAdapter =
-            picoContainer.unregisterComponent(descriptor.getInterface());// Allow to re-define service implementations in plugins.
+          // Allow to re-define service implementations in plugins.
+          ComponentAdapter oldAdapter = picoContainer.unregisterComponent(descriptor.getInterface());
           if (oldAdapter == null) {
             throw new RuntimeException("Service: " + descriptor.getInterface() + " doesn't override anything");
           }
         }
 
-        picoContainer.registerComponent(new MyComponentAdapter(descriptor, pluginDescriptor, (ComponentManagerEx)componentManager));
+        if (!ComponentManagerImpl.isComponentSuitableForOs(descriptor.os)) {
+          return;
+        }
+
+        // empty serviceImplementation means we want to unregister service
+        if (!StringUtil.isEmpty(descriptor.serviceImplementation)) {
+          picoContainer.registerComponent(new MyComponentAdapter(descriptor, pluginDescriptor, (ComponentManagerEx)componentManager));
+        }
       }
 
+      @Override
       public void extensionRemoved(@NotNull final ServiceDescriptor extension, final PluginDescriptor pluginDescriptor) {
         picoContainer.unregisterComponent(extension.getInterface());
       }
@@ -84,18 +104,74 @@ public class ServiceManagerImpl implements BaseComponent {
     return Arrays.asList(extensions);
   }
 
+  public static void processAllImplementationClasses(@NotNull ComponentManagerImpl componentManager, @NotNull PairProcessor<Class<?>, PluginDescriptor> processor) {
+    Collection adapters = componentManager.getPicoContainer().getComponentAdapters();
+    if (adapters.isEmpty()) {
+      return;
+    }
+
+    for (Object o : adapters) {
+      Class aClass;
+      if (o instanceof MyComponentAdapter) {
+        MyComponentAdapter adapter = (MyComponentAdapter)o;
+        PluginDescriptor pluginDescriptor = adapter.myPluginDescriptor;
+        try {
+          ComponentAdapter delegate = adapter.myDelegate;
+          // avoid delegation creation & class initialization
+          if (delegate == null) {
+            ClassLoader classLoader = pluginDescriptor == null ? ServiceManagerImpl.class.getClassLoader() : pluginDescriptor.getPluginClassLoader();
+            aClass = Class.forName(adapter.myDescriptor.getImplementation(), false, classLoader);
+          }
+          else {
+            aClass = delegate.getComponentImplementation();
+          }
+        }
+        catch (Throwable e) {
+          if (PlatformUtils.isIdeaUltimate()) {
+            LOG.error(e);
+          }
+          else {
+            // well, component registered, but required jar is not added to classpath (community edition or junior IDE)
+            LOG.warn(e);
+          }
+          continue;
+        }
+
+        if (!processor.process(aClass, pluginDescriptor)) {
+          break;
+        }
+      }
+      else if (o instanceof ComponentAdapter && !(o instanceof ExtensionComponentAdapter)) {
+        try {
+          aClass = ((ComponentAdapter)o).getComponentImplementation();
+        }
+        catch (Throwable e) {
+          LOG.error(e);
+          continue;
+        }
+
+        PluginId pluginId = componentManager.getConfig(aClass);
+        if (pluginId != null) {
+          processor.process(aClass, PluginManager.getPlugin(pluginId));
+        }
+      }
+    }
+  }
+
+  @Override
   @NonNls
   @NotNull
   public String getComponentName() {
     return getClass().getName();
   }
 
+  @Override
   public void initComponent() {
   }
 
+  @Override
   public void disposeComponent() {
     final ExtensionPoint<ServiceDescriptor> extensionPoint = Extensions.getArea(null).getExtensionPoint(myExtensionPointName);
-    assert extensionPoint != null;
     extensionPoint.removeExtensionPointListener(myExtensionPointListener);
   }
 
@@ -113,82 +189,105 @@ public class ServiceManagerImpl implements BaseComponent {
       myDelegate = null;
     }
 
-    public Object getComponentKey() {
+    @Override
+    public String getComponentKey() {
       return myDescriptor.getInterface();
     }
 
+    @Override
     public Class getComponentImplementation() {
-      return loadClass(myDescriptor.getInterface());
+      return getDelegate().getComponentImplementation();
     }
 
-    private Class loadClass(final String className) {
-      try {
-        final ClassLoader classLoader = myPluginDescriptor != null ? myPluginDescriptor.getPluginClassLoader() : getClass().getClassLoader();
-
-        return Class.forName(className, true, classLoader);
-      }
-      catch (ClassNotFoundException e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    public Object getComponentInstance(final PicoContainer container) throws PicoInitializationException, PicoIntrospectionException {
+    @Override
+    public Object getComponentInstance(@NotNull PicoContainer container) throws PicoInitializationException, PicoIntrospectionException {
       Object instance = myInitializedComponentInstance;
-      if (instance != null) return instance;
+      if (instance != null) {
+        return instance;
+      }
 
-      return ApplicationManager.getApplication().runReadAction(new Computable<Object>() {
-        public Object compute() {
+      // we must take read action before adapter lock - if service requested from EDT (2) and pooled (1), will be a deadlock, because EDT waits adapter lock and Pooled waits read lock
+      boolean useReadActionToInitService = isUseReadActionToInitService();
+      AccessToken readToken = useReadActionToInitService ? ReadAction.start() : null;
+      try {
+        synchronized (this) {
+          instance = myInitializedComponentInstance;
+          if (instance != null) {
+            // DCL is fine, field is volatile
+            return instance;
+          }
+
+          ComponentAdapter delegate = getDelegate();
+
+          // useReadActionToInitService is enabled currently only in internal or test mode or explicitly (registry) - we have enough feedback to fix, so, don't disturb all users
+          if (!useReadActionToInitService && LOG.isDebugEnabled() && ApplicationManager.getApplication().isWriteAccessAllowed() && PersistentStateComponent.class.isAssignableFrom(delegate.getComponentImplementation())) {
+            LOG.warn(new Throwable("Getting service from write-action leads to possible deadlock. Service implementation " + myDescriptor.getImplementation()));
+          }
+
           // prevent storages from flushing and blocking FS
-          HeavyProcessLatch.INSTANCE.processStarted();
+          AccessToken token = HeavyProcessLatch.INSTANCE.processStarted("Creating component '" + myDescriptor.getImplementation() + "'");
           try {
-            synchronized (MyComponentAdapter.this) {
-              Object instance = myInitializedComponentInstance;
-              if (instance != null) return instance; // DCL is fine, field is volatile
-              myInitializedComponentInstance = instance = initializeInstance(container);
-              return instance;
+            instance = delegate.getComponentInstance(container);
+            if (instance instanceof Disposable) {
+              Disposer.register(myComponentManager, (Disposable)instance);
             }
+
+            myComponentManager.initializeComponent(instance, true);
+
+            myInitializedComponentInstance = instance;
+            return instance;
           }
           finally {
-            HeavyProcessLatch.INSTANCE.processFinished();
+            token.finish();
           }
         }
-      });
-    }
-
-    protected Object initializeInstance(final PicoContainer container) {
-      final Object serviceInstance = getDelegate().getComponentInstance(container);
-      if (serviceInstance instanceof Disposable) {
-        Disposer.register(myComponentManager, (Disposable)serviceInstance);
       }
-
-      myComponentManager.initializeComponent(serviceInstance, true);
-
-      return serviceInstance;
+      finally {
+        if (readToken != null) {
+          readToken.finish();
+        }
+      }
     }
 
+    @NotNull
     private synchronized ComponentAdapter getDelegate() {
       if (myDelegate == null) {
-        myDelegate = new CachingComponentAdapter(new ConstructorInjectionComponentAdapter(getComponentKey(), loadClass(
-          myDescriptor.getImplementation()), null, true));
-      }
+        Class<?> implClass;
+        try {
+          ClassLoader classLoader = myPluginDescriptor != null ? myPluginDescriptor.getPluginClassLoader() : getClass().getClassLoader();
+          implClass = Class.forName(myDescriptor.getImplementation(), true, classLoader);
+        }
+        catch (ClassNotFoundException e) {
+          throw new RuntimeException(e);
+        }
 
+        myDelegate = new ConstructorInjectionComponentAdapter(getComponentKey(), implClass, null, true);
+      }
       return myDelegate;
     }
 
+    @Override
     public void verify(final PicoContainer container) throws PicoIntrospectionException {
       getDelegate().verify(container);
     }
 
+    @Override
     public void accept(final PicoVisitor visitor) {
       visitor.visitComponentAdapter(this);
     }
 
-    public boolean isAssignableTo(Class aClass) {
-      return aClass.getName().equals(getComponentKey());
-    }
-
+    @Override
     public String getAssignableToClassName() {
       return myDescriptor.getInterface();
     }
+
+    @Override
+    public String toString() {
+      return "ServiceComponentAdapter[" + myDescriptor.getInterface() + "]: implementation=" + myDescriptor.getImplementation() + ", plugin=" + myPluginDescriptor;
+    }
+  }
+
+  public static boolean isUseReadActionToInitService() {
+    return Registry.is("use.read.action.to.init.service", true);
   }
 }

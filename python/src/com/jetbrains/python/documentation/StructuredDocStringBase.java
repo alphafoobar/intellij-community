@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,20 +43,21 @@ public abstract class StructuredDocStringBase implements StructuredDocString {
   private static final Pattern RE_LOOSE_TAG_LINE = Pattern.compile("([a-z]+) ([a-zA-Z_0-9]*):?([^:]*)");
   private static final Pattern RE_ARG_TYPE = Pattern.compile("(.*) ([a-zA-Z_0-9]+)");
 
-  public static String[] PARAM_TAGS = new String[] { "param", "parameter", "arg", "argument" };
-  public static String[] PARAM_TYPE_TAGS = new String[] { "type" };
-  public static String[] VARIABLE_TAGS = new String[] { "ivar", "cvar", "var" };
+  public static String[] PARAM_TAGS = new String[]{"param", "parameter", "arg", "argument"};
+  public static String[] PARAM_TYPE_TAGS = new String[]{"type"};
+  public static String[] VARIABLE_TAGS = new String[]{"ivar", "cvar", "var"};
 
-  public static String[] RAISES_TAGS = new String[] { "raises", "raise", "except", "exception" };
-  public static String[] RETURN_TAGS = new String[] { "return", "returns" };
+  public static String[] RAISES_TAGS = new String[]{"raises", "raise", "except", "exception"};
+  public static String[] RETURN_TAGS = new String[]{"return", "returns"};
+  @NotNull
+  private final String myTagPrefix;
 
-  public static String PARAMETER = "parameter";
+  public enum ReferenceType {PARAMETER, PARAMETER_TYPE, KEYWORD, VARIABLE, CLASS_VARIABLE, INSTANCE_VARIABLE}
+
   public static String TYPE = "type";
-  public static String PARAMETER_TYPE = "parameter_type";
-  public static String KEYWORD = "keyword";
-  public static String VARIABLE = "variable";
 
   protected StructuredDocStringBase(@NotNull String docStringText, String tagPrefix) {
+    myTagPrefix = tagPrefix;
     final Substring docString = new Substring(docStringText);
     final List<Substring> lines = docString.splitLines();
     final int nlines = lines.size();
@@ -76,6 +77,12 @@ public abstract class StructuredDocStringBase implements StructuredDocString {
   }
 
   @Override
+  @NotNull
+  public String createParameterType(@NotNull final String name, @NotNull final String type) {
+    return myTagPrefix + TYPE + String.format(" %s %s", name, type);
+  }
+
+  @Override
   public String getDescription() {
     return myDescription;
   }
@@ -84,8 +91,9 @@ public abstract class StructuredDocStringBase implements StructuredDocString {
   public String getSummary() {
     final List<String> strings = StringUtil.split(StringUtil.trimLeading(myDescription), "\n", true, false);
     if (strings.size() > 1) {
-      if (strings.get(1).isEmpty())
+      if (strings.get(1).isEmpty()) {
         return strings.get(0);
+      }
     }
     return "";
   }
@@ -218,8 +226,8 @@ public abstract class StructuredDocStringBase implements StructuredDocString {
 
   @Override
   @Nullable
-  public Substring getParamByNameAndKind(@NotNull String name, String kind)  {
-    for (Substring s: getTagArguments(kind)) {
+  public Substring getParamByNameAndKind(@NotNull String name, String kind) {
+    for (Substring s : getTagArguments(kind)) {
       if (name.equals(s.getValue())) {
         return s;
       }

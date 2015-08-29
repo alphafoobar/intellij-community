@@ -15,7 +15,6 @@
  */
 package com.intellij.uiDesigner.editor;
 
-import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorPolicy;
@@ -23,7 +22,6 @@ import com.intellij.openapi.fileEditor.FileEditorProvider;
 import com.intellij.openapi.fileEditor.FileEditorState;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.module.ModuleUtil;
-import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -32,7 +30,7 @@ import com.intellij.util.ArrayUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 
-public final class UIFormEditorProvider implements FileEditorProvider, DumbAware {
+public final class UIFormEditorProvider implements FileEditorProvider {
   private static final Logger LOG = Logger.getInstance("#com.intellij.uiDesigner.editor.UIFormEditorProvider");
 
   public boolean accept(@NotNull final Project project, @NotNull final VirtualFile file){
@@ -66,9 +64,6 @@ public final class UIFormEditorProvider implements FileEditorProvider, DumbAware
   }
 
   @NotNull public FileEditorPolicy getPolicy() {
-    return
-      ApplicationManagerEx.getApplicationEx().isInternal() ?
-      FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR : FileEditorPolicy.HIDE_DEFAULT_EDITOR;
+    return FileEditorPolicy.HIDE_DEFAULT_EDITOR;
   }
-
 }

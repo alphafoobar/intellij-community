@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.execution.actions.ConfigurationFromContext;
 import com.intellij.execution.actions.RunConfigurationProducer;
 import com.intellij.execution.configurations.ConfigurationFactory;
+import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.facet.Facet;
 import com.intellij.facet.FacetManager;
 import com.intellij.openapi.module.Module;
@@ -32,15 +33,14 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiDirectory;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiFileSystemItem;
+import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PythonModuleTypeBase;
 import com.jetbrains.python.facet.PythonFacetSettings;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.run.PythonRunConfigurationProducer;
+import com.jetbrains.python.testing.unittest.PythonUnitTestRunConfiguration;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -90,7 +90,7 @@ abstract public class PythonTestConfigurationProducer extends RunConfigurationPr
         return confType == AbstractPythonTestRunConfiguration.TestType.TEST_FUNCTION &&
                methodName.equals(pyFunction.getName()) && isTestFileEquals;
       }
-      else if (pyFunction.getContainingClass() != null) {
+      else {
         final String className = configuration.getClassName();
 
         return confType == AbstractPythonTestRunConfiguration.TestType.TEST_METHOD &&
@@ -113,7 +113,10 @@ abstract public class PythonTestConfigurationProducer extends RunConfigurationPr
     if (context == null) return false;
     final Location location = context.getLocation();
     if (location == null || !isAvailable(location)) return false;
-    final PsiElement element = location.getPsiElement();
+    PsiElement element = location.getPsiElement();
+    if (element instanceof PsiWhiteSpace) {
+      element = PyUtil.findNonWhitespaceAtOffset(element.getContainingFile(), element.getTextOffset());
+    }
 
     if (PythonUnitTestRunnableScriptFilter.isIfNameMain(location)) return false;
     final Module module = location.getModule();
@@ -131,7 +134,7 @@ abstract public class PythonTestConfigurationProducer extends RunConfigurationPr
     if (pyClass != null && isTestClass(pyClass, configuration)) {
       return setupConfigurationFromClass(pyClass, configuration);
     }
-
+    if (element == null) return false;
     final PsiFile file = element.getContainingFile();
     if (file instanceof PyFile && isTestFile((PyFile)file)) {
       return setupConfigurationFromFile((PyFile)file, configuration);
@@ -206,7 +209,7 @@ abstract public class PythonTestConfigurationProducer extends RunConfigurationPr
   }
 
   protected boolean isTestFolder(@NotNull final VirtualFile virtualFile, @NotNull final Project project) {
-    final String name = virtualFile.getName();
+    @NonNls final String name = virtualFile.getName();
     final HashSet<VirtualFile> roots = Sets.newHashSet();
     final Module[] modules = ModuleManager.getInstance(project).getModules();
     for (Module module : modules) {
@@ -258,6 +261,11 @@ abstract public class PythonTestConfigurationProducer extends RunConfigurationPr
 
   @Override
   public boolean isPreferredConfiguration(ConfigurationFromContext self, ConfigurationFromContext other) {
+    final RunConfiguration configuration = self.getConfiguration();
+    if (configuration instanceof PythonUnitTestRunConfiguration &&
+        ((PythonUnitTestRunConfiguration)configuration).getTestType() == AbstractPythonTestRunConfiguration.TestType.TEST_FOLDER) {
+      return true;
+    }
     return other.isProducedBy(PythonTestConfigurationProducer.class) || other.isProducedBy(PythonRunConfigurationProducer.class);
   }
 }

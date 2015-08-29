@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.jetbrains.python.inspections;
 import com.google.common.collect.ImmutableSet;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ui.ListEditForm;
+import com.intellij.execution.ExecutionException;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
@@ -27,21 +28,21 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.JDOMExternalizableStringList;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiElementVisitor;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiReference;
+import com.intellij.psi.*;
 import com.intellij.util.Function;
+import com.jetbrains.python.codeInsight.imports.AddImportHelper;
 import com.jetbrains.python.codeInsight.stdlib.PyStdlibUtil;
 import com.jetbrains.python.packaging.*;
 import com.jetbrains.python.packaging.ui.PyChooseRequirementsDialog;
 import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.resolve.PyResolveUtil;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
+import com.jetbrains.python.sdk.PySdkUtil;
 import com.jetbrains.python.sdk.PythonSdkType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -111,9 +112,7 @@ public class PyPackageRequirementsInspection extends PyInspection {
               unsatisfiedNames.add(req.getName());
             }
             final List<LocalQuickFix> quickFixes = new ArrayList<LocalQuickFix>();
-            if (PyPackageManager.getInstance(sdk).hasPip()) {
-              quickFixes.add(new PyInstallRequirementsFix(null, module, sdk, unsatisfied));
-            }
+            quickFixes.add(new PyInstallRequirementsFix(null, module, sdk, unsatisfied));
             quickFixes.add(new IgnoreRequirementFix(unsatisfiedNames));
             registerProblem(node, msg,
                             ProblemHighlightType.GENERIC_ERROR_OR_WARNING, null,
@@ -147,9 +146,8 @@ public class PyPackageRequirementsInspection extends PyInspection {
           return;
         }
       }
-      final List<PyExpression> expressions = PyResolveUtil.unwindQualifiers(importedExpression);
-      if (!expressions.isEmpty()) {
-        final PyExpression packageReferenceExpression = expressions.get(0);
+      final PyExpression packageReferenceExpression = PyPsiUtils.getFirstQualifier(importedExpression);
+      if (packageReferenceExpression != null) {
         final String packageName = packageReferenceExpression.getName();
         if (packageName != null && !myIgnoredPackages.contains(packageName)) {
           if (!ApplicationManager.getApplication().isUnitTestMode() && !PyPIPackageUtil.INSTANCE.isInPyPI(packageName)) {
@@ -161,15 +159,16 @@ public class PyPackageRequirementsInspection extends PyInspection {
               return;
             }
           }
-          if (PyPackageManagerImpl.PACKAGE_SETUPTOOLS.equals(packageName)) {
+          if (PyPackageManager.SETUPTOOLS.equals(packageName)) {
             return;
           }
           final Module module = ModuleUtilCore.findModuleForPsiElement(packageReferenceExpression);
           if (module != null) {
-            Collection<PyRequirement> requirements = PyPackageManagerImpl.getRequirements(module);
-            if (requirements != null) {
-              final Sdk sdk = PythonSdkType.findPythonSdk(module);
-              if (sdk != null) {
+            final Sdk sdk = PythonSdkType.findPythonSdk(module);
+            if (sdk != null) {
+              final PyPackageManager manager = PyPackageManager.getInstance(sdk);
+              Collection<PyRequirement> requirements = manager.getRequirements(module);
+              if (requirements != null) {
                 requirements = getTransitiveRequirements(sdk, requirements, new HashSet<PyPackage>());
               }
               if (requirements == null) return;
@@ -192,9 +191,7 @@ public class PyPackageRequirementsInspection extends PyInspection {
                 }
               }
               final List<LocalQuickFix> quickFixes = new ArrayList<LocalQuickFix>();
-              if (sdk != null && PyPackageManager.getInstance(sdk).hasPip()) {
-                quickFixes.add(new AddToRequirementsFix(module, packageName, LanguageLevel.forElement(importedExpression)));
-              }
+              quickFixes.add(new AddToRequirementsFix(module, packageName, LanguageLevel.forElement(importedExpression)));
               quickFixes.add(new IgnoreRequirementFix(Collections.singleton(packageName)));
               registerProblem(packageReferenceExpression, String.format("Package '%s' is not listed in project requirements", packageName),
                               ProblemHighlightType.WEAK_WARNING, null,
@@ -212,9 +209,9 @@ public class PyPackageRequirementsInspection extends PyInspection {
     final Set<PyRequirement> results = new HashSet<PyRequirement>(requirements);
     final List<PyPackage> packages;
     try {
-      packages = ((PyPackageManagerImpl) PyPackageManager.getInstance(sdk)).getPackagesFast();
+      packages = PyPackageManager.getInstance(sdk).getPackages(PySdkUtil.isRemote(sdk));
     }
-    catch (PyExternalProcessException e) {
+    catch (ExecutionException e) {
       return null;
     }
     if (packages == null) return null;
@@ -243,14 +240,14 @@ public class PyPackageRequirementsInspection extends PyInspection {
   @Nullable
   private static List<PyRequirement> findUnsatisfiedRequirements(@NotNull Module module, @NotNull Sdk sdk,
                                                                  @NotNull Set<String> ignoredPackages) {
-    final PyPackageManagerImpl manager = (PyPackageManagerImpl)PyPackageManager.getInstance(sdk);
-    List<PyRequirement> requirements = PyPackageManagerImpl.getRequirements(module);
+    final PyPackageManager manager = PyPackageManager.getInstance(sdk);
+    List<PyRequirement> requirements = manager.getRequirements(module);
     if (requirements != null) {
       final List<PyPackage> packages;
       try {
-        packages = manager.getPackagesFast();
+        packages = manager.getPackages(PySdkUtil.isRemote(sdk));
       }
-      catch (PyExternalProcessException e) {
+      catch (ExecutionException e) {
         return null;
       }
       if (packages == null) return null;
@@ -266,11 +263,11 @@ public class PyPackageRequirementsInspection extends PyInspection {
   }
 
   private static void setRunningPackagingTasks(@NotNull Module module, boolean value) {
-    module.putUserData(PyPackageManagerImpl.RUNNING_PACKAGING_TASKS, value);
+    module.putUserData(PyPackageManager.RUNNING_PACKAGING_TASKS, value);
   }
 
   private static boolean isRunningPackagingTasks(@NotNull Module module) {
-    final Boolean value = module.getUserData(PyPackageManagerImpl.RUNNING_PACKAGING_TASKS);
+    final Boolean value = module.getUserData(PyPackageManager.RUNNING_PACKAGING_TASKS);
     return value != null && value;
   }
 
@@ -303,10 +300,36 @@ public class PyPackageRequirementsInspection extends PyInspection {
 
     @Override
     public void applyFix(@NotNull final Project project, @NotNull ProblemDescriptor descriptor) {
+      boolean installManagement = false;
+      final PyPackageManager manager = PyPackageManager.getInstance(mySdk);
+      boolean hasManagement = false;
+      try {
+        hasManagement = manager.hasManagement(false);
+      }
+      catch (ExecutionException ignored) {
+      }
+      if (!hasManagement) {
+        final int result = Messages.showYesNoDialog(project,
+                                                    "Python packaging tools are required for installing packages. Do you want to " +
+                                                    "install 'pip' and 'setuptools' for your interpreter?",
+                                                    "Install Python Packaging Tools",
+                                                    Messages.getQuestionIcon());
+        if (result == Messages.YES) {
+          installManagement = true;
+        }
+        else {
+          return;
+        }
+      }
       final List<PyRequirement> chosen;
       if (myUnsatisfied.size() > 1) {
         final PyChooseRequirementsDialog dialog = new PyChooseRequirementsDialog(project, myUnsatisfied);
-        chosen = dialog.showAndGetResult();
+        if (dialog.showAndGet()) {
+          chosen = dialog.getMarkedElements();
+        }
+        else {
+          chosen = Collections.emptyList();
+        }
       }
       else {
         chosen = myUnsatisfied;
@@ -314,20 +337,104 @@ public class PyPackageRequirementsInspection extends PyInspection {
       if (chosen.isEmpty()) {
         return;
       }
-      final PyPackageManagerImpl.UI ui = new PyPackageManagerImpl.UI(project, mySdk, new PyPackageManagerImpl.UI.Listener() {
-        @Override
-        public void started() {
-          setRunningPackagingTasks(myModule, true);
-        }
+      if (installManagement) {
+        final PyPackageManagerUI ui = new PyPackageManagerUI(project, mySdk, new UIListener(myModule) {
+          @Override
+          public void finished(List<ExecutionException> exceptions) {
+            super.finished(exceptions);
+            if (exceptions.isEmpty()) {
+              installRequirements(project, chosen);
+            }
+          }
+        });
+        ui.installManagement();
+      }
+      else {
+        installRequirements(project, chosen);
+      }
+    }
 
-        @Override
-        public void finished(List<PyExternalProcessException> exceptions) {
-          setRunningPackagingTasks(myModule, false);
-        }
-      });
-      ui.install(chosen, Collections.<String>emptyList());
+    private void installRequirements(Project project, List<PyRequirement> requirements) {
+      final PyPackageManagerUI ui = new PyPackageManagerUI(project, mySdk, new UIListener(myModule));
+      ui.install(requirements, Collections.<String>emptyList());
     }
   }
+
+  public static class InstallAndImportQuickFix implements LocalQuickFix {
+
+    private final Sdk mySdk;
+    private final Module myModule;
+    private String myPackageName;
+    @Nullable private final String myAsName;
+    @NotNull private final SmartPsiElementPointer<PyElement> myNode;
+
+    public InstallAndImportQuickFix(@NotNull final String packageName,
+                                    @Nullable final String asName,
+                                    @NotNull final PyElement node) {
+      myPackageName = packageName;
+      myAsName = asName;
+      myNode = SmartPointerManager.getInstance(node.getProject()).createSmartPsiElementPointer(node, node.getContainingFile());
+      myModule = ModuleUtilCore.findModuleForPsiElement(node);
+      mySdk = PythonSdkType.findPythonSdk(myModule);
+    }
+
+    @NotNull
+    public String getName() {
+      return "Install and import package " + myPackageName;
+    }
+
+    @NotNull
+    public String getFamilyName() {
+      return "Install and import package " + myPackageName;
+    }
+
+    public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
+      final PyPackageManagerUI ui = new PyPackageManagerUI(project, mySdk, new UIListener(myModule) {
+        @Override
+        public void finished(List<ExecutionException> exceptions) {
+          super.finished(exceptions);
+          if (exceptions.isEmpty()) {
+
+            final PyElement element = myNode.getElement();
+            if (element == null) return;
+
+            CommandProcessor.getInstance().executeCommand(project, new Runnable() {
+              @Override
+              public void run() {
+                ApplicationManager.getApplication().runWriteAction(new Runnable() {
+                  @Override
+                  public void run() {
+                    AddImportHelper.addImportStatement(element.getContainingFile(), myPackageName, myAsName,
+                                                       AddImportHelper.ImportPriority.THIRD_PARTY, element);
+                  }
+                });
+              }
+            }, "Add import", "Add import");
+          }
+        }
+      });
+      ui.install(Collections.singletonList(new PyRequirement(myPackageName)), Collections.<String>emptyList());
+    }
+  }
+
+  private static class UIListener implements PyPackageManagerUI.Listener {
+    private final Module myModule;
+
+    public UIListener(Module module) {
+      myModule = module;
+    }
+
+    @Override
+    public void started() {
+      setRunningPackagingTasks(myModule, true);
+    }
+
+    @Override
+    public void finished(List<ExecutionException> exceptions) {
+      setRunningPackagingTasks(myModule, false);
+    }
+  }
+
 
   private static class IgnoreRequirementFix implements LocalQuickFix {
     @NotNull private final Set<String> myPackageNames;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.ParamsGroup;
-import com.intellij.execution.filters.Filter;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.testframework.TestFrameworkRunningModel;
@@ -42,12 +41,10 @@ import com.jetbrains.python.console.PythonDebugLanguageConsoleView;
 import com.jetbrains.python.run.AbstractPythonRunConfiguration;
 import com.jetbrains.python.run.CommandLinePatcher;
 import com.jetbrains.python.run.PythonCommandLineState;
-import com.jetbrains.python.run.PythonTracebackFilter;
 import com.jetbrains.python.sdk.PythonSdkType;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -62,10 +59,11 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
   }
 
   public PythonTestCommandLineStateBase(AbstractPythonRunConfiguration configuration, ExecutionEnvironment env) {
-    super(configuration, env, Collections.<Filter>emptyList());
+    super(configuration, env);
     myConfiguration = configuration;
   }
 
+  @Override
   @NotNull
   protected ConsoleView createAndAttachConsole(Project project, ProcessHandler processHandler, Executor executor)
     throws ExecutionException {
@@ -74,18 +72,18 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
 
     if (isDebug()) {
       final ConsoleView testsOutputConsoleView = SMTestRunnerConnectionUtil.createConsole(PythonTRunnerConsoleProperties.FRAMEWORK_NAME,
-                                                                                      consoleProperties,
-                                                                                      getEnvironment());
-      final ConsoleView consoleView = new PythonDebugLanguageConsoleView(project, PythonSdkType.findSdkByPath(myConfiguration.getInterpreterPath()), testsOutputConsoleView);
-      consoleView.addMessageFilter(new PythonTracebackFilter(project, myConfiguration.getWorkingDirectory()));
+                                                                                          consoleProperties);
+      final ConsoleView consoleView =
+        new PythonDebugLanguageConsoleView(project, PythonSdkType.findSdkByPath(myConfiguration.getInterpreterPath()),
+                                           testsOutputConsoleView);
       consoleView.attachToProcess(processHandler);
+      addTracebackFilter(project, consoleView, processHandler);
       return consoleView;
     }
     final ConsoleView consoleView = SMTestRunnerConnectionUtil.createAndAttachConsole(PythonTRunnerConsoleProperties.FRAMEWORK_NAME,
                                                                                       processHandler,
-                                                                                      consoleProperties,
-                                                                                      getEnvironment());
-    consoleView.addMessageFilter(new PythonTracebackFilter(project, myConfiguration.getWorkingDirectory()));
+                                                                                      consoleProperties);
+    addTracebackFilter(project, consoleView, processHandler);
     return consoleView;
   }
 
@@ -93,6 +91,7 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
     return new PythonTRunnerConsoleProperties(myConfiguration, executor, false);
   }
 
+  @Override
   public GeneralCommandLine generateCommandLine() throws ExecutionException {
     GeneralCommandLine cmd = super.generateCommandLine();
 
@@ -109,20 +108,23 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
   protected void setWorkingDirectory(@NotNull final GeneralCommandLine cmd) {
     final String workingDirectory = myConfiguration.getWorkingDirectory();
     if (!StringUtil.isEmptyOrSpaces(workingDirectory)) {
-      cmd.setWorkDirectory(workingDirectory);
+      cmd.withWorkDirectory(workingDirectory);
     }
     else if (myConfiguration instanceof AbstractPythonTestRunConfiguration) {
       final String folderName = ((AbstractPythonTestRunConfiguration)myConfiguration).getFolderName();
       if (!StringUtil.isEmptyOrSpaces(folderName)) {
-        cmd.setWorkDirectory(folderName);
+        cmd.withWorkDirectory(folderName);
       }
       else {
         final String scriptName = ((AbstractPythonTestRunConfiguration)myConfiguration).getScriptName();
         if (StringUtil.isEmptyOrSpaces(scriptName)) return;
         final VirtualFile script = LocalFileSystem.getInstance().findFileByPath(scriptName);
         if (script == null) return;
-        cmd.setWorkDirectory(script.getParent().getPath());
+        cmd.withWorkDirectory(script.getParent().getPath());
       }
+    }
+    if (cmd.getWorkDirectory() == null) { // If current dir still not set, lets use project dir
+      cmd.setWorkDirectory(myConfiguration.getWorkingDirectorySafe());
     }
   }
 
@@ -139,7 +141,7 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
 
     PyRerunFailedTestsAction rerunFailedTestsAction = new PyRerunFailedTestsAction(console);
     if (console instanceof SMTRunnerConsoleView) {
-      rerunFailedTestsAction.init(((BaseTestsOutputConsoleView)console).getProperties(), getEnvironment());
+      rerunFailedTestsAction.init(((BaseTestsOutputConsoleView)console).getProperties());
       rerunFailedTestsAction.setModelProvider(new Getter<TestFrameworkRunningModel>() {
       @Override
       public TestFrameworkRunningModel get() {
@@ -148,7 +150,7 @@ public abstract class PythonTestCommandLineStateBase extends PythonCommandLineSt
     });
     }
 
-    executionResult.setRestartActions(rerunFailedTestsAction, new ToggleAutoTestAction(getEnvironment()));
+    executionResult.setRestartActions(rerunFailedTestsAction, new ToggleAutoTestAction());
     return executionResult;
   }
 

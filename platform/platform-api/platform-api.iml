@@ -14,7 +14,7 @@
     <orderEntry type="module" module-name="bootstrap" />
     <orderEntry type="library" exported="" name="jgoodies-forms" level="project" />
     <orderEntry type="module" module-name="forms_rt" exported="" />
-    <orderEntry type="library" exported="" name="commons-codec" level="project" />
+    <orderEntry type="library" name="commons-codec" level="project" />
     <orderEntry type="module" module-name="platform-resources-en" exported="" />
     <orderEntry type="library" name="OroMatcher" level="project" />
     <orderEntry type="module" module-name="icons" />
@@ -34,6 +34,9 @@
     <orderEntry type="module" module-name="editor-ui-api" exported="" />
     <orderEntry type="library" name="pty4j" level="project" />
     <orderEntry type="library" name="Guava" level="project" />
+    <orderEntry type="library" name="http-client" level="project" />
+    <orderEntry type="module" module-name="structure-view-api" exported="" />
+    <orderEntry type="library" name="jna" level="project" />
   </component>
 </module>
 

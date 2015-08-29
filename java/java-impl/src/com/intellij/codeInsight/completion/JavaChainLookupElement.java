@@ -16,16 +16,14 @@
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.lookup.*;
-import com.intellij.diagnostic.LogMessageEx;
-import com.intellij.diagnostic.AttachmentFactory;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.util.ClassConditionKey;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
-import com.intellij.psi.impl.DebugUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.text.CharArrayUtil;
 import gnu.trove.THashSet;
@@ -38,6 +36,7 @@ import java.util.Set;
  * @author peter
  */
 public class JavaChainLookupElement extends LookupElementDecorator<LookupElement> implements TypedLookupItem {
+  public static final Key<Boolean> CHAIN_QUALIFIER = Key.create("CHAIN_QUALIFIER");
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.completion.JavaChainLookupElement");
   public static final ClassConditionKey<JavaChainLookupElement> CLASS_CONDITION_KEY = ClassConditionKey.create(JavaChainLookupElement.class);
   private final LookupElement myQualifier;
@@ -109,8 +108,11 @@ public class JavaChainLookupElement extends LookupElementDecorator<LookupElement
   public void handleInsert(InsertionContext context) {
     final Document document = context.getEditor().getDocument();
     document.replaceString(context.getStartOffset(), context.getTailOffset(), ";");
+    myQualifier.putUserData(CHAIN_QUALIFIER, true);
     final InsertionContext qualifierContext = CompletionUtil.emulateInsertion(context, context.getStartOffset(), myQualifier);
     OffsetKey oldStart = context.trackOffset(context.getStartOffset(), false);
+
+    PsiDocumentManager.getInstance(context.getProject()).doPostponedOperationsAndUnblockDocument(document);
 
     int start = CharArrayUtil.shiftForward(context.getDocument().getCharsSequence(), context.getStartOffset(), " \t\n");
     if (shouldParenthesizeQualifier(context.getFile(), start, qualifierContext.getTailOffset())) {
@@ -121,14 +123,7 @@ public class JavaChainLookupElement extends LookupElementDecorator<LookupElement
 
     final char atTail = document.getCharsSequence().charAt(context.getTailOffset() - 1);
     if (atTail != ';') {
-      LOG.error(LogMessageEx.createEvent("Unexpected character",
-                                         "atTail=" + atTail + "\n" +
-                                         "offset=" + context.getTailOffset() + "\n" +
-                                         "item=" + this + "\n" +
-                                         "item.class=" + this.getClass() + "\n" +
-                                         DebugUtil.currentStackTrace(),
-                                         AttachmentFactory.createAttachment(context.getDocument())));
-
+      return;
     }
     document.replaceString(context.getTailOffset() - 1, context.getTailOffset(), ".");
 
@@ -165,6 +160,7 @@ public class JavaChainLookupElement extends LookupElementDecorator<LookupElement
 
     if (expr instanceof PsiJavaCodeReferenceElement ||
         expr instanceof PsiMethodCallExpression ||
+        expr instanceof PsiNewExpression ||
         expr instanceof PsiArrayAccessExpression) {
       return false;
     }

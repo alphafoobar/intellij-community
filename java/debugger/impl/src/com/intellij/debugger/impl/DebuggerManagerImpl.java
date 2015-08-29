@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,15 +23,13 @@ import com.intellij.debugger.ui.GetJPDADialog;
 import com.intellij.debugger.ui.breakpoints.BreakpointManager;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.ExecutionResult;
-import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.JavaParameters;
-import com.intellij.execution.configurations.ModuleRunProfile;
 import com.intellij.execution.configurations.RemoteConnection;
 import com.intellij.execution.configurations.RunProfileState;
+import com.intellij.execution.process.KillableColoredProcessHandler;
 import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
@@ -42,6 +40,7 @@ import com.intellij.openapi.editor.colors.EditorColorsListener;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
@@ -62,6 +61,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.io.File;
 import java.util.*;
 import java.util.jar.Attributes;
@@ -81,43 +81,47 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   private final MyDebuggerStateManager myDebuggerStateManager = new MyDebuggerStateManager();
 
   private final DebuggerContextListener mySessionListener = new DebuggerContextListener() {
-    public void changeEvent(DebuggerContextImpl newContext, int event) {
+    @Override
+    public void changeEvent(DebuggerContextImpl newContext, DebuggerSession.Event event) {
 
       final DebuggerSession session = newContext.getDebuggerSession();
-      if (event == DebuggerSession.EVENT_PAUSE && myDebuggerStateManager.myDebuggerSession != session) {
+      if (event == DebuggerSession.Event.PAUSE && myDebuggerStateManager.myDebuggerSession != session) {
         // if paused in non-active session; switch current session
-        myDebuggerStateManager.setState(newContext, session != null? session.getState() : DebuggerSession.STATE_DISPOSED, event, null);
+        myDebuggerStateManager.setState(newContext, session != null? session.getState() : DebuggerSession.State.DISPOSED, event, null);
         return;
       }
 
       if (myDebuggerStateManager.myDebuggerSession == session) {
         myDebuggerStateManager.fireStateChanged(newContext, event);
       }
-      if (event == DebuggerSession.EVENT_ATTACHED) {
+      if (event == DebuggerSession.Event.ATTACHED) {
         myDispatcher.getMulticaster().sessionAttached(session);
       }
-      else if (event == DebuggerSession.EVENT_DETACHED) {
+      else if (event == DebuggerSession.Event.DETACHED) {
         myDispatcher.getMulticaster().sessionDetached(session);
       }
-      else if (event == DebuggerSession.EVENT_DISPOSE) {
+      else if (event == DebuggerSession.Event.DISPOSE) {
         dispose(session);
         if (myDebuggerStateManager.myDebuggerSession == session) {
           myDebuggerStateManager
-            .setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.STATE_DISPOSED, DebuggerSession.EVENT_DISPOSE, null);
+            .setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.State.DISPOSED, DebuggerSession.Event.DISPOSE, null);
         }
       }
     }
   };
   @NonNls private static final String DEBUG_KEY_NAME = "idea.xdebug.key";
 
+  @Override
   public void addClassNameMapper(final NameMapper mapper) {
     myNameMappers.add(mapper);
   }
 
+  @Override
   public void removeClassNameMapper(final NameMapper mapper) {
     myNameMappers.remove(mapper);
   }
 
+  @Override
   public String getVMClassQualifiedName(@NotNull final PsiClass aClass) {
     for (NameMapper nameMapper : myNameMappers) {
       final String qName = nameMapper.getQualifiedName(aClass);
@@ -128,10 +132,12 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return aClass.getQualifiedName();
   }
 
+  @Override
   public void addDebuggerManagerListener(DebuggerManagerListener listener) {
     myDispatcher.addListener(listener);
   }
 
+  @Override
   public void removeDebuggerManagerListener(DebuggerManagerListener listener) {
     myDispatcher.removeListener(listener);
   }
@@ -141,6 +147,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     myBreakpointManager = new BreakpointManager(myProject, startupManager, this);
     if (!project.isDefault()) {
       colorsManager.addEditorColorsListener(new EditorColorsListener() {
+        @Override
         public void globalSchemeChange(EditorColorsScheme scheme) {
           getBreakpointManager().updateBreakpointsUI();
         }
@@ -148,6 +155,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Override
   public DebuggerSession getSession(DebugProcess process) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     for (final DebuggerSession debuggerSession : getSessions()) {
@@ -156,6 +164,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return null;
   }
 
+  @Override
   public Collection<DebuggerSession> getSessions() {
     synchronized (mySessions) {
       final Collection<DebuggerSession> values = mySessions.values();
@@ -163,15 +172,19 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Override
   public void disposeComponent() {
   }
 
+  @Override
   public void initComponent() {
   }
 
+  @Override
   public void projectClosed() {
   }
 
+  @Override
   public void projectOpened() {
     myBreakpointManager.init();
   }
@@ -193,26 +206,13 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     myBreakpointManager.writeExternal(element);
   }
 
-  public DebuggerSession attachVirtualMachine(Executor executor,
-                                              ProgramRunner runner,
-                                              ModuleRunProfile profile,
-                                              RunProfileState state,
-                                              RemoteConnection remoteConnection,
-                                              boolean pollConnection
-  ) throws ExecutionException {
-    return attachVirtualMachine(new DefaultDebugEnvironment(myProject,
-                                                            executor,
-                                                            runner,
-                                                            profile,
-                                                            state,
-                                                            remoteConnection,
-                                                            pollConnection));
-  }
-
-  public DebuggerSession attachVirtualMachine(DebugEnvironment environment) throws ExecutionException {
+  @Override
+  @Nullable
+  public DebuggerSession attachVirtualMachine(@NotNull DebugEnvironment environment) throws ExecutionException {
     ApplicationManager.getApplication().assertIsDispatchThread();
     final DebugProcessEvents debugProcess = new DebugProcessEvents(myProject);
     debugProcess.addDebugProcessListener(new DebugProcessAdapter() {
+      @Override
       public void processAttached(final DebugProcess process) {
         process.removeDebugProcessListener(this);
         for (Function<DebugProcess, PositionManager> factory : myCustomPositionManagerFactories) {
@@ -229,26 +229,27 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
         }
       }
 
+      @Override
       public void processDetached(final DebugProcess process, final boolean closedByUser) {
         debugProcess.removeDebugProcessListener(this);
       }
 
+      @Override
       public void attachException(final RunProfileState state,
                                   final ExecutionException exception,
                                   final RemoteConnection remoteConnection) {
         debugProcess.removeDebugProcessListener(this);
       }
     });
-    final DebuggerSession session = new DebuggerSession(environment.getSessionName(), debugProcess);
-
-    final ExecutionResult executionResult = session.attach(environment);
+    DebuggerSession session = DebuggerSession.create(environment.getSessionName(), debugProcess, environment);
+    ExecutionResult executionResult = session.getProcess().getExecutionResult();
     if (executionResult == null) {
       return null;
     }
     session.getContextManager().addListener(mySessionListener);
     getContextManager()
       .setState(DebuggerContextUtil.createDebuggerContext(session, session.getContextManager().getContext().getSuspendContext()),
-                session.getState(), DebuggerSession.EVENT_CONTEXT, null);
+                session.getState(), DebuggerSession.Event.CONTEXT, null);
 
     final ProcessHandler processHandler = executionResult.getProcessHandler();
 
@@ -263,16 +264,29 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       // RemoteProcessHandler on the other hand will call debugProcess.stop() as a part of destroyProcess() and detachProcess() implementation,
       // so we shouldn't add the listener to avoid calling stop() twice
       processHandler.addProcessListener(new ProcessAdapter() {
+        @Override
         public void processWillTerminate(ProcessEvent event, boolean willBeDestroyed) {
           final DebugProcessImpl debugProcess = getDebugProcess(event.getProcessHandler());
           if (debugProcess != null) {
             // if current thread is a "debugger manager thread", stop will execute synchronously
-            debugProcess.stop(willBeDestroyed);
+            // it is KillableColoredProcessHandler responsibility to terminate VM
+            debugProcess.stop(willBeDestroyed && !(event.getProcessHandler() instanceof KillableColoredProcessHandler));
 
             // wait at most 10 seconds: the problem is that debugProcess.stop() can hang if there are troubles in the debuggee
             // if processWillTerminate() is called from AWT thread debugProcess.waitFor() will block it and the whole app will hang
             if (!DebuggerManagerThreadImpl.isManagerThread()) {
-              debugProcess.waitFor(10000);
+              if (SwingUtilities.isEventDispatchThread()) {
+                ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
+                  @Override
+                  public void run() {
+                    ProgressManager.getInstance().getProgressIndicator().setIndeterminate(true);
+                    debugProcess.waitFor(10000);
+                  }
+                }, "Waiting For Debugger Response", false, debugProcess.getProject());
+              }
+              else {
+                debugProcess.waitFor(10000);
+              }
             }
           }
         }
@@ -282,7 +296,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return session;
   }
 
-
+  @Override
   public DebugProcessImpl getDebugProcess(final ProcessHandler processHandler) {
     synchronized (mySessions) {
       DebuggerSession session = mySessions.get(processHandler);
@@ -298,6 +312,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Override
   public void addDebugProcessListener(final ProcessHandler processHandler, final DebugProcessListener listener) {
     DebugProcessImpl debugProcess = getDebugProcess(processHandler);
     if (debugProcess != null) {
@@ -305,6 +320,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
     else {
       processHandler.addProcessListener(new ProcessAdapter() {
+        @Override
         public void startNotified(ProcessEvent event) {
           DebugProcessImpl debugProcess = getDebugProcess(processHandler);
           if (debugProcess != null) {
@@ -316,6 +332,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Override
   public void removeDebugProcessListener(final ProcessHandler processHandler, final DebugProcessListener listener) {
     DebugProcessImpl debugProcess = getDebugProcess(processHandler);
     if (debugProcess != null) {
@@ -323,6 +340,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
     else {
       processHandler.addProcessListener(new ProcessAdapter() {
+        @Override
         public void startNotified(ProcessEvent event) {
           DebugProcessImpl debugProcess = getDebugProcess(processHandler);
           if (debugProcess != null) {
@@ -334,31 +352,38 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Override
   public boolean isDebuggerManagerThread() {
     return DebuggerManagerThreadImpl.isManagerThread();
   }
 
+  @Override
   @NotNull
   public String getComponentName() {
     return "DebuggerManager";
   }
 
+  @Override
   public BreakpointManager getBreakpointManager() {
     return myBreakpointManager;
   }
 
+  @Override
   public DebuggerContextImpl getContext() {
     return getContextManager().getContext();
   }
 
+  @Override
   public DebuggerStateManager getContextManager() {
     return myDebuggerStateManager;
   }
 
+  @Override
   public void registerPositionManagerFactory(final Function<DebugProcess, PositionManager> factory) {
     myCustomPositionManagerFactories.add(factory);
   }
 
+  @Override
   public void unregisterPositionManagerFactory(final Function<DebugProcess, PositionManager> factory) {
     myCustomPositionManagerFactories.remove(factory);
   }
@@ -473,6 +498,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     final String _debuggeeRunProperties = debuggeeRunProperties;
 
     ApplicationManager.getApplication().runReadAction(new Runnable() {
+      @Override
       @SuppressWarnings({"HardCodedStringLiteral"})
       public void run() {
         JavaSdkUtil.addRtJar(parameters.getClassPath());
@@ -569,17 +595,19 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
                                                        GenericDebuggerRunnerSettings settings,
                                                        boolean checkValidity)
     throws ExecutionException {
-    return createDebugParameters(parameters, settings.LOCAL, settings.getTransport(), settings.DEBUG_PORT, checkValidity);
+    return createDebugParameters(parameters, settings.LOCAL, settings.getTransport(), settings.getDebugPort(), checkValidity);
   }
 
   private static class MyDebuggerStateManager extends DebuggerStateManager {
     private DebuggerSession myDebuggerSession;
 
+    @Override
     public DebuggerContextImpl getContext() {
       return myDebuggerSession == null ? DebuggerContextImpl.EMPTY_CONTEXT : myDebuggerSession.getContextManager().getContext();
     }
 
-    public void setState(final DebuggerContextImpl context, int state, int event, String description) {
+    @Override
+    public void setState(final DebuggerContextImpl context, DebuggerSession.State state, DebuggerSession.Event event, String description) {
       ApplicationManager.getApplication().assertIsDispatchThread();
       myDebuggerSession = context.getDebuggerSession();
       if (myDebuggerSession != null) {
@@ -592,8 +620,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   }
 
   private void dispose(DebuggerSession session) {
-    ProcessHandler processHandler = session.getProcess().getExecutionResult().getProcessHandler();
-
+    ProcessHandler processHandler = session.getProcess().getProcessHandler();
     synchronized (mySessions) {
       DebuggerSession removed = mySessions.remove(processHandler);
       LOG.assertTrue(removed != null);

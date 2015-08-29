@@ -21,16 +21,22 @@ import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.util.xmlb.annotations.Attribute;
+import com.intellij.util.xmlb.annotations.Tag;
+import com.intellij.util.xmlb.annotations.Transient;
 import org.jdom.Element;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Tag("class-filter")
 public class ClassFilter implements JDOMExternalizable, Cloneable{
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.classFilter.ClassFilter");
   public static final ClassFilter[] EMPTY_ARRAY = new ClassFilter[0];
 
+  @Attribute("pattern")
   public String PATTERN = "";
+  @Attribute("enabled")
   public boolean ENABLED = true;
   private Matcher myMatcher;  // to speedup matching
 
@@ -42,9 +48,12 @@ public class ClassFilter implements JDOMExternalizable, Cloneable{
     ENABLED = true;
   }
 
+  @Transient
   public String getPattern() {
     return PATTERN;
   }
+
+  @Transient
   public boolean isEnabled() {
     return ENABLED;
   }
@@ -63,10 +72,12 @@ public class ClassFilter implements JDOMExternalizable, Cloneable{
     return getPattern();
   }
 
+  @Override
   public void readExternal(Element element) throws InvalidDataException {
     DefaultJDOMExternalizer.readExternal(this, element);
   }
 
+  @Override
   public void writeExternal(Element element) throws WriteExternalException {
     DefaultJDOMExternalizer.writeExternal(this, element);
   }
@@ -90,6 +101,7 @@ public class ClassFilter implements JDOMExternalizable, Cloneable{
     return result;
   }
 
+  @Override
   public ClassFilter clone() {
     try {
       return (ClassFilter) super.clone();

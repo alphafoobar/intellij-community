@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.debugger.ui.tree.render;
 
+import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.DebuggerContext;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
@@ -23,7 +24,6 @@ import com.intellij.debugger.settings.ViewsGeneralSettings;
 import com.intellij.debugger.ui.impl.watch.ArrayElementDescriptorImpl;
 import com.intellij.debugger.ui.impl.watch.MessageDescriptor;
 import com.intellij.debugger.ui.impl.watch.NodeManagerImpl;
-import com.intellij.debugger.ui.impl.watch.ValueDescriptorImpl;
 import com.intellij.debugger.ui.tree.DebuggerTreeNode;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
 import com.intellij.debugger.ui.tree.NodeDescriptorFactory;
@@ -47,7 +47,6 @@ import org.jetbrains.annotations.NonNls;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.ListIterator;
 
 /**
  * User: lex
@@ -63,6 +62,8 @@ public class ArrayRenderer extends NodeRendererImpl{
   public int END_INDEX   = 100;
   public int ENTRIES_LIMIT = 101;
   private final static String MORE_ELEMENTS = "...";
+
+  private boolean myForced = false;
 
   public ArrayRenderer() {
     myProperties.setEnabled(true);
@@ -96,11 +97,19 @@ public class ArrayRenderer extends NodeRendererImpl{
     return ClassRenderer.calcLabel(descriptor);
   }
 
+  public void setForced(boolean forced) {
+    myForced = forced;
+  }
+
   public void buildChildren(Value value, ChildrenBuilder builder, EvaluationContext evaluationContext) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     List<DebuggerTreeNode> children = new ArrayList<DebuggerTreeNode>();
     NodeManagerImpl nodeManager = (NodeManagerImpl)builder.getNodeManager();
     NodeDescriptorFactory descriptorFactory = builder.getDescriptorManager();
+
+    if (!myForced) {
+      builder.initChildrenArrayRenderer(this);
+    }
 
     ArrayReference array = (ArrayReference)value;
     if (array.length() > 0) {
@@ -121,25 +130,28 @@ public class ArrayRenderer extends NodeRendererImpl{
         int idx;
 
         for (idx = start; idx <= end; idx++) {
-          DebuggerTreeNode arrayItemNode = nodeManager.createNode(descriptorFactory.getArrayItemDescriptor(builder.getParentDescriptor(), array, idx), evaluationContext);
+          if (ViewsGeneralSettings.getInstance().HIDE_NULL_ARRAY_ELEMENTS && elementIsNull(array, idx)) continue;
 
-          if (ViewsGeneralSettings.getInstance().HIDE_NULL_ARRAY_ELEMENTS && ((ValueDescriptorImpl)arrayItemNode.getDescriptor()).isNull()) continue;
-          if(added >= (ENTRIES_LIMIT  + 1)/ 2) break;
+          DebuggerTreeNode arrayItemNode = nodeManager.createNode(descriptorFactory.getArrayItemDescriptor(builder.getParentDescriptor(), array, idx), evaluationContext);
+          if (arrayItemNode == null) continue;
+
+          //if(added >= (ENTRIES_LIMIT  + 1)/ 2) break;
           children.add(arrayItemNode);
           added++;
         }
 
         start = idx;
 
-        List<DebuggerTreeNode> childrenTail = new ArrayList<DebuggerTreeNode>();
-        for (idx = end; idx >= start; idx--) {
-          DebuggerTreeNode arrayItemNode = nodeManager.createNode(descriptorFactory.getArrayItemDescriptor(builder.getParentDescriptor(), array, idx), evaluationContext);
-
-          if (ViewsGeneralSettings.getInstance().HIDE_NULL_ARRAY_ELEMENTS && ((ValueDescriptorImpl)arrayItemNode.getDescriptor()).isNull()) continue;
-          if(added >= ENTRIES_LIMIT) break;
-          childrenTail.add(arrayItemNode);
-          added++;
-        }
+        //List<DebuggerTreeNode> childrenTail = new ArrayList<DebuggerTreeNode>();
+        //for (idx = end; idx >= start; idx--) {
+        //  DebuggerTreeNode arrayItemNode = nodeManager.createNode(descriptorFactory.getArrayItemDescriptor(builder.getParentDescriptor(), array, idx), evaluationContext);
+        //
+        //  if (arrayItemNode == null) continue;
+        //  if (ViewsGeneralSettings.getInstance().HIDE_NULL_ARRAY_ELEMENTS && ((ValueDescriptorImpl)arrayItemNode.getDescriptor()).isNull()) continue;
+        //  if(added >= ENTRIES_LIMIT) break;
+        //  childrenTail.add(arrayItemNode);
+        //  added++;
+        //}
 
         //array is printed in the following way
         // ...
@@ -149,35 +161,45 @@ public class ArrayRenderer extends NodeRendererImpl{
         // ...
 
         //when itemENTRIES_LIMIT/2+1...itemENTRIES_LIMIT set is empty, we should not add middle "..." node
-        if(idx >= start && !(ENTRIES_LIMIT == 1 && END_INDEX < array.length())) {
-          children.add(nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
-        }
+        //if(idx >= start && !(ENTRIES_LIMIT == 1 && END_INDEX < array.length())) {
+        //  children.add(nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
+        //}
 
-        for (ListIterator<DebuggerTreeNode> iterator = childrenTail.listIterator(childrenTail.size()); iterator.hasPrevious();) {
-          DebuggerTreeNode debuggerTreeNode = iterator.previous();
-          children.add(debuggerTreeNode);
-        }
+        //for (ListIterator<DebuggerTreeNode> iterator = childrenTail.listIterator(childrenTail.size()); iterator.hasPrevious();) {
+        //  DebuggerTreeNode debuggerTreeNode = iterator.previous();
+        //  children.add(debuggerTreeNode);
+        //}
       }
 
       if (added == 0) {
         if(START_INDEX == 0 && array.length() - 1 <= END_INDEX) {
-          children.add(nodeManager.createMessageNode(MessageDescriptor.ALL_ELEMENTS_IN_RANGE_ARE_NULL.getLabel()));
+          children.add(nodeManager.createMessageNode(MessageDescriptor.ALL_ELEMENTS_IN_RANGE_ARE_NULL));
         }
         else {
-          children.add(nodeManager.createMessageNode(MessageDescriptor.ALL_ELEMENTS_IN_VISIBLE_RANGE_ARE_NULL.getLabel()));
+          children.add(nodeManager.createMessageNode(DebuggerBundle.message("message.node.all.array.elements.null", START_INDEX, END_INDEX)));
         }
       }
       else {
-        if(START_INDEX > 0) {
-          children.add(0, nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
-        }
+        //if(START_INDEX > 0) {
+        //  children.add(0, nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
+        //}
 
-        if(END_INDEX < array.length() - 1) {
-          children.add(nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
+        if(!myForced && END_INDEX < array.length() - 1) {
+          //children.add(nodeManager.createMessageNode(new MessageDescriptor(MORE_ELEMENTS, MessageDescriptor.SPECIAL)));
+          builder.setRemaining(array.length()-1-END_INDEX);
         }
       }
     }
     builder.setChildren(children);
+  }
+
+  private static boolean elementIsNull(ArrayReference arrayReference, int index) {
+    try {
+      return ArrayElementDescriptorImpl.getArrayElement(arrayReference, index) == null;
+    }
+    catch (EvaluateException e) {
+      return false;
+    }
   }
 
   public void readExternal(Element element) throws InvalidDataException {

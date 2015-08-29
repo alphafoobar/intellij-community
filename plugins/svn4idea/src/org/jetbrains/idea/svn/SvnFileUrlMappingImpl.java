@@ -33,10 +33,10 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.svn.info.Info;
 import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.util.SVNPathUtil;
-import org.tmatesoft.svn.core.wc.SVNInfo;
 
 import java.io.File;
 import java.util.List;
@@ -191,8 +191,9 @@ public class SvnFileUrlMappingImpl implements SvnFileUrlMapping, PersistentState
     }
   }
 
-  public List<VirtualFile> convertRoots(final List<VirtualFile> result) {
-    if (ThreadLocalDefendedInvoker.isInside()) return result;
+  @NotNull
+  public List<VirtualFile> convertRoots(@NotNull List<VirtualFile> result) {
+    if (ThreadLocalDefendedInvoker.isInside()) return ContainerUtil.newArrayList(result);
 
     synchronized (myMonitor) {
       final List<VirtualFile> cachedRoots = myMoreRealMapping.getUnderVcsRoots();
@@ -200,11 +201,8 @@ public class SvnFileUrlMappingImpl implements SvnFileUrlMapping, PersistentState
       if (! lonelyRoots.isEmpty()) {
         myChecker.reportNoRoots(lonelyRoots);
       }
-      if (cachedRoots.isEmpty()) {
-        // todo +-
-        return result;
-      }
-      return cachedRoots;
+
+      return ContainerUtil.newArrayList(cachedRoots.isEmpty() ? result : cachedRoots);
     }
   }
 
@@ -221,11 +219,16 @@ public class SvnFileUrlMappingImpl implements SvnFileUrlMapping, PersistentState
   }
 
   public void realRefresh(final Runnable afterRefreshCallback) {
-    final SvnVcs vcs = SvnVcs.getInstance(myProject);
-    final VirtualFile[] roots = myHelper.executeDefended(myProject);
-    final SvnRootsDetector rootsDetector = new SvnRootsDetector(vcs, this, myNestedCopiesHolder);
-    // do not send additional request for nested copies when in init state
-    rootsDetector.detectCopyRoots(roots, init(), afterRefreshCallback);
+    if (myProject.isDisposed()) {
+      afterRefreshCallback.run();
+    }
+    else {
+      final SvnVcs vcs = SvnVcs.getInstance(myProject);
+      final VirtualFile[] roots = myHelper.executeDefended(myProject);
+      final SvnRootsDetector rootsDetector = new SvnRootsDetector(vcs, this, myNestedCopiesHolder);
+      // do not send additional request for nested copies when in init state
+      rootsDetector.detectCopyRoots(roots, init(), afterRefreshCallback);
+    }
   }
 
   public void applyDetectionResult(@NotNull SvnRootsDetector.Result result) {
@@ -388,7 +391,7 @@ public class SvnFileUrlMappingImpl implements SvnFileUrlMapping, PersistentState
       if (copyRoot == null || vcsRoot == null) continue;
 
       final SvnVcs vcs = SvnVcs.getInstance(myProject);
-      final SVNInfo svnInfo = vcs.getInfo(copyRoot);
+      final Info svnInfo = vcs.getInfo(copyRoot);
       if ((svnInfo == null) || (svnInfo.getRepositoryRootURL() == null)) continue;
 
       Node node = new Node(copyRoot, svnInfo.getURL(), svnInfo.getRepositoryRootURL());

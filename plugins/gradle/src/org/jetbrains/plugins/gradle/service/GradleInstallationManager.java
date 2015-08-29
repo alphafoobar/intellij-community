@@ -1,19 +1,39 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.plugins.gradle.service;
 
+import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkException;
+import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil;
+import com.intellij.openapi.externalSystem.service.notification.callback.OpenExternalSystemSettingsCallback;
 import com.intellij.openapi.externalSystem.service.project.PlatformFacade;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JdkUtil;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import org.gradle.StartParameter;
-import org.gradle.api.tasks.wrapper.Wrapper;
 import org.gradle.util.DistributionLocator;
 import org.gradle.util.GradleVersion;
 import org.gradle.wrapper.PathAssembler;
@@ -49,6 +69,9 @@ public class GradleInstallationManager {
 
   public static final Pattern GRADLE_JAR_FILE_PATTERN;
   public static final Pattern ANY_GRADLE_JAR_FILE_PATTERN;
+  public static final Pattern ANT_JAR_PATTERN = Pattern.compile("ant(-(.*))?\\.jar");
+  public static final Pattern IVY_JAR_PATTERN = Pattern.compile("ivy(-(.*))?\\.jar");
+
   private static final String[] GRADLE_START_FILE_NAMES;
   @NonNls private static final String GRADLE_ENV_PROPERTY_NAME;
 
@@ -107,6 +130,51 @@ public class GradleInstallationManager {
   @Nullable
   public File getGradleHome(@Nullable Project project, @NotNull String linkedProjectPath) {
     return doGetGradleHome(project, linkedProjectPath);
+  }
+
+  @Nullable
+  public Sdk getGradleJdk(@Nullable Project project, @NotNull String linkedProjectPath) {
+    return doGetGradleJdk(project, linkedProjectPath);
+  }
+
+  @Nullable
+  private Sdk doGetGradleJdk(@Nullable Project project, String linkedProjectPath) {
+    if (project == null) {
+      return null;
+    }
+
+    final GradleProjectSettings settings = GradleSettings.getInstance(project).getLinkedProjectSettings(linkedProjectPath);
+    if (settings == null) {
+      return null;
+    }
+
+    final String gradleJvm = settings.getGradleJvm();
+    final Sdk sdk;
+    try {
+      sdk = ExternalSystemJdkUtil.getJdk(project, gradleJvm);
+    }
+    catch (ExternalSystemJdkException e) {
+      throw new ExternalSystemJdkException(
+        String.format("Invalid Gradle JDK configuration found. <a href='%s'>Open Gradle Settings</a> \n",
+                      OpenExternalSystemSettingsCallback.ID),
+        linkedProjectPath, e, OpenExternalSystemSettingsCallback.ID);
+    }
+
+    if (sdk == null && gradleJvm != null) {
+      throw new ExternalSystemJdkException(
+        String.format("Invalid Gradle JDK configuration found. <a href='%s'>Open Gradle Settings</a> \n",
+                      OpenExternalSystemSettingsCallback.ID),
+        linkedProjectPath, null, OpenExternalSystemSettingsCallback.ID);
+    }
+
+    final File sdkHomePath = sdk != null && sdk.getHomePath() != null ? new File(sdk.getHomePath()) : null;
+    if (sdkHomePath != null && JdkUtil.checkForJre(sdkHomePath.getPath()) && !JdkUtil.checkForJdk(sdkHomePath)) {
+      throw new ExternalSystemJdkException(
+        String.format("Please, use JDK instead of JRE for Gradle importer. <a href='%s'>Open Gradle Settings</a> \n",
+                      OpenExternalSystemSettingsCallback.ID),
+        linkedProjectPath, null, OpenExternalSystemSettingsCallback.ID);
+    }
+    return sdk;
   }
 
   /**
@@ -357,7 +425,7 @@ public class GradleInstallationManager {
         filesInfo.setLength(filesInfo.length() - 1);
       }
       GradleLog.LOG.info(String.format(
-        "Gradle sdk check fails. Reason: no one of the given files matches gradle jar pattern (%s). Files: %s",
+        "Gradle sdk check fails. Reason: no one of the given files matches gradle JAR pattern (%s). Files: %s",
         GRADLE_JAR_FILE_PATTERN.toString(), filesInfo
       ));
     }
@@ -375,57 +443,83 @@ public class GradleInstallationManager {
    */
   @Nullable
   public List<VirtualFile> getClassRoots(@Nullable Project project) {
+    List<File> files = getClassRoots(project, null);
+    if(files == null) return null;
+    final LocalFileSystem localFileSystem = LocalFileSystem.getInstance();
+    final JarFileSystem jarFileSystem = JarFileSystem.getInstance();
+    return ContainerUtil.mapNotNull(files, new Function<File, VirtualFile>() {
+      @Override
+      public VirtualFile fun(File file) {
+        final VirtualFile virtualFile = localFileSystem.refreshAndFindFileByIoFile(file);
+        return virtualFile != null ? jarFileSystem.getJarRootForLocalFile(virtualFile) : null;
+      }
+    });
+  }
+
+  @Nullable
+  public List<File> getClassRoots(@Nullable Project project, @Nullable String rootProjectPath) {
     if (project == null) return null;
 
-    for (Module module : myPlatformFacade.getModules(project)) {
-      String rootProjectPath = module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
-      if (StringUtil.isEmpty(rootProjectPath)) {
-        continue;
+    if(rootProjectPath == null) {
+      for (Module module : myPlatformFacade.getModules(project)) {
+        rootProjectPath = module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
+        List<File> result = findGradleSdkClasspath(project, rootProjectPath);
+        if(!result.isEmpty()) return result;
       }
-      File gradleHome = getGradleHome(module.getProject(), rootProjectPath);
-
-      if (gradleHome == null || !gradleHome.isDirectory()) {
-        continue;
-      }
-
-      final Collection<File> libraries = getAllLibraries(gradleHome);
-      if (libraries == null) {
-        continue;
-      }
-      final LocalFileSystem localFileSystem = LocalFileSystem.getInstance();
-      final JarFileSystem jarFileSystem = JarFileSystem.getInstance();
-      List<VirtualFile> result = new ArrayList<VirtualFile>();
-      for (File file : libraries) {
-        if (ANY_GRADLE_JAR_FILE_PATTERN.matcher(file.getName()).matches() || GroovyConfigUtils.matchesGroovyAll(file.getName())) {
-          final VirtualFile virtualFile = localFileSystem.refreshAndFindFileByIoFile(file);
-          if (virtualFile != null) {
-            ContainerUtil.addIfNotNull(result, jarFileSystem.getJarRootForLocalFile(virtualFile));
-          }
-        }
-      }
-
-      File src = new File(gradleHome, "src");
-      if (src.isDirectory()) {
-        if(new File(src, "org").isDirectory()) {
-          addRoots(localFileSystem, result, src);
-        } else {
-          addRoots(localFileSystem, result, src.listFiles());
-        }
-      }
-
-      return result;
+    } else {
+      return findGradleSdkClasspath(project, rootProjectPath);
     }
+
     return null;
   }
 
-  private void addRoots(@NotNull LocalFileSystem localFileSystem, @NotNull List<VirtualFile> result, @Nullable File... files) {
-    if(files == null) return;
-    for (File file : files) {
-      if(file == null || !file.isDirectory()) continue;
-      final VirtualFile virtualFile = localFileSystem.refreshAndFindFileByIoFile(file);
-      if (virtualFile != null) {
-        result.add(0, virtualFile);
+  private List<File> findGradleSdkClasspath(Project project, String rootProjectPath) {
+    List<File> result = new ArrayList<File>();
+
+    if (StringUtil.isEmpty(rootProjectPath)) return result;
+
+    File gradleHome = getGradleHome(project, rootProjectPath);
+
+    if (gradleHome == null || !gradleHome.isDirectory()) {
+      return result;
+    }
+
+    File src = new File(gradleHome, "src");
+    if (src.isDirectory()) {
+      if(new File(src, "org").isDirectory()) {
+        addRoots(result, src);
+      } else {
+        addRoots(result, src.listFiles());
       }
+    }
+
+    final Collection<File> libraries = getAllLibraries(gradleHome);
+    if (libraries == null) {
+      return result;
+    }
+
+    for (File file : libraries) {
+      if (isGradleBuildClasspathLibrary(file)) {
+        ContainerUtil.addIfNotNull(result, file);
+      }
+    }
+
+    return result;
+  }
+
+  private boolean isGradleBuildClasspathLibrary(File file) {
+    String fileName = file.getName();
+    return ANY_GRADLE_JAR_FILE_PATTERN.matcher(fileName).matches()
+           || ANT_JAR_PATTERN.matcher(fileName).matches()
+           || IVY_JAR_PATTERN.matcher(fileName).matches()
+           || GroovyConfigUtils.matchesGroovyAll(fileName);
+  }
+
+  private void addRoots(@NotNull List<File> result, @Nullable File... files) {
+    if (files == null) return;
+    for (File file : files) {
+      if (file == null || !file.isDirectory()) continue;
+      result.add(file);
     }
   }
 
@@ -435,7 +529,7 @@ public class GradleInstallationManager {
     }
     File gradleSystemDir;
 
-    if (Wrapper.PathBase.PROJECT.name().equals(wrapperConfiguration.getDistributionBase())) {
+    if ("PROJECT".equals(wrapperConfiguration.getDistributionBase())) {
       gradleSystemDir = new File(linkedProjectPath, ".gradle");
     }
     else {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,14 @@ public class SphinxDocString extends StructuredDocStringBase {
                                                    ":type", ":raise", ":raises", ":var", ":cvar", ":ivar",
                                                    ":return", ":returns", ":rtype", ":except", ":exception" };
 
-  public SphinxDocString(@NotNull String docstringText) {
+  /**
+   * Empty doc (for {@link #createParameterType(String, String)} probably)
+   */
+  public SphinxDocString() {
+    this("");
+  }
+
+  public SphinxDocString(@NotNull final String docstringText) {
     super(docstringText, ":");
   }
 

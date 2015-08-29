@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,11 +36,13 @@ import java.util.*;
  * @author Dmitry Avdeev
  */
 public class DefaultXmlExtension extends XmlExtension {
-  
+
+  @Override
   public boolean isAvailable(final PsiFile file) {
     return true;
   }
 
+  @Override
   @NotNull
   public List<TagInfo> getAvailableTagNames(@NotNull final XmlFile file, @NotNull final XmlTag context) {
 
@@ -96,6 +98,10 @@ public class DefaultXmlExtension extends XmlExtension {
 
   private static boolean hasTag(@NotNull XmlElementDescriptor elementDescriptor, String tagName, Set<XmlElementDescriptor> visited) {
     final String name = elementDescriptor.getDefaultName();
+    if (name == null) {
+      LOG.error(elementDescriptor + " returned null as default name");
+      return false;
+    }
     if (name.equals(tagName)) {
       return true;
     }
@@ -110,6 +116,7 @@ public class DefaultXmlExtension extends XmlExtension {
     return false;
   }
 
+  @Override
   public SchemaPrefix getPrefixDeclaration(final XmlTag context, String namespacePrefix) {
     @NonNls String nsDeclarationAttrName = null;
     for(XmlTag t = context; t != null; t = t.getParentTag()) {

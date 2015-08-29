@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import com.intellij.psi.JavaTokenType;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -57,6 +56,7 @@ public class StringLiteralCopyPasteProcessor implements CopyPastePreProcessor {
     StringBuilder buffer = new StringBuilder();
     int givenTextOffset = 0;
     boolean textWasChanged = false;
+    int deducedBlockSelectionWidth = deduceBlockSelectionWidth(startOffsets, endOffsets, text);
     for (int i = 0; i < startOffsets.length && givenTextOffset < text.length(); i++, givenTextOffset++) {
       if (i > 0) {
         buffer.append('\n'); // LF is added for block selection
@@ -110,8 +110,28 @@ public class StringLiteralCopyPasteProcessor implements CopyPastePreProcessor {
           givenTextStartOffset += numberOfSymbolsToCopy;
         }
       }
+      int blockSelectionPadding = deducedBlockSelectionWidth - (fileEndOffset - fileStartOffset);
+      for (int j = 0; j < blockSelectionPadding; j++) {
+        buffer.append(' ');
+        givenTextOffset++;
+      }
     }
     return textWasChanged ? buffer.toString() : null;
+  }
+
+  private static int deduceBlockSelectionWidth(int[] startOffsets, int[] endOffsets, final String text) {
+    int fragmentCount = startOffsets.length;
+    assert fragmentCount > 0;
+    int totalLength = fragmentCount - 1; // number of line breaks inserted between fragments
+    for (int i = 0; i < fragmentCount; i++) {
+      totalLength += endOffsets[i] - startOffsets[i];
+    }
+    if (totalLength < text.length() && (text.length() + 1) % fragmentCount == 0) {
+      return (text.length() + 1) / fragmentCount - 1;
+    }
+    else {
+      return -1;
+    }
   }
 
   @NotNull
@@ -119,6 +139,7 @@ public class StringLiteralCopyPasteProcessor implements CopyPastePreProcessor {
     return unescapeStringCharacters(text);
   }
 
+  @NotNull
   @Override
   public String preprocessOnPaste(final Project project, final PsiFile file, final Editor editor, String text, final RawText rawText) {
     final Document document = editor.getDocument();

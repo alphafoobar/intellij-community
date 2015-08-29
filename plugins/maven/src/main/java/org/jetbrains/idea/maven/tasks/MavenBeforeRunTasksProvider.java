@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -39,12 +38,12 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.execution.MavenEditGoalDialog;
 import org.jetbrains.idea.maven.execution.MavenRunner;
 import org.jetbrains.idea.maven.execution.MavenRunnerParameters;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
 import org.jetbrains.idea.maven.utils.MavenLog;
 
 import javax.swing.*;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -133,8 +132,9 @@ public class MavenBeforeRunTasksProvider extends BeforeRunTaskProvider<MavenBefo
       }
     }
 
-    dialog.show();
-    if (!dialog.isOK()) return false;
+    if (!dialog.showAndGet()) {
+      return false;
+    }
 
     task.setProjectPath(dialog.getWorkDirectory() + "/pom.xml");
     task.setGoal(dialog.getGoals());
@@ -162,7 +162,7 @@ public class MavenBeforeRunTasksProvider extends BeforeRunTaskProvider<MavenBefo
 
             FileDocumentManager.getInstance().saveAllDocuments();
 
-            final Collection<String> explicitProfiles = MavenProjectsManager.getInstance(project).getExplicitProfiles();
+            final MavenExplicitProfiles explicitProfiles = MavenProjectsManager.getInstance(project).getExplicitProfiles();
             final MavenRunner mavenRunner = MavenRunner.getInstance(project);
 
             targetDone.down();
@@ -173,7 +173,8 @@ public class MavenBeforeRunTasksProvider extends BeforeRunTaskProvider<MavenBefo
                     true,
                     mavenProject.getDirectory(),
                     ParametersListUtil.parse(task.getGoal()),
-                    explicitProfiles);
+                    explicitProfiles.getEnabledProfiles(),
+                    explicitProfiles.getDisabledProfiles());
 
                   result[0] = mavenRunner.runBatch(Collections.singletonList(params),
                                                 null,

@@ -42,6 +42,10 @@ public class CanBeFinalTest extends InspectionTestCase {
     doTest();
   }
 
+  public void testanonymous() throws Exception {
+    doTest();
+  }
+
   public void testmethodInheritance() throws Exception {
     doTest();
   }
@@ -91,6 +95,15 @@ public class CanBeFinalTest extends InspectionTestCase {
   }
 
   public void testSCR7737() throws Exception {
+    CanBeFinalInspection tool = new CanBeFinalInspection();
+    tool.REPORT_CLASSES = false;
+    tool.REPORT_FIELDS = false;
+    tool.REPORT_METHODS = true;
+
+    doTest(tool);
+  }
+
+  public void testInterfaceMethodInHierarchy() throws Exception {
     CanBeFinalInspection tool = new CanBeFinalInspection();
     tool.REPORT_CLASSES = false;
     tool.REPORT_FIELDS = false;

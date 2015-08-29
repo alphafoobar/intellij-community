@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
@@ -30,10 +31,10 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
-import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.codeStyle.CodeStyleSettings;
-import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.codeStyle.*;
 import com.intellij.psi.codeStyle.Indent;
+import com.intellij.psi.codeStyle.autodetect.DetectedIndentOptionsNotificationProvider;
+import com.intellij.psi.formatter.FormatterUtil;
 import com.intellij.psi.impl.CheckUtil;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
@@ -57,8 +58,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class CodeStyleManagerImpl extends CodeStyleManager {
-
-  private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.codeStyle.CodeStyleManagerImpl");
+  private static final Logger LOG = Logger.getInstance(CodeStyleManagerImpl.class);
   private static final ThreadLocal<ProcessingUnderProgressInfo> SEQUENTIAL_PROCESSING_ALLOWED
     = new ThreadLocal<ProcessingUnderProgressInfo>()
   {
@@ -100,7 +100,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     }
 
     ASTNode treeElement = SourceTreeToPsiMap.psiElementToTree(element);
-    final PsiElement formatted = SourceTreeToPsiMap.treeElementToPsi(new CodeFormatterFacade(getSettings()).processElement(treeElement));
+    final PsiElement formatted = SourceTreeToPsiMap.treeElementToPsi(new CodeFormatterFacade(getSettings(), element.getLanguage()).processElement(treeElement));
     if (!canChangeWhiteSpacesOnly) {
       return postProcessElement(formatted);
     }
@@ -164,10 +164,20 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     reformatText(file, ranges, null);
   }
 
+  @Override
+  public void reformatTextWithContext(@NotNull PsiFile file, @NotNull Collection<TextRange> ranges) throws IncorrectOperationException {
+    reformatText(file, ranges, null, true);
+  }
+
   public void reformatText(@NotNull PsiFile file, @NotNull Collection<TextRange> ranges, @Nullable Editor editor) throws IncorrectOperationException {
+    reformatText(file, ranges, editor, false);
+  }
+
+  public void reformatText(@NotNull PsiFile file, @NotNull Collection<TextRange> ranges, @Nullable Editor editor, boolean reformatContext) throws IncorrectOperationException {
     if (ranges.isEmpty()) {
       return;
     }
+    boolean isFullReformat = ranges.size() == 1 && file.getTextRange().equals(ranges.iterator().next());
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
 
@@ -179,8 +189,10 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     ASTNode treeElement = SourceTreeToPsiMap.psiElementToTree(file);
     transformAllChildren(treeElement);
 
-    final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings());
-    LOG.assertTrue(file.isValid());
+    final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings(), file.getLanguage());
+    codeFormatter.setReformatContext(reformatContext);
+
+    LOG.assertTrue(file.isValid(), "File name: " + file.getName() + " , class: " + file.getClass().getSimpleName());
 
     if (editor == null) {
       editor = PsiUtilBase.findEditor(file);
@@ -188,12 +200,16 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
     CaretPositionKeeper caretKeeper = null;
     if (editor != null) {
-      caretKeeper = new CaretPositionKeeper(editor);
+      caretKeeper = new CaretPositionKeeper(editor, getSettings(), file.getLanguage());
     }
+
+    Collection<TextRange> correctedRanges = FormatterUtil.isFormatterCalledExplicitly()
+                                            ? removeEndingWhiteSpaceFromEachRange(file, ranges)
+                                            : ranges;
 
     final SmartPointerManager smartPointerManager = SmartPointerManager.getInstance(getProject());
     List<RangeFormatInfo> infos = new ArrayList<RangeFormatInfo>();
-    for (TextRange range : ranges) {
+    for (TextRange range : correctedRanges) {
       final PsiElement start = findElementInTreeWithFormatterEnabled(file, range.getStartOffset());
       final PsiElement end = findElementInTreeWithFormatterEnabled(file, range.getEndOffset());
       if (start != null && !start.isValid()) {
@@ -213,7 +229,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     }
 
     FormatTextRanges formatRanges = new FormatTextRanges();
-    for (TextRange range : ranges) {
+    for (TextRange range : correctedRanges) {
       formatRanges.add(range, true);
     }
     codeFormatter.processText(file, formatRanges, true);
@@ -231,6 +247,34 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     if (caretKeeper != null) {
       caretKeeper.restoreCaretPosition();
     }
+    if (editor instanceof EditorEx && isFullReformat) {
+      ((EditorEx)editor).reinitSettings();
+      DetectedIndentOptionsNotificationProvider.updateIndentNotification(file, true);
+    }
+  }
+
+  @NotNull
+  private Collection<TextRange> removeEndingWhiteSpaceFromEachRange(@NotNull PsiFile file, @NotNull Collection<TextRange> ranges) {
+    Collection<TextRange> result = new ArrayList<TextRange>();
+
+    for (TextRange range : ranges) {
+      int rangeStart = range.getStartOffset();
+      int rangeEnd = range.getEndOffset();
+
+      PsiElement lastElementInRange = findElementInTreeWithFormatterEnabled(file, range.getEndOffset());
+      if (lastElementInRange instanceof PsiWhiteSpace
+          && rangeStart < lastElementInRange.getTextRange().getStartOffset())
+      {
+        PsiElement prev = lastElementInRange.getPrevSibling();
+        if (prev != null) {
+          rangeEnd = prev.getTextRange().getEndOffset();
+        }
+      }
+
+      result.add(new TextRange(rangeStart, rangeEnd));
+    }
+
+    return result;
   }
 
   private PsiElement reformatRangeImpl(final PsiElement element,
@@ -245,7 +289,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     }
 
     ASTNode treeElement = SourceTreeToPsiMap.psiElementToTree(element);
-    final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings());
+    final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings(), element.getLanguage());
     final PsiElement formatted = SourceTreeToPsiMap.treeElementToPsi(codeFormatter.processRange(treeElement, startOffset, endOffset));
 
     return canChangeWhiteSpacesOnly ? formatted : postProcessElement(formatted);
@@ -283,6 +327,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
   @Override
   public int adjustLineIndent(@NotNull final PsiFile file, final int offset) throws IncorrectOperationException {
+    DetectedIndentOptionsNotificationProvider.updateIndentNotification(file, false);
     return PostprocessReformattingAspect.getInstance(file.getProject()).disablePostprocessFormattingInside(new Computable<Integer>() {
       @Override
       public Integer compute() {
@@ -432,7 +477,8 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
   /**
    * Formatter trims line that contains white spaces symbols only, however, there is a possible case that we want
-   * to preserve them for particular line (e.g. for live template that defines blank line that contains $END$ marker).
+   * to preserve them for particular line 
+   * (e.g. for live template that defines line with whitespaces that contains $END$ marker: templateText   $END$).
    * <p/>
    * Current approach is to do the following:
    * <pre>
@@ -444,7 +490,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
    * </pre>
    * <p/>
    * This method inserts that dummy comment (fallback to identifier <code>xxx</code>, see {@link CodeStyleManagerImpl#createDummy(PsiFile)})
-   * if necessary (if target line contains white space symbols only).
+   * if necessary.
    * <p/>
 
    * <b>Note:</b> it's expected that the whole white space region that contains given offset is processed in a way that all
@@ -460,26 +506,22 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
    */
   @Nullable
   public static TextRange insertNewLineIndentMarker(@NotNull PsiFile file, @NotNull Document document, int offset) {
-    CharSequence text = document.getCharsSequence();
-    if (offset < 0 || offset >= text.length() || !isWhiteSpaceSymbol(text.charAt(offset))) {
+    CharSequence text = document.getImmutableCharSequence();
+    if (offset <= 0 || offset >= text.length() || !isWhiteSpaceSymbol(text.charAt(offset))) {
       return null;
     }
-
-    for (int i = offset - 1; i >= 0; i--) {
-      char c = text.charAt(i);
-      // We don't want to insert a marker if target line is not blank (doesn't consist from white space symbols only).
-      if (c == '\n') {
-        break;
-      }
-      if (!isWhiteSpaceSymbol(c)) {
-        return null;
-      }
+    
+    if (!isWhiteSpaceSymbol(text.charAt(offset - 1))) {
+      return null; // no whitespaces before offset
     }
 
     int end = offset;
     for (; end < text.length(); end++) {
+      if (text.charAt(end) == '\n') {
+        break; // line is empty till the end
+      }
       if (!isWhiteSpaceSymbol(text.charAt(end))) {
-        break;
+        return null;
       }
     }
 
@@ -534,7 +576,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     if (node == null || node.getElementType() != TokenType.WHITE_SPACE) {
       return new Pair<PsiElement, CharTable>(null, charTable);
     }
-    return new Pair<PsiElement, CharTable>(elementAt, charTable);
+    return Pair.create(elementAt, charTable);
   }
 
   @Override
@@ -708,11 +750,13 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     RangeMarker myBeforeCaretRangeMarker;
     String myCaretIndentToRestore;
     int myVisualColumnToRestore = -1;
+    boolean myBlankLineIndentPreserved = true;
 
-    CaretPositionKeeper(@NotNull Editor editor) {
+    CaretPositionKeeper(@NotNull Editor editor, @NotNull CodeStyleSettings settings, @NotNull Language language) {
       myEditor = editor;
       myCaretModel = editor.getCaretModel();
       myDocument = editor.getDocument();
+      myBlankLineIndentPreserved = isBlankLineIndentPreserved(settings, language);
 
       int caretOffset = getCaretOffset();
       int lineStartOffset = getLineStartOffsetByTotalOffset(caretOffset);
@@ -722,6 +766,15 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
       if (shouldFixCaretPosition) {
         initRestoreInfo(caretOffset);
       }
+    }
+
+    private static boolean isBlankLineIndentPreserved(@NotNull CodeStyleSettings settings, @NotNull Language language) {
+      CommonCodeStyleSettings langSettings = settings.getCommonSettings(language);
+      if (langSettings != null) {
+        CommonCodeStyleSettings.IndentOptions indentOptions = langSettings.getIndentOptions();
+        return indentOptions != null && indentOptions.KEEP_INDENTS_ON_EMPTY_LINES;
+      }
+      return false;
     }
 
     private void initRestoreInfo(int caretOffset) {
@@ -742,7 +795,10 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
     }
 
     private void restorePositionByIndentInsertion() {
-      if (myBeforeCaretRangeMarker == null || !myBeforeCaretRangeMarker.isValid() || myCaretIndentToRestore == null) {
+      if (myBeforeCaretRangeMarker == null ||
+          !myBeforeCaretRangeMarker.isValid() ||
+          myCaretIndentToRestore == null ||
+          myBlankLineIndentPreserved) {
         return;
       }
       int newCaretLineStartOffset = myBeforeCaretRangeMarker.getEndOffset();

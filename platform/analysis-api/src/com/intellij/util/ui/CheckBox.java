@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2009 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,13 @@
 package com.intellij.util.ui;
 
 import com.intellij.codeInspection.InspectionProfileEntry;
+import com.intellij.util.ReflectionUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.ButtonModel;
-import javax.swing.JCheckBox;
+import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.lang.reflect.Field;
 
 public class CheckBox extends JCheckBox {
 
@@ -39,16 +38,7 @@ public class CheckBox extends JCheckBox {
 
     private static boolean getPropertyValue(InspectionProfileEntry owner,
                                             String property) {
-        try {
-            final Class<? extends InspectionProfileEntry> aClass =
-                    owner.getClass();
-            final Field field = aClass.getField(property);
-            return field.getBoolean(owner);
-        } catch (IllegalAccessException ignore) {
-            return false;
-        } catch (NoSuchFieldException ignore) {
-            return false;
-        }
+      return ReflectionUtil.getField(owner.getClass(), owner, boolean.class, property);
     }
 
     private static class SingleCheckboxChangeListener
@@ -72,16 +62,7 @@ public class CheckBox extends JCheckBox {
         private static void setPropertyValue(InspectionProfileEntry owner,
                                              String property,
                                              boolean selected) {
-            try {
-                final Class<? extends InspectionProfileEntry> aClass =
-                        owner.getClass();
-                final Field field = aClass.getField(property);
-                field.setBoolean(owner, selected);
-            } catch (IllegalAccessException ignore) {
-                // do nothing
-            } catch (NoSuchFieldException ignore) {
-                // do nothing
-            }
+          ReflectionUtil.setField(owner.getClass(), owner, boolean.class, property, selected);
         }
     }
 }

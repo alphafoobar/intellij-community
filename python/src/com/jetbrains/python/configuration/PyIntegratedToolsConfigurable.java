@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,22 @@ package com.jetbrains.python.configuration;
 
 import com.google.common.collect.Lists;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
+import com.intellij.execution.ExecutionException;
 import com.intellij.facet.impl.ui.FacetErrorPanel;
 import com.intellij.facet.ui.FacetConfigurationQuickFix;
 import com.intellij.facet.ui.FacetEditorValidator;
 import com.intellij.facet.ui.ValidationResult;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.highlighter.EditorHighlighter;
+import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.NonDefaultProjectConfigurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -46,7 +51,10 @@ import com.jetbrains.python.PythonFileType;
 import com.jetbrains.python.ReSTService;
 import com.jetbrains.python.documentation.DocStringFormat;
 import com.jetbrains.python.documentation.PyDocumentationSettings;
-import com.jetbrains.python.packaging.*;
+import com.jetbrains.python.packaging.PyPackageManagerUI;
+import com.jetbrains.python.packaging.PyPackageRequirementsSettings;
+import com.jetbrains.python.packaging.PyPackageUtil;
+import com.jetbrains.python.packaging.PyRequirement;
 import com.jetbrains.python.sdk.PythonSdkType;
 import com.jetbrains.python.testing.PythonTestConfigurationsModel;
 import com.jetbrains.python.testing.TestRunnerService;
@@ -62,7 +70,7 @@ import java.util.List;
 /**
  * User: catherine
  */
-public class PyIntegratedToolsConfigurable implements SearchableConfigurable, NonDefaultProjectConfigurable {
+public class PyIntegratedToolsConfigurable implements SearchableConfigurable {
   private JPanel myMainPanel;
   private JComboBox myTestRunnerComboBox;
   private JComboBox myDocstringFormatComboBox;
@@ -82,6 +90,7 @@ public class PyIntegratedToolsConfigurable implements SearchableConfigurable, No
     myModule = module;
     myProject = myModule.getProject();
     myDocumentationSettings = PyDocumentationSettings.getInstance(myModule);
+    //noinspection unchecked
     myDocstringFormatComboBox.setModel(new CollectionComboBoxModel(DocStringFormat.ALL, myDocumentationSettings.myDocStringFormat));
 
     final FileChooserDescriptor fileChooserDescriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
@@ -114,11 +123,10 @@ public class PyIntegratedToolsConfigurable implements SearchableConfigurable, No
     myErrorPanel.add(facetErrorPanel.getComponent(), BorderLayout.CENTER);
 
     facetErrorPanel.getValidatorsManager().registerValidator(new FacetEditorValidator() {
+      @NotNull
       @Override
       public ValidationResult check() {
-        Module[] modules = ModuleManager.getInstance(myProject).getModules();
-        if (modules.length == 0) return ValidationResult.OK;
-        final Sdk sdk = PythonSdkType.findPythonSdk(modules[0]);
+        final Sdk sdk = PythonSdkType.findPythonSdk(myModule);
         if (sdk != null) {
           final Object selectedItem = myTestRunnerComboBox.getSelectedItem();
           if (PythonTestConfigurationsModel.PY_TEST_NAME.equals(selectedItem)) {
@@ -151,12 +159,12 @@ public class PyIntegratedToolsConfigurable implements SearchableConfigurable, No
     return new FacetConfigurationQuickFix() {
       @Override
       public void run(JComponent place) {
-        final PyPackageManagerImpl.UI ui = new PyPackageManagerImpl.UI(myProject, sdk, new PyPackageManagerImpl.UI.Listener() {
+        final PyPackageManagerUI ui = new PyPackageManagerUI(myProject, sdk, new PyPackageManagerUI.Listener() {
           @Override
           public void started() {}
 
           @Override
-          public void finished(List<PyExternalProcessException> exceptions) {
+          public void finished(List<ExecutionException> exceptions) {
             if (exceptions.isEmpty()) {
               VFSTestFrameworkListener.getInstance().testInstalled(true, sdk.getHomePath(), name);
               facetErrorPanel.getValidatorsManager().validate();
@@ -192,6 +200,7 @@ public class PyIntegratedToolsConfigurable implements SearchableConfigurable, No
   }
 
   private void updateConfigurations() {
+    //noinspection unchecked
     myTestRunnerComboBox.setModel(myModel);
   }
 
@@ -242,25 +251,43 @@ public class PyIntegratedToolsConfigurable implements SearchableConfigurable, No
     reSTService.setWorkdir(myWorkDir.getText());
     if (txtIsRst.isSelected() != reSTService.txtIsRst()) {
       reSTService.setTxtIsRst(txtIsRst.isSelected());
-      reparseRstFiles();
+      reparseFiles(Collections.singletonList(PlainTextFileType.INSTANCE.getDefaultExtension()));
     }
     myDocumentationSettings.analyzeDoctest = analyzeDoctest.isSelected();
     PyPackageRequirementsSettings.getInstance(myModule).setRequirementsPath(myRequirementsPathField.getText());
     DaemonCodeAnalyzer.getInstance(myProject).restart();
   }
 
-  public void reparseRstFiles() {
+  public void reparseFiles(final List<String> extensions) {
     final List<VirtualFile> filesToReparse = Lists.newArrayList();
     ProjectRootManager.getInstance(myProject).getFileIndex().iterateContent(new ContentIterator() {
       @Override
       public boolean processFile(VirtualFile fileOrDir) {
-        if (!fileOrDir.isDirectory() && PlainTextFileType.INSTANCE.getDefaultExtension().equals(fileOrDir.getExtension())) {
+        if (!fileOrDir.isDirectory() && extensions.contains(fileOrDir.getExtension())) {
           filesToReparse.add(fileOrDir);
         }
         return true;
       }
     });
     FileContentUtilCore.reparseFiles(filesToReparse);
+
+    ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      @Override
+      public void run() {
+
+        for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
+          if (editor instanceof EditorEx && editor.getProject() == myProject) {
+            final VirtualFile vFile = ((EditorEx)editor).getVirtualFile();
+            if (vFile != null) {
+              final EditorHighlighter highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, vFile);
+              ((EditorEx)editor).setHighlighter(highlighter);
+            }
+          }
+        }
+      }
+    });
+
+    DaemonCodeAnalyzer.getInstance(myProject).restart();
   }
 
   @Override

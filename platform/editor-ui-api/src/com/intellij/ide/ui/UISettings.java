@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,57 +13,68 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.ide.ui;
 
-import com.intellij.ide.IdeBundle;
+import com.intellij.ide.WelcomeWizardUtil;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.*;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.util.PlatformUtilsCore;
+import com.intellij.util.EventDispatcher;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.xmlb.Accessor;
 import com.intellij.util.xmlb.SerializationFilter;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 import com.intellij.util.xmlb.annotations.Property;
+import com.intellij.util.xmlb.annotations.Transient;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import javax.swing.event.EventListenerList;
 import java.awt.*;
-import java.io.File;
 import java.util.Map;
 
 import static com.intellij.util.ui.UIUtil.isValidFont;
 
 @State(
   name = "UISettings",
-  storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/ui.lnf.xml"
-    )}
+  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/ui.lnf.xml")
 )
-public class UISettings implements PersistentStateComponent<UISettings>, ExportableApplicationComponent {
-  private final EventListenerList myListenerList;
+public class UISettings extends SimpleModificationTracker implements PersistentStateComponent<UISettings> {
+  /** Not tabbed pane. */
+  public static final int TABS_NONE = 0;
 
-  @Property(filter = FontFilter.class)
-  @NonNls
-  public String FONT_FACE;
-  @Property(filter = FontFilter.class)
-  public int FONT_SIZE;
+  public static UISettings getInstance() {
+    return ServiceManager.getService(UISettings.class);
+  }
 
+  /**
+   * Use this method if you are not sure whether the application is initialized.
+   * @return persisted UISettings instance or default values.
+   */
+  public static UISettings getShadowInstance() {
+    Application application = ApplicationManager.getApplication();
+    UISettings settings = application == null ? null : getInstance();
+    return settings == null ? new UISettings() : settings;
+  }
+
+  @Property(filter = FontFilter.class) public String FONT_FACE;
+  @Property(filter = FontFilter.class) public int FONT_SIZE;
   public int RECENT_FILES_LIMIT = 50;
   public int CONSOLE_COMMAND_HISTORY_LIMIT = 300;
+  public boolean OVERRIDE_CONSOLE_CYCLE_BUFFER_SIZE = false;
+  public int CONSOLE_CYCLE_BUFFER_SIZE_KB = 1024;
   public int EDITOR_TAB_LIMIT = 10;
+  public boolean REUSE_NOT_MODIFIED_TABS = false;
   public boolean ANIMATE_WINDOWS = true;
-  public int ANIMATION_SPEED = 2000; // Pixels per second
+  @Deprecated //todo remove in IDEA 16
+  public int ANIMATION_SPEED = 4000; // Pixels per second
+  public int ANIMATION_DURATION = 300; // Milliseconds
   public boolean SHOW_TOOL_WINDOW_NUMBERS = true;
   public boolean HIDE_TOOL_STRIPES = true;
   public boolean WIDESCREEN_SUPPORT = false;
@@ -77,15 +88,21 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
   public boolean SHOW_NAVIGATION_BAR = true;
   public boolean ALWAYS_SHOW_WINDOW_BUTTONS = false;
   public boolean CYCLE_SCROLLING = true;
-  public boolean SCROLL_TAB_LAYOUT_IN_EDITOR = PlatformUtilsCore.isAppCode();
+  public boolean SCROLL_TAB_LAYOUT_IN_EDITOR = true;
+  public boolean HIDE_TABS_IF_NEED = true;
   public boolean SHOW_CLOSE_BUTTON = true;
   public int EDITOR_TAB_PLACEMENT = 1;
   public boolean HIDE_KNOWN_EXTENSION_IN_TABS = false;
   public boolean SHOW_ICONS_IN_QUICK_NAVIGATION = true;
   public boolean CLOSE_NON_MODIFIED_FILES_FIRST = false;
   public boolean ACTIVATE_MRU_EDITOR_ON_CLOSE = false;
-  public boolean ACTIVATE_RIGHT_EDITOR_ON_CLOSE = PlatformUtilsCore.isAppCode();
+  public boolean ACTIVATE_RIGHT_EDITOR_ON_CLOSE = false;
+  @Deprecated
   public boolean ANTIALIASING_IN_EDITOR = true;
+  public boolean ANTIALIASING_IN_IDE = ANTIALIASING_IN_EDITOR;
+  public LCDRenderingScope LCD_RENDERING_SCOPE = UIUtil.isRetina() ? LCDRenderingScope.OFF : LCDRenderingScope.IDE;
+  public ColorBlindness COLOR_BLINDNESS; 
+  public boolean USE_LCD_RENDERING_IN_EDITOR = true;
   public boolean MOVE_MOUSE_ON_DEFAULT_BUTTON = false;
   public boolean ENABLE_ALPHA_MODE = false;
   public int ALPHA_MODE_DELAY = 1500;
@@ -100,35 +117,36 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
   public int MAX_LOOKUP_WIDTH2 = 500;
   public int MAX_LOOKUP_LIST_HEIGHT = 11;
   public boolean HIDE_NAVIGATION_ON_FOCUS_LOSS = true;
+  public boolean DND_WITH_PRESSED_ALT_ONLY = false;
   public boolean FILE_COLORS_IN_PROJECT_VIEW = false;
   public boolean DEFAULT_AUTOSCROLL_TO_SOURCE = false;
+  @Transient
   public boolean PRESENTATION_MODE = false;
   public int PRESENTATION_MODE_FONT_SIZE = 24;
-
-  /**
-   * Defines whether asterisk is shown on modified editor tab or not
-   */
   public boolean MARK_MODIFIED_TABS_WITH_ASTERISK = false;
+  public boolean SHOW_TABS_TOOLTIPS = true;
+  public boolean SHOW_DIRECTORY_FOR_NON_UNIQUE_FILENAMES = true;
+  public boolean NAVIGATE_TO_PREVIEW = false;
+  public boolean SORT_BOOKMARKS = false;
 
-  public boolean SHOW_DIRECTORY_FOR_NON_UNIQUE_FILENAMES = false;
-
-  /**
-   * Not tabbed pane
-   */
-  public static final int TABS_NONE = 0;
+  private final EventDispatcher<UISettingsListener> myDispatcher = EventDispatcher.create(UISettingsListener.class);
 
   public UISettings() {
-    myListenerList = new EventListenerList();
     tweakPlatformDefaults();
     setSystemFontFaceAndSize();
+
+    Boolean scrollToSource = WelcomeWizardUtil.getAutoScrollToSource();
+    if (scrollToSource != null) {
+      DEFAULT_AUTOSCROLL_TO_SOURCE = scrollToSource;
+    }
   }
 
   private void tweakPlatformDefaults() {
-    // TODO: Make it pluggable
-    if (PlatformUtilsCore.isAppCode()) {
-      SHOW_MAIN_TOOLBAR = false;
+    // TODO[anton] consider making all IDEs use the same settings
+    if (PlatformUtils.isAppCode()) {
+      SCROLL_TAB_LAYOUT_IN_EDITOR = true;
+      ACTIVATE_RIGHT_EDITOR_ON_CLOSE = true;
       SHOW_ICONS_IN_MENUS = false;
-      SHOW_MEMORY_INDICATOR = false;
     }
   }
 
@@ -136,44 +154,24 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
    * @deprecated use {@link UISettings#addUISettingsListener(com.intellij.ide.ui.UISettingsListener, Disposable disposable)} instead.
    */
   public void addUISettingsListener(UISettingsListener listener) {
-    myListenerList.add(UISettingsListener.class, listener);
+    myDispatcher.addListener(listener);
   }
 
   public void addUISettingsListener(@NotNull final UISettingsListener listener, @NotNull Disposable parentDisposable) {
-    myListenerList.add(UISettingsListener.class,listener);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        removeUISettingsListener(listener);
-      }
-    });
+    myDispatcher.addListener(listener, parentDisposable);
   }
 
   /**
    * Notifies all registered listeners that UI settings has been changed.
    */
   public void fireUISettingsChanged() {
-    UISettingsListener[] listeners= myListenerList.getListeners(UISettingsListener.class);
-    for (UISettingsListener listener : listeners) {
-      listener.uiSettingsChanged(this);
-    }
-  }
-
-  public static UISettings getInstance() {
-    return ApplicationManager.getApplication().getComponent(UISettings.class);
-  }
-
-  /**
-   * Use this method if you are not sure is application initialized or not
-   * @return UISettings instance or default values
-   */
-  public static UISettings getShadowInstance() {
-    Application application = ApplicationManager.getApplication();
-    return application != null ? getInstance() : new UISettings();
+    incModificationCount();
+    myDispatcher.getMulticaster().uiSettingsChanged(this);
+    ApplicationManager.getApplication().getMessageBus().syncPublisher(UISettingsListener.TOPIC).uiSettingsChanged(this);
   }
 
   public void removeUISettingsListener(UISettingsListener listener) {
-    myListenerList.remove(UISettingsListener.class,listener);
+    myDispatcher.removeListener(listener);
   }
 
   private void setSystemFontFaceAndSize() {
@@ -190,19 +188,12 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
       return fontData;
     }
 
-    if (SystemInfo.isWindows) {
-      //noinspection HardCodedStringLiteral
-      final Font font = (Font)Toolkit.getDefaultToolkit().getDesktopProperty("win.messagebox.font");
-      if (font != null) {
-        return Pair.create(font.getName(), font.getSize());
-      }
-    }
-
     return Pair.create("Dialog", 12);
   }
 
   public static class FontFilter implements SerializationFilter {
-    public boolean accepts(Accessor accessor, Object bean) {
+    @Override
+    public boolean accepts(@NotNull Accessor accessor, @NotNull Object bean) {
       UISettings settings = (UISettings)bean;
       return !hasDefaultFontSetting(settings);
     }
@@ -213,10 +204,12 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
     return fontData.first.equals(settings.FONT_FACE) && fontData.second.equals(settings.FONT_SIZE);
   }
 
+  @Override
   public UISettings getState() {
     return this;
   }
 
+  @Override
   public void loadState(UISettings object) {
     XmlSerializerUtil.copyBean(object, this);
 
@@ -268,78 +261,51 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
     fireUISettingsChanged();
   }
 
-  private static final boolean DEFAULT_ALIASING             =
-    SystemProperties.getBooleanProperty("idea.use.default.antialiasing.in.editor", false);
-  private static final boolean FORCE_USE_FRACTIONAL_METRICS =
+  public static final boolean FORCE_USE_FRACTIONAL_METRICS =
     SystemProperties.getBooleanProperty("idea.force.use.fractional.metrics", false);
 
+  public static void setupFractionalMetrics(final Graphics2D g2d) {
+    if (FORCE_USE_FRACTIONAL_METRICS) {
+      g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+    }
+  }
+
+  /* This method must not be used for set up antialiasing for editor components
+   */
   public static void setupAntialiasing(final Graphics g) {
-    if (DEFAULT_ALIASING) return;
+
+    Application application = ApplicationManager.getApplication();
+    if (application == null) {
+      // We cannot use services while Aplication has not been loaded yet
+      // So let's apply the default hints.
+      UIUtil.applyRenderingHints(g);
+      return;
+    }
 
     Graphics2D g2d = (Graphics2D)g;
     UISettings uiSettings = getInstance();
 
-    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-    if (!isRemoteDesktopConnected() && UIUtil.isRetina()) {
-      g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+    if (uiSettings != null) {
+      g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, LCDRenderingScope.getKeyForCurrentScope(false));
+    } else {
+      g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
     }
-    else {
-      if (uiSettings == null || uiSettings.ANTIALIASING_IN_EDITOR) {
-        Toolkit tk = Toolkit.getDefaultToolkit();
-        //noinspection HardCodedStringLiteral
-        Map map = (Map)tk.getDesktopProperty("awt.font.desktophints");
-        if (map != null) {
-          if (isRemoteDesktopConnected()) {
-            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_DEFAULT);
-          }
-          else {
-            g2d.addRenderingHints(map);
-          }
-        }
-        else {
-          g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        }
-        if (FORCE_USE_FRACTIONAL_METRICS) {
-          g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        }
-      }
-      else {
-        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
-      }
-    }
+
+    setupFractionalMetrics(g2d);
   }
 
   /**
    * @return true when Remote Desktop (i.e. Windows RDP) is connected
+   * @deprecated Use RemoteDesktopDetector class - it should work in more cases. To be removed in IDEA 16.
    */
-  // TODO[neuro]: move to UIUtil
+  @SuppressWarnings("unused")
   public static boolean isRemoteDesktopConnected() {
     if (System.getProperty("os.name").contains("Windows")) {
       final Map map = (Map)Toolkit.getDefaultToolkit().getDesktopProperty("awt.font.desktophints");
       return map != null && RenderingHints.VALUE_TEXT_ANTIALIAS_DEFAULT.equals(map.get(RenderingHints.KEY_TEXT_ANTIALIASING));
     }
     return false;
-  }
-
-  @NotNull
-  public File[] getExportFiles() {
-    return new File[]{PathManager.getOptionsFile("ui.lnf")};
-  }
-
-  @NotNull
-  public String getPresentableName() {
-    return IdeBundle.message("ui.settings");
-  }
-
-  @NonNls
-  @NotNull
-  public String getComponentName() {
-    return "UISettings";
-  }
-
-  public void initComponent() {
-  }
-
-  public void disposeComponent() {
   }
 }

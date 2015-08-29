@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,16 @@
  */
 package com.siyeh.ig.psiutils;
 
+import com.intellij.codeInsight.ExceptionUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.containers.ContainerUtil;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -56,13 +60,13 @@ public class ExpectedTypeUtils {
     /**
      * @noinspection StaticCollection
      */
-    private static final Set<IElementType> arithmeticOps = new HashSet<IElementType>(5);
+    private static final Set<IElementType> arithmeticOps = new THashSet<IElementType>(5);
 
-    private static final Set<IElementType> booleanOps = new HashSet<IElementType>(5);
+    private static final Set<IElementType> booleanOps = new THashSet<IElementType>(5);
 
-    private static final Set<IElementType> shiftOps = new HashSet<IElementType>(3);
+    private static final Set<IElementType> shiftOps = new THashSet<IElementType>(3);
 
-    private static final Set<IElementType> operatorAssignmentOps = new HashSet<IElementType>(11);
+    private static final Set<IElementType> operatorAssignmentOps = new THashSet<IElementType>(11);
 
     static {
       arithmeticOps.add(JavaTokenType.PLUS);
@@ -153,114 +157,79 @@ public class ExpectedTypeUtils {
     }
 
     @Override
-    public void visitBinaryExpression(@NotNull PsiBinaryExpression binaryExpression) {
-      final PsiExpression rhs = binaryExpression.getROperand();
-      if (rhs == null) {
+    public void visitPolyadicExpression(@NotNull PsiPolyadicExpression polyadicExpression) {
+      final PsiExpression[] operands = polyadicExpression.getOperands();
+      if (operands.length < 2) {
         expectedType = null;
         return;
       }
-      final PsiExpression lhs = binaryExpression.getLOperand();
-      PsiType lhsType = lhs.getType();
-      if (lhsType == null) {
-        expectedType = null;
-        return;
+      for (PsiExpression operand : operands) {
+        if (operand == null || operand.getType() == null) {
+          expectedType = null;
+          return;
+        }
       }
-      PsiType rhsType = rhs.getType();
-      if (rhsType == null) {
-        expectedType = null;
-        return;
-      }
-      final IElementType tokenType = binaryExpression.getOperationTokenType();
-      final PsiType type = binaryExpression.getType();
+      final IElementType tokenType = polyadicExpression.getOperationTokenType();
+      final PsiType type = polyadicExpression.getType();
+      final PsiType wrappedExpressionType = wrappedExpression.getType();
       if (TypeUtils.isJavaLangString(type) || isArithmeticOperation(tokenType) || isBooleanOperation(tokenType)) {
         expectedType = type;
       }
       else if (isShiftOperation(tokenType)) {
-        if (lhs == wrappedExpression) {
-          expectedType = unaryNumericPromotion(lhsType);
-        }
-        else {
-          expectedType = unaryNumericPromotion(rhsType);
-        }
+        expectedType = TypeUtils.unaryNumericPromotion(wrappedExpressionType);
       }
-      else if (ComparisonUtils.isEqualityComparison(binaryExpression)) {
-        // JLS 15.21.1 Numerical Equality Operators == and !=
-        final PsiType wrappedExpressionType = wrappedExpression.getType();
-        if (TypeConversionUtil.isPrimitiveAndNotNull(wrappedExpressionType)) {
-          expectedType = wrappedExpressionType;
-          return;
-        }
-        if (lhs == wrappedExpression) {
-          if (TypeConversionUtil.isPrimitiveAndNotNull(rhsType)) {
-            expectedType = PsiPrimitiveType.getUnboxedType(wrappedExpressionType);
-            return;
+      else if (ComparisonUtils.isEqualityComparison(polyadicExpression)) {
+        final PsiExpression operand1 = operands[0];
+        final PsiExpression operand2 = operands[1];
+        if (operand1 == wrappedExpression || operand2 == wrappedExpression) {
+          final PsiType type1 = operand1.getType();
+          final PsiType type2 = operand2.getType();
+          if (type1 instanceof PsiPrimitiveType) {
+            expectedType = expectedPrimitiveType((PsiPrimitiveType)type1, type2);
           }
-          expectedType = TypeUtils.getObjectType(wrappedExpression);
+          else if (type2 instanceof PsiPrimitiveType) {
+            expectedType = expectedPrimitiveType((PsiPrimitiveType)type2, type1);
+          }
+          else {
+            expectedType = TypeUtils.getObjectType(wrappedExpression);
+          }
         }
         else {
-         if (TypeConversionUtil.isPrimitiveAndNotNull(lhsType)) {
-            expectedType = PsiPrimitiveType.getUnboxedType(wrappedExpressionType);
-            return;
-          }
-          expectedType = TypeUtils.getObjectType(wrappedExpression);
+          // third or more operand must always be boolean or does not compile
+          expectedType = TypeConversionUtil.isBooleanType(wrappedExpressionType) ? PsiType.BOOLEAN : null;
         }
       }
       else if (ComparisonUtils.isComparisonOperation(tokenType)) {
-        if (lhs == wrappedExpression && !TypeConversionUtil.isPrimitiveAndNotNull(lhsType)) {
-          lhsType = PsiPrimitiveType.getUnboxedType(lhsType);
-          if (lhsType == null) {
-            expectedType = null;
+        if (operands.length != 2) {
+          expectedType = null;
+          return;
+        }
+        else if (!TypeConversionUtil.isPrimitiveAndNotNull(wrappedExpressionType)) {
+          if (PsiPrimitiveType.getUnboxedType(wrappedExpressionType) == null) {
             return;
           }
         }
-        if (rhs == wrappedExpression && !TypeConversionUtil.isPrimitiveAndNotNull(rhsType)) {
-          rhsType = PsiPrimitiveType.getUnboxedType(rhsType);
-          if (rhsType == null) {
-            expectedType = null;
-            return;
-          }
-        }
-        // JLS 5.6.2 Binary Numeric Promotion
-        if (PsiType.DOUBLE.equals(lhsType) || PsiType.DOUBLE.equals(rhsType)) {
-          expectedType = PsiType.DOUBLE;
-        }
-        else if (PsiType.FLOAT.equals(lhsType) || PsiType.FLOAT.equals(rhsType)) {
-          expectedType = PsiType.FLOAT;
-        }
-        else if (PsiType.LONG.equals(lhsType) || PsiType.LONG.equals(rhsType)) {
-          expectedType = PsiType.LONG;
-        }
-        else {
-          expectedType = PsiType.INT;
-        }
+        expectedType = TypeConversionUtil.binaryNumericPromotion(operands[0].getType(), operands[1].getType());
       }
       else {
         expectedType = null;
       }
     }
 
-    /**
-     * JLS 5.6.1 Unary Numeric Promotion
-     */
-    private static PsiType unaryNumericPromotion(PsiType type) {
-      if (type == null) {
-        return null;
+    private PsiType expectedPrimitiveType(PsiPrimitiveType type1, PsiType type2) {
+      if (TypeConversionUtil.isNumericType(type1)) {
+        // JLS 15.21.1. Numerical Equality Operators == and !=
+        return TypeConversionUtil.isNumericType(type2) ? TypeConversionUtil.binaryNumericPromotion(type1, type2) : null;
       }
-      if (type.equalsToText("java.lang.Byte") || type.equalsToText("java.lang.Short") ||
-          type.equalsToText("java.lang.Character") || type.equalsToText("java.lang.Integer") ||
-          type.equals(PsiType.BYTE) || type.equals(PsiType.SHORT) || type.equals(PsiType.CHAR)) {
-        return PsiType.INT;
+      else if (PsiType.BOOLEAN.equals(type1)) {
+        // JLS 15.21.2. Boolean Equality Operators == and !=
+        return TypeConversionUtil.isBooleanType(type2) ? PsiType.BOOLEAN : null;
       }
-      else if (type.equalsToText("java.lang.Long")) {
-        return PsiType.LONG;
+      else if (PsiType.NULL.equals(type1)) {
+        return TypeUtils.getObjectType(wrappedExpression);
       }
-      else if (type.equalsToText("java.lang.Float")) {
-        return PsiType.FLOAT;
-      }
-      else if (type.equalsToText("java.lang.Double")) {
-        return PsiType.DOUBLE;
-      }
-      return type;
+      // void
+      return null;
     }
 
     @Override
@@ -410,10 +379,18 @@ public class ExpectedTypeUtils {
 
     @Override
     public void visitReturnStatement(@NotNull PsiReturnStatement returnStatement) {
-      final PsiMethod method = PsiTreeUtil.getParentOfType(returnStatement, PsiMethod.class);
-      if (method != null) {
-        expectedType = method.getReturnType();
+      final PsiElement method = PsiTreeUtil.getParentOfType(returnStatement, PsiMethod.class, PsiLambdaExpression.class);
+      if (method instanceof PsiMethod) {
+        expectedType = ((PsiMethod)method).getReturnType();
       }
+      else if (method instanceof PsiLambdaExpression) {
+        expectedType = LambdaUtil.getFunctionalInterfaceReturnType((PsiLambdaExpression)method);
+      }
+    }
+
+    @Override
+    public void visitLambdaExpression(PsiLambdaExpression expression) {
+      expectedType = LambdaUtil.getFunctionalInterfaceReturnType(expression);
     }
 
     @Override
@@ -552,9 +529,12 @@ public class ExpectedTypeUtils {
       if (aClass == null) {
         return null;
       }
+      final PsiReferenceList throwsList = method.getThrowsList();
+      final HashSet<PsiClassType> thrownTypes = ContainerUtil.newHashSet(throwsList.getReferencedTypes());
       final PsiMethod[] superMethods = aClass.findMethodsBySignature(method, true);
       PsiMethod topSuper = null;
       PsiClass topSuperContainingClass = null;
+      methodLoop:
       for (PsiMethod superMethod : superMethods) {
         final PsiClass superClass = superMethod.getContainingClass();
         if (superClass == null) {
@@ -577,6 +557,13 @@ public class ExpectedTypeUtils {
         }
         if (topSuper != null && superClass.isInheritor(topSuperContainingClass, true)) {
           continue;
+        }
+        final PsiReferenceList superThrowsList = superMethod.getThrowsList();
+        final PsiClassType[] superThrownTypes = superThrowsList.getReferencedTypes();
+        for (PsiClassType superThrownType : superThrownTypes) {
+          if (!ExceptionUtil.isUncheckedException(superThrownType) && !thrownTypes.contains(superThrownType)) {
+            continue methodLoop;
+          }
         }
         topSuper = superMethod;
         topSuperContainingClass = superClass;
@@ -622,13 +609,7 @@ public class ExpectedTypeUtils {
     }
 
     private static int getParameterPosition(@NotNull PsiExpressionList expressionList, PsiExpression expression) {
-      final PsiExpression[] expressions = expressionList.getExpressions();
-      for (int i = 0; i < expressions.length; i++) {
-        if (expressions[i].equals(expression)) {
-          return i;
-        }
-      }
-      return -1;
+      return ArrayUtil.indexOf(expressionList.getExpressions(), expression);
     }
 
     @Nullable

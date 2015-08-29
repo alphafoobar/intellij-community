@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.types.PyClassLikeType;
 import com.jetbrains.python.psi.types.PyClassType;
-import com.jetbrains.python.psi.types.PyClassTypeImpl;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -74,10 +73,10 @@ public class PyClassHasNoInitInspection extends PyInspection {
         if (!(type instanceof PyClassType)) return;
       }
 
-      final PyFunction init = node.findInitOrNew(true);
+      final PyFunction init = node.findInitOrNew(true, null);
       if (init == null) {
         registerProblem(node.getNameIdentifier(), PyBundle.message("INSP.class.has.no.init"),
-                        new AddMethodQuickFix("__init__", new PyClassTypeImpl(node, false), false));
+                        new AddMethodQuickFix("__init__", node.getName(), false));
       }
     }
   }

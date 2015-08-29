@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.ide.ui.laf.darcula.ui.DarculaEditorTextFieldBorder;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
@@ -45,6 +46,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.util.IJSwingUtilities;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.MacUIUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -62,7 +64,7 @@ import java.util.List;
  * @author max
  */
 public class EditorTextField extends NonOpaquePanel implements DocumentListener, TextComponent, DataProvider,
-                                                       DocumentBasedComponent {
+                                                       DocumentBasedComponent, FocusListener {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.EditorTextField");
   public static final Key<Boolean> SUPPLEMENTARY_KEY = Key.create("Supplementary");
 
@@ -73,6 +75,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
   private Component myNextFocusable = null;
   private boolean myWholeTextSelected = false;
   private final List<DocumentListener> myDocumentListeners = ContainerUtil.createLockFreeCopyOnWriteList();
+  private final List<FocusListener> myFocusListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private boolean myIsListenerInstalled = false;
   private boolean myIsViewer;
   private boolean myIsSupplementary;
@@ -119,7 +122,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     // todo[dsl,max]
     setFocusable(true);
     // dsl: this is a weird way of doing things....
-    addFocusListener(new FocusListener() {
+    super.addFocusListener(new FocusListener() {
       @Override
       public void focusGained(FocusEvent e) {
         requestFocus();
@@ -204,13 +207,6 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
 
   public void setDocument(Document document) {
     if (myDocument != null) {
-      /*
-      final UndoManager undoManager = myProject != null
-      ? UndoManager.getInstance(myProject)
-      : UndoManager.getGlobalInstance();
-      undoManager.clearUndoRedoQueue(myDocument);
-      */
-
       uninstallDocumentListener(true);
     }
 
@@ -284,11 +280,16 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
   
   public void selectAll() {
     if (myEditor != null) {
-      myEditor.getSelectionModel().setSelection(0, myDocument.getTextLength());
+      doSelectAll(myEditor);
     }
     else {
       myWholeTextSelected = true;
     }
+  }
+
+  private static void doSelectAll(@NotNull Editor editor) {
+    editor.getCaretModel().removeSecondaryCarets();
+    editor.getCaretModel().getPrimaryCaret().setSelection(0, editor.getDocument().getTextLength(), false);
   }
 
   public void removeSelection() {
@@ -321,6 +322,9 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     }
 
     remove(editor.getComponent());
+
+    editor.getContentComponent().removeFocusListener(this);
+
     final Application application = ApplicationManager.getApplication();
     final Runnable runnable = new Runnable() {
       @Override
@@ -421,7 +425,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     editor.setColorsScheme(editor.createBoundColorSchemeDelegate(customGlobalScheme));
 
     EditorColorsScheme colorsScheme = editor.getColorsScheme();
-    colorsScheme.setColor(EditorColors.CARET_ROW_COLOR, null);
+    editor.getSettings().setCaretRowShown(false);
     editor.setColorsScheme(new DelegateColorScheme(colorsScheme) {
       @Override
       public TextAttributes getAttributes(TextAttributesKey key) {
@@ -469,6 +473,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     settings.setIndentGuidesShown(false);
     settings.setVirtualSpace(false);
     settings.setWheelFontChangeEnabled(false);
+    settings.setAdditionalPageAtBottom(false);
     editor.setHorizontalScrollbarVisible(false);
     editor.setVerticalScrollbarVisible(false);
     editor.setCaretEnabled(!myIsViewer);
@@ -486,9 +491,10 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     }
 
     final EditorColorsScheme colorsScheme = editor.getColorsScheme();
-    colorsScheme.setColor(EditorColors.CARET_ROW_COLOR, null);
+    editor.getSettings().setCaretRowShown(false);
     if (!isEnabled()) {
       editor.setColorsScheme(new DelegateColorScheme(colorsScheme) {
+        @Nullable
         @Override
         public Color getColor(ColorKey key) {
           return super.getColor(key);
@@ -517,11 +523,13 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
       editor.getSelectionModel().removeSelection();
     }
     else if (myWholeTextSelected) {
-      editor.getSelectionModel().setSelection(0, myDocument.getTextLength());
+      doSelectAll(editor);
+      myWholeTextSelected = false;
     }
 
     editor.putUserData(SUPPLEMENTARY_KEY, myIsSupplementary);
     editor.getContentComponent().setFocusCycleRoot(false);
+    editor.getContentComponent().addFocusListener(this);
     
     editor.setPlaceholder(myHintText);
 
@@ -587,7 +595,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
   public void setEnabled(boolean enabled) {
     if (isEnabled() != enabled) {
       super.setEnabled(enabled);
-      myIsViewer = !enabled;
+      setViewerEnabled(enabled);
       EditorEx editor = myEditor;
       if (editor == null) {
         return;
@@ -598,13 +606,23 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     }
   }
 
+  protected void setViewerEnabled(boolean enabled) {
+    myIsViewer = !enabled;
+  }
+
+  @Override
+  public Color getBackground() {
+    Color color = getBackgroundColor(isEnabled(), EditorColorsUtil.getGlobalOrDefaultColorScheme());
+    return color != null ? color : super.getBackground();
+  }
+
   private Color getBackgroundColor(boolean enabled, final EditorColorsScheme colorsScheme){
     if (myEnforcedBgColor != null) return myEnforcedBgColor;
-    if (UIUtil.getParentOfType(CellRendererPane.class, this) != null && UIUtil.isUnderDarcula()) {
+    if (UIUtil.getParentOfType(CellRendererPane.class, this) != null && (UIUtil.isUnderDarcula() || UIUtil.isUnderIntelliJLaF())) {
       return getParent().getBackground();
     }
 
-    if (UIUtil.isUnderDarcula()) return UIUtil.getTextFieldBackground();
+    if (UIUtil.isUnderDarcula()/* || UIUtil.isUnderIntelliJLaF()*/) return UIUtil.getTextFieldBackground();
 
     return enabled
            ? colorsScheme.getDefaultBackground()
@@ -642,13 +660,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
         preferredSize.width = myPreferredWidth;
       }
 
-      final Insets insets = getInsets();
-      if (insets != null) {
-        preferredSize.width += insets.left;
-        preferredSize.width += insets.right;
-        preferredSize.height += insets.top;
-        preferredSize.height += insets.bottom;
-      }
+      JBInsets.addTo(preferredSize, getInsets());
       size = preferredSize;
     } else if (myPassivePreferredSize != null) {
       size = myPassivePreferredSize;
@@ -672,8 +684,8 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     if (myEditor != null) {
       size.height = myEditor.getLineHeight();
 
-      size = UIUtil.addInsets(size, getInsets());
-      size = UIUtil.addInsets(size, myEditor.getInsets());
+      JBInsets.addTo(size, getInsets());
+      JBInsets.addTo(size, myEditor.getInsets());
     }
 
     return size;
@@ -747,8 +759,37 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
   }
 
   @Override
+  public synchronized void addFocusListener(FocusListener l) {
+    myFocusListeners.add(l);
+  }
+
+  @Override
+  public synchronized void removeFocusListener(FocusListener l) {
+    myFocusListeners.remove(l);
+  }
+
+  @Override
+  public void focusGained(FocusEvent e) {
+    for (FocusListener listener : myFocusListeners) {
+      listener.focusGained(e);
+    }
+  }
+
+  @Override
+  public void focusLost(FocusEvent e) {
+    for (FocusListener listener : myFocusListeners) {
+      listener.focusLost(e);
+    }
+  }
+
+  @Override
   public Object getData(String dataId) {
-    if (myEditor != null && myEditor.isRendererMode()) return null;
+    if (myEditor != null && myEditor.isRendererMode()) {
+      if (PlatformDataKeys.COPY_PROVIDER.is(dataId)) {
+        return myEditor.getCopyProvider();
+      }
+      return null;
+    }
 
     if (CommonDataKeys.EDITOR.is(dataId)) {
       return myEditor;

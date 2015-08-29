@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDirectory;
@@ -38,6 +39,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,7 +49,7 @@ import java.util.Collections;
  * User: anna
  * Date: Feb 15, 2005
  */
-public class AddToFavoritesAction extends AnAction {
+public class AddToFavoritesAction extends AnAction implements DumbAware {
   private static final Logger LOG = Logger.getInstance("com.intellij.ide.favoritesTreeView.actions.AddToFavoritesAction");
 
   private final String myFavoritesListName;
@@ -63,12 +65,13 @@ public class AddToFavoritesAction extends AnAction {
 
     Collection<AbstractTreeNode> nodesToAdd = getNodesToAdd(dataContext, true);
 
-    if (nodesToAdd != null && !nodesToAdd.isEmpty()) {
-      Project project = e.getData(CommonDataKeys.PROJECT);
+    if (nodesToAdd.isEmpty()) {
+      Project project = e.getProject();
       FavoritesManager.getInstance(project).addRoots(myFavoritesListName, nodesToAdd);
     }
   }
 
+  @NotNull
   public static Collection<AbstractTreeNode> getNodesToAdd(final DataContext dataContext, final boolean inProjectView) {
     Project project = CommonDataKeys.PROJECT.getData(dataContext);
 
@@ -90,15 +93,19 @@ public class AddToFavoritesAction extends AnAction {
         nodesToAdd = createNodes(project, moduleContext, elements, inProjectView, ViewSettings.DEFAULT);
       }
     }
-    return nodesToAdd;
+    return nodesToAdd == null ? Collections.<AbstractTreeNode>emptyList() : nodesToAdd;
   }
 
   @Override
   public void update(AnActionEvent e) {
-    e.getPresentation().setEnabled(canCreateNodes(e));
+    e.getPresentation().setEnabled(canCreateNodes(e, myFavoritesListName));
   }
 
   public static boolean canCreateNodes(AnActionEvent e) {
+    return canCreateNodes(e, null);
+  }
+
+  public static boolean canCreateNodes(AnActionEvent e, @Nullable String listName) {
     DataContext dataContext = e.getDataContext();
     if (e.getProject() == null) {
       return false;
@@ -111,7 +118,11 @@ public class AddToFavoritesAction extends AnAction {
                                   e.getPlace().equals(ActionPlaces.STRUCTURE_VIEW_POPUP) ||
                                   e.getPlace().equals(ActionPlaces.PROJECT_VIEW_POPUP);
     //com.intellij.openapi.actionSystem.ActionPlaces.USAGE_VIEW_TOOLBAR
-    return getNodesToAdd(dataContext, inProjectView) != null;
+    Collection<AbstractTreeNode> nodes = getNodesToAdd(dataContext, inProjectView);
+    if (listName != null && !nodes.isEmpty()) {
+      return FavoritesManager.getInstance(e.getProject()).canAddRoots(listName, nodes);
+    }
+    return !nodes.isEmpty();
   }
 
   static Object retrieveData(Object object, Object data) {

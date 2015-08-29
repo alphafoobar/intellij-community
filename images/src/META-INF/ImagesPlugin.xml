@@ -4,9 +4,13 @@
 
   <extensions defaultExtensionNs="com.intellij">
     <errorHandler implementation="com.intellij.diagnostic.ITNReporter"/>
-    <applicationConfigurable instance="org.intellij.images.options.impl.OptionsConfigurabe" id="Images" displayName="Images"/>
+    <search.topHitProvider implementation="org.intellij.images.options.impl.ImagesOptionsTopHitProvider"/>
+    <applicationConfigurable groupId="editor" instance="org.intellij.images.options.impl.OptionsConfigurabe" id="Images" displayName="Images"/>
     <fileEditorProvider implementation="org.intellij.images.editor.impl.ImageFileEditorProvider"/>
     <selectInTarget implementation="org.intellij.images.thumbnail.impl.ThumbnailSelectInTarget"/>
+
+    <applicationService serviceInterface="org.intellij.images.fileTypes.ImageFileTypeManager"
+                        serviceImplementation="org.intellij.images.fileTypes.impl.ImageFileTypeManagerImpl"/>
     <applicationService serviceInterface="org.intellij.images.options.OptionsManager"
                         serviceImplementation="org.intellij.images.options.impl.OptionsManagerImpl"/>
     <projectService serviceInterface="org.intellij.images.thumbnail.ThumbnailManager"
@@ -17,17 +21,7 @@
     <documentationProvider implementation="org.intellij.images.fileTypes.ImageDocumentationProvider"/>
   </extensions>
 
-  <application-components>
-    <component>
-      <interface-class>org.intellij.images.fileTypes.ImageFileTypeManager</interface-class>
-      <implementation-class>org.intellij.images.fileTypes.impl.ImageFileTypeManagerImpl</implementation-class>
-    </component>
-  </application-components>
-
   <actions>
-    <action id="images.color.picker" class="org.intellij.images.actions.ColorPickerForImageAction" text="Show Color Picker">
-      <add-to-group anchor="after" group-id="ProjectViewPopupMenu" relative-to-action="EditSource"/>
-    </action>
     <action class="org.intellij.images.actions.EditExternallyAction"
             id="Images.EditExternally"
             icon="ImagesIcons.EditExternally"
@@ -73,6 +67,7 @@
         <keyboard-shortcut first-keystroke="control DIVIDE" keymap="$default"/>
         <keyboard-shortcut first-keystroke="control SLASH" keymap="$default"/>
       </action>
+      <reference id="ShowColorPicker" />
     </group>
     <group id="Images.EditorPopupMenu">
       <reference id="CutCopyPasteGroup"/>
@@ -88,7 +83,6 @@
       <separator/>
       <reference id="VersionControlsGroup"/>
       <separator/>
-      <reference id="images.color.picker" />
       <reference id="Images.EditExternally"/>
       <reference id="ExternalToolsGroup"/>
     </group>
@@ -105,7 +99,7 @@
               text="Recursive"
               description="Toggle whether to show the images from subfolders recursively"
               icon="AllIcons.ObjectBrowser.FlattenPackages">
-        <keyboard-shortcut first-keystroke="control MULTIPLY" keymap="$default"/>
+        <keyboard-shortcut first-keystroke="alt MULTIPLY" keymap="$default"/>
       </action>
       <separator/>
       <reference id="Images.ToggleTransparencyChessboard"/>

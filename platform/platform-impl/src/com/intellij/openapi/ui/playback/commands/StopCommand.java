@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.openapi.util.ActionCallback;
 
 public class StopCommand extends AbstractCommand {
 
-  public static String PREFIX = CMD_PREFIX + "stop";
+  public static final String PREFIX = CMD_PREFIX + "stop";
 
   public StopCommand(String text, int line) {
     super(text, line);
@@ -28,7 +28,7 @@ public class StopCommand extends AbstractCommand {
 
   protected ActionCallback _execute(PlaybackContext context) {
     context.message("Stopped", getLine());
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override

@@ -16,10 +16,15 @@
 package git4idea.commands;
 
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.Function;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
+import git4idea.GitUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -45,6 +50,26 @@ public class GitCommandResult {
     myException = exception;
   }
 
+  @NotNull
+  public static GitCommandResult merge(@Nullable GitCommandResult first, @NotNull GitCommandResult second) {
+    if (first == null) return second;
+
+    int mergedExitCode;
+    if (first.myExitCode == 0) {
+      mergedExitCode = second.myExitCode;
+    }
+    else if (second.myExitCode == 0) {
+      mergedExitCode = first.myExitCode;
+    }
+    else {
+      mergedExitCode = second.myExitCode; // take exit code of the latest command
+    }
+    return new GitCommandResult(first.success() && second.success(), mergedExitCode,
+                                ContainerUtil.concat(first.myErrorOutput, second.myErrorOutput),
+                                ContainerUtil.concat(first.myOutput, second.myOutput),
+                                ObjectUtils.chooseNotNull(second.myException, first.myException));
+  }
+
   /**
    * @return we think that the operation succeeded
    */
@@ -64,9 +89,10 @@ public class GitCommandResult {
 
   @NotNull
   public String getErrorOutputAsHtmlString() {
-    return StringUtil.join(myErrorOutput, "<br/>");
+    return StringUtil.join(cleanup(myErrorOutput), "<br/>");
   }
-  
+
+  @NotNull
   public String getErrorOutputAsJoinedString() {
     return StringUtil.join(myErrorOutput, "\n");
   }
@@ -85,4 +111,19 @@ public class GitCommandResult {
   public static GitCommandResult error(@NotNull String error) {
     return new GitCommandResult(false, 1, Collections.singletonList(error), Collections.<String>emptyList(), null);
   }
+
+  public boolean cancelled() {
+    return false; // will be implemented later
+  }
+
+  @NotNull
+  private static Collection<String> cleanup(@NotNull Collection<String> errorOutput) {
+    return ContainerUtil.map(errorOutput, new Function<String, String>() {
+      @Override
+      public String fun(String errorMessage) {
+        return GitUtil.cleanupErrorPrefixes(errorMessage);
+      }
+    });
+  }
+
 }

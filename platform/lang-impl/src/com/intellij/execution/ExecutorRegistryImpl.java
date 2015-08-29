@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.execution;
 
 import com.intellij.execution.actions.RunContextAction;
+import com.intellij.execution.executors.DefaultRunExecutor;
+import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
+import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.*;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Trinity;
+import com.intellij.util.IconUtil;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.containers.HashSet;
 import com.intellij.util.messages.MessageBusConnection;
@@ -33,17 +40,14 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.*;
 
-/**
- * @author spleaner
- */
 public class ExecutorRegistryImpl extends ExecutorRegistry {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.execution.ExecutorRegistryImpl");
-
+  private static final Logger LOG = Logger.getInstance(ExecutorRegistryImpl.class);
 
   @NonNls public static final String RUNNERS_GROUP = "RunnerActions";
-  @NonNls public static final String RUN_CONTEXT_GROUP = "RunContextGroup";
+  @NonNls public static final String RUN_CONTEXT_GROUP = "RunContextGroupInner";
 
   private List<Executor> myExecutors = new ArrayList<Executor>();
   private ActionManager myActionManager;
@@ -84,8 +88,7 @@ public class ExecutorRegistryImpl extends ExecutorRegistry {
       action = anAction;
     }
 
-    final DefaultActionGroup group = (DefaultActionGroup) myActionManager.getAction(groupId);
-    group.add(action);
+    ((DefaultActionGroup)myActionManager.getAction(groupId)).add(action);
   }
 
   synchronized void deinitExecutor(@NotNull final Executor executor) {
@@ -135,18 +138,18 @@ public class ExecutorRegistryImpl extends ExecutorRegistry {
         final MessageBusConnection connect = project.getMessageBus().connect(project);
         connect.subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionAdapter(){
           @Override
-          public void processStartScheduled(String executorId, ExecutionEnvironment env) {
-            myInProgress.add(createExecutionId(executorId, env, project));
+          public void processStartScheduled(String executorId, ExecutionEnvironment environment) {
+            myInProgress.add(createExecutionId(executorId, environment));
           }
 
           @Override
-          public void processNotStarted(String executorId, @NotNull ExecutionEnvironment env) {
-            myInProgress.remove(createExecutionId(executorId, env, project));
+          public void processNotStarted(String executorId, @NotNull ExecutionEnvironment environment) {
+            myInProgress.remove(createExecutionId(executorId, environment));
           }
 
           @Override
-          public void processStarted(String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
-            myInProgress.remove(createExecutionId(executorId, env, project));
+          public void processStarted(String executorId, @NotNull ExecutionEnvironment environment, @NotNull ProcessHandler handler) {
+            myInProgress.remove(createExecutionId(executorId, environment));
           }
         });
       }
@@ -172,26 +175,29 @@ public class ExecutorRegistryImpl extends ExecutorRegistry {
     }
   }
 
-  private static Trinity<Project, String, String> createExecutionId(String executorId, ExecutionEnvironment env, Project project) {
-    return new Trinity<Project, String, String>(project, executorId, env.getRunnerId());
+  @NotNull
+  private static Trinity<Project, String, String> createExecutionId(String executorId, @NotNull ExecutionEnvironment environment) {
+    return Trinity.create(environment.getProject(), executorId, environment.getRunner().getRunnerId());
   }
 
   @Override
   public boolean isStarting(Project project, final String executorId, final String runnerId) {
-    return myInProgress.contains(new Trinity<Project, String, String>(project, executorId, runnerId));
+    return myInProgress.contains(Trinity.create(project, executorId, runnerId));
+  }
+
+  @Override
+  public boolean isStarting(@NotNull ExecutionEnvironment environment) {
+    return isStarting(environment.getProject(), environment.getExecutor().getId(), environment.getRunner().getRunnerId());
   }
 
   @Override
   public synchronized void disposeComponent() {
-    if (myExecutors.size() > 0) {
-      List<Executor> executors = new ArrayList<Executor>(myExecutors);
-      for (Executor executor : executors) {
+    if (!myExecutors.isEmpty()) {
+      for (Executor executor : new ArrayList<Executor>(myExecutors)) {
         deinitExecutor(executor);
       }
-
-      myExecutors = null;
     }
-
+    myExecutors = null;
     myActionManager = null;
   }
 
@@ -206,23 +212,24 @@ public class ExecutorRegistryImpl extends ExecutorRegistry {
     @Override
     public void update(final AnActionEvent e) {
       final Presentation presentation = e.getPresentation();
-      final Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
+      final Project project = e.getProject();
 
       if (project == null || !project.isInitialized() || project.isDisposed() || DumbService.getInstance(project).isDumb()) {
         presentation.setEnabled(false);
         return;
       }
 
-      final RunnerAndConfigurationSettings selectedConfiguration = getConfiguration(project);
+      final RunnerAndConfigurationSettings selectedConfiguration = getSelectedConfiguration(project);
       boolean enabled = false;
       String text;
       final String textWithMnemonic = getTemplatePresentation().getTextWithMnemonic();
       if (selectedConfiguration != null) {
+        presentation.setIcon(getInformativeIcon(project, selectedConfiguration));
         final ProgramRunner runner = RunnerRegistry.getInstance().getRunner(myExecutor.getId(), selectedConfiguration.getConfiguration());
 
         ExecutionTarget target = ExecutionTargetManager.getActiveTarget(project);
         enabled = ExecutionTargetManager.canRun(selectedConfiguration, target)
-                  &&  runner != null && !isStarting(project, myExecutor.getId(), runner.getRunnerId());
+                  && runner != null && !isStarting(project, myExecutor.getId(), runner.getRunnerId());
 
         if (enabled) {
           presentation.setDescription(myExecutor.getDescription());
@@ -237,32 +244,58 @@ public class ExecutorRegistryImpl extends ExecutorRegistry {
       presentation.setText(text);
     }
 
+    private Icon getInformativeIcon(Project project, final RunnerAndConfigurationSettings selectedConfiguration) {
+      final ExecutionManagerImpl executionManager = ExecutionManagerImpl.getInstance(project);
+
+      List<RunContentDescriptor> runningDescriptors =
+        executionManager.getRunningDescriptors(new Condition<RunnerAndConfigurationSettings>() {
+          @Override
+          public boolean value(RunnerAndConfigurationSettings s) {
+            return s == selectedConfiguration;
+          }
+        });
+      runningDescriptors = ContainerUtil.filter(runningDescriptors, new Condition<RunContentDescriptor>() {
+        @Override
+        public boolean value(RunContentDescriptor descriptor) {
+          RunContentDescriptor contentDescriptor =
+            executionManager.getContentManager().findContentDescriptor(myExecutor, descriptor.getProcessHandler());
+          return contentDescriptor != null && executionManager.getExecutors(contentDescriptor).contains(myExecutor);
+        }
+      });
+
+      if (!runningDescriptors.isEmpty() && DefaultRunExecutor.EXECUTOR_ID.equals(myExecutor.getId()) && selectedConfiguration.isSingleton()) {
+        return AllIcons.Actions.Restart;
+      }
+      if (runningDescriptors.isEmpty()) {
+        return myExecutor.getIcon();
+      }
+
+      if (runningDescriptors.size() == 1) {
+        return ExecutionUtil.getLiveIndicator(myExecutor.getIcon());
+      }
+      else {
+        return IconUtil.addText(myExecutor.getIcon(), String.valueOf(runningDescriptors.size()));
+      }
+    }
+
     @Nullable
-    private RunnerAndConfigurationSettings getConfiguration(@NotNull final Project project) {
+    private RunnerAndConfigurationSettings getSelectedConfiguration(@NotNull final Project project) {
       return RunManagerEx.getInstanceEx(project).getSelectedConfiguration();
     }
 
     @Override
     public void actionPerformed(final AnActionEvent e) {
-      final DataContext dataContext = e.getDataContext();
       final Project project = e.getProject();
       if (project == null || project.isDisposed()) {
         return;
       }
-      final RunnerAndConfigurationSettings configuration = getConfiguration(project);
-      if (configuration == null) {
+
+      RunnerAndConfigurationSettings configuration = getSelectedConfiguration(project);
+      ExecutionEnvironmentBuilder builder = configuration == null ? null : ExecutionEnvironmentBuilder.createOrNull(myExecutor, configuration);
+      if (builder == null) {
         return;
       }
-
-      ExecutionTarget target = ExecutionTargetManager.getActiveTarget(project);
-      ExecutionEnvironmentBuilder builder = new ExecutionEnvironmentBuilder(project, myExecutor);
-      ProgramRunner runner = ProgramRunnerUtil.getRunner(myExecutor.getId(), configuration);
-      if (runner == null) {
-        return;
-      }
-
-      builder.setDataContext(dataContext).setTarget(target).setRunnerAndSettings(runner, configuration);
-      ExecutionManager.getInstance(project).restartRunProfile(runner, builder.build(), null);
+      ExecutionManager.getInstance(project).restartRunProfile(builder.activeTarget().dataContext(e.getDataContext()).build());
     }
   }
 }

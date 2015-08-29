@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.psi.PsiAnonymousClass;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.FilteredQuery;
 import com.intellij.util.Query;
 import com.intellij.util.QueryExecutor;
@@ -29,8 +30,8 @@ import com.intellij.util.QueryExecutor;
  * @author max
  */
 public class DirectClassInheritorsSearch extends ExtensibleQueryFactory<PsiClass, DirectClassInheritorsSearch.SearchParameters> {
-  public static ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.directClassInheritorsSearch");
-  public static DirectClassInheritorsSearch INSTANCE = new DirectClassInheritorsSearch();
+  public static final ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.directClassInheritorsSearch");
+  public static final DirectClassInheritorsSearch INSTANCE = new DirectClassInheritorsSearch();
 
   public static class SearchParameters {
     private final PsiClass myClass;
@@ -73,7 +74,7 @@ public class DirectClassInheritorsSearch extends ExtensibleQueryFactory<PsiClass
   private DirectClassInheritorsSearch() {}
 
   public static Query<PsiClass> search(final PsiClass aClass) {
-    return search(aClass, GlobalSearchScope.allScope(aClass.getProject()));
+    return search(aClass, GlobalSearchScope.allScope(PsiUtilCore.getProjectInReadAction(aClass)));
   }
 
   public static Query<PsiClass> search(final PsiClass aClass, SearchScope scope) {

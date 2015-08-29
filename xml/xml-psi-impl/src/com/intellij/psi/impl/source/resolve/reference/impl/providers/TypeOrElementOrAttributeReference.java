@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.psi.impl.source.resolve.reference.impl.providers;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.ElementManipulators;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.resolve.ResolveCache;
 import com.intellij.psi.search.PsiElementProcessor;
@@ -108,14 +109,17 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
     return null;
   }
 
+  @Override
   public PsiElement getElement() {
     return myElement;
   }
 
+  @Override
   public TextRange getRangeInElement() {
     return myRange;
   }
 
+  @Override
   @Nullable
   public PsiElement resolve() {
     final PsiElement psiElement = ResolveCache
@@ -204,7 +208,10 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
     final String namespace = getNamespace(tag, text);
     XmlNSDescriptor nsDescriptor = tag.getNSDescriptor(namespace,true);
 
-    final XmlDocument document = ((XmlFile)tag.getContainingFile()).getDocument();
+    final PsiFile file = tag.getContainingFile();
+    if (!(file instanceof XmlFile)) return null;
+
+    final XmlDocument document = ((XmlFile)file).getDocument();
 
     if (nsDescriptor == null) { // import
       nsDescriptor = (XmlNSDescriptor)document.getMetaData();
@@ -216,6 +223,7 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
       URLReference.processWsdlSchemas(
         document.getRootTag(),
         new Processor<XmlTag>() {
+          @Override
           public boolean process(final XmlTag xmlTag) {
             if (namespace.equals(xmlTag.getAttributeValue(TARGET_NAMESPACE))) {
               descrs[0] = (XmlNSDescriptor)xmlTag.getMetaData();
@@ -255,6 +263,7 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
     return namespaceByPrefix;
   }
 
+  @Override
   @NotNull
   public String getCanonicalText() {
     final String text = myElement.getText();
@@ -265,6 +274,7 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
     return name;
   }
 
+  @Override
   public PsiElement handleElementRename(String newElementName) throws IncorrectOperationException {
     final String canonicalText = getCanonicalText();
 
@@ -274,14 +284,17 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
     return element;
   }
 
+  @Override
   public PsiElement bindToElement(@NotNull PsiElement element) throws IncorrectOperationException {
     throw new IncorrectOperationException();
   }
 
+  @Override
   public boolean isReferenceTo(PsiElement element) {
     return myElement.getManager().areElementsEquivalent(resolve(), element);
   }
 
+  @Override
   @NotNull
   public Object[] getVariants() {
     final XmlTag tag = PsiTreeUtil.getContextOfType(myElement, XmlTag.class, true);
@@ -325,16 +338,16 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
       final XmlNSDescriptor nsDescriptor = tag.getNSDescriptor(namespace, true);
 
       if (nsDescriptor instanceof XmlNSDescriptorImpl) {
-        processNamespace(namespace, processor, nsDescriptor, tagNames);
+        processNamespace(namespace, processor, (XmlNSDescriptorImpl)nsDescriptor, tagNames);
       }
     }
 
     XmlNSDescriptor nsDescriptor = (XmlNSDescriptor)document.getMetaData();
-    if (nsDescriptor != null) {
+    if (nsDescriptor instanceof XmlNSDescriptorImpl) {
       processNamespace(
         ourNamespace,
         processor,
-        nsDescriptor,
+        (XmlNSDescriptorImpl)nsDescriptor,
         tagNames
       );
     }
@@ -344,31 +357,32 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
 
   private static void processNamespace(final String namespace,
                                 final CompletionProcessor processor,
-                                final XmlNSDescriptor nsDescriptor,
+                                final XmlNSDescriptorImpl nsDescriptor,
                                 final String[] tagNames) {
     processor.namespace = namespace;
 
-    final XmlNSDescriptorImpl xmlNSDescriptor = ((XmlNSDescriptorImpl)nsDescriptor);
     XmlNSDescriptorImpl.processTagsInNamespace(
-      xmlNSDescriptor.getTag(),
+      nsDescriptor.getTag(),
       tagNames,
       processor
     );
   }
 
+  @Override
   public boolean isSoft() {
     return false;
   }
 
   private static class MyResolver implements ResolveCache.Resolver {
-    static MyResolver INSTANCE = new MyResolver();
+    static final MyResolver INSTANCE = new MyResolver();
+    @Override
     public PsiElement resolve(@NotNull PsiReference ref, boolean incompleteCode) {
       return ((TypeOrElementOrAttributeReference)ref).resolveInner();
     }
   }
 
   private static class CompletionProcessor implements PsiElementProcessor<XmlTag> {
-    List<String> myElements = new ArrayList<String>(1);
+    final List<String> myElements = new ArrayList<String>(1);
     String namespace;
     final XmlTag tag;
     private final String prefix;
@@ -378,6 +392,7 @@ public class TypeOrElementOrAttributeReference implements PsiReference {
       this.prefix = prefix;
     }
 
+    @Override
     public boolean execute(@NotNull final XmlTag element) {
       String name = element.getAttributeValue(SchemaReferencesProvider.NAME_ATTR_NAME);
       final String prefixByNamespace = tag.getPrefixByNamespace(namespace);

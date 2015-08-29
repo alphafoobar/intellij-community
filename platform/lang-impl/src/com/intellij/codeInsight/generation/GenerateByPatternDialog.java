@@ -1,10 +1,24 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.generation;
 
 import com.intellij.codeInsight.template.Template;
 import com.intellij.codeInsight.template.impl.TemplateEditorUtil;
 import com.intellij.codeInsight.template.impl.TemplateImpl;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.project.Project;
@@ -14,6 +28,7 @@ import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.treeStructure.SimpleTree;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.containers.MultiMap;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -31,6 +46,7 @@ import java.util.Collection;
  */
 public class GenerateByPatternDialog extends DialogWrapper {
 
+  private final Project myProject;
   private JPanel myPanel;
   private Splitter mySplitter;
   private Tree myTree = new Tree();
@@ -38,8 +54,9 @@ public class GenerateByPatternDialog extends DialogWrapper {
 
   private final MultiMap<String,PatternDescriptor> myMap;
 
-  public GenerateByPatternDialog(Project project, PatternDescriptor[] descriptors, DataContext context) {
+  public GenerateByPatternDialog(Project project, PatternDescriptor[] descriptors) {
     super(project);
+    myProject = project;
     setTitle("Generate by Pattern");
     setOKButtonText("Generate");
 
@@ -54,8 +71,9 @@ public class GenerateByPatternDialog extends DialogWrapper {
     };
     myTree.setRootVisible(false);
     myTree.setCellRenderer(new DefaultTreeCellRenderer() {
+      @NotNull
       @Override
-      public Component getTreeCellRendererComponent(JTree tree,
+      public Component getTreeCellRendererComponent(@NotNull JTree tree,
                                                     Object value,
                                                     boolean sel,
                                                     boolean expanded,
@@ -77,7 +95,7 @@ public class GenerateByPatternDialog extends DialogWrapper {
     myTree.setModel(new DefaultTreeModel(root));
     myTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
       @Override
-      public void valueChanged(TreeSelectionEvent e) {
+      public void valueChanged(@NotNull TreeSelectionEvent e) {
         update();
       }
     });
@@ -122,23 +140,25 @@ public class GenerateByPatternDialog extends DialogWrapper {
   }
 
   private void updateDetails(final PatternDescriptor descriptor) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
+    new WriteCommandAction.Simple(myProject) {
       @Override
-      public void run() {
+      protected void run() throws Throwable {
         final Template template = descriptor.getTemplate();
         if (template instanceof TemplateImpl) {
           String text = ((TemplateImpl)template).getString();
           myEditor.getDocument().replaceString(0, myEditor.getDocument().getTextLength(), text);
           TemplateEditorUtil.setHighlighter(myEditor, ((TemplateImpl)template).getTemplateContext());
-        } else {
+        }
+        else {
           myEditor.getDocument().replaceString(0, myEditor.getDocument().getTextLength(), "");
         }
       }
-    });
+    }.execute();
   }
 
   private DefaultMutableTreeNode createNode(@Nullable PatternDescriptor descriptor) {
     DefaultMutableTreeNode root = new DefaultMutableTreeNode(descriptor) {
+      @NotNull
       @Override
       public String toString() {
         Object object = getUserObject();

@@ -39,7 +39,11 @@ public class JavaMethodCallElement extends LookupItem<PsiMethod> implements Type
   private boolean myMayNeedExplicitTypeParameters;
 
   public JavaMethodCallElement(@NotNull PsiMethod method) {
-    super(method, method.getName());
+    this(method, method.getName());
+  }
+
+  public JavaMethodCallElement(@NotNull PsiMethod method, String methodName) {
+    super(method, methodName);
     myMethod = method;
     myHelper = null;
     myContainingClass = method.getContainingClass();
@@ -246,7 +250,6 @@ public class JavaMethodCallElement extends LookupItem<PsiMethod> implements Type
     presentation.setIcon(DefaultLookupItemRenderer.getRawIcon(this, presentation.isReal()));
 
     presentation.setStrikeout(JavaElementLookupRenderer.isToStrikeout(this));
-    presentation.setItemTextBold(getAttribute(HIGHLIGHTED_ATTR) != null);
 
     MemberLookupHelper helper = myHelper != null ? myHelper : new MemberLookupHelper(myMethod, myContainingClass, false, false);
     final Boolean qualify = getAttribute(FORCE_QUALIFY) != null ? Boolean.TRUE : myHelper == null ? Boolean.FALSE : null;

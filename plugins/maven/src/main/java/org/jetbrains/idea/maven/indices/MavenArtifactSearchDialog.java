@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.TabbedPaneWrapper;
+import com.intellij.util.ui.JBUI;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.dom.model.MavenDomDependency;
@@ -29,9 +30,7 @@ import org.jetbrains.idea.maven.model.MavenId;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
 import java.util.*;
-import java.util.List;
 
 public class MavenArtifactSearchDialog extends DialogWrapper {
   private List<MavenId> myResult = Collections.emptyList();
@@ -57,8 +56,9 @@ public class MavenArtifactSearchDialog extends DialogWrapper {
     }
 
     MavenArtifactSearchDialog d = new MavenArtifactSearchDialog(project, className, true);
-    d.show();
-    if (!d.isOK()) return Collections.emptyList();
+    if (!d.showAndGet()) {
+      return Collections.emptyList();
+    }
 
     return d.getResult();
   }
@@ -76,8 +76,9 @@ public class MavenArtifactSearchDialog extends DialogWrapper {
     MavenArtifactSearchDialog d = new MavenArtifactSearchDialog(project, "", false);
     d.setManagedDependencies(managedDependencies);
 
-    d.show();
-    if (!d.isOK()) return Collections.emptyList();
+    if (!d.showAndGet()) {
+      return Collections.emptyList();
+    }
 
     return d.getResult();
   }
@@ -130,7 +131,7 @@ public class MavenArtifactSearchDialog extends DialogWrapper {
     myTabbedPane.addTab("Search for class", myClassesPanel);
     myTabbedPane.setSelectedIndex(classMode ? 1 : 0);
 
-    myTabbedPane.getComponent().setPreferredSize(new Dimension(900, 600));
+    myTabbedPane.getComponent().setPreferredSize(JBUI.size(900, 600));
 
     myTabbedPane.addChangeListener(new ChangeListener() {
       public void stateChanged(ChangeEvent e) {

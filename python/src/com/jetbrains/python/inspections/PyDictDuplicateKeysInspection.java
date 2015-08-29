@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.util.containers.HashMap;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.inspections.quickfix.PyRemoveDictKeyQuickFix;
 import com.jetbrains.python.psi.*;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -57,15 +58,16 @@ public class PyDictDuplicateKeysInspection extends PyInspection {
 
     @Override
     public void visitPyDictLiteralExpression(PyDictLiteralExpression node) {
-      if (node.getElements().length != 0){
+      final PyKeyValueExpression[] elements = node.getElements();
+      if (elements.length != 0){
         final Map<String, PyElement> map = new HashMap<String, PyElement>();
-        for (PyExpression exp : node.getElements()) {
+        for (PyExpression exp : elements) {
           final PyExpression key = ((PyKeyValueExpression)exp).getKey();
           if (key instanceof PyNumericLiteralExpression
                   || key instanceof PyStringLiteralExpression || key instanceof PyReferenceExpression) {
             if (map.keySet().contains(key.getText())) {
-              registerProblem(key, "Dictionary contains duplicate keys " + key.getText());
-              registerProblem(map.get(key.getText()), "Dictionary contains duplicate keys " + key.getText());
+              registerProblem(key, "Dictionary contains duplicate keys " + key.getText(), new PyRemoveDictKeyQuickFix());
+              registerProblem(map.get(key.getText()), "Dictionary contains duplicate keys " + key.getText(), new PyRemoveDictKeyQuickFix());
             }
             map.put(key.getText(), key);
           }

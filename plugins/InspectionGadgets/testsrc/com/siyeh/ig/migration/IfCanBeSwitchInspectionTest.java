@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,24 +15,36 @@
  */
 package com.siyeh.ig.migration;
 
+import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.testFramework.IdeaTestUtil;
+import com.intellij.testFramework.LightProjectDescriptor;
 import com.siyeh.ig.IGInspectionTestCase;
+import com.siyeh.ig.LightInspectionTestCase;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-public class IfCanBeSwitchInspectionTest extends IGInspectionTestCase {
+public class IfCanBeSwitchInspectionTest extends LightInspectionTestCase {
 
-  @Override
-  protected Sdk getTestProjectSdk() {
-    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_7);
-    return IdeaTestUtil.getMockJdk17();
+  public void testIfCanBeSwitch() throws Exception {
+    doTest();
   }
 
-  public void test() throws Exception {
+  @Nullable
+  @Override
+  protected InspectionProfileEntry getInspection() {
     final IfCanBeSwitchInspection inspection = new IfCanBeSwitchInspection();
     inspection.suggestIntSwitches = true;
-      doTest("com/siyeh/igtest/migration/if_switch", new LocalInspectionToolWrapper(inspection));
+    inspection.suggestEnumSwitches = true;
+    inspection.setOnlySuggestNullSafe(true);
+    return inspection;
+  }
+
+  @Override
+  protected String getBasePath() {
+    return "/plugins/InspectionGadgets/test/com/siyeh/igtest/migration/if_switch";
   }
 }

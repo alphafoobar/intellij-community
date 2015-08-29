@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.IgnoredBeanFactory;
+import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -55,9 +56,7 @@ import org.jetbrains.plugins.groovy.mvc.*;
 import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -76,10 +75,12 @@ public class GriffonFramework extends MvcFramework {
   private GriffonFramework() {
   }
 
+  @Override
   public boolean hasSupport(@NotNull Module module) {
     return findAppRoot(module) != null && !isAuxModule(module) && getSdkRoot(module) != null;
   }
 
+  @NotNull
   @Override
   public String getApplicationDirectoryName() {
     return "griffon-app";
@@ -98,8 +99,7 @@ public class GriffonFramework extends MvcFramework {
   @Override
   protected GeneralCommandLine getCreationCommandLine(Module module) {
     GriffonCreateProjectDialog dialog = new GriffonCreateProjectDialog(module);
-    dialog.show();
-    if (!dialog.isOK()) {
+    if (!dialog.showAndGet()) {
       return null;
     }
 
@@ -112,7 +112,7 @@ public class GriffonFramework extends MvcFramework {
   }
 
   @Override
-  public void updateProjectStructure(final @NotNull Module module) {
+  public void updateProjectStructure(@NotNull final Module module) {
     if (!MvcModuleStructureUtil.isEnabledStructureUpdate()) return;
 
     final VirtualFile root = findAppRoot(module);
@@ -166,7 +166,7 @@ public class GriffonFramework extends MvcFramework {
         return pluginAndVersion.substring(0, separatorIndexes.get(0));
       }
 
-      if (separatorIndexes.size() > 0) {
+      if (!separatorIndexes.isEmpty()) {
         String json;
         try {
           json = VfsUtil.loadText(pluginJson);
@@ -208,12 +208,19 @@ public class GriffonFramework extends MvcFramework {
 
   @Override
   public VirtualFile getSdkRoot(@Nullable Module module) {
-    VirtualFile coreJar = findCoreJar(module);
-    if (coreJar == null) return null;
-
-    final VirtualFile parent = coreJar.getParent();
-    if (parent != null) {
-      return parent.getParent();
+    if (module == null) return null;
+    final VirtualFile[] classRoots = ModuleRootManager.getInstance(module).orderEntries().librariesOnly().getClassesRoots();
+    for (VirtualFile file : classRoots) {
+      if (GriffonLibraryPresentationProvider.isGriffonCoreJar(file)) {
+        final VirtualFile localFile = JarFileSystem.getInstance().getVirtualFileForJar(file);
+        if (localFile != null) {
+          final VirtualFile parent = localFile.getParent();
+          if (parent != null) {
+            return parent.getParent();
+          }
+        }
+        return null;
+      }
     }
     return null;
   }
@@ -238,12 +245,7 @@ public class GriffonFramework extends MvcFramework {
       return params;
     }
 
-    Map<String, String> env = params.getEnv();
-    if (env == null) {
-      env = new HashMap<String, String>();
-      params.setEnv(env);
-    }
-    env.put(getSdkHomePropertyName(), FileUtil.toSystemDependentName(sdkRoot.getPath()));
+    params.addEnv(getSdkHomePropertyName(), FileUtil.toSystemDependentName(sdkRoot.getPath()));
 
     final VirtualFile lib = sdkRoot.findChild("lib");
     if (lib != null) {
@@ -336,6 +338,7 @@ public class GriffonFramework extends MvcFramework {
     return params;
   }
 
+  @NotNull
   @Override
   public String getFrameworkName() {
     return "Griffon";
@@ -366,6 +369,7 @@ public class GriffonFramework extends MvcFramework {
     return GLOBAL_PLUGINS_MODULE_NAME;
   }
 
+  @Override
   @Nullable
   public File getDefaultSdkWorkDir(@NotNull Module module) {
     final String version = GriffonLibraryPresentationProvider.getGriffonVersion(module);
@@ -430,11 +434,13 @@ public class GriffonFramework extends MvcFramework {
       super(module, auxModule, getUserHomeGriffon(), GriffonFramework.getInstance().getSdkWorkDir(module));
     }
 
+    @Override
     @NotNull
     public String getUserLibraryName() {
       return GRIFFON_USER_LIBRARY;
     }
 
+    @Override
     public MultiMap<JpsModuleSourceRootType<?>, String> getSourceFolders() {
       MultiMap<JpsModuleSourceRootType<?>, String> res = new MultiMap<JpsModuleSourceRootType<?>, String>();
 
@@ -482,6 +488,7 @@ public class GriffonFramework extends MvcFramework {
       return res;
     }
 
+    @Override
     public String[] getInvalidSourceFolders() {
       return new String[]{"src"};
     }

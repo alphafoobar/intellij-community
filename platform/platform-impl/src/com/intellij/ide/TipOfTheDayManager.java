@@ -27,7 +27,7 @@ public class TipOfTheDayManager implements StartupActivity, DumbAware {
 
   @Override
   public void runActivity(@NotNull final Project project) {
-    if (!myVeryFirstProjectOpening || !GeneralSettings.getInstance().showTipsOnStartup()) {
+    if (!myVeryFirstProjectOpening || !GeneralSettings.getInstance().isShowTipsOnStartup()) {
       return;
     }
 
@@ -39,7 +39,7 @@ public class TipOfTheDayManager implements StartupActivity, DumbAware {
         ToolWindowManager.getInstance(project).invokeLater(new Runnable() {
           public void run() {
             if (project.isDisposed()) return;
-            new TipDialog().show();
+            TipDialog.createForProject(project).show();
           }
         });
       }

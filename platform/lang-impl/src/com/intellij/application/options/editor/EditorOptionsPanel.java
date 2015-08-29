@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,13 +24,17 @@ import com.intellij.codeInsight.daemon.impl.IdentifierHighlighterPass;
 import com.intellij.codeInsight.documentation.QuickDocOnMouseOverManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.application.ApplicationBundle;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapAppliancePlaces;
+import com.intellij.openapi.editor.richcopy.settings.RichCopySettings;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.TextEditor;
@@ -38,15 +42,22 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vcs.VcsApplicationSettings;
+import com.intellij.openapi.vcs.impl.LineStatusTrackerSettingListener;
+import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 
@@ -63,7 +74,6 @@ public class EditorOptionsPanel {
   private JCheckBox myCbCaretInsideTabs;
 
   private JTextField myRecentFilesLimitField;
-  private JTextField myCommandsHistoryLimitField;
 
   private JCheckBox myCbHighlightScope;
 
@@ -80,17 +90,25 @@ public class EditorOptionsPanel {
   private JCheckBox    myCbRenameLocalVariablesInplace;
   private JCheckBox    myCbHighlightIdentifierUnderCaret;
   private JCheckBox    myCbEnsureBlankLineBeforeCheckBox;
-  private JCheckBox    myShowReformatCodeDialogCheckBox;
-  private JCheckBox    myShowOptimizeImportsDialogCheckBox;
+  private JCheckBox    myShowNotificationAfterReformatCodeCheckBox;
+  private JCheckBox    myShowNotificationAfterOptimizeImportsCheckBox;
   private JCheckBox    myCbUseSoftWrapsAtEditor;
-  private JCheckBox    myCbUseSoftWrapsAtConsole;
   private JCheckBox    myCbUseCustomSoftWrapIndent;
   private JTextField   myCustomSoftWrapIndent;
-  private JCheckBox    myCbShowAllSoftWraps;
+  private JLabel       myCustomSoftWrapIndentLabel;
+  private JCheckBox    myCbShowSoftWrapsOnlyOnCaretLine;
   private JCheckBox    myPreselectCheckBox;
   private JBCheckBox   myCbShowQuickDocOnMouseMove;
   private JBLabel      myQuickDocDelayLabel;
   private JTextField   myQuickDocDelayTextField;
+  private JComboBox    myRichCopyColorSchemeComboBox;
+  private JCheckBox    myShowInlineDialogForCheckBox;
+  private JBLabel      myStripTrailingSpacesExplanationLabel;
+  private JCheckBox    myCbEnableRichCopyByDefault;
+  private JCheckBox    myShowLSTInGutterCheckBox;
+  private JCheckBox    myShowWhitespacesModificationsInLSTGutterCheckBox;
+
+  private static final String ACTIVE_COLOR_SCHEME = ApplicationBundle.message("combobox.richcopy.color.scheme.active");
 
   private final ErrorHighlightingPanel myErrorHighlightingPanel = new ErrorHighlightingPanel();
   private final MyConfigurable myConfigurable;
@@ -105,6 +123,15 @@ public class EditorOptionsPanel {
     myStripTrailingSpacesCombo.addItem(STRIP_CHANGED);
     myStripTrailingSpacesCombo.addItem(STRIP_ALL);
     myStripTrailingSpacesCombo.addItem(STRIP_NONE);
+    ActionListener explainer = new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        explainTrailingSpaces(getStripTrailingSpacesValue());
+      }
+    };
+    myStripTrailingSpacesCombo.addActionListener(explainer);
+    myCbVirtualSpace.addActionListener(explainer);
+
 
 
     myHighlightSettingsPanel.setLayout(new BorderLayout());
@@ -113,9 +140,24 @@ public class EditorOptionsPanel {
 
     myCbRenameLocalVariablesInplace.setVisible(OptionsApplicabilityFilter.isApplicable(OptionId.RENAME_IN_PLACE));
 
+    myRichCopyColorSchemeComboBox.setRenderer(new ListCellRendererWrapper<String>() {
+      @Override
+      public void customize(JList list, String value, int index, boolean selected, boolean hasFocus) {
+        final String textToUse;
+        if (RichCopySettings.ACTIVE_GLOBAL_SCHEME_MARKER.equals(value)) {
+          textToUse = ACTIVE_COLOR_SCHEME;
+        }
+        else {
+          textToUse = value;
+        }
+        setText(textToUse);
+      }
+    });
+
     myConfigurable = new MyConfigurable();
     initQuickDocProcessing();
     initSoftWrapsSettingsProcessing();
+    initVcsSettingsProcessing();
   }
 
 
@@ -123,6 +165,7 @@ public class EditorOptionsPanel {
     EditorSettingsExternalizable editorSettings = EditorSettingsExternalizable.getInstance();
     CodeInsightSettings codeInsightSettings = CodeInsightSettings.getInstance();
     UISettings uiSettings = UISettings.getInstance();
+    VcsApplicationSettings vcsSettings = VcsApplicationSettings.getInstance();
 
     // Display
 
@@ -138,10 +181,9 @@ public class EditorOptionsPanel {
     // Virtual space
 
     myCbUseSoftWrapsAtEditor.setSelected(editorSettings.isUseSoftWraps(SoftWrapAppliancePlaces.MAIN_EDITOR));
-    myCbUseSoftWrapsAtConsole.setSelected(editorSettings.isUseSoftWraps(SoftWrapAppliancePlaces.CONSOLE));
     myCbUseCustomSoftWrapIndent.setSelected(editorSettings.isUseCustomSoftWrapIndent());
     myCustomSoftWrapIndent.setText(Integer.toString(editorSettings.getCustomSoftWrapIndent()));
-    myCbShowAllSoftWraps.setSelected(editorSettings.isAllSoftWrapsShown());
+    myCbShowSoftWrapsOnlyOnCaretLine.setSelected(!editorSettings.isAllSoftWrapsShown());
     updateSoftWrapSettingsRepresentation();
 
     myCbVirtualSpace.setSelected(editorSettings.isVirtualSpace());
@@ -163,6 +205,7 @@ public class EditorOptionsPanel {
     else if (EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE.equals(stripTrailingSpaces)) {
       myStripTrailingSpacesCombo.setSelectedItem(STRIP_ALL);
     }
+    explainTrailingSpaces(stripTrailingSpaces);
 
     myCbEnsureBlankLineBeforeCheckBox.setSelected(editorSettings.isEnsureNewLineAtEOF());
     myCbShowQuickDocOnMouseMove.setSelected(editorSettings.isShowQuickDocOnMouseOverElement());
@@ -180,21 +223,57 @@ public class EditorOptionsPanel {
 
 
     myRecentFilesLimitField.setText(Integer.toString(uiSettings.RECENT_FILES_LIMIT));
-    myCommandsHistoryLimitField.setText(Integer.toString(uiSettings.CONSOLE_COMMAND_HISTORY_LIMIT));
 
     myCbRenameLocalVariablesInplace.setSelected(editorSettings.isVariableInplaceRenameEnabled());
     myPreselectCheckBox.setSelected(editorSettings.isPreselectRename());
+    myShowInlineDialogForCheckBox.setSelected(editorSettings.isShowInlineLocalDialog());
 
-    myShowReformatCodeDialogCheckBox.setSelected(editorSettings.getOptions().SHOW_REFORMAT_DIALOG);
-    myShowOptimizeImportsDialogCheckBox.setSelected(editorSettings.getOptions().SHOW_OPIMIZE_IMPORTS_DIALOG);
+    myShowNotificationAfterReformatCodeCheckBox.setSelected(editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_REFORMAT_CODE_ACTION);
+    myShowNotificationAfterOptimizeImportsCheckBox.setSelected(editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_OPTIMIZE_IMPORTS_ACTION);
+
+    myShowLSTInGutterCheckBox.setSelected(vcsSettings.SHOW_LST_GUTTER_MARKERS);
+    myShowWhitespacesModificationsInLSTGutterCheckBox.setSelected(vcsSettings.SHOW_WHITESPACES_IN_LST);
+    myShowWhitespacesModificationsInLSTGutterCheckBox.setEnabled(myShowLSTInGutterCheckBox.isSelected());
 
     myErrorHighlightingPanel.reset();
+
+    RichCopySettings settings = RichCopySettings.getInstance();
+    myCbEnableRichCopyByDefault.setSelected(settings.isEnabled());
+    myRichCopyColorSchemeComboBox.removeAllItems();
+    EditorColorsScheme[] schemes = EditorColorsManager.getInstance().getAllSchemes();
+    myRichCopyColorSchemeComboBox.addItem(RichCopySettings.ACTIVE_GLOBAL_SCHEME_MARKER);
+    for (EditorColorsScheme scheme : schemes) {
+      myRichCopyColorSchemeComboBox.addItem(scheme.getName());
+    }
+    String toSelect = settings.getSchemeName();
+    if (!StringUtil.isEmpty(toSelect)) {
+      myRichCopyColorSchemeComboBox.setSelectedItem(toSelect);
+    }
+  }
+
+  private void explainTrailingSpaces(@NotNull @EditorSettingsExternalizable.StripTrailingSpaces String stripTrailingSpaces) {
+    if(EditorSettingsExternalizable.STRIP_TRAILING_SPACES_NONE.equals(stripTrailingSpaces)) {
+      myStripTrailingSpacesExplanationLabel.setVisible(false);
+      return;
+    }
+    myStripTrailingSpacesExplanationLabel.setVisible(true);
+    boolean isVirtualSpace = myCbVirtualSpace.isSelected();
+    String text;
+    String virtSpaceText = myCbVirtualSpace.getText();
+    if (isVirtualSpace) {
+      text = "Trailing spaces will be trimmed even in the line under caret.<br>To disable trimming in that line uncheck the '<b>"+virtSpaceText+"</b>' above.";
+    }
+    else {
+      text = "Trailing spaces will <b><font color=red>NOT</font></b> be trimmed in the line under caret.<br>To enable trimming in that line too check the '<b>"+virtSpaceText+"</b>' above.";
+    }
+    myStripTrailingSpacesExplanationLabel.setText(XmlStringUtil.wrapInHtml(text));
   }
 
   public void apply() throws ConfigurationException {
     EditorSettingsExternalizable editorSettings = EditorSettingsExternalizable.getInstance();
     CodeInsightSettings codeInsightSettings = CodeInsightSettings.getInstance();
     UISettings uiSettings=UISettings.getInstance();
+    VcsApplicationSettings vcsSettings = VcsApplicationSettings.getInstance();
 
     // Display
 
@@ -211,10 +290,9 @@ public class EditorOptionsPanel {
     // Virtual space
 
     editorSettings.setUseSoftWraps(myCbUseSoftWrapsAtEditor.isSelected(), SoftWrapAppliancePlaces.MAIN_EDITOR);
-    editorSettings.setUseSoftWraps(myCbUseSoftWrapsAtConsole.isSelected(), SoftWrapAppliancePlaces.CONSOLE);
     editorSettings.setUseCustomSoftWrapIndent(myCbUseCustomSoftWrapIndent.isSelected());
     editorSettings.setCustomSoftWrapIndent(getCustomSoftWrapIndent());
-    editorSettings.setAllSoftwrapsShown(myCbShowAllSoftWraps.isSelected());
+    editorSettings.setAllSoftwrapsShown(!myCbShowSoftWrapsOnlyOnCaretLine.isSelected());
     editorSettings.setVirtualSpace(myCbVirtualSpace.isSelected());
     editorSettings.setCaretInsideTabs(myCbCaretInsideTabs.isSelected());
     editorSettings.setAdditionalPageAtBottom(myCbVirtualPageAtBottom.isSelected());
@@ -258,7 +336,7 @@ public class EditorOptionsPanel {
     if (quickDocDelay != null) {
       editorSettings.setQuickDocOnMouseOverElementDelayMillis(quickDocDelay);
     }
-    
+
     editorSettings.setDndEnabled(myCbEnableDnD.isSelected());
 
     editorSettings.setWheelFontChangeEnabled(myCbEnableWheelFontChange.isSelected());
@@ -267,9 +345,23 @@ public class EditorOptionsPanel {
 
     editorSettings.setVariableInplaceRenameEnabled(myCbRenameLocalVariablesInplace.isSelected());
     editorSettings.setPreselectRename(myPreselectCheckBox.isSelected());
+    editorSettings.setShowInlineLocalDialog(myShowInlineDialogForCheckBox.isSelected());
 
-    editorSettings.getOptions().SHOW_REFORMAT_DIALOG = myShowReformatCodeDialogCheckBox.isSelected();
-    editorSettings.getOptions().SHOW_OPIMIZE_IMPORTS_DIALOG = myShowOptimizeImportsDialogCheckBox.isSelected();
+    editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_REFORMAT_CODE_ACTION = myShowNotificationAfterReformatCodeCheckBox.isSelected();
+    editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_OPTIMIZE_IMPORTS_ACTION = myShowNotificationAfterOptimizeImportsCheckBox.isSelected();
+
+    boolean updateVcsSettings = false;
+    if (vcsSettings.SHOW_WHITESPACES_IN_LST != myShowWhitespacesModificationsInLSTGutterCheckBox.isSelected()) {
+      vcsSettings.SHOW_WHITESPACES_IN_LST = myShowWhitespacesModificationsInLSTGutterCheckBox.isSelected();
+      updateVcsSettings = true;
+    }
+    if (vcsSettings.SHOW_LST_GUTTER_MARKERS != myShowLSTInGutterCheckBox.isSelected()) {
+      vcsSettings.SHOW_LST_GUTTER_MARKERS = myShowLSTInGutterCheckBox.isSelected();
+      updateVcsSettings = true;
+    }
+    if (updateVcsSettings) {
+      ApplicationManager.getApplication().getMessageBus().syncPublisher(LineStatusTrackerSettingListener.TOPIC).settingsUpdated();
+    }
 
     reinitAllEditors();
 
@@ -286,9 +378,16 @@ public class EditorOptionsPanel {
     if(uiSettingsChanged){
       uiSettings.fireUISettingsChanged();
     }
-    uiSettings.CONSOLE_COMMAND_HISTORY_LIMIT = StringUtil.parseInt(myCommandsHistoryLimitField.getText(), uiSettings.CONSOLE_COMMAND_HISTORY_LIMIT);
 
     myErrorHighlightingPanel.apply();
+
+    RichCopySettings settings = RichCopySettings.getInstance();
+    settings.setEnabled(myCbEnableRichCopyByDefault.isSelected());
+    Object item = myRichCopyColorSchemeComboBox.getSelectedItem();
+    if (item instanceof String) {
+      settings.setSchemeName(item.toString());
+    }
+
     restartDaemons();
   }
 
@@ -308,7 +407,7 @@ public class EditorOptionsPanel {
       return null;
     }
   }
-  
+
   public static void restartDaemons() {
     Project[] projects = ProjectManager.getInstance().getOpenProjects();
     for (Project project : projects) {
@@ -353,6 +452,7 @@ public class EditorOptionsPanel {
     EditorSettingsExternalizable editorSettings = EditorSettingsExternalizable.getInstance();
     CodeInsightSettings codeInsightSettings = CodeInsightSettings.getInstance();
     UISettings uiSettings=UISettings.getInstance();
+    VcsApplicationSettings vcsSettings = VcsApplicationSettings.getInstance();
 
     // Display
     boolean isModified = isModified(myCbSmoothScrolling, editorSettings.isSmoothScrolling());
@@ -364,10 +464,9 @@ public class EditorOptionsPanel {
 
     // Virtual space
     isModified |= isModified(myCbUseSoftWrapsAtEditor, editorSettings.isUseSoftWraps(SoftWrapAppliancePlaces.MAIN_EDITOR));
-    isModified |= isModified(myCbUseSoftWrapsAtConsole, editorSettings.isUseSoftWraps(SoftWrapAppliancePlaces.CONSOLE));
     isModified |= isModified(myCbUseCustomSoftWrapIndent, editorSettings.isUseCustomSoftWrapIndent());
     isModified |= editorSettings.getCustomSoftWrapIndent() != getCustomSoftWrapIndent();
-    isModified |= isModified(myCbShowAllSoftWraps, editorSettings.isAllSoftWrapsShown());
+    isModified |= isModified(myCbShowSoftWrapsOnlyOnCaretLine, !editorSettings.isAllSoftWrapsShown());
     isModified |= isModified(myCbVirtualSpace, editorSettings.isVirtualSpace());
     isModified |= isModified(myCbCaretInsideTabs, editorSettings.isCaretInsideTabs());
     isModified |= isModified(myCbVirtualPageAtBottom, editorSettings.isAdditionalPageAtBottom());
@@ -398,14 +497,22 @@ public class EditorOptionsPanel {
 
 
     isModified |= isModified(myRecentFilesLimitField, UISettings.getInstance().RECENT_FILES_LIMIT);
-    isModified |= isModified(myCommandsHistoryLimitField, UISettings.getInstance().CONSOLE_COMMAND_HISTORY_LIMIT);
     isModified |= isModified(myCbRenameLocalVariablesInplace, editorSettings.isVariableInplaceRenameEnabled());
     isModified |= isModified(myPreselectCheckBox, editorSettings.isPreselectRename());
+    isModified |= isModified(myShowInlineDialogForCheckBox, editorSettings.isShowInlineLocalDialog());
 
-    isModified |= isModified(myShowReformatCodeDialogCheckBox, editorSettings.getOptions().SHOW_REFORMAT_DIALOG);
-    isModified |= isModified(myShowOptimizeImportsDialogCheckBox, editorSettings.getOptions().SHOW_OPIMIZE_IMPORTS_DIALOG);
+    isModified |= isModified(myShowNotificationAfterReformatCodeCheckBox, editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_REFORMAT_CODE_ACTION);
+    isModified |= isModified(myShowNotificationAfterOptimizeImportsCheckBox, editorSettings.getOptions().SHOW_NOTIFICATION_AFTER_OPTIMIZE_IMPORTS_ACTION);
+
+    isModified |= isModified(myShowLSTInGutterCheckBox, vcsSettings.SHOW_LST_GUTTER_MARKERS);
+    isModified |= isModified(myShowWhitespacesModificationsInLSTGutterCheckBox, vcsSettings.SHOW_WHITESPACES_IN_LST);
 
     isModified |= myErrorHighlightingPanel.isModified();
+
+    RichCopySettings settings = RichCopySettings.getInstance();
+    isModified |= isModified(myCbEnableRichCopyByDefault, settings.isEnabled());
+    isModified |= !Comparing.equal(settings.getSchemeName(), myRichCopyColorSchemeComboBox.getSelectedItem());
+
     return isModified;
   }
 
@@ -423,17 +530,17 @@ public class EditorOptionsPanel {
     }
   }
 
+  @NotNull
+  @EditorSettingsExternalizable.StripTrailingSpaces
   private String getStripTrailingSpacesValue() {
     Object selectedItem = myStripTrailingSpacesCombo.getSelectedItem();
     if(STRIP_NONE.equals(selectedItem)) {
       return EditorSettingsExternalizable.STRIP_TRAILING_SPACES_NONE;
     }
-    else if(STRIP_CHANGED.equals(selectedItem)){
+    if(STRIP_CHANGED.equals(selectedItem)){
       return EditorSettingsExternalizable.STRIP_TRAILING_SPACES_CHANGED;
     }
-    else {
-      return EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE;
-    }
+    return EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE;
   }
 
   private int getCustomSoftWrapIndent() {
@@ -460,7 +567,7 @@ public class EditorOptionsPanel {
       }
     });
   }
-  
+
   private void initSoftWrapsSettingsProcessing() {
     ItemListener listener = new ItemListener() {
       @Override
@@ -469,13 +576,24 @@ public class EditorOptionsPanel {
       }
     };
     myCbUseSoftWrapsAtEditor.addItemListener(listener);
-    myCbUseSoftWrapsAtConsole.addItemListener(listener);
     myCbUseCustomSoftWrapIndent.addItemListener(listener);
   }
 
   private void updateSoftWrapSettingsRepresentation() {
-    myCbUseCustomSoftWrapIndent.setEnabled(myCbUseSoftWrapsAtEditor.isSelected() || myCbUseSoftWrapsAtConsole.isSelected());
+    boolean softWrapsEnabled = myCbUseSoftWrapsAtEditor.isSelected();
+    myCbUseCustomSoftWrapIndent.setEnabled(softWrapsEnabled);
     myCustomSoftWrapIndent.setEnabled(myCbUseCustomSoftWrapIndent.isEnabled() && myCbUseCustomSoftWrapIndent.isSelected());
+    myCustomSoftWrapIndentLabel.setEnabled(myCustomSoftWrapIndent.isEnabled());
+    myCbShowSoftWrapsOnlyOnCaretLine.setEnabled(softWrapsEnabled);
+  }
+
+  private void initVcsSettingsProcessing() {
+    myShowLSTInGutterCheckBox.addItemListener(new ItemListener() {
+      @Override
+      public void itemStateChanged(ItemEvent e) {
+        myShowWhitespacesModificationsInLSTGutterCheckBox.setEnabled(myShowLSTInGutterCheckBox.isSelected());
+      }
+    });
   }
 
   public JComponent getComponent() {

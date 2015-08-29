@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.util.NotNullLazyKey;
 import com.intellij.openapi.util.Ref;
 import com.intellij.util.messages.Topic;
@@ -29,15 +30,13 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
 /**
  * A service managing IDEA's 'dumb' mode: when indices are updated in background and the functionality is very much limited.
- * Only the explicitly allowed functionality is available. Usually it's allowed by implementing {@link com.intellij.openapi.project.DumbAware} interface.
- *
- * If you want to register a toolwindow, which will be enabled during the dumb mode, please use {@link com.intellij.openapi.wm.ToolWindowManager}'s
- * registration methods which have 'canWorkInDumMode' parameter. 
+ * Only the explicitly allowed functionality is available. Usually it's allowed by implementing {@link DumbAware} interface.
  *
  * @author peter
  */
@@ -45,9 +44,14 @@ public abstract class DumbService {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.project.DumbService");
 
   /**
-   * @see com.intellij.openapi.project.Project#getMessageBus()
+   * @see Project#getMessageBus()
    */
   public static final Topic<DumbModeListener> DUMB_MODE = new Topic<DumbModeListener>("dumb mode", DumbModeListener.class);
+
+  /**
+   * The tracker is advanced each time we enter/exit from dumb mode.
+   */
+  public abstract ModificationTracker getModificationTracker();
 
   /**
    * @return whether IntelliJ IDEA is in dumb mode, which means that right now indices are updated in background.
@@ -55,7 +59,7 @@ public abstract class DumbService {
    */
   public abstract boolean isDumb();
 
-  public static boolean isDumb(Project project) {
+  public static boolean isDumb(@NotNull Project project) {
     return getInstance(project).isDumb();
   }
 
@@ -63,7 +67,7 @@ public abstract class DumbService {
    * Executes the runnable immediately if not in dumb mode, or on AWT Event Dispatch thread when the dumb mode ends.
    * @param runnable runnable to run
    */
-  public abstract void runWhenSmart(Runnable runnable);
+  public abstract void runWhenSmart(@NotNull Runnable runnable);
 
   /**
    * Pause the current thread until dumb mode ends and then continue execution.
@@ -75,7 +79,7 @@ public abstract class DumbService {
   /**
    * Pause the current thread until dumb mode ends, and then run the read action. Index is guaranteed to be available inside that read action.
    */
-  public <T> T runReadActionInSmartMode(final Computable<T> r) {
+  public <T> T runReadActionInSmartMode(@NotNull final Computable<T> r) {
     final Ref<T> result = new Ref<T>();
     runReadActionInSmartMode(new Runnable() {
       @Override
@@ -87,13 +91,15 @@ public abstract class DumbService {
   }
 
   @Nullable
-  public <T> T tryRunReadActionInSmartMode(@NotNull Computable<T> task, @NotNull String notification) {
+  public <T> T tryRunReadActionInSmartMode(@NotNull Computable<T> task, @Nullable String notification) {
     if (ApplicationManager.getApplication().isReadAccessAllowed()) {
       try {
         return task.compute();
       }
       catch (IndexNotReadyException e) {
-        showDumbModeNotification(notification);
+        if (notification != null) {
+          showDumbModeNotification(notification);
+        }
         return null;
       }
     }
@@ -105,7 +111,7 @@ public abstract class DumbService {
   /**
    * Pause the current thread until dumb mode ends, and then run the read action. Index is guaranteed to be available inside that read action.
    */
-  public void runReadActionInSmartMode(final Runnable r) {
+  public void runReadActionInSmartMode(@NotNull final Runnable r) {
     while (true) {
       waitForSmartMode();
       boolean success = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
@@ -130,7 +136,7 @@ public abstract class DumbService {
    * 
    * @see #runReadActionInSmartMode(Runnable) 
    */
-  public void repeatUntilPassesInSmartMode(final Runnable r) {
+  public void repeatUntilPassesInSmartMode(@NotNull final Runnable r) {
     while (true) {
       waitForSmartMode();
       try {
@@ -147,23 +153,9 @@ public abstract class DumbService {
    * Invoke the runnable later on EventDispatchThread AND when IDEA isn't in dumb mode
    * @param runnable runnable
    */
-  public void smartInvokeLater(@NotNull final Runnable runnable) {
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        runWhenSmart(runnable);
-      }
-    });
-  }
+  public abstract void smartInvokeLater(@NotNull Runnable runnable);
 
-  public void smartInvokeLater(@NotNull final Runnable runnable, ModalityState modalityState) {
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        runWhenSmart(runnable);
-      }
-    }, modalityState);
-  }
+  public abstract void smartInvokeLater(@NotNull Runnable runnable, @NotNull ModalityState modalityState);
 
   private static final NotNullLazyKey<DumbService, Project> INSTANCE_KEY = ServiceManager.createLazyKey(DumbService.class);
 
@@ -171,6 +163,19 @@ public abstract class DumbService {
     return INSTANCE_KEY.getValue(project);
   }
 
+  /**
+   * @return all the elements of the given array if there's no dumb mode currently, or the dumb-aware ones if {@link #isDumb()} is true.
+   * @see #isDumbAware(Object) 
+   */
+  @NotNull
+  public <T> List<T> filterByDumbAwareness(@NotNull T[] array) {
+    return filterByDumbAwareness(Arrays.asList(array));
+  }
+
+  /**
+   * @return all the elements of the given collection if there's no dumb mode currently, or the dumb-aware ones if {@link #isDumb()} is true. 
+   * @see #isDumbAware(Object)
+   */
   @NotNull
   public <T> List<T> filterByDumbAwareness(@NotNull Collection<T> collection) {
     if (isDumb()) {
@@ -190,6 +195,10 @@ public abstract class DumbService {
     return new ArrayList<T>(collection);
   }
 
+  public abstract void queueTask(@NotNull DumbModeTask task);
+  
+  public abstract void cancelTask(@NotNull DumbModeTask task);
+
   public abstract JComponent wrapGently(@NotNull JComponent dumbUnawareContent, @NotNull Disposable parentDisposable);
 
   public void makeDumbAware(@NotNull final JComponent component, @NotNull Disposable disposable) {
@@ -207,7 +216,7 @@ public abstract class DumbService {
     });
   }
 
-  public abstract void showDumbModeNotification(String message);
+  public abstract void showDumbModeNotification(@NotNull String message);
 
   public abstract Project getProject();
 
@@ -216,6 +225,60 @@ public abstract class DumbService {
       return ((PossiblyDumbAware)o).isDumbAware();
     }
     return o instanceof DumbAware;
+  }
+
+  /**
+   * Enables or disables alternative resolve strategies for the current thread.<p/> 
+   * 
+   * Normally reference resolution uses index, and hence is not available in dumb mode. In some cases, alternative ways
+   * of performing resolve are available, although much slower. It's impractical to always use these ways because it'll
+   * lead to overloaded CPU (especially given there's also indexing in progress). But for some explicit user actions
+   * (e.g. explicit Goto Declaration) turning these slower methods is beneficial.<p/>
+   *
+   * NOTE: even with alternative resolution enabled, methods like resolve(), findClass() etc may still throw
+   * {@link IndexNotReadyException}. So alternative resolve is not a panacea, it might help provide navigation in some cases
+   * but not in all.<p/>
+   * 
+   * A typical usage would involve try-finally, where the alternative resolution is first enabled, then an action is performed,
+   * and then alternative resolution is turned off in the finally block.
+   */
+  public abstract void setAlternativeResolveEnabled(boolean enabled);
+
+  /**
+   * Invokes the given runnable with alternative resolve set to true.
+   * @see #setAlternativeResolveEnabled(boolean) 
+   */
+  public void withAlternativeResolveEnabled(@NotNull Runnable runnable) {
+    setAlternativeResolveEnabled(true);
+    try {
+      runnable.run();
+    }
+    finally {
+      setAlternativeResolveEnabled(false);
+    }
+  }
+
+  /**
+   * @return whether alternative resolution is enabled for the current thread.
+   * 
+   * @see #setAlternativeResolveEnabled(boolean) 
+   */
+  public abstract boolean isAlternativeResolveEnabled();
+
+  /**
+   * By default, dumb mode tasks (including indexing) are allowed in non-modal state only. The reason is that
+   * when some code shows a dialog, it probably does't expect that after the dialog is closed the dumb mode will be on.
+   * Therefore any dumb mode started within a dialog is considered a mistake, performed under modal progress and reported as an exception.<p/>
+   *
+   * If the dialog (e.g. Project Structure) starting background dumb mode is an expected situation, the dumb mode should be started inside the runnable
+   * passed to this method. This will suppress the exception and allow either modal or background indexing. Note that this will only affect the invocation time
+   * modality state, so showing other dialogs from within the runnable and starting dumb mode from them would still result in an assertion failure.<p/>
+   *
+   * If this exception occurs inside invokeLater call which happens to run when a modal dialog is shown, the correct fix is supplying an explicit modality state
+   * in {@link com.intellij.openapi.application.Application#invokeLater(Runnable, ModalityState)}.
+   */
+  public static void allowStartingDumbModeInside(@NotNull DumbModePermission permission, @NotNull Runnable runnable) {
+    ServiceManager.getService(DumbPermissionService.class).allowStartingDumbModeInside(permission, runnable);
   }
 
   /**
@@ -234,4 +297,5 @@ public abstract class DumbService {
     void exitDumbMode();
 
   }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ public class PyClassInsertHandler implements InsertHandler<LookupElement> {
       document.insertString(offset, "()");
 
       PyClass pyClass = (PyClass) item.getObject();
-      PyFunction init = pyClass.findInitOrNew(true);
+      PyFunction init = pyClass.findInitOrNew(true, null);
       if (init != null && PyFunctionInsertHandler.hasParams(context, init)) {
         editor.getCaretModel().moveToOffset(offset+1);
         AutoPopupController.getInstance(context.getProject()).autoPopupParameterInfo(context.getEditor(), init);

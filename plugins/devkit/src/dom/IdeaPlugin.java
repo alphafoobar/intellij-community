@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,10 +117,16 @@ public interface IdeaPlugin extends DomElement {
 
 
   @NotNull
-  ApplicationComponents getApplicationComponents();
+  @SubTagList("application-components")
+  List<ApplicationComponents> getApplicationComponents();
+
+  ApplicationComponents addApplicationComponent();
 
   @NotNull
-  ProjectComponents getProjectComponents();
+  @SubTagList("project-components")
+  List<ProjectComponents> getProjectComponents();
+
+  ProjectComponents addProjectComponent();
 
   @NotNull
   ModuleComponents getModuleComponents();
@@ -128,6 +134,7 @@ public interface IdeaPlugin extends DomElement {
 
   @NotNull
   @SubTagList("actions")
+  @Stubbed
   List<Actions> getActions();
   Actions addActions();
 

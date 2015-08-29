@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,12 +43,6 @@ public abstract class PropertyProviderFinder extends AntDomRecursiveVisitor {
       }
       cachemap.put(key, value);
     }
-  }
-
-  @Nullable
-  protected static <K, V> V getCachedResult(@Nullable final DomElement context, final Key<Map<K, V>> cacheKind, K key) {
-    final Map<K, V> cached = cacheKind.get(context);
-    return cached != null? cached.get(key) : null;
   }
 
   public enum Stage {
@@ -165,7 +159,7 @@ public abstract class PropertyProviderFinder extends AntDomRecursiveVisitor {
               final String dependentTargetEffectiveName = myNameContext.calcTargetReferenceText(token);
               final AntDomTarget dependent = getTargetByName(dependentTargetEffectiveName);
               if (dependent != null) {
-                depsMap.put(token, new Pair<AntDomTarget, String>(dependent, dependentTargetEffectiveName));
+                depsMap.put(token, Pair.create(dependent, dependentTargetEffectiveName));
               }
               addDependency(effectiveTargetName, dependentTargetEffectiveName);
             }
@@ -368,7 +362,7 @@ public abstract class PropertyProviderFinder extends AntDomRecursiveVisitor {
 
     public void pushPrefix(String prefix, InclusionKind kind) {
       myCurrentPrefix = null;
-      myPrefixes.addLast(new Pair<String, InclusionKind>(prefix, kind));
+      myPrefixes.addLast(Pair.create(prefix, kind));
     }
 
     public void popPrefix() {

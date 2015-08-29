@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,16 +18,24 @@ package com.intellij.usageView;
 
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.GeneratedSourcesFilter;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.StatusBar;
+import com.intellij.openapi.wm.WindowManager;
 import com.intellij.psi.ElementDescriptionUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
+import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.MoveRenameUsageInfo;
 import com.intellij.refactoring.util.NonCodeUsageInfo;
+import com.intellij.usages.Usage;
+import com.intellij.usages.UsageInfo2UsageAdapter;
+import com.intellij.usages.UsageView;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -155,4 +163,38 @@ public class UsageViewUtil {
     });
   }
 
+  public static void navigateTo(@NotNull UsageInfo info, boolean requestFocus) {
+    int offset = info.getNavigationOffset();
+    VirtualFile file = info.getVirtualFile();
+    Project project = info.getProject();
+    if (file != null) {
+      FileEditorManager.getInstance(project).openTextEditor(new OpenFileDescriptor(project, file, offset), requestFocus);
+    }
+  }
+
+  public static Set<UsageInfo> getNotExcludedUsageInfos(final UsageView usageView) {
+    Set<Usage> excludedUsages = usageView.getExcludedUsages();
+
+    Set<UsageInfo> usageInfos = new LinkedHashSet<UsageInfo>();
+    for (Usage usage : usageView.getUsages()) {
+      if (usage instanceof UsageInfo2UsageAdapter && !excludedUsages.contains(usage)) {
+        UsageInfo usageInfo = ((UsageInfo2UsageAdapter)usage).getUsageInfo();
+        usageInfos.add(usageInfo);
+      }
+    }
+    return usageInfos;
+  }
+
+  public static boolean reportNonRegularUsages(UsageInfo[] usages, final Project project) {
+    boolean inGeneratedCode = hasUsagesInGeneratedCode(usages, project);
+    if (hasNonCodeUsages(usages) || inGeneratedCode) {
+      StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
+      if (statusBar != null) {
+        statusBar.setInfo(inGeneratedCode ? RefactoringBundle.message("occurrences.found.in.comments.strings.non.java.files.and.generated.code")
+                                          : RefactoringBundle.message("occurrences.found.in.comments.strings.and.non.java.files"));
+      }
+      return true;
+    }
+    return false;
+  }
 }

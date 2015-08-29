@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.vcs.update;
 
+import com.intellij.diff.DiffDialogHints;
 import com.intellij.history.ByteContent;
 import com.intellij.history.Label;
 import com.intellij.openapi.actionSystem.*;
@@ -24,15 +25,19 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.FileStatus;
+import com.intellij.openapi.vcs.VcsDataKeys;
+import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ContentRevision;
-import com.intellij.openapi.vcs.changes.actions.ShowDiffAction;
-import com.intellij.openapi.vcs.changes.actions.ShowDiffUIContext;
+import com.intellij.openapi.vcs.changes.actions.diff.ShowDiffAction;
+import com.intellij.openapi.vcs.changes.actions.diff.ShowDiffContext;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.encoding.EncodingManager;
+import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
+import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -72,8 +77,9 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
 
     final String selectedUrl = VcsDataKeys.UPDATE_VIEW_SELECTED_PATH.getData(dc);
 
-    ShowDiffAction.showDiffForChange(new MyIterableWrapper(iterable.iterator(), before, after), new MySelectionMarker(selectedUrl),
-                                     project, new ShowDiffUIContext(true));
+    Iterable<Change> changes = new MyIterableWrapper(iterable.iterator(), before, after, project);
+    Condition<Change> selection = new MySelectionMarker(selectedUrl);
+    ShowDiffAction.showDiffForChange(project, changes, selection, new ShowDiffContext(DiffDialogHints.FRAME));
   }
 
   private static class MySelectionMarker implements Condition<Change> {
@@ -102,15 +108,20 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
     private final Iterator<Pair<VirtualFilePointer, FileStatus>> myVfIterator;
     private final Label myBefore;
     private final Label myAfter;
+    @NotNull private final Project myProject;
 
-    private MyIterableWrapper(Iterator<Pair<VirtualFilePointer, FileStatus>> vfIterator, final Label before, final Label after) {
+    private MyIterableWrapper(Iterator<Pair<VirtualFilePointer, FileStatus>> vfIterator,
+                              final Label before,
+                              final Label after,
+                              @NotNull Project project) {
       myVfIterator = vfIterator;
       myBefore = before;
       myAfter = after;
+      myProject = project;
     }
 
     public Iterator<Change> iterator() {
-      return new MyIteratorWrapper(myVfIterator, myBefore, myAfter);
+      return new MyIteratorWrapper(myVfIterator, myBefore, myAfter, myProject);
     }
   }
 
@@ -122,7 +133,7 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
     }
 
     @Nullable
-    public String convert(final VirtualFilePointer pointer) {
+    public String convert(final VirtualFilePointer pointer, @NotNull Project project) {
       if (pointer == null) return null;
       final String path = pointer.getPresentableUrl();
       final ByteContent byteContent = myLabel.getByteContent(FileUtil.toSystemIndependentName(path));
@@ -131,8 +142,9 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
       }
       final VirtualFile vf = pointer.getFile();
       if (vf == null) {
-        return LoadTextUtil.getTextByBinaryPresentation(byteContent.getBytes(), EncodingManager.getInstance().getDefaultCharset()).toString();
-      } else {
+        return LoadTextUtil.getTextByBinaryPresentation(byteContent.getBytes(), EncodingProjectManager.getInstance(project).getDefaultCharset()).toString();
+      }
+      else {
         return LoadTextUtil.getTextByBinaryPresentation(byteContent.getBytes(), vf).toString();
       }
     }
@@ -143,11 +155,13 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
     private final MyLoader myLoader;
     private final VirtualFilePointer myPointer;
     private final boolean myBefore;
+    @NotNull private final Project myProject;
 
-    private MyCheckpointContentRevision(final VirtualFilePointer pointer, final MyLoader loader, final boolean before) {
+    private MyCheckpointContentRevision(final VirtualFilePointer pointer, final MyLoader loader, final boolean before, @NotNull Project project) {
       myLoader = loader;
       myPointer = pointer;
       myBefore = before;
+      myProject = project;
     }
 
     public String getContent() throws VcsException {
@@ -156,7 +170,7 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
         return s;
       }
 
-      final String loaded = myLoader.convert(myPointer);
+      final String loaded = myLoader.convert(myPointer, myProject);
       myContent = new SoftReference<String>(loaded);
 
       return loaded;
@@ -168,11 +182,7 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
 
     @NotNull
     public FilePath getFile() {
-      final VirtualFile vf = myPointer.getFile();
-      if (vf != null) {
-        return new FilePathImpl(vf);
-      }
-      return new FilePathImpl(new File(myPointer.getPresentableUrl()), false);
+      return VcsUtil.getFilePath(myPointer.getPresentableUrl(), false);
     }
 
     @NotNull
@@ -193,9 +203,14 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
     private final MyLoader myBeforeLoader;
     private final MyLoader myAfterLoader;
     private final Iterator<Pair<VirtualFilePointer, FileStatus>> myVfIterator;
+    @NotNull private final Project myProject;
 
-    public MyIteratorWrapper(final Iterator<Pair<VirtualFilePointer, FileStatus>> vfIterator, final Label before, final Label after) {
+    public MyIteratorWrapper(final Iterator<Pair<VirtualFilePointer, FileStatus>> vfIterator,
+                             final Label before,
+                             final Label after,
+                             @NotNull Project project) {
       myVfIterator = vfIterator;
+      myProject = project;
       myBeforeLoader = new MyLoader(before);
       myAfterLoader = new MyLoader(after);
     }
@@ -208,8 +223,8 @@ public class ShowUpdatedDiffAction extends AnAction implements DumbAware {
       final Pair<VirtualFilePointer, FileStatus> pair = myVfIterator.next();
       final VirtualFilePointer pointer = pair.getFirst();
 
-      MyCheckpointContentRevision before = new MyCheckpointContentRevision(pointer, myBeforeLoader, true);
-      MyCheckpointContentRevision after = new MyCheckpointContentRevision(pointer, myAfterLoader, false);
+      MyCheckpointContentRevision before = new MyCheckpointContentRevision(pointer, myBeforeLoader, true, myProject);
+      MyCheckpointContentRevision after = new MyCheckpointContentRevision(pointer, myAfterLoader, false, myProject);
       if (FileStatus.ADDED.equals(pair.getSecond())) {
         before = null;
       } else if (FileStatus.DELETED.equals(pair.getSecond())) {

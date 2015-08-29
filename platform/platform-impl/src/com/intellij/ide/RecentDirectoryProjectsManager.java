@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -30,22 +29,19 @@ import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author yole
- */
 @State(
   name = "RecentDirectoryProjectsManager",
-  roamingType = RoamingType.DISABLED,
   storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/other.xml"
-    )}
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/recentProjectDirectories.xml", roamingType = RoamingType.DISABLED),
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/other.xml", deprecated = true)
+  }
 )
 public class RecentDirectoryProjectsManager extends RecentProjectsManagerBase {
-  public RecentDirectoryProjectsManager(ProjectManager projectManager, MessageBus messageBus) {
-    super(projectManager, messageBus);
+  public RecentDirectoryProjectsManager(MessageBus messageBus) {
+    super(messageBus);
   }
 
+  @Override
   @Nullable
   protected String getProjectPath(@NotNull Project project) {
     final ProjectBaseDirectory baseDir = ProjectBaseDirectory.getInstance(project);
@@ -53,6 +49,7 @@ public class RecentDirectoryProjectsManager extends RecentProjectsManagerBase {
     return baseDirVFile != null ? FileUtil.toSystemDependentName(baseDirVFile.getPath()) : null;
   }
 
+  @Override
   protected void doOpenProject(@NotNull String projectPath, Project projectToClose, boolean forceOpenInNewFrame) {
     final VirtualFile projectDir = LocalFileSystem.getInstance().findFileByPath(FileUtil.toSystemIndependentName(projectPath));
     if (projectDir != null) {

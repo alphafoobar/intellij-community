@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +19,14 @@ import com.google.common.collect.Lists;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkAdditionalData;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.encoding.EncodingManager;
+import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.util.PatternUtil;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.sdk.PySdkUtil;
@@ -45,6 +46,7 @@ import java.util.regex.Pattern;
  * @author yole
  */
 public abstract class PythonSdkFlavor {
+  private static final Pattern VERSION_RE = Pattern.compile("(Python \\S+).*");
   private static final Logger LOG = Logger.getInstance(PythonSdkFlavor.class);
 
   public static Collection<String> appendSystemPythonPath(@NotNull Collection<String> pythonPath) {
@@ -72,6 +74,10 @@ public abstract class PythonSdkFlavor {
   }
 
   public static List<PythonSdkFlavor> getApplicableFlavors() {
+    return getApplicableFlavors(true);
+  }
+
+  public static List<PythonSdkFlavor> getApplicableFlavors(boolean addPlatformIndependent) {
     List<PythonSdkFlavor> result = new ArrayList<PythonSdkFlavor>();
 
     if (SystemInfo.isWindows) {
@@ -84,7 +90,8 @@ public abstract class PythonSdkFlavor {
       result.add(UnixPythonSdkFlavor.INSTANCE);
     }
 
-    result.addAll(getPlatformIndependentFlavors());
+    if (addPlatformIndependent)
+      result.addAll(getPlatformIndependentFlavors());
 
     return result;
   }
@@ -153,53 +160,40 @@ public abstract class PythonSdkFlavor {
     return FileUtil.getNameWithoutExtension(file).toLowerCase().startsWith("python");
   }
 
-  public String getVersionString(String sdkHome) {
-    return getVersionStringFromOutput(getVersionFromOutput(sdkHome, getVersionOption(), getVersionRegexp()));
+  @Nullable
+  public String getVersionString(@Nullable String sdkHome) {
+    if (sdkHome == null) {
+      return null;
+    }
+    final String runDirectory = new File(sdkHome).getParent();
+    final ProcessOutput processOutput = PySdkUtil.getProcessOutput(runDirectory, new String[]{sdkHome, getVersionOption()}, 10000);
+    return getVersionStringFromOutput(processOutput);
   }
 
-  public String getVersionStringFromOutput(String version) {
-    return version;
+  @Nullable
+  public String getVersionStringFromOutput(@NotNull ProcessOutput processOutput) {
+    if (processOutput.getExitCode() != 0) {
+      String errors = processOutput.getStderr();
+      if (StringUtil.isEmpty(errors)) {
+        errors = processOutput.getStdout();
+      }
+      LOG.warn("Couldn't get interpreter version: process exited with code " + processOutput.getExitCode() + "\n" + errors);
+      return null;
+    }
+    final String result = getVersionStringFromOutput(processOutput.getStderr());
+    if (result != null) {
+      return result;
+    }
+    return getVersionStringFromOutput(processOutput.getStdout());
   }
 
-
-  public String getVersionRegexp() {
-    return "(Python \\S+).*";
+  @Nullable
+  public String getVersionStringFromOutput(@NotNull String output) {
+    return PatternUtil.getFirstMatch(Arrays.asList(StringUtil.splitByLines(output)), VERSION_RE);
   }
 
   public String getVersionOption() {
     return "-V";
-  }
-
-  @Nullable
-  public String getVersionFromOutput(ProcessOutput processOutput) {
-    return getVersionFromOutput(getVersionRegexp(), processOutput);
-  }
-
-  @Nullable
-  protected static String getVersionFromOutput(String sdkHome, String version_opt, String version_regexp) {
-    String run_dir = new File(sdkHome).getParent();
-    final ProcessOutput process_output = PySdkUtil.getProcessOutput(run_dir, new String[]{sdkHome, version_opt});
-
-    return getVersionFromOutput(version_regexp, process_output);
-  }
-
-  @Nullable
-  private static String getVersionFromOutput(String version_regexp, ProcessOutput process_output) {
-    if (process_output.getExitCode() != 0) {
-      String err = process_output.getStderr();
-      if (StringUtil.isEmpty(err)) {
-        err = process_output.getStdout();
-      }
-      LOG.warn("Couldn't get interpreter version: process exited with code " + process_output.getExitCode() + "\n" + err
-      );
-      return null;
-    }
-    Pattern pattern = Pattern.compile(version_regexp);
-    final String result = PatternUtil.getFirstMatch(process_output.getStderrLines(), pattern);
-    if (result != null) {
-      return result;
-    }
-    return PatternUtil.getFirstMatch(process_output.getStdoutLines(), pattern);
   }
 
   public Collection<String> getExtraDebugOptions() {
@@ -215,18 +209,17 @@ public abstract class PythonSdkFlavor {
   }
 
   @SuppressWarnings({"MethodMayBeStatic"})
-  public void addPredefinedEnvironmentVariables(Map<String, String> envs) {
-    Charset defaultCharset = EncodingManager.getInstance().getDefaultCharset();
-    if (defaultCharset != null) {
-      final String encoding = defaultCharset.name();
-      PythonEnvUtil.setPythonIOEncoding(envs, encoding);
-    }
+  public void addPredefinedEnvironmentVariables(Map<String, String> envs, @NotNull Project project) {
+    Charset defaultCharset = EncodingProjectManager.getInstance(project).getDefaultCharset();
+    final String encoding = defaultCharset.name();
+    PythonEnvUtil.setPythonIOEncoding(envs, encoding);
   }
 
   @NotNull
   public abstract String getName();
 
-  public LanguageLevel getLanguageLevel(Sdk sdk) {
+  @NotNull
+  public LanguageLevel getLanguageLevel(@NotNull Sdk sdk) {
     final String version = sdk.getVersionString();
     final String prefix = getName() + " ";
     if (version != null && version.startsWith(prefix)) {

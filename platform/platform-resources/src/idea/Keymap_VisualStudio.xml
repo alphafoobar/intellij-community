@@ -78,6 +78,9 @@
     <action id="GotoClass">
       <keyboard-shortcut first-keystroke="control COMMA"/>
     </action>
+    <action id="GotoChangedFile">
+      <keyboard-shortcut first-keystroke="control COMMA"/>
+    </action>
     <action id="$Redo">
       <keyboard-shortcut first-keystroke="control Y"/>
       <keyboard-shortcut first-keystroke="shift control Z"/>
@@ -85,6 +88,7 @@
     <action id="ParameterInfo">
       <keyboard-shortcut first-keystroke="shift control SPACE"/>
     </action>
+    <action id="ExpressionTypeInfo"/>
     <action id="RunClass">
       <keyboard-shortcut first-keystroke="control F9"/>
     </action>
@@ -101,7 +105,6 @@
       <keyboard-shortcut first-keystroke="shift control I"/>
     </action>
     <action id="SmartTypeCompletion">
-      <keyboard-shortcut first-keystroke="alt SPACE"/>
       <keyboard-shortcut first-keystroke="shift alt SPACE"/>
     </action>
     <action id="GotoDeclaration">
@@ -206,6 +209,5 @@
       <keyboard-shortcut first-keystroke="shift control alt UP"/>
     </action>
     <action id="CopyElement"/>
-    <action id="CloneElement"/>
   </keymap>
 </component>

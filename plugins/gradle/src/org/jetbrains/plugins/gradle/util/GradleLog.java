@@ -8,7 +8,7 @@ import com.intellij.openapi.diagnostic.Logger;
  */
 public class GradleLog {
 
-  public static final Logger LOG = Logger.getInstance("#" + GradleLog.class.getName());
+  public static final Logger LOG = Logger.getInstance(GradleLog.class);
 
   private GradleLog() {
   }

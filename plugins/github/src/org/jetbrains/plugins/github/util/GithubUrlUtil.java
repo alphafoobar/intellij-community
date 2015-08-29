@@ -48,7 +48,18 @@ public class GithubUrlUtil {
 
   @NotNull
   public static String getApiUrl(@NotNull String urlFromSettings) {
-    return "https://" + getApiUrlWithoutProtocol(urlFromSettings);
+    return getApiProtocolFromUrl(urlFromSettings) + getApiUrlWithoutProtocol(urlFromSettings);
+  }
+
+  @NotNull
+  public static String getApiProtocol() {
+    return getApiProtocolFromUrl(GithubSettings.getInstance().getHost());
+  }
+
+  @NotNull
+  public static String getApiProtocolFromUrl(@NotNull String urlFromSettings) {
+    if (StringUtil.startsWithIgnoreCase(urlFromSettings.trim(), "http://")) return "http://";
+    return "https://";
   }
 
   /**
@@ -68,7 +79,7 @@ public class GithubUrlUtil {
    */
   @NotNull
   public static String getGithubHost() {
-    return "https://" + getGitHostWithoutProtocol();
+    return getApiProtocol() + getGitHostWithoutProtocol();
   }
 
   /**
@@ -126,6 +137,7 @@ public class GithubUrlUtil {
   }
 
   public static boolean isGithubUrl(@NotNull String url, @NotNull String host) {
+    host = getHostFromUrl(host);
     url = removeProtocolPrefix(url);
     if (StringUtil.startsWithIgnoreCase(url, host)) {
       if (url.length() > host.length() && ":/".indexOf(url.charAt(host.length())) == -1) {
@@ -197,6 +209,11 @@ public class GithubUrlUtil {
 
   @NotNull
   public static String getCloneUrl(@NotNull String user, @NotNull String repo) {
-    return getGithubHost() + "/" + user + "/" + repo + ".git";
+    if (GithubSettings.getInstance().isCloneGitUsingSsh()) {
+      return "git@" + getGitHostWithoutProtocol() + ":" + user + "/" + repo + ".git";
+    }
+    else {
+      return "https://" + getGitHostWithoutProtocol() + "/" + user + "/" + repo + ".git";
+    }
   }
 }

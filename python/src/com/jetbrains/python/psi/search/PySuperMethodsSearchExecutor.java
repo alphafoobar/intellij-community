@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ public class PySuperMethodsSearchExecutor implements QueryExecutor<PsiElement, P
     PyClass containingClass = func.getContainingClass();
     Set<PyClass> foundMethodContainingClasses = new HashSet<PyClass>();
     if (name != null && containingClass != null) {
-      for (PyClass superClass : containingClass.getAncestorClasses()) {
+      for (PyClass superClass : containingClass.getAncestorClasses(null)) {
         if (!queryParameters.isDeepSearch()) {
           boolean isAlreadyFound = false;
           for (PyClass alreadyFound : foundMethodContainingClasses) {
@@ -52,7 +52,7 @@ public class PySuperMethodsSearchExecutor implements QueryExecutor<PsiElement, P
           final Property superProperty = superMethod.getProperty();
           if (property != null && superProperty != null) {
             final AccessDirection direction = PyUtil.getPropertyAccessDirection(func);
-            final Callable callable = superProperty.getByDirection(direction).valueOrNull();
+            final PyCallable callable = superProperty.getByDirection(direction).valueOrNull();
             superMethod = (callable instanceof PyFunction) ? (PyFunction)callable : null;
           }
         }

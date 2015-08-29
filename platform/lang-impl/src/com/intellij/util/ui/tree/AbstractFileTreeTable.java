@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ import java.awt.*;
 import java.util.*;
 import java.util.List;
 
-public abstract class AbstractFileTreeTable<T> extends TreeTable {
+public class AbstractFileTreeTable<T> extends TreeTable {
   private final MyModel<T> myModel;
   private final Project myProject;
 
@@ -57,9 +57,23 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
                                @NotNull String valueTitle,
                                @NotNull VirtualFileFilter filter,
                                boolean showProjectNode) {
-    super(new MyModel<T>(project, valueClass, valueTitle, filter));
+    this(project, valueClass, valueTitle, filter, showProjectNode, true);
+  }
+
+  /**
+   * Due to historical reasons, passed filter does not perform all jobs - fileIndex.isInContent is checked in addition.
+   * Flag showContentFilesOnly allows you to disable such behavior.
+   */
+  public AbstractFileTreeTable(@NotNull Project project,
+                               @NotNull Class<T> valueClass,
+                               @NotNull String valueTitle,
+                               @NotNull VirtualFileFilter filter,
+                               boolean showProjectNode,
+                               boolean showContentFilesOnly) {
+    super(new MyModel<T>(project, valueClass, valueTitle, showContentFilesOnly ? new ProjectContentFileFilter(project, filter) : filter));
     myProject = project;
 
+    //noinspection unchecked
     myModel = (MyModel)getTableModel();
     myModel.setTreeTable(this);
 
@@ -84,6 +98,7 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
     getTree().setShowsRootHandles(true);
     getTree().setLineStyleAngled();
     getTree().setRootVisible(showProjectNode);
+    final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     getTree().setCellRenderer(new DefaultTreeCellRenderer() {
       @Override
       public Component getTreeCellRendererComponent(final JTree tree, final Object value, final boolean sel, final boolean expanded,
@@ -96,20 +111,17 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
         }
         FileNode fileNode = (FileNode)value;
         VirtualFile file = fileNode.getObject();
-        if (fileNode.getParent() instanceof FileNode) {
-          setText(file.getName());
+        setText(fileNode.getParent() instanceof FileNode ? file.getName() : file.getPresentableUrl());
+        if (file.isDirectory()) {
+          setIcon(fileIndex.isExcluded(file) ? AllIcons.Modules.ExcludeRoot : PlatformIcons.DIRECTORY_CLOSED_ICON);
         }
         else {
-          setText(file.getPresentableUrl());
+          setIcon(IconUtil.getIcon(file, 0, null));
         }
-
-        Icon icon = file.isDirectory() ? PlatformIcons.DIRECTORY_CLOSED_ICON : IconUtil.getIcon(file, 0, null);
-        setIcon(icon);
         return this;
       }
     });
     getTableHeader().setReorderingAllowed(false);
-
 
     setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     setPreferredScrollableViewportSize(new Dimension(300, getRowHeight() * 10));
@@ -140,8 +152,7 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
 
   public static void press(final Container comboComponent) {
     if (comboComponent instanceof JButton) {
-      final JButton button = (JButton)comboComponent;
-      button.doClick();
+      ((JButton)comboComponent).doClick();
     }
     else {
       for (int i = 0; i < comboComponent.getComponentCount(); i++) {
@@ -191,8 +202,7 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
 
   public void reset(@NotNull Map<VirtualFile, T> mappings) {
     myModel.reset(mappings);
-    final TreeNode root = (TreeNode)myModel.getRoot();
-    myModel.nodeChanged(root);
+    myModel.nodeChanged((TreeNode)myModel.getRoot());
     getTree().setModel(null);
     getTree().setModel(myModel);
     TreeUtil.expandRootChildIfOnlyOne(getTree());
@@ -222,7 +232,6 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
       }
     }
   }
-
 
   private static class MyModel<T> extends DefaultTreeModel implements TreeTableModel {
     private final Map<VirtualFile, T> myCurrentMapping = new HashMap<VirtualFile, T>();
@@ -310,11 +319,14 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
 
     @Override
     public void setValueAt(final Object aValue, final Object node, final int column) {
-      final DefaultMutableTreeNode treeNode = (DefaultMutableTreeNode)node;
-      final Object userObject = treeNode.getUserObject();
-      if (userObject instanceof Project) return;
+      final Object userObject = ((DefaultMutableTreeNode)node).getUserObject();
+      if (userObject instanceof Project) {
+        return;
+      }
+
       final VirtualFile file = (VirtualFile)userObject;
-      final T t = (T)aValue;
+      @SuppressWarnings("unchecked")
+      T t = (T)aValue;
       if (t == null || myTreeTable.isNullObject(t)) {
         myCurrentMapping.remove(file);
       }
@@ -336,7 +348,7 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
   }
 
   public static class ProjectRootNode extends ConvenientNode<Project> {
-    private VirtualFileFilter myFilter;
+    private final VirtualFileFilter myFilter;
 
     public ProjectRootNode(@NotNull Project project) {
       this(project, VirtualFileFilter.ALL);
@@ -426,8 +438,8 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
     public void clearCachedChildren() {
       if (children != null) {
         for (Object child : children) {
-          ConvenientNode<T> node = (ConvenientNode<T>)child;
-          node.clearCachedChildren();
+          //noinspection unchecked
+          ((ConvenientNode<T>)child).clearCachedChildren();
         }
       }
       removeAllChildren();
@@ -437,7 +449,7 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
 
   public static class FileNode extends ConvenientNode<VirtualFile> {
     private final Project myProject;
-    private VirtualFileFilter myFilter;
+    private final VirtualFileFilter myFilter;
 
     public FileNode(@NotNull VirtualFile file, @NotNull final Project project) {
       this(file, project, VirtualFileFilter.ALL);
@@ -451,14 +463,11 @@ public abstract class AbstractFileTreeTable<T> extends TreeTable {
 
     @Override
     protected void appendChildrenTo(@NotNull final Collection<ConvenientNode> children) {
-      VirtualFile[] childrenf = getObject().getChildren();
-      ProjectFileIndex fileIndex = ProjectRootManager.getInstance(myProject).getFileIndex();
-      for (VirtualFile child : childrenf) {
-        if (myFilter.accept(child) && fileIndex.isInContent(child)) {
+      for (VirtualFile child : getObject().getChildren()) {
+        if (myFilter.accept(child)) {
           children.add(new FileNode(child, myProject, myFilter));
         }
       }
     }
   }
-
 }

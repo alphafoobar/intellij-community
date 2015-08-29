@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,10 @@
 
 package org.jetbrains.idea.maven;
 
-import com.intellij.compiler.CompilerManagerImpl;
-import com.intellij.compiler.CompilerTestUtil;
-import com.intellij.compiler.CompilerWorkspaceConfiguration;
-import com.intellij.compiler.impl.ModuleCompileScope;
-import com.intellij.compiler.impl.TranslatingCompilerFilesMonitor;
 import com.intellij.compiler.server.BuildManager;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.compiler.CompileContext;
-import com.intellij.openapi.compiler.CompileScope;
-import com.intellij.openapi.compiler.CompileStatusNotification;
-import com.intellij.openapi.compiler.CompilerManager;
+import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
@@ -43,22 +35,23 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.PathUtil;
-import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.execution.*;
 import org.jetbrains.idea.maven.model.MavenArtifact;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.project.*;
+import org.jetbrains.idea.maven.server.MavenServerManager;
 import org.jetbrains.jps.model.java.JavaResourceRootType;
 import org.jetbrains.jps.model.java.JavaSourceRootProperties;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
-import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
@@ -67,9 +60,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 public abstract class MavenImportingTestCase extends MavenTestCase {
   protected MavenProjectsTree myProjectsTree;
   protected MavenProjectsManager myProjectsManager;
+  private File myGlobalSettingsFile;
 
-  protected boolean useJps() {
-    return false;
+  @Override
+  protected void setUp() throws Exception {
+    VfsRootAccess.allowRootAccess(PathManager.getConfigPath());
+    super.setUp();
+    myGlobalSettingsFile =
+      MavenWorkspaceSettingsComponent.getInstance(myProject).getSettings().generalSettings.getEffectiveGlobalSettingsIoFile();
+    if (myGlobalSettingsFile != null) {
+      VfsRootAccess.allowRootAccess(myGlobalSettingsFile.getAbsolutePath());
+    }
   }
 
   @Override
@@ -77,24 +78,22 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
     super.setUpInWriteAction();
     myProjectsManager = MavenProjectsManager.getInstance(myProject);
     removeFromLocalRepository("test");
-    if (useJps()) {
-      CompilerTestUtil.enableExternalCompiler(myProject);
-    }
-    else {
-      CompilerTestUtil.disableExternalCompiler(myProject);
-    }
   }
 
   @Override
   protected void tearDown() throws Exception {
-    Messages.setTestDialog(TestDialog.DEFAULT);
-    myProjectsManager.projectClosed();
-    removeFromLocalRepository("test");
-    if (useJps()) {
-      CompilerTestUtil.disableExternalCompiler(myProject);
+    try {
+      if (myGlobalSettingsFile != null) {
+        VfsRootAccess.disallowRootAccess(myGlobalSettingsFile.getAbsolutePath());
+      }
+      VfsRootAccess.disallowRootAccess(PathManager.getConfigPath());
+      Messages.setTestDialog(TestDialog.DEFAULT);
+      removeFromLocalRepository("test");
       FileUtil.delete(BuildManager.getInstance().getBuildSystemDirectory());
     }
-    super.tearDown();
+    finally {
+      super.tearDown();
+    }
   }
 
   protected void assertModules(String... expectedNames) {
@@ -179,7 +178,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
       actual.add(folderUrl);
     }
 
-    assertUnorderedPathsAreEqual(actual, Arrays.asList(expected));
+    assertOrderedElementsAreEqual(actual, Arrays.asList(expected));
   }
 
   protected void assertModuleOutput(String moduleName, String output, String testOutput) {
@@ -200,7 +199,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
     assertTrue(getCompilerExtension(module).isCompilerOutputPathInherited());
   }
 
-  private CompilerModuleExtension getCompilerExtension(String module) {
+  protected CompilerModuleExtension getCompilerExtension(String module) {
     ModuleRootManager m = getRootManager(module);
     return CompilerModuleExtension.getInstance(m.getModule());
   }
@@ -386,7 +385,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
   }
 
   protected void importProjectWithProfiles(String... profiles) {
-    doImportProjects(Collections.singletonList(myProjectPom), profiles);
+    doImportProjects(true, Collections.singletonList(myProjectPom), profiles);
   }
 
   protected void importProject(VirtualFile file) {
@@ -394,10 +393,24 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
   }
 
   protected void importProjects(VirtualFile... files) {
-    doImportProjects(Arrays.asList(files));
+    doImportProjects(true, Arrays.asList(files));
   }
 
-  private void doImportProjects(final List<VirtualFile> files, String... profiles) {
+  protected void importProjectWithMaven3(@NonNls String xml) throws IOException {
+    createProjectPom(xml);
+    importProjectWithMaven3();
+  }
+
+  protected void importProjectWithMaven3() {
+    importProjectWithMaven3WithProfiles();
+  }
+
+  protected void importProjectWithMaven3WithProfiles(String... profiles) {
+    doImportProjects(false, Collections.singletonList(myProjectPom), profiles);
+  }
+
+  private void doImportProjects(boolean useMaven2, final List<VirtualFile> files, String... profiles) {
+    MavenServerManager.getInstance().setUseMaven2(useMaven2);
     initProjectsManager(false);
 
     readProjects(files, profiles);
@@ -419,7 +432,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
   }
 
   protected void readProjects(List<VirtualFile> files, String... profiles) {
-    myProjectsManager.resetManagedFilesAndProfilesInTests(files, Arrays.asList(profiles));
+    myProjectsManager.resetManagedFilesAndProfilesInTests(files, new MavenExplicitProfiles(Arrays.asList(profiles)));
     waitForReadingCompletion();
   }
 
@@ -519,7 +532,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
   protected void executeGoal(String relativePath, String goal) {
     VirtualFile dir = myProjectRoot.findFileByRelativePath(relativePath);
 
-    MavenRunnerParameters rp = new MavenRunnerParameters(true, dir.getPath(), Arrays.asList(goal), null);
+    MavenRunnerParameters rp = new MavenRunnerParameters(true, dir.getPath(), Arrays.asList(goal), Collections.<String>emptyList());
     MavenRunnerSettings rs = new MavenRunnerSettings();
     MavenExecutor e = new MavenExternalExecutor(myProject, rp, getMavenGeneralSettings(), rs, new SoutMavenConsole());
 
@@ -537,65 +550,13 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
   }
 
   protected Sdk setupJdkForModule(final String moduleName) {
-    final Sdk sdk = useJps()? JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk() : createJdk("Java 1.5");
+    final Sdk sdk = JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
     ModuleRootModificationUtil.setModuleSdk(getModule(moduleName), sdk);
     return sdk;
   }
 
   protected static Sdk createJdk(String versionName) {
     return IdeaTestUtil.getMockJdk17(versionName);
-  }
-
-  protected void compileModules(final String... moduleNames) throws Exception {
-    final List<Module> modules = new ArrayList<Module>();
-
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        for (String each : moduleNames) {
-          setupJdkForModule(each);
-          modules.add(getModule(each));
-        }
-        if (useJps()) {
-          new MavenResourceCompilerConfigurationGenerator(myProject, MavenProjectsManager.getInstance(myProject).getProjectsTreeForTests())
-            .generateBuildConfiguration(false);
-        }
-      }
-    });
-
-    CompilerWorkspaceConfiguration.getInstance(myProject).CLEAR_OUTPUT_DIRECTORY = true;
-    CompilerManagerImpl.testSetup();
-
-    List<VirtualFile> roots = Arrays.asList(ProjectRootManager.getInstance(myProject).getContentRoots());
-    TranslatingCompilerFilesMonitor.getInstance()
-      .scanSourceContent(new TranslatingCompilerFilesMonitor.ProjectRef(myProject), roots, roots.size(), true);
-
-    final CompileScope scope = new ModuleCompileScope(myProject, modules.toArray(new Module[modules.size()]), false);
-
-    final Semaphore semaphore = new Semaphore();
-    semaphore.down();
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        CompilerManager.getInstance(myProject).make(scope, new CompileStatusNotification() {
-          @Override
-          public void finished(boolean aborted, int errors, int warnings, CompileContext compileContext) {
-            //assertFalse(aborted);
-            //assertEquals(collectMessages(compileContext, CompilerMessageCategory.ERROR), 0, errors);
-            //assertEquals(collectMessages(compileContext, CompilerMessageCategory.WARNING), 0, warnings);
-            semaphore.up();
-          }
-        });
-      }
-    });
-    while (!semaphore.waitFor(100)) {
-      if (SwingUtilities.isEventDispatchThread()) {
-        UIUtil.dispatchAllInvocationEvents();
-      }
-    }
-    if (SwingUtilities.isEventDispatchThread()) {
-      UIUtil.dispatchAllInvocationEvents();
-    }
   }
 
   protected static AtomicInteger configConfirmationForYesAnswer() {

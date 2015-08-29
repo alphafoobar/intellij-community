@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,14 +74,9 @@ public class PyConvertStaticMethodToFunctionIntention extends BaseIntentionActio
       final PyDecorator decorator = decoratorList.findDecorator(PyNames.STATICMETHOD);
       if (decorator != null) decorator.delete();
     }
-    final PyElementGenerator generator = PyElementGenerator.getInstance(project);
 
     final PsiElement copy = problemFunction.copy();
-    final PyStatementList classStatementList = containingClass.getStatementList();
-    classStatementList.deleteChildRange(problemFunction, problemFunction);
-    if (classStatementList.getStatements().length < 1) {
-      classStatementList.add(generator.createPassStatement());
-    }
+    problemFunction.delete();
     file.addAfter(copy, containingClass);
 
     for (UsageInfo usage : usages) {

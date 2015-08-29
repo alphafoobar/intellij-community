@@ -1,13 +1,11 @@
 package com.intellij.psi.impl.source.resolve.graphInference.constraints;
 
 import com.intellij.psi.*;
-import com.intellij.psi.controlFlow.*;
 import com.intellij.psi.impl.source.resolve.graphInference.FunctionalInterfaceParameterizationUtil;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceSession;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.util.containers.IntArrayList;
 
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -24,14 +22,12 @@ public class LambdaExpressionCompatibilityConstraint implements ConstraintFormul
 
   @Override
   public boolean reduce(InferenceSession session, List<ConstraintFormula> constraints) {
-    if (LambdaHighlightingUtil.checkInterfaceFunctional(myT) != null) {
+    if (!LambdaUtil.isFunctionalType(myT)) {
       return false;
     }
 
-    if (myExpression.hasFormalParameterTypes()) {
-    }
-    final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(
-      FunctionalInterfaceParameterizationUtil.getFunctionalType(myT, myExpression, false));
+    final PsiType groundTargetType = FunctionalInterfaceParameterizationUtil.getGroundTargetType(myT, myExpression, false);
+    final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(groundTargetType);
     final PsiMethod interfaceMethod = LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
     if (interfaceMethod == null) {
       return false;
@@ -47,27 +43,32 @@ public class LambdaExpressionCompatibilityConstraint implements ConstraintFormul
       for (int i = 0; i < lambdaParameters.length; i++) {
         constraints.add(new TypeEqualityConstraint(lambdaParameters[i].getType(), substitutor.substitute(parameters[i].getType())));
       }
+      constraints.add(new StrictSubtypingConstraint(myT, groundTargetType));
     } else {
       for (PsiParameter parameter : parameters) {
-        if (!session.isProperType(substitutor.substitute(parameter.getType()))) {
+        if (!session.isProperType(session.substituteWithInferenceVariables(substitutor.substitute(parameter.getType())))) {
           return false;
         }
       }
     }
 
-    final PsiType returnType = interfaceMethod.getReturnType();
+    PsiType returnType = interfaceMethod.getReturnType();
     if (returnType != null) {
       final List<PsiExpression> returnExpressions = LambdaUtil.getReturnExpressions(myExpression);
       if (returnType.equals(PsiType.VOID)) {
-        if (!returnExpressions.isEmpty() && !(myExpression.getBody() instanceof PsiExpression)) {
+        if (!myExpression.isVoidCompatible()) {
           return false;
         }
       } else {
-        if (returnExpressions.isEmpty() && !myExpression.isValueCompatible()) {  //not value-compatible
+        if (!myExpression.isValueCompatible()) {
           return false;
         }
-        for (PsiExpression returnExpression : returnExpressions) {
-          constraints.add(new ExpressionCompatibilityConstraint(returnExpression, GenericsUtil.eliminateWildcards(substitutor.substitute(returnType))));
+        InferenceSession callsession = session.findNestedCallSession(myExpression);
+        returnType = callsession.substituteWithInferenceVariables(substitutor.substitute(returnType));
+        if (!callsession.isProperType(returnType)) {
+          for (PsiExpression returnExpression : returnExpressions) {
+            constraints.add(new ExpressionCompatibilityConstraint(returnExpression, returnType));
+          }
         }
       }
     }
@@ -75,7 +76,12 @@ public class LambdaExpressionCompatibilityConstraint implements ConstraintFormul
   }
 
   @Override
-  public void apply(PsiSubstitutor substitutor) {
+  public void apply(PsiSubstitutor substitutor, boolean cache) {
     myT = substitutor.substitute(myT);
+  }
+
+  @Override
+  public String toString() {
+    return myExpression.getText() + " -> " + myT.getPresentableText();
   }
 }

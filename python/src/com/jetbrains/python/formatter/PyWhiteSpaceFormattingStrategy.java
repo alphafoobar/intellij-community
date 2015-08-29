@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,6 +134,9 @@ public class PyWhiteSpaceFormattingStrategy extends StaticSymbolWhiteSpaceDefini
   static TIntIntHashMap countBackSlashes(CharSequence text, int start, int end) {
     TIntIntHashMap result = new TIntIntHashMap();
     int line = 0;
+    if (end > text.length()) {
+      end = text.length();
+    }
     for (int i = start; i < end; i++) {
       char c = text.charAt(i);
       switch (c) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,10 +37,11 @@ import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.IdeRootPaneNorthExtension;
 import com.intellij.openapi.wm.StatusBar;
@@ -51,9 +52,11 @@ import com.intellij.openapi.wm.ex.StatusBarEx;
 import com.intellij.openapi.wm.impl.status.*;
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame;
 import com.intellij.ui.*;
+import com.intellij.ui.mac.MacMainFrameDecorator;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.io.PowerSupplyKit;
 
 import javax.swing.*;
 import java.awt.*;
@@ -74,8 +77,6 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
 
   private static boolean myUpdatingTitle;
 
-  private static String xdgCurrentDesktop = System.getenv("XDG_CURRENT_DESKTOP");
-
   private String myTitle;
   private String myFileTitle;
   private File myCurrentFile;
@@ -85,15 +86,15 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
   private IdeRootPane myRootPane;
   private final BalloonLayout myBalloonLayout;
   private IdeFrameDecorator myFrameDecorator;
+  private PropertyChangeListener myWindowsBorderUpdater = null;
   private boolean myRestoreFullScreen;
 
   public IdeFrameImpl(ApplicationInfoEx applicationInfoEx,
                       ActionManagerEx actionManager,
-                      UISettings uiSettings,
                       DataManager dataManager,
                       Application application) {
     super(applicationInfoEx.getFullApplicationName());
-    myRootPane = createRootPane(actionManager, uiSettings, dataManager, application);
+    myRootPane = createRootPane(actionManager, UISettings.getInstance(), dataManager, application);
     setRootPane(myRootPane);
     setBackground(UIUtil.getPanelBackground());
     AppUIUtil.updateWindowIcon(this);
@@ -109,13 +110,9 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     setFocusTraversalPolicy(layoutFocusTraversalPolicy);
 
     setupCloseAction();
-    new MnemonicHelper().register(this);
+    MnemonicHelper.init(this);
 
-    myBalloonLayout = new BalloonLayoutImpl(myRootPane.getLayeredPane(), new Insets(8, 8, 8, 8));
-
-    if (!Registry.is("ide.windowSystem.focusAppOnStartup") && !isThereActiveFrame()) {
-      setFocusableWindowState(false);
-    }
+    myBalloonLayout = new BalloonLayoutImpl(myRootPane, new Insets(8, 8, 8, 8));
 
     // to show window thumbnail under Macs
     // http://lists.apple.com/archives/java-dev/2009/Dec/msg00240.html
@@ -131,16 +128,29 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
         updateBorder();
       }
     });
-
-    Toolkit.getDefaultToolkit().addPropertyChangeListener("win.xpstyle.themeActive", new PropertyChangeListener() {
-      @Override
-      public void propertyChange(PropertyChangeEvent evt) {
-        updateBorder();
-      }
-    });
+    if (SystemInfo.isWindows) {
+      myWindowsBorderUpdater = new PropertyChangeListener() {
+        @Override
+        public void propertyChange(@NotNull PropertyChangeEvent evt) {
+          updateBorder();
+        }
+      };
+      Toolkit.getDefaultToolkit().addPropertyChangeListener("win.xpstyle.themeActive", myWindowsBorderUpdater);
+    }
 
     IdeMenuBar.installAppMenuIfNeeded(this);
+
+    // UIUtil.suppressFocusStealing();
+
   }
+
+  @Override
+  public void addNotify() {
+    super.addNotify();
+    PowerSupplyKit.checkPowerSupply();
+  }
+
+
 
   private void updateBorder() {
     int state = getExtendedState();
@@ -157,13 +167,13 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
       for (IdeFrame frame : projectFrames) {
         if (frame == this) continue;
         if (((IdeFrameImpl)frame).isInFullScreen() && ScreenUtil.getScreenDevice(((IdeFrameImpl)frame).getBounds()) == device) {
-          Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(device.getDefaultConfiguration());
+          Insets insets = ScreenUtil.getScreenInsets(device.getDefaultConfiguration());
           int mask = SideBorder.NONE;
           if (insets.top != 0) mask |= SideBorder.TOP;
           if (insets.left != 0) mask |= SideBorder.LEFT;
           if (insets.bottom != 0) mask |= SideBorder.BOTTOM;
           if (insets.right != 0) mask |= SideBorder.RIGHT;
-          myRootPane.setBorder(new SideBorder(JBColor.BLACK, mask, false, 3));
+          myRootPane.setBorder(new SideBorder(JBColor.BLACK, mask, 3));
           break;
         }
       }
@@ -177,6 +187,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     return new IdeRootPane(actionManager, uiSettings, dataManager, application, this);
   }
 
+  @NotNull
   @Override
   public Insets getInsets() {
     if (SystemInfo.isMac && isInFullScreen()) {
@@ -198,22 +209,12 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     return null;
   }
 
-  public static boolean isThereActiveFrame() {
-    Frame[] all = Frame.getFrames();
-    for (Frame each : all) {
-      if (each.isActive()) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   @SuppressWarnings({"deprecation", "SSBasedInspection"})
   @Override
   public void show() {
     super.show();
     SwingUtilities.invokeLater(new Runnable() {
+      @Override
       public void run() {
         setFocusableWindowState(true);
       }
@@ -232,7 +233,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
     addWindowListener(
       new WindowAdapter() {
-        public void windowClosing(final WindowEvent e) {
+        public void windowClosing(@NotNull final WindowEvent e) {
           if (isTemporaryDisposed())
             return;
           final Application app = ApplicationManager.getApplication();
@@ -262,7 +263,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
   }
 
   public StatusBar getStatusBar() {
-    return ((IdeRootPane)getRootPane()).getStatusBar();
+    return myRootPane == null ? null : myRootPane.getStatusBar();
   }
 
   public void setTitle(final String title) {
@@ -309,9 +310,10 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
       final String applicationName = ((ApplicationInfoEx)ApplicationInfo.getInstance()).getFullApplicationName();
       final Builder builder = new Builder();
       if (SystemInfo.isMac) {
-        builder.append(fileTitle).append(title)
-          .append(ProjectManager.getInstance().getOpenProjects().length == 0
-                  || ((ApplicationInfoEx)ApplicationInfo.getInstance()).isEAP() && !applicationName.endsWith("SNAPSHOT") ? applicationName : null);
+        boolean addAppName = StringUtil.isEmpty(title) ||
+                             ProjectManager.getInstance().getOpenProjects().length == 0 ||
+                             ((ApplicationInfoEx)ApplicationInfo.getInstance()).isEAP() && !applicationName.endsWith("SNAPSHOT");
+        builder.append(fileTitle).append(title).append(addAppName ? applicationName : null);
       } else {
         builder.append(title).append(fileTitle).append(applicationName);
       }
@@ -423,18 +425,12 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     final LineSeparatorPanel lineSeparatorPanel = new LineSeparatorPanel(project);
     statusBar.addWidget(lineSeparatorPanel, "before " + encodingPanel.ID());
 
-    final ToggleReadOnlyAttributePanel readOnlyAttributePanel = new ToggleReadOnlyAttributePanel();
+    final ToggleReadOnlyAttributePanel readOnlyAttributePanel = new ToggleReadOnlyAttributePanel(project);
 
-    InsertOverwritePanel insertOverwritePanel = null;
-    if (!SystemInfo.isMac) {
-      insertOverwritePanel = new InsertOverwritePanel(project);
-      statusBar.addWidget(insertOverwritePanel, "after Encoding");
-      statusBar.addWidget(readOnlyAttributePanel, "after InsertOverwrite");
-    } else {
-      statusBar.addWidget(readOnlyAttributePanel, "after Encoding");
-    }
+    final InsertOverwritePanel insertOverwritePanel = new InsertOverwritePanel(project);
+    statusBar.addWidget(insertOverwritePanel, "after Encoding");
+    statusBar.addWidget(readOnlyAttributePanel, "after InsertOverwrite");
 
-    final InsertOverwritePanel finalInsertOverwritePanel = insertOverwritePanel;
     Disposer.register(project, new Disposable() {
       public void dispose() {
         statusBar.removeWidget(encodingPanel.ID());
@@ -442,7 +438,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
         statusBar.removeWidget(positionPanel.ID());
         statusBar.removeWidget(notificationArea.ID());
         statusBar.removeWidget(readOnlyAttributePanel.ID());
-        if (finalInsertOverwritePanel != null) statusBar.removeWidget(finalInsertOverwritePanel.ID());
+        statusBar.removeWidget(insertOverwritePanel.ID());
 
         ((StatusBarEx)statusBar).removeCustomIndicationComponents();
       }
@@ -454,20 +450,33 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
   }
 
   public void dispose() {
+    if (SystemInfo.isMac && isInFullScreen()) {
+      ((MacMainFrameDecorator)myFrameDecorator).exitFullScreenAndDispose();
+    }
+    else {
+      disposeImpl();
+    }
+  }
+
+  public void disposeImpl() {
     if (isTemporaryDisposed()) {
       super.dispose();
       return;
     }
     MouseGestureManager.getInstance().remove(this);
-    WelcomeFrame.notifyFrameClosed(this);
 
+    // clear both our and swing hard refs
     if (myRootPane != null) {
       myRootPane = null;
+      setRootPane(new JRootPane());
     }
-
     if (myFrameDecorator != null) {
       Disposer.dispose(myFrameDecorator);
       myFrameDecorator = null;
+    }
+    if (myWindowsBorderUpdater != null) {
+      Toolkit.getDefaultToolkit().removePropertyChangeListener("win.xpstyle.themeActive", myWindowsBorderUpdater);
+      myWindowsBorderUpdater = null;
     }
 
     FocusTrackback.release(this);
@@ -480,26 +489,29 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
   }
 
   public void storeFullScreenStateIfNeeded() {
-    storeFullScreenStateIfNeeded(myFrameDecorator.isInFullScreen());
+    if (myFrameDecorator != null) {
+      storeFullScreenStateIfNeeded(myFrameDecorator.isInFullScreen());
+    }
   }
 
   public void storeFullScreenStateIfNeeded(boolean state) {
     if (!WindowManager.getInstance().isFullScreenSupportedInCurrentOS()) return;
 
     if (myProject != null) {
-      PropertiesComponent.getInstance(myProject).setValue(FULL_SCREEN, String.valueOf(state));
+      PropertiesComponent.getInstance(myProject).setValue(FULL_SCREEN, state);
+      doLayout();
     }
   }
 
   public static boolean shouldRestoreFullScreen(@Nullable Project project) {
     return WindowManager.getInstance().isFullScreenSupportedInCurrentOS() &&
            project != null &&
-           (SHOULD_OPEN_IN_FULL_SCREEN.get(project) == Boolean.TRUE || PropertiesComponent.getInstance(project).getBoolean(FULL_SCREEN, false));
+           (SHOULD_OPEN_IN_FULL_SCREEN.get(project) == Boolean.TRUE || PropertiesComponent.getInstance(project).getBoolean(FULL_SCREEN));
   }
 
   @Override
-  public void paint(Graphics g) {
-    UIUtil.applyRenderingHints(g);
+  public void paint(@NotNull Graphics g) {
+    UISettings.setupAntialiasing(g);
     //noinspection Since15
     super.paint(g);
   }
@@ -514,20 +526,6 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     return b;
   }
 
-  @Nullable
-  public static Component findNearestModalComponent(@NotNull Component c) {
-    Component eachParent = c;
-    while (eachParent != null) {
-      if (eachParent instanceof IdeFrame) return eachParent;
-      if (eachParent instanceof JDialog) {
-        if (((JDialog)eachParent).isModal()) return eachParent;
-      }
-      eachParent = eachParent.getParent();
-    }
-
-    return null;
-  }
-
   public final BalloonLayout getBalloonLayout() {
     return myBalloonLayout;
   }
@@ -537,15 +535,17 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, DataProvider {
     return myFrameDecorator != null && myFrameDecorator.isInFullScreen();
   }
 
+  @NotNull
   @Override
-  public void toggleFullScreen(boolean state) {
+  public ActionCallback toggleFullScreen(boolean state) {
     if (myFrameDecorator != null) {
-      myFrameDecorator.toggleFullScreen(state);
+      return myFrameDecorator.toggleFullScreen(state);
     }
     IdeFrame[] frames = WindowManager.getInstance().getAllProjectFrames();
     for (IdeFrame frame : frames) {
       ((IdeFrameImpl)frame).updateBorder();
     }
+    return ActionCallback.DONE;
   }
 
   @Override

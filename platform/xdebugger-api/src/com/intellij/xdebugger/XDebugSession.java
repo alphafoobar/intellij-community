@@ -21,6 +21,7 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunnerLayoutUi;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
@@ -45,6 +46,7 @@ import javax.swing.event.HyperlinkListener;
  * @author nik
  */
 public interface XDebugSession extends AbstractDebuggerSession {
+  DataKey<XDebugSession> DATA_KEY = DataKey.create("XDebugSessionTab.XDebugSession");
 
   @NotNull
   Project getProject();
@@ -59,8 +61,19 @@ public interface XDebugSession extends AbstractDebuggerSession {
 
   XSuspendContext getSuspendContext();
 
+  /**
+   * Position from the current frame
+   * @return
+   */
   @Nullable
   XSourcePosition getCurrentPosition();
+
+  /**
+   * Position from the top frame
+   * @return
+   */
+  @Nullable
+  XSourcePosition getTopFramePosition();
 
   void stepOver(boolean ignoreBreakpoints);
 
@@ -78,12 +91,12 @@ public interface XDebugSession extends AbstractDebuggerSession {
 
   void showExecutionPoint();
 
-  void setCurrentStackFrame(@NotNull XExecutionStack executionStack, @NotNull XStackFrame frame);
+  void setCurrentStackFrame(@NotNull XExecutionStack executionStack, @NotNull XStackFrame frame, boolean isTopFrame);
 
   /**
-   * @deprecated use {@link #setCurrentStackFrame(com.intellij.xdebugger.frame.XExecutionStack, com.intellij.xdebugger.frame.XStackFrame)} instead
+   * @deprecated use {@link #setCurrentStackFrame(com.intellij.xdebugger.frame.XExecutionStack, com.intellij.xdebugger.frame.XStackFrame, boolean)} instead
    */
-  void setCurrentStackFrame(@NotNull XStackFrame frame);
+  void setCurrentStackFrame(@NotNull XExecutionStack executionStack, @NotNull XStackFrame frame);
 
   /**
    * Call this method to setup custom icon and/or error message (it will be shown in tooltip) for breakpoint

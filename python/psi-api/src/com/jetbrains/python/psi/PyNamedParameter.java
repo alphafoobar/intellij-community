@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,14 @@ public interface PyNamedParameter extends PyParameter, PsiNamedElement, PsiNameI
   boolean isPositionalContainer();
 
   boolean isKeywordContainer();
+
+  /**
+   * Parameter is considered "keyword-only" if it appears after named or unnamed positional vararg parameter.
+   * See PEP-3102 for more details.
+   *
+   * @return whether this parameter is keyword-only
+   */
+  boolean isKeywordOnly();
 
   /**
    * @param includeDefaultValue if true, include the default value after an " = ".

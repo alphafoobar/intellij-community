@@ -21,19 +21,21 @@ import com.intellij.execution.filters.Filter;
 import com.intellij.execution.filters.TextConsoleBuilder;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.util.ExecutionErrorDialog;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.util.ClassUtil;
-import com.intellij.psi.util.PsiClassUtil;
-import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -56,13 +58,11 @@ public class JavaExecutionUtil {
   public static boolean executeRun(@NotNull final Project project, String contentName, Icon icon, DataContext dataContext, Filter[] filters) throws ExecutionException {
     final JavaParameters cmdLine = JavaParameters.JAVA_PARAMETERS.getData(dataContext);
     final DefaultRunProfile profile = new DefaultRunProfile(project, cmdLine, contentName, icon, filters);
-    final ProgramRunner runner = RunnerRegistry.getInstance().getRunner(DefaultRunExecutor.EXECUTOR_ID, profile);
-    if (runner != null) {
-      Executor executor = DefaultRunExecutor.getRunExecutorInstance();
-      runner.execute(new ExecutionEnvironment(profile, executor, project, null));
+    ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder.createOrNull(project, DefaultRunExecutor.getRunExecutorInstance(), profile);
+    if (builder != null) {
+      builder.buildAndExecute();
       return true;
     }
-
     return false;
   }
 
@@ -114,7 +114,7 @@ public class JavaExecutionUtil {
     }
 
     @Override
-    public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
+    public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) {
       final JavaCommandLineState state = new JavaCommandLineState(env) {
         @Override
         protected JavaParameters createJavaParameters() {
@@ -141,22 +141,22 @@ public class JavaExecutionUtil {
   }
 
   @Nullable
-  public static String getPresentableClassName(final String rtClassName) {
+  public static String getPresentableClassName(@Nullable String rtClassName) {
     return getPresentableClassName(rtClassName, null);
   }
 
   /**
-   * {@link JavaExecutionUtil#getPresentableClassName(java.lang.String)} 
+   * {@link JavaExecutionUtil#getPresentableClassName(java.lang.String)}
    */
   @Deprecated
   @Nullable
-  public static String getPresentableClassName(final String rtClassName, final JavaRunConfigurationModule configurationModule) {
-    if (StringUtil.isEmpty(rtClassName)) return null;
-    final int lastDot = rtClassName.lastIndexOf('.');
-    if (lastDot == -1 || lastDot == rtClassName.length() - 1) {
-      return rtClassName;
+  public static String getPresentableClassName(@Nullable String rtClassName, JavaRunConfigurationModule configurationModule) {
+    if (StringUtil.isEmpty(rtClassName)) {
+      return null;
     }
-    return rtClassName.substring(lastDot + 1, rtClassName.length());
+
+    int lastDot = rtClassName.lastIndexOf('.');
+    return lastDot == -1 || lastDot == rtClassName.length() - 1 ? rtClassName : rtClassName.substring(lastDot + 1, rtClassName.length());
   }
 
   public static Module findModule(@NotNull final PsiClass psiClass) {
@@ -170,7 +170,7 @@ public class JavaExecutionUtil {
 
   @Nullable
   public static PsiClass findMainClass(final Project project, final String mainClassName, final GlobalSearchScope scope) {
-    if (project.isDefault()) return null;
+    if (project.isDefault() || DumbService.isDumb(project)) return null;
     final PsiManager psiManager = PsiManager.getInstance(project);
     final String shortName = StringUtil.getShortName(mainClassName);
     final String packageName = StringUtil.getPackageName(mainClassName);
@@ -184,12 +184,18 @@ public class JavaExecutionUtil {
     return name == null || name.startsWith(ExecutionBundle.message("run.configuration.unnamed.name.prefix"));
   }
 
-  public static Location stepIntoSingleClass(final Location location) {
+  @Nullable
+  public static Location stepIntoSingleClass(@NotNull final Location location) {
     PsiElement element = location.getPsiElement();
     if (!(element instanceof PsiClassOwner)) {
       if (PsiTreeUtil.getParentOfType(element, PsiClass.class) != null) return location;
       element = PsiTreeUtil.getParentOfType(element, PsiClassOwner.class);
       if (element == null) return location;
+    }
+    final VirtualFile virtualFile = PsiUtilCore.getVirtualFile(element);
+    final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(location.getProject()).getFileIndex();
+    if (virtualFile == null || !fileIndex.isInSource(virtualFile)) {
+      return null;
     }
     final PsiClassOwner psiFile = (PsiClassOwner)element;
     final PsiClass[] classes = psiFile.getClasses();
@@ -197,9 +203,8 @@ public class JavaExecutionUtil {
     return PsiLocation.fromPsiElement(classes[0]);
   }
 
-  public static String getShortClassName(final String fqName) {
-    if (fqName == null) return "";
-    return StringUtil.getShortName(fqName);
+  public static String getShortClassName(@Nullable String fqName) {
+    return fqName == null ? "" : StringUtil.getShortName(fqName);
   }
 
   public static void showExecutionErrorMessage(final ExecutionException e, final String title, final Project project) {

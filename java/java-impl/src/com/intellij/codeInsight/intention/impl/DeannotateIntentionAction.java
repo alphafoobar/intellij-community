@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ public class DeannotateIntentionAction implements IntentionAction {
   @Override
   @NotNull
   public String getText() {
-    return CodeInsightBundle.message("deannotate.intention.action.text") + (myAnnotationName != null ? " " + myAnnotationName : "");
+    return CodeInsightBundle.message("deannotate.intention.action.text") + (myAnnotationName != null ? " " + myAnnotationName : "...");
   }
 
   @Override
@@ -59,6 +59,7 @@ public class DeannotateIntentionAction implements IntentionAction {
 
   @Override
   public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
+    myAnnotationName = null;
     PsiModifierListOwner listOwner = getContainer(editor, file);
     if (listOwner != null) {
       final ExternalAnnotationsManager externalAnnotationsManager = ExternalAnnotationsManager.getInstance(project);
@@ -163,7 +164,7 @@ public class DeannotateIntentionAction implements IntentionAction {
                           final PsiModifierListOwner listOwner) {
     new WriteCommandAction(project, getText()) {
       @Override
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         final VirtualFile virtualFile = file.getVirtualFile();
         String qualifiedName = annotation.getQualifiedName();
         LOG.assertTrue(qualifiedName != null);

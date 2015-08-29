@@ -15,17 +15,28 @@
  */
 package git4idea.merge;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.ElementsChooser;
+import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitBranch;
 import git4idea.GitRemoteBranch;
 import git4idea.GitUtil;
+import git4idea.commands.Git;
 import git4idea.commands.GitCommand;
+import git4idea.commands.GitCommandResult;
 import git4idea.commands.GitLineHandler;
 import git4idea.i18n.GitBundle;
 import git4idea.repo.GitBranchTrackInfo;
@@ -44,71 +55,32 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Git pull dialog
- */
 public class GitPullDialog extends DialogWrapper {
 
   private static final Logger LOG = Logger.getInstance(GitPullDialog.class);
 
-  /**
-   * root panel
-   */
   private JPanel myPanel;
-  /**
-   * The selected git root
-   */
   private JComboBox myGitRoot;
-  /**
-   * Current branch label
-   */
   private JLabel myCurrentBranch;
-  /**
-   * The merge strategy
-   */
   private JComboBox myStrategy;
-  /**
-   * No commit option
-   */
   private JCheckBox myNoCommitCheckBox;
-  /**
-   * Squash commit option
-   */
   private JCheckBox mySquashCommitCheckBox;
-  /**
-   * No fast forward option
-   */
   private JCheckBox myNoFastForwardCheckBox;
-  /**
-   * Add log info to commit option
-   */
   private JCheckBox myAddLogInformationCheckBox;
-  /**
-   * Selected remote option
-   */
   private JComboBox myRemote;
-  /**
-   * The branch chooser
-   */
+  private JButton myGetBranchesButton;
   private ElementsChooser<String> myBranchChooser;
-  /**
-   * The context project
-   */
   private final Project myProject;
   private final GitRepositoryManager myRepositoryManager;
+  private final Git myGit;
 
-  /**
-   * A constructor
-   *
-   * @param project     a project to select
-   * @param roots       a git repository roots for the project
-   * @param defaultRoot a guessed default root
-   */
   public GitPullDialog(Project project, List<VirtualFile> roots, VirtualFile defaultRoot) {
     super(project, true);
     setTitle(GitBundle.getString("pull.title"));
     myProject = project;
     myRepositoryManager = GitUtil.getRepositoryManager(myProject);
+    myGit = ServiceManager.getService(Git.class);
+
     GitUIUtil.setupRootChooser(myProject, roots, defaultRoot, myGitRoot, myCurrentBranch);
     myGitRoot.addActionListener(new ActionListener() {
       public void actionPerformed(final ActionEvent e) {
@@ -118,6 +90,7 @@ public class GitPullDialog extends DialogWrapper {
     setOKButtonText(GitBundle.getString("pull.button"));
     updateRemotes();
     updateBranches();
+    setupGetBranches();
     myRemote.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
@@ -138,9 +111,64 @@ public class GitPullDialog extends DialogWrapper {
     init();
   }
 
-  /**
-   * Validate dialog and enable buttons
-   */
+  private void setupGetBranches() {
+    myGetBranchesButton.setIcon(AllIcons.Actions.Refresh);
+    myGetBranchesButton.setEnabled(myRemote.getItemCount() >= 1);
+    myGetBranchesButton.addActionListener(new ActionListener() {
+      public void actionPerformed(final ActionEvent e) {
+        GitRemote selectedItem = (GitRemote)myRemote.getSelectedItem();
+        Collection<String> remoteBranches = selectedItem != null ? getRemoteBranches(selectedItem) : null;
+        if (remoteBranches != null) {
+          myBranchChooser.removeAllElements();
+          for (String branch : remoteBranches) {
+            myBranchChooser.addElement(branch, false);
+          }
+        }
+      }
+    });
+  }
+
+  @Nullable
+  private Collection<String> getRemoteBranches(@NotNull final GitRemote remote) {
+    final Ref<GitCommandResult> result = Ref.create();
+    ProgressManager.getInstance().run(new Task.Modal(myProject, GitBundle.getString("pull.getting.remote.branches"), false) {
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        indicator.setIndeterminate(true);
+        result.set(myGit.lsRemote(GitPullDialog.this.myProject, gitRoot(), remote, "--heads"));
+      }
+    });
+
+    if (!result.isNull() && result.get().success()) {
+      try {
+        return parseRemoteBranches(remote, result.get().getOutput());
+      }
+      catch (Exception e) {
+        LOG.error("Couldn't parse ls-remote output: [" + result.get().getOutput() + "]", e);
+        Messages.showErrorDialog(this.getRootPane(), "Couldn't parse ls-remote output",
+                                 "Couldn't get the remote branches list from " + remote.getName());
+        return null;
+      }
+    }
+    else {
+      String message = result.isNull() ? "" : result.get().getErrorOutputAsJoinedString();
+      Messages.showErrorDialog(this.getRootPane(), message, "Couldn't get the remote branches list from " + remote.getName());
+      return null;
+    }
+  }
+
+  @NotNull
+  private static List<String> parseRemoteBranches(@NotNull final GitRemote remote, @NotNull List<String> lsRemoteOutputLines) {
+    return ContainerUtil.mapNotNull(lsRemoteOutputLines, new Function<String, String>() {
+      @Override
+      public String fun(@NotNull String line) {
+        if (StringUtil.isEmptyOrSpaces(line)) return null;
+        String shortRemoteName = line.trim().substring(line.indexOf(GitBranch.REFS_HEADS_PREFIX) + GitBranch.REFS_HEADS_PREFIX.length());
+        return remote.getName() + "/" + shortRemoteName;
+      }
+    });
+  }
+
   private void validateDialog() {
     String selectedRemote = getRemote();
     if (StringUtil.isEmptyOrSpaces(selectedRemote)) {
@@ -150,14 +178,11 @@ public class GitPullDialog extends DialogWrapper {
     setOKActionEnabled(myBranchChooser.getMarkedElements().size() != 0);
   }
 
-  /**
-   * @return a pull handler configured according to dialog options
-   */
-  public GitLineHandler makeHandler(@NotNull String url) {
+  public GitLineHandler makeHandler(@NotNull List<String> urls) {
     GitLineHandler h = new GitLineHandler(myProject, gitRoot(), GitCommand.PULL);
     // ignore merge failure for the pull
     h.ignoreErrorCode(1);
-    h.setUrl(url);
+    h.setUrls(urls);
     h.addProgressParameter();
     h.addParameters("--no-stat");
     if (myNoCommitCheckBox.isSelected()) {
@@ -203,7 +228,7 @@ public class GitPullDialog extends DialogWrapper {
   }
 
   private void updateBranches() {
-    String selectedRemote = getRemote();
+    final String selectedRemote = getRemote();
     myBranchChooser.removeAllElements();
 
     if (selectedRemote == null) {
@@ -216,25 +241,22 @@ public class GitPullDialog extends DialogWrapper {
     }
 
     GitBranchTrackInfo trackInfo = GitUtil.getTrackInfoForCurrentBranch(repository);
-    String currentRemoteBranch = trackInfo == null ? null : trackInfo.getRemoteBranch().getNameForLocalOperations();
+    GitRemoteBranch currentRemoteBranch = trackInfo == null ? null : trackInfo.getRemoteBranch();
     List<GitRemoteBranch> remoteBranches = new ArrayList<GitRemoteBranch>(repository.getBranches().getRemoteBranches());
     Collections.sort(remoteBranches);
-    for (GitBranch remoteBranch : remoteBranches) {
-      if (belongsToRemote(remoteBranch, selectedRemote)) {
-        myBranchChooser.addElement(remoteBranch.getName(), remoteBranch.getName().equals(currentRemoteBranch));
+    myBranchChooser.setElements(ContainerUtil.mapNotNull(remoteBranches, new Function<GitRemoteBranch, String>() {
+      @Override
+      public String fun(GitRemoteBranch branch) {
+        return branch.getRemote().getName().equals(selectedRemote) ? branch.getNameForLocalOperations() : null;
       }
+    }), false);
+    if (currentRemoteBranch != null && currentRemoteBranch.getRemote().getName().equals(selectedRemote)) {
+      myBranchChooser.setElementMarked(currentRemoteBranch.getNameForLocalOperations(), true);
     }
 
     validateDialog();
   }
 
-  private static boolean belongsToRemote(@NotNull GitBranch branch, @NotNull String remote) {
-    return branch.getName().startsWith(remote + "/");
-  }
-
-  /**
-   * Update remotes for the git root
-   */
   private void updateRemotes() {
     GitRepository repository = getRepository();
     if (repository == null) {
@@ -266,7 +288,7 @@ public class GitPullDialog extends DialogWrapper {
       return trackInfo.getRemote();
     }
     else {
-      GitRemote origin = getOriginRemote(remotes);
+      GitRemote origin = GitUtil.getDefaultRemote(remotes);
       if (origin != null) {
         return origin;
       }
@@ -274,16 +296,6 @@ public class GitPullDialog extends DialogWrapper {
         return remotes.iterator().next();
       }
     }
-  }
-
-  @Nullable
-  private static GitRemote getOriginRemote(@NotNull Collection<GitRemote> remotes) {
-    for (GitRemote remote : remotes) {
-      if (remote.getName().equals(GitRemote.ORIGIN_NAME)) {
-        return remote;
-      }
-    }
-    return null;
   }
 
   @Nullable
@@ -331,39 +343,23 @@ public class GitPullDialog extends DialogWrapper {
     };
   }
 
-  /**
-   * @return a currently selected git root
-   */
   public VirtualFile gitRoot() {
     return (VirtualFile)myGitRoot.getSelectedItem();
   }
 
-
-  /**
-   * Create branch chooser
-   */
   private void createUIComponents() {
     myBranchChooser = new ElementsChooser<String>(true);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   protected JComponent createCenterPanel() {
     return myPanel;
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected String getDimensionServiceKey() {
     return getClass().getName();
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected String getHelpId() {
     return "reference.VersionControl.Git.Pull";

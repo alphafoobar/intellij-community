@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileSystemItem;
 import com.intellij.psi.PsiReference;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.refactoring.RefactoringSettings;
@@ -66,7 +67,7 @@ public abstract class RenamePsiElementProcessor {
 
   @NotNull
   public Collection<PsiReference> findReferences(final PsiElement element) {
-    return ReferencesSearch.search(element).findAll();
+    return ReferencesSearch.search(element, GlobalSearchScope.projectScope(element.getProject())).findAll();
   }
 
   @Nullable
@@ -116,7 +117,8 @@ public abstract class RenamePsiElementProcessor {
 
   @NotNull
   public static RenamePsiElementProcessor forElement(@NotNull PsiElement element) {
-    for(RenamePsiElementProcessor processor: Extensions.getExtensions(EP_NAME)) {
+    RenamePsiElementProcessor[] extensions = Extensions.getExtensions(EP_NAME);
+    for(RenamePsiElementProcessor processor: extensions) {
       if (processor.canProcessElement(element)) {
         return processor;
       }

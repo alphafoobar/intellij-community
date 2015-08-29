@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.ExpirableRunnable;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.FocusCommand;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ex.LayoutFocusTraversalPolicyExt;
@@ -51,8 +52,8 @@ public class FocusTrackback {
 
   private Window myRoot;
 
-  private Component myFocusOwner;
-  private Component myLocalFocusOwner;
+  private WeakReference<Component> myFocusOwner = new WeakReference<Component>(null);
+  private WeakReference<Component> myLocalFocusOwner = new WeakReference<Component>(null);
 
   private static final Map<Window, List<FocusTrackback>> ourRootWindowToParentsStack = new WeakHashMap<Window, List<FocusTrackback>>();
   private static final Map<Window, Component> ourRootWindowToFocusedMap = new WeakKeyWeakValueHashMap<Window, Component>();
@@ -68,7 +69,7 @@ public class FocusTrackback {
   private boolean myForcedRestore;
 
   public FocusTrackback(@NotNull Object requestor, Component parent, boolean mustBeShown) {
-    this(requestor, parent == null || parent instanceof Window ? (Window)parent : SwingUtilities.getWindowAncestor(parent), mustBeShown);
+    this(requestor, parent == null ? null : UIUtil.getWindow(parent), mustBeShown);
   }
 
   public FocusTrackback(@NotNull Object requestor, Window parent, boolean mustBeShown) {
@@ -79,7 +80,7 @@ public class FocusTrackback {
 
 
     final Application app = ApplicationManager.getApplication();
-    if (app == null || app.isUnitTestMode() || wrongOS()) return;
+    if (app == null || app.isHeadlessEnvironment() || wrongOS()) return;
 
     register(parent);
 
@@ -93,14 +94,17 @@ public class FocusTrackback {
     setLocalFocusOwner(manager.getPermanentFocusOwner());
 
     final IdeFocusManager fm = IdeFocusManager.getGlobalInstance();
-    if (myLocalFocusOwner == null && fm.isFocusBeingTransferred()) {
+    if (myLocalFocusOwner.get() == null && fm.isFocusBeingTransferred()) {
       if (index > 0) {
         int eachIndex = index - 1;
         while (eachIndex > 0) {
           final FocusTrackback each = stack.get(eachIndex);
-          if (!each.isConsumed() && each.myLocalFocusOwner != null) {
-            setLocalFocusOwner(each.myLocalFocusOwner);
-            break;
+          if (!each.isConsumed()) {
+            Component component = each.myLocalFocusOwner.get();
+            if (component != null) {
+              setLocalFocusOwner(component);
+              break;
+            }
           }
           eachIndex--;
         }
@@ -132,7 +136,7 @@ public class FocusTrackback {
   }
 
   private void setLocalFocusOwner(Component component) {
-    myLocalFocusOwner = component;
+    myLocalFocusOwner = new WeakReference<Component>(component);
   }
 
   public static Component getFocusFor(Window parent) {
@@ -190,10 +194,12 @@ public class FocusTrackback {
     if (app == null || wrongOS() || myConsumed || isSheduledForRestore()) return;
 
     Project project = null;
-    DataContext context =
-        myParentWindow == null ? DataManager.getInstance().getDataContext() : DataManager.getInstance().getDataContext(myParentWindow);
-    if (context != null) {
-      project = CommonDataKeys.PROJECT.getData(context);
+    DataManager dataManager = DataManager.getInstance();
+    if (dataManager != null) {
+      DataContext context = myParentWindow == null ? dataManager.getDataContext() : dataManager.getDataContext(myParentWindow);
+      if (context != null) {
+        project = CommonDataKeys.PROJECT.getData(context);
+      }
     }
 
     mySheduledForRestore = true;
@@ -243,7 +249,7 @@ public class FocusTrackback {
   private ActionCallback _restoreFocus() {
     final List<FocusTrackback> stack = getCleanStack();
 
-    if (!stack.contains(this)) return new ActionCallback.Rejected();
+    if (!stack.contains(this)) return ActionCallback.REJECTED;
 
     Component toFocus = queryToFocus(stack, this, true);
 
@@ -260,13 +266,13 @@ public class FocusTrackback {
       }
 
       if (myParentWindow != null) {
-        final Window to = toFocus instanceof Window ? (Window) toFocus : SwingUtilities.getWindowAncestor(toFocus);
+        final Window to = UIUtil.getWindow(toFocus);
         if (to != null && UIUtil.findUltimateParent(to) == UIUtil.findUltimateParent(myParentWindow)) {  // IDEADEV-34537
-          toFocus.requestFocus();
+          requestFocus(toFocus);
           result.setDone();
         }
       } else {
-        toFocus.requestFocus();
+        requestFocus(toFocus);
         result.setDone();
       }
     }
@@ -281,12 +287,21 @@ public class FocusTrackback {
     return result;
   }
 
+  private void requestFocus(Component toFocus) {
+    if (myForcedRestore) {
+      toFocus.requestFocus();
+    } else {
+      toFocus.requestFocusInWindow();
+    }
+  }
+
   private static Component queryToFocus(final List<FocusTrackback> stack, final FocusTrackback trackback, boolean mustBeLastInStack) {
     final int index = stack.indexOf(trackback);
     Component toFocus = null;
 
-    if (trackback.myLocalFocusOwner != null) {
-      toFocus = trackback.myLocalFocusOwner;
+    Component focusOwner = trackback.myLocalFocusOwner.get();
+    if (focusOwner != null) {
+      toFocus = focusOwner;
 
       if (UIUtil.isMeaninglessFocusOwner(toFocus)) {
         toFocus = null;
@@ -362,7 +377,7 @@ public class FocusTrackback {
 
   @Nullable
   public Component getFocusOwner() {
-    return myFocusOwner;
+    return myFocusOwner.get();
   }
 
   @SuppressWarnings({"HardCodedStringLiteral"})
@@ -384,8 +399,8 @@ public class FocusTrackback {
 
     myParentWindow = null;
     myRoot = null;
-    myFocusOwner = null;
-    myLocalFocusOwner = null;
+    myFocusOwner.clear();
+    myLocalFocusOwner.clear();
   }
 
   private boolean isConsumed() {
@@ -407,7 +422,7 @@ public class FocusTrackback {
   }
 
   private void setFocusOwner(final Component focusOwner) {
-    myFocusOwner = focusOwner;
+    myFocusOwner = new WeakReference<Component>(focusOwner);
   }
 
   public void setMustBeShown(final boolean mustBeShown) {
@@ -452,7 +467,8 @@ public class FocusTrackback {
   }
 
   public void cleanParentWindow() {
-    if (myParentWindow != null) {
+    if (!Registry.is("focus.fix.lost.cursor")) return;
+      if (myParentWindow != null) {
       try {
         Method tmpLost = Window.class.getDeclaredMethod("setTemporaryLostComponent", Component.class);
         tmpLost.setAccessible(true);
@@ -486,7 +502,7 @@ public class FocusTrackback {
   public static List<JBPopup> getChildPopups(@NotNull final Component component) {
     List<JBPopup> result = new ArrayList<JBPopup>();
 
-    final Window window = component instanceof Window ? (Window)component: SwingUtilities.windowForComponent(component);
+    final Window window = UIUtil.getWindow(component);
     if (window == null) return result;
 
     final List<FocusTrackback> stack = getCleanStackForRoot(findUtlimateParent(window));

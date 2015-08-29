@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@ import com.intellij.openapi.util.Conditions;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.concurrency.Semaphore;
-import com.intellij.util.containers.*;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -40,7 +41,8 @@ import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -49,22 +51,21 @@ public class LaterInvocator {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.application.impl.LaterInvocator");
   private static final boolean DEBUG = LOG.isDebugEnabled();
 
-  public static final Object LOCK = new Object(); //public for tests
+  private static final Object LOCK = new Object();
   private static final IdeEventQueue ourEventQueue = IdeEventQueue.getInstance();
   private static final FrequentEventDetector ourFrequentEventDetector = new FrequentEventDetector(1009, 100);
 
-  private LaterInvocator() {
-  }
+  private LaterInvocator() { }
 
   private static class RunnableInfo {
-    final Runnable runnable;
-    final ModalityState modalityState;
-    final Condition<Object> expired;
-    final ActionCallback callback;
+    @NotNull private final Runnable runnable;
+    @NotNull private final ModalityState modalityState;
+    @NotNull private final Condition<?> expired;
+    @NotNull private final ActionCallback callback;
 
     public RunnableInfo(@NotNull Runnable runnable,
                         @NotNull ModalityState modalityState,
-                        @NotNull Condition<Object> expired,
+                        @NotNull Condition<?> expired,
                         @NotNull ActionCallback callback) {
       this.runnable = runnable;
       this.modalityState = modalityState;
@@ -72,37 +73,28 @@ public class LaterInvocator {
       this.callback = callback;
     }
 
+    @Override
     @NonNls
     public String toString() {
-      return "[runnable: " + runnable + "; state=" + modalityState + "] ";
+      return "[runnable: " + runnable + "; state=" + modalityState + (expired.value(null) ? "; expired" : "")+"] ";
     }
   }
 
   private static final List<Object> ourModalEntities = ContainerUtil.createLockFreeCopyOnWriteList();
   private static final List<RunnableInfo> ourQueue = new ArrayList<RunnableInfo>(); //protected by LOCK
   private static volatile int ourQueueSkipCount = 0; // optimization
-  private static final Runnable ourFlushQueueRunnable = new FlushQueue();
+  private static final FlushQueue ourFlushQueueRunnable = new FlushQueue();
 
   private static final Stack<AWTEvent> ourEventStack = new Stack<AWTEvent>(); // guarded by RUN_LOCK
 
-  static boolean IS_TEST_MODE = false;
+  private static final EventDispatcher<ModalityStateListener> ourModalityStateMulticaster = EventDispatcher.create(ModalityStateListener.class);
 
-  private static final EventDispatcher<ModalityStateListener> ourModalityStateMulticaster =
-    EventDispatcher.create(ModalityStateListener.class);
-
-
-  private static final ArrayList<RunnableInfo> ourForcedFlushQueue = new ArrayList<RunnableInfo>();
-
-  public static void addModalityStateListener(@NotNull ModalityStateListener listener) {
-    ourModalityStateMulticaster.addListener(listener);
-  }
+  private static final List<RunnableInfo> ourForcedFlushQueue = new ArrayList<RunnableInfo>();
 
   public static void addModalityStateListener(@NotNull ModalityStateListener listener, @NotNull Disposable parentDisposable) {
-    ourModalityStateMulticaster.addListener(listener, parentDisposable);
-  }
-
-  public static void removeModalityStateListener(@NotNull ModalityStateListener listener) {
-    ourModalityStateMulticaster.removeListener(listener);
+    if (!ourModalityStateMulticaster.getListeners().contains(listener)) {
+      ourModalityStateMulticaster.addListener(listener, parentDisposable);
+    }
   }
 
   @NotNull
@@ -110,58 +102,51 @@ public class LaterInvocator {
     int index = ourModalEntities.indexOf(window);
     if (index < 0) {
       Window owner = window.getOwner();
-      if (owner == null) return (ModalityStateEx)ApplicationManager.getApplication().getNoneModalityState();
+      if (owner == null) {
+        return (ModalityStateEx)ApplicationManager.getApplication().getNoneModalityState();
+      }
       ModalityStateEx ownerState = modalityStateForWindow(owner);
       if (window instanceof Dialog && ((Dialog)window).isModal()) {
         return ownerState.appendEntity(window);
       }
-      else {
-        return ownerState;
-      }
+      return ownerState;
     }
 
-    ArrayList<Object> result = new ArrayList<Object>();
+    List<Object> result = new ArrayList<Object>();
     for (Object entity : ourModalEntities) {
-      if (entity instanceof Window) {
+      if (entity instanceof Window ||
+          entity instanceof ProgressIndicator && ((ProgressIndicator)entity).isModal()) {
         result.add(entity);
-      }
-      else if (entity instanceof ProgressIndicator) {
-        if (((ProgressIndicator)entity).isModal()) {
-          result.add(entity);
-        }
       }
     }
     return new ModalityStateEx(result.toArray());
   }
 
-  public static ActionCallback invokeLater(@NotNull Runnable runnable) {
-    return invokeLater(runnable, Conditions.FALSE);
-  }
-
-  public static ActionCallback invokeLater(@NotNull Runnable runnable, @NotNull Condition expired) {
+  @NotNull
+  static ActionCallback invokeLater(@NotNull Runnable runnable, @NotNull Condition<?> expired) {
     ModalityState modalityState = ModalityState.defaultModalityState();
     return invokeLater(runnable, modalityState, expired);
   }
 
-  public static ActionCallback invokeLater(@NotNull Runnable runnable, @NotNull ModalityState modalityState) {
+  @NotNull
+  static ActionCallback invokeLater(@NotNull Runnable runnable, @NotNull ModalityState modalityState) {
     return invokeLater(runnable, modalityState, Conditions.FALSE);
   }
 
-  public static ActionCallback invokeLater(@NotNull Runnable runnable,
-                                           @NotNull ModalityState modalityState,
-                                           @NotNull Condition<Object> expired) {
+  @NotNull
+  static ActionCallback invokeLater(@NotNull Runnable runnable, @NotNull ModalityState modalityState, @NotNull Condition<?> expired) {
     ourFrequentEventDetector.eventHappened();
 
     final ActionCallback callback = new ActionCallback();
+    RunnableInfo runnableInfo = new RunnableInfo(runnable, modalityState, expired, callback);
     synchronized (LOCK) {
-      ourQueue.add(new RunnableInfo(runnable, modalityState, expired, callback));
+      ourQueue.add(runnableInfo);
     }
     requestFlush();
     return callback;
   }
 
-
-  public static void invokeAndWait(@NotNull final Runnable runnable, @NotNull ModalityState modalityState) {
+  static void invokeAndWait(@NotNull final Runnable runnable, @NotNull ModalityState modalityState) {
     LOG.assertTrue(!isDispatchThread());
 
     final Semaphore semaphore = new Semaphore();
@@ -177,9 +162,10 @@ public class LaterInvocator {
         }
       }
 
+      @Override
       @NonNls
       public String toString() {
-        return "InvokeAndWait[" + runnable.toString() + "]";
+        return "InvokeAndWait[" + runnable + "]";
       }
     };
     invokeLater(runnable1, modalityState);
@@ -187,33 +173,28 @@ public class LaterInvocator {
   }
 
   public static void enterModal(@NotNull Object modalEntity) {
-    if (!IS_TEST_MODE) {
-      LOG.assertTrue(isDispatchThread(), "enterModal() should be invoked in event-dispatch thread");
-    }
+    LOG.assertTrue(isDispatchThread(), "enterModal() should be invoked in event-dispatch thread");
 
     if (LOG.isDebugEnabled()) {
       LOG.debug("enterModal:" + modalEntity);
     }
 
-    if (!IS_TEST_MODE) {
-      ourModalityStateMulticaster.getMulticaster().beforeModalityStateChanged(true);
-    }
+    ourModalityStateMulticaster.getMulticaster().beforeModalityStateChanged(true);
 
     ourModalEntities.add(modalEntity);
   }
 
   public static void leaveModal(@NotNull Object modalEntity) {
-    if (!IS_TEST_MODE) {
-      LOG.assertTrue(isDispatchThread(), "leaveModal() should be invoked in event-dispatch thread");
-    }
+    LOG.assertTrue(isDispatchThread(), "leaveModal() should be invoked in event-dispatch thread");
 
     if (LOG.isDebugEnabled()) {
       LOG.debug("leaveModal:" + modalEntity);
     }
 
-    if (!IS_TEST_MODE) {
-      ourModalityStateMulticaster.getMulticaster().beforeModalityStateChanged(false);
-    }
+    //noinspection StatementWithEmptyBody
+    while (ourFlushQueueRunnable.runNextEvent());
+
+    ourModalityStateMulticaster.getMulticaster().beforeModalityStateChanged(false);
 
     boolean removed = ourModalEntities.remove(modalEntity);
     LOG.assertTrue(removed, modalEntity);
@@ -237,15 +218,8 @@ public class LaterInvocator {
     }
   }
 
+  @TestOnly
   static void leaveAllModals() {
-    LOG.assertTrue(IS_TEST_MODE);
-
-    /*
-    if (!IS_TEST_MODE) {
-      ourModalityStateMulticaster.getMulticaster().beforeModalityStateChanged();
-    }
-    */
-
     ourModalEntities.clear();
     ourQueueSkipCount = 0;
     requestFlush();
@@ -253,9 +227,7 @@ public class LaterInvocator {
 
   @NotNull
   public static Object[] getCurrentModalEntities() {
-    if (!IS_TEST_MODE) {
-      ApplicationManager.getApplication().assertIsDispatchThread();
-    }
+    ApplicationManager.getApplication().assertIsDispatchThread();
     //TODO!
     //LOG.assertTrue(IdeEventQueue.getInstance().isInInputEvent() || isInMyRunnable());
 
@@ -263,9 +235,7 @@ public class LaterInvocator {
   }
 
   public static boolean isInModalContext() {
-    if (!IS_TEST_MODE) {
-      LOG.assertTrue(isDispatchThread());
-    }
+    LOG.assertTrue(isDispatchThread());
     return !ourModalEntities.isEmpty();
   }
 
@@ -279,11 +249,26 @@ public class LaterInvocator {
     }
   }
 
+  /**
+   * There might be some requests in the queue, but ourFlushQueueRunnable might not be scheduled yet. In these circumstances 
+   * {@link EventQueue#peekEvent()} default implementation would return null, and {@link UIUtil#dispatchAllInvocationEvents()} would
+   * stop processing events too early and lead to spurious test failures.
+   * 
+   * @see IdeEventQueue#peekEvent() 
+   */
+  public static boolean ensureFlushRequested() {
+    if (getNextEvent(false) != null) {
+      SwingUtilities.invokeLater(ourFlushQueueRunnable);
+      return true;
+    }
+    return false;
+  }
+
   @Nullable
-  private static RunnableInfo pollNext() {
+  private static RunnableInfo getNextEvent(boolean remove) {
     synchronized (LOCK) {
       if (!ourForcedFlushQueue.isEmpty()) {
-        final RunnableInfo toRun = ourForcedFlushQueue.remove(0);
+        final RunnableInfo toRun = remove ? ourForcedFlushQueue.remove(0) : ourForcedFlushQueue.get(0);
         if (!toRun.expired.value(null)) {
           return toRun;
         }
@@ -293,11 +278,10 @@ public class LaterInvocator {
       }
 
 
-      ModalityStateEx currentModality;
+      ModalityState currentModality;
       if (ourModalEntities.isEmpty()) {
         Application application = ApplicationManager.getApplication();
-        currentModality =
-          application == null ? (ModalityStateEx)ModalityState.NON_MODAL : (ModalityStateEx)application.getNoneModalityState();
+        currentModality = application == null ? ModalityState.NON_MODAL : application.getNoneModalityState();
       }
       else {
         currentModality = new ModalityStateEx(ourModalEntities.toArray());
@@ -313,7 +297,9 @@ public class LaterInvocator {
         }
 
         if (!currentModality.dominates(info.modalityState)) {
-          ourQueue.remove(ourQueueSkipCount);
+          if (remove) {
+            ourQueue.remove(ourQueueSkipCount);
+          }
           return info;
         }
         ourQueueSkipCount++;
@@ -327,13 +313,18 @@ public class LaterInvocator {
   private static final Object RUN_LOCK = new Object();
 
   private static class FlushQueue implements Runnable {
-    private RunnableInfo myLastInfo;
+    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized") private RunnableInfo myLastInfo;
 
     @Override
     public void run() {
       FLUSHER_SCHEDULED.set(false);
+      if (runNextEvent()) {
+        requestFlush();
+      }
+    }
 
-      final RunnableInfo lastInfo = pollNext();
+    private boolean runNextEvent() {
+      final RunnableInfo lastInfo = getNextEvent(true);
       myLastInfo = lastInfo;
 
       if (lastInfo != null) {
@@ -346,13 +337,8 @@ public class LaterInvocator {
             lastInfo.runnable.run();
             lastInfo.callback.setDone();
           }
-          catch (ProcessCanceledException ex) {
-            // ignore            
-          }
+          catch (ProcessCanceledException ignored) { }
           catch (Throwable t) {
-            if (t instanceof StackOverflowError) {
-              t.printStackTrace();
-            }
             LOG.error(t);
           }
           finally {
@@ -362,27 +348,20 @@ public class LaterInvocator {
             if (!DEBUG) myLastInfo = null;
           }
         }
-
-        requestFlush();
       }
+      return lastInfo != null;
     }
 
-    @NonNls
+    @Override
     public String toString() {
-      return "LaterInvocator[lastRunnable=" + myLastInfo + "]";
+      return "LaterInvocator.FlushQueue" + (myLastInfo == null ? "" : " lastInfo=" + myLastInfo);
     }
   }
 
   @TestOnly
-  public static List<Object> dumpQueue() {
+  public static List<RunnableInfo> getLaterInvocatorQueue() {
     synchronized (LOCK) {
-      if (!ourQueue.isEmpty()) {
-        ArrayList<Object> r = new ArrayList<Object>();
-        r.addAll(ourQueue);
-        Collections.reverse(r);
-        return r;
-      }
+      return ContainerUtil.newArrayList(ourQueue);
     }
-    return null;
   }
 }

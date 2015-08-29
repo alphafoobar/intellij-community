@@ -34,7 +34,10 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.Convertor;
+import com.intellij.vcsUtil.VcsUtil;
 import junit.framework.Assert;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.auth.SvnAuthenticationManager;
 import org.jetbrains.idea.svn.checkout.SvnCheckoutProvider;
 import org.junit.Before;
 import org.tmatesoft.svn.core.*;
@@ -124,7 +127,7 @@ public class SvnProtocolsTest extends Svn17TestCase {
 
   private void testBrowseRepositoryImpl(final String url) throws SVNException {
     final List<SVNDirEntry> list = new ArrayList<SVNDirEntry>();
-    final SVNRepository repository = myVcs.createRepository(url);
+    final SVNRepository repository = myVcs.getSvnKitManager().createRepository(url);
     repository.getDir(".", -1, null, new ISVNDirEntryHandler() {
       @Override
       public void handleDirEntry(SVNDirEntry dirEntry) throws SVNException {
@@ -190,7 +193,7 @@ public class SvnProtocolsTest extends Svn17TestCase {
     final VirtualFile vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(wc1);
     final UpdatedFiles files = UpdatedFiles.create();
     final UpdateSession session =
-      myVcs.getUpdateEnvironment().updateDirectories(new FilePath[]{new FilePathImpl(vf)}, files, new EmptyProgressIndicator(),
+      myVcs.getUpdateEnvironment().updateDirectories(new FilePath[]{VcsUtil.getFilePath(vf)}, files, new EmptyProgressIndicator(),
                                                      new Ref<SequentialUpdatesContext>());
     Assert.assertTrue(session.getExceptions() == null || session.getExceptions().isEmpty());
     Assert.assertTrue(! session.isCanceled());
@@ -210,7 +213,7 @@ public class SvnProtocolsTest extends Svn17TestCase {
     final List<VcsException> exceptions = myVcs.getCheckinEnvironment().scheduleUnversionedFilesForAddition(files);
     Assert.assertTrue(exceptions.isEmpty());
 
-    final Change change = new Change(null, new CurrentContentRevision(new FilePathImpl(vf)));
+    final Change change = new Change(null, new CurrentContentRevision(VcsUtil.getFilePath(vf)));
     final List<VcsException> commit = myVcs.getCheckinEnvironment().commit(Collections.singletonList(change), "commit");
     Assert.assertTrue(commit.isEmpty());
     return file;
@@ -221,7 +224,7 @@ public class SvnProtocolsTest extends Svn17TestCase {
     root.deleteOnExit();
     Assert.assertTrue(root.exists());
     SvnCheckoutProvider
-      .checkout(myProject, root, url, SVNRevision.HEAD, SVNDepth.INFINITY, false, new CheckoutProvider.Listener() {
+      .checkout(myProject, root, url, SVNRevision.HEAD, Depth.INFINITY, false, new CheckoutProvider.Listener() {
         @Override
         public void directoryCheckedOut(File directory, VcsKey vcs) {
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.InputValidator;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.XmlRecursiveElementVisitor;
@@ -44,7 +45,7 @@ import java.util.Set;
  * @author Konstantin Bulenkov
  */
 public class AddSchemaPrefixIntention extends PsiElementBaseIntentionAction {
-  public static final String NAME = "Insert Namespace Prefix";
+  public static final String NAME = "Insert namespace prefix";
 
   public AddSchemaPrefixIntention() {
     setText(NAME);
@@ -65,7 +66,7 @@ public class AddSchemaPrefixIntention extends PsiElementBaseIntentionAction {
 
     if (tag != null) {
       final Set<String> ns = tag.getLocalNamespaceDeclarations().keySet();
-      final String nsPrefix = Messages.showInputDialog(project, "Namespace Prefix:", NAME, Messages.getInformationIcon(), "",
+      final String nsPrefix = Messages.showInputDialog(project, "Namespace Prefix:", StringUtil.capitalize(NAME), Messages.getInformationIcon(), "",
                                new InputValidator() {
                                  @Override
                                  public boolean checkInput(String inputString) {
@@ -82,7 +83,7 @@ public class AddSchemaPrefixIntention extends PsiElementBaseIntentionAction {
       final List<XmlAttributeValue> values = new ArrayList<XmlAttributeValue>();
       new WriteCommandAction(project, NAME, tag.getContainingFile()) {
         @Override
-        protected void run(Result result) throws Throwable {
+        protected void run(@NotNull Result result) throws Throwable {
           tag.accept(new XmlRecursiveElementVisitor() {
             @Override
             public void visitXmlTag(XmlTag tag) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,51 +23,45 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.reference.SoftReference;
 import com.intellij.util.Function;
-import com.intellij.util.containers.WeakFactoryMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import java.lang.ref.Reference;
 
 public class MockFileDocumentManagerImpl extends FileDocumentManager {
   private static final Key<VirtualFile> MOCK_VIRTUAL_FILE_KEY = Key.create("MockVirtualFile");
   private final Function<CharSequence, Document> myFactory;
-  @Nullable private final Key<Reference<Document>> myCachedDocumentKey;
+  @Nullable private final Key<Document> myCachedDocumentKey;
 
-  public MockFileDocumentManagerImpl(Function<CharSequence, Document> factory, @Nullable Key<Reference<Document>> cachedDocumentKey) {
+  public MockFileDocumentManagerImpl(Function<CharSequence, Document> factory, @Nullable Key<Document> cachedDocumentKey) {
     myFactory = factory;
     myCachedDocumentKey = cachedDocumentKey;
   }
 
-  private final WeakFactoryMap<VirtualFile,Document> myDocuments = new WeakFactoryMap<VirtualFile, Document>() {
-    @Override
-    protected Document create(final VirtualFile key) {
-      if (key.isDirectory() || isBinaryWithoutDecompiler(key)) return null;
+  private static final Key<Document> MOCK_DOC_KEY = Key.create("MOCK_DOC_KEY");
 
-      CharSequence text = LoadTextUtil.loadText(key);
-      final Document document = myFactory.fun(text);
-      document.putUserData(MOCK_VIRTUAL_FILE_KEY, key);
-      return document;
-    }
-
-    private boolean isBinaryWithoutDecompiler(VirtualFile file) {
-      final FileType ft = file.getFileType();
-      return ft.isBinary() && BinaryFileTypeDecompilers.INSTANCE.forFileType(ft) == null;
-    }
-  };
+  private static boolean isBinaryWithoutDecompiler(VirtualFile file) {
+    final FileType ft = file.getFileType();
+    return ft.isBinary() && BinaryFileTypeDecompilers.INSTANCE.forFileType(ft) == null;
+  }
 
   @Override
   public Document getDocument(@NotNull VirtualFile file) {
-    return myDocuments.get(file);
+    Document document = file.getUserData(MOCK_DOC_KEY);
+    if (document == null) {
+      if (file.isDirectory() || isBinaryWithoutDecompiler(file)) return null;
+
+      CharSequence text = LoadTextUtil.loadText(file);
+      document = myFactory.fun(text);
+      document.putUserData(MOCK_VIRTUAL_FILE_KEY, file);
+      document = file.putUserDataIfAbsent(MOCK_DOC_KEY, document);
+    }
+    return document;
   }
 
   @Override
   public Document getCachedDocument(@NotNull VirtualFile file) {
     if (myCachedDocumentKey != null) {
-      Reference<Document> reference = file.getUserData(myCachedDocumentKey);
-      return SoftReference.dereference(reference);
+      return file.getUserData(myCachedDocumentKey);
     }
     return null;
   }
@@ -110,7 +104,7 @@ public class MockFileDocumentManagerImpl extends FileDocumentManager {
   }
 
   @Override
-  public void reloadFiles(final VirtualFile... files) {
+  public void reloadFiles(@NotNull final VirtualFile... files) {
   }
 
   @Override

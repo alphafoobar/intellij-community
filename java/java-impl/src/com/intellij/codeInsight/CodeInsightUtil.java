@@ -16,6 +16,7 @@
 package com.intellij.codeInsight;
 
 import com.intellij.codeInsight.completion.AllClassesGetter;
+import com.intellij.codeInsight.completion.CompletionUtil;
 import com.intellij.codeInsight.completion.JavaCompletionUtil;
 import com.intellij.codeInsight.completion.PrefixMatcher;
 import com.intellij.lang.Language;
@@ -33,17 +34,14 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiUtil;
-import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.psi.util.*;
 import com.intellij.psi.util.proximity.PsiProximityComparator;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.FilteredQuery;
 import com.intellij.util.Processor;
 import com.intellij.util.Query;
-import com.intellij.psi.util.FileTypeUtils;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -105,7 +103,9 @@ public class CodeInsightUtil {
     if (parent == null) return PsiElement.EMPTY_ARRAY;
     while (true) {
       if (parent instanceof PsiStatement) {
-        parent = parent.getParent();
+        if (!(element1 instanceof PsiComment)) {
+          parent = parent.getParent();
+        }
         break;
       }
       if (parent instanceof PsiCodeBlock) break;
@@ -180,7 +180,23 @@ public class CodeInsightUtil {
     if (classes.length <= 1) return;
 
     PsiElement leaf = context.getElement().getFirstChild(); // the same proximity weighers are used in completion, where the leafness is critical
-    Arrays.sort(classes, new PsiProximityComparator(leaf));
+    final PsiProximityComparator proximityComparator = new PsiProximityComparator(leaf);
+    Arrays.sort(classes, new Comparator<PsiClass>() {
+      @Override
+      public int compare(PsiClass o1, PsiClass o2) {
+        boolean deprecated1 = o1.isDeprecated();
+        boolean deprecated2 = o2.isDeprecated();
+        if (deprecated1 && !deprecated2) return 1;
+        if (!deprecated1 && deprecated2) return -1;
+        int compare = proximityComparator.compare(o1, o2);
+        if (compare != 0) return compare;
+
+        String qname1 = o1.getQualifiedName();
+        String qname2 = o2.getQualifiedName();
+        if (qname1 == null || qname2 == null) return 0;
+        return qname1.compareToIgnoreCase(qname2);
+      }
+    });
   }
 
   public static PsiExpression[] findExpressionOccurrences(PsiElement scope, PsiExpression expr) {
@@ -233,7 +249,7 @@ public class CodeInsightUtil {
     }
   }
 
-  public static Editor positionCursor(final Project project, PsiFile targetFile, PsiElement element) {
+  public static Editor positionCursor(final Project project, PsiFile targetFile, @NotNull PsiElement element) {
     TextRange range = element.getTextRange();
     int textOffset = range.getStartOffset();
 
@@ -283,6 +299,11 @@ public class CodeInsightUtil {
 
     final Processor<PsiClass> inheritorsProcessor =
       createInheritorsProcessor(context, baseType, arrayDim, getRawSubtypes, consumer, baseClass, baseSubstitutor);
+
+    addContextTypeArguments(context, baseType, inheritorsProcessor);
+
+    if (baseClass.hasModifierProperty(PsiModifier.FINAL)) return;
+
     if (matcher.getPrefix().length() > 2) {
       AllClassesGetter.processJavaClasses(matcher, context.getProject(), scope, new Processor<PsiClass>() {
         @Override
@@ -305,6 +326,30 @@ public class CodeInsightUtil {
       query.forEach(inheritorsProcessor);
     }
 
+  }
+
+  private static void addContextTypeArguments(final PsiElement context,
+                                              final PsiClassType baseType,
+                                              final Processor<PsiClass> inheritorsProcessor) {
+    ApplicationManager.getApplication().runReadAction(new Runnable() {
+      @Override
+      public void run() {
+        Set<String> usedNames = ContainerUtil.newHashSet();
+        PsiElementFactory factory = JavaPsiFacade.getElementFactory(context.getProject());
+        PsiElement each = context;
+        while (true) {
+          PsiTypeParameterListOwner typed = PsiTreeUtil.getParentOfType(each, PsiTypeParameterListOwner.class);
+          if (typed == null) break;
+          for (PsiTypeParameter parameter : typed.getTypeParameters()) {
+            if (baseType.isAssignableFrom(factory.createType(parameter)) && usedNames.add(parameter.getName())) {
+              inheritorsProcessor.process(CompletionUtil.getOriginalOrSelf(parameter));
+            }
+          }
+
+          each = typed;
+        }
+      }
+    });
   }
 
   public static Processor<PsiClass> createInheritorsProcessor(final PsiElement context, final PsiClassType baseType,

@@ -15,7 +15,7 @@
  */
 package org.jetbrains.jps.builders.java.dependencyView;
 
-import org.jetbrains.asm4.ClassReader;
+import org.jetbrains.org.objectweb.asm.ClassReader;
 
 import java.io.File;
 import java.util.Collection;
@@ -29,6 +29,7 @@ public class Callbacks {
 
   public interface Backend {
     void associate(String classFileName, String sourceFileName, ClassReader cr);
+    void associate(String classFileName, Collection<String> sources, ClassReader cr);
     void registerImports(String className, Collection<String> imports, Collection<String> staticImports);
   }
 

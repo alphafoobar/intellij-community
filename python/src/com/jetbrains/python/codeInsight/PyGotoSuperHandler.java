@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ public class PyGotoSuperHandler implements CodeInsightActionHandler {
       return Collections.emptyList();
     }
     final List<PyTargetExpression> result = new ArrayList<PyTargetExpression>();
-    for (PyClass aClass: pyClass.getAncestorClasses()) {
+    for (PyClass aClass: pyClass.getAncestorClasses(null)) {
       final PyTargetExpression superAttr = aClass.findClassAttribute(name, false);
       if (superAttr != null) {
         result.add(superAttr);
@@ -100,7 +100,7 @@ public class PyGotoSuperHandler implements CodeInsightActionHandler {
       return Collections.emptyList();
     }
     final List<PyFunction> result = new ArrayList<PyFunction>();
-    for (PyClass aClass: pyClass.getAncestorClasses()) {
+    for (PyClass aClass: pyClass.getAncestorClasses(null)) {
       final PyFunction byName = aClass.findMethodByName(name, false);
       if (byName != null) {
         result.add(byName);

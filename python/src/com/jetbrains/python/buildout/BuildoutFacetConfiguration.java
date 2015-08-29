@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,14 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizerUtil;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.util.ui.JBUI;
 import org.jdom.Element;
 import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -102,9 +105,13 @@ public class BuildoutFacetConfiguration implements FacetConfiguration {
       return "Buildout";
     }
 
+    @NotNull
     @Override
     public JComponent createComponent() {
-      return myPanel;
+      final JPanel panel = new JPanel(new BorderLayout());
+      panel.add(myPanel, BorderLayout.CENTER);
+      panel.setBorder(JBUI.Borders.empty(5, 10, 10, 10));
+      return panel;
     }
 
     @Override

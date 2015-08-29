@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,16 @@
  */
 package com.jetbrains.python.psi.search;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.QueryExecutorBase;
+import com.intellij.openapi.util.Computable;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.Processor;
+import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.psi.*;
 import org.jetbrains.annotations.NotNull;
 
@@ -29,16 +33,21 @@ import org.jetbrains.annotations.NotNull;
  */
 public class PyKeywordArgumentSearchExecutor extends QueryExecutorBase<PsiReference, ReferencesSearch.SearchParameters> {
   @Override
-  public void processQuery(@NotNull ReferencesSearch.SearchParameters queryParameters, @NotNull final Processor<PsiReference> consumer) {
+  public void processQuery(@NotNull final ReferencesSearch.SearchParameters queryParameters, @NotNull final Processor<PsiReference> consumer) {
     final PsiElement element = queryParameters.getElementToSearch();
     if (!(element instanceof PyNamedParameter)) {
       return;
     }
-    PyFunction owner = PsiTreeUtil.getParentOfType(element, PyFunction.class);
-    if (owner == null) {
+    final ScopeOwner owner = ApplicationManager.getApplication().runReadAction(new Computable<ScopeOwner>() {
+      @Override
+      public ScopeOwner compute() {
+        return ScopeUtil.getScopeOwner(element);
+      }
+    });
+    if (!(owner instanceof PyFunction)) {
       return;
     }
-    ReferencesSearch.search(owner, queryParameters.getScope()).forEach(new Processor<PsiReference>() {
+    ReferencesSearch.search(owner, queryParameters.getScopeDeterminedByUser()).forEach(new Processor<PsiReference>() {
       @Override
       public boolean process(PsiReference reference) {
         final PsiElement refElement = reference.getElement();

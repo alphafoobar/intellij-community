@@ -5,12 +5,15 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/scripts" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/groovy" type="java-resource" />
+      <excludeFolder url="file://$MODULE_DIR$/jdk" />
+      <excludeFolder url="file://$MODULE_DIR$/restApiDocGenerator/node_modules" />
     </content>
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="1.8" jdkType="JavaSDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" exported="" name="Groovy" level="project" />
     <orderEntry type="library" exported="" name="Ant" level="project" />
-    <orderEntry type="library" scope="RUNTIME" name="asm4" level="project" />
+    <orderEntry type="library" scope="RUNTIME" name="asm5" level="project" />
     <orderEntry type="library" exported="" scope="RUNTIME" name="cli-parser" level="project" />
     <orderEntry type="library" scope="RUNTIME" name="JDOM" level="project" />
     <orderEntry type="library" scope="RUNTIME" name="Netty" level="project" />
@@ -36,4 +39,3 @@
     <orderEntry type="module" module-name="groovy_rt" scope="RUNTIME" />
   </component>
 </module>
-

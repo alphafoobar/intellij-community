@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,10 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.fileEditor.impl.BaseRemoteFileEditor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.impl.http.HttpVirtualFile;
+import com.intellij.openapi.vfs.impl.http.RemoteFileInfo;
+import com.intellij.util.Consumer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,29 +31,33 @@ import javax.swing.*;
 /**
  * @author nik
  */
-public class HttpFileEditor extends BaseRemoteFileEditor {
+class HttpFileEditor extends BaseRemoteFileEditor {
   private final RemoteFilePanel myPanel;
 
   public HttpFileEditor(@NotNull Project project, @NotNull HttpVirtualFile virtualFile) {
     super(project);
 
     myPanel = new RemoteFilePanel(project, virtualFile, this);
-    virtualFile.getFileInfo().download().doWhenDone(new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            checkPendingNavigable();
-          }
-        });
-      }
-    }).doWhenRejected(new Runnable() {
-      @Override
-      public void run() {
-        myPendingNavigatable = null;
-      }
-    });
+    RemoteFileInfo fileInfo = virtualFile.getFileInfo();
+    assert fileInfo != null;
+    fileInfo.download()
+      .done(new Consumer<VirtualFile>() {
+        @Override
+        public void consume(VirtualFile file) {
+          ApplicationManager.getApplication().invokeLater(new Runnable() {
+            @Override
+            public void run() {
+              contentLoaded();
+            }
+          }, myProject.getDisposed());
+        }
+      })
+      .rejected(new Consumer<Throwable>() {
+        @Override
+        public void consume(Throwable throwable) {
+          contentRejected();
+        }
+      });
   }
 
   @Override

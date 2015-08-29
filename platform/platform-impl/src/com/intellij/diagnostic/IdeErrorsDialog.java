@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import com.intellij.ide.impl.DataManagerImpl;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.ide.plugins.PluginManagerMain;
+import com.intellij.ide.plugins.cl.PluginClassLoader;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.Application;
@@ -111,7 +113,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   private AttachmentsTabForm myAttachmentsTabForm;
 
   private ClearFatalsAction myClearAction = new ClearFatalsAction();
-  private BlameAction myBlameAction = new BlameAction();
+  private BlameAction myBlameAction;
   @Nullable
   private AnalyzeAction myAnalyzeAction;
   private boolean myMute;
@@ -219,13 +221,14 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   @Override
   protected void createDefaultActions() {
     super.createDefaultActions();
-    getCancelAction().putValue(DEFAULT_ACTION, Boolean.TRUE);
+    myBlameAction = new BlameAction();
+    myBlameAction.putValue(DialogWrapper.DEFAULT_ACTION, true);
   }
 
   private class ForwardAction extends AnAction implements DumbAware {
     public ForwardAction() {
       super("Next", null, AllIcons.Actions.Forward);
-      AnAction forward = ActionManager.getInstance().getAction("Forward");
+      AnAction forward = ActionManager.getInstance().getAction(IdeActions.ACTION_NEXT_TAB);
       if (forward != null) {
         registerCustomShortcutSet(forward.getShortcutSet(), getRootPane(), getDisposable());
       }
@@ -245,7 +248,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   private class BackAction extends AnAction implements DumbAware {
     public BackAction() {
       super("Previous", null, AllIcons.Actions.Back);
-      AnAction back = ActionManager.getInstance().getAction("Back");
+      AnAction back = ActionManager.getInstance().getAction(IdeActions.ACTION_PREVIOUS_TAB);
       if (back != null) {
         registerCustomShortcutSet(back.getShortcutSet(), getRootPane(), getDisposable());
       }
@@ -467,13 +470,13 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   }
 
   private void updateAttachmentWarning(final AbstractMessage message) {
-    final List<Attachment> includedAttachments;
-    if (message instanceof LogMessageEx &&
-        !(includedAttachments = ContainerUtil.filter(((LogMessageEx)message).getAttachments(), new Condition<Attachment>() {
-          public boolean value(final Attachment attachment) {
-            return attachment.isIncluded();
-          }
-        })).isEmpty()) {
+    if (message == null) return;
+    final List<Attachment> includedAttachments = ContainerUtil.filter(message.getAttachments(), new Condition<Attachment>() {
+      public boolean value(final Attachment attachment) {
+        return attachment.isIncluded();
+      }
+    });
+    if (!includedAttachments.isEmpty()) {
       myAttachmentWarningPanel.setVisible(true);
       if (includedAttachments.size() == 1) {
         myAttachmentWarningLabel.setHtmlText(
@@ -495,14 +498,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     }
 
     PluginId pluginId = findPluginId(message.getThrowable());
-    if (pluginId == null) {
-      return false;
-    }
-
-    if (ApplicationInfoEx.getInstanceEx().isEssentialPlugin(pluginId.getIdString())) {
-      return false;
-    }
-    return true;
+    return pluginId != null && !ApplicationInfoEx.getInstanceEx().isEssentialPlugin(pluginId.getIdString());
   }
 
   private void updateCountLabel() {
@@ -552,7 +548,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
     StringBuilder text = new StringBuilder();
     PluginId pluginId = findPluginId(throwable);
-    if (pluginId == null || ApplicationInfoEx.getInstanceEx().isEssentialPlugin(pluginId.getIdString())) {
+    if (pluginId == null) {
       if (throwable instanceof AbstractMethodError) {
         text.append(DiagnosticBundle.message("error.list.message.blame.unknown.plugin"));
       }
@@ -569,9 +565,9 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
     String url = null;
     if (message.isSubmitted()) {
-      final SubmittedReportInfo info = message.getSubmissionInfo();
-      url = getUrl(info, getSubmitter(throwable) instanceof ITNReporter);
-      appendSubmissionInformation(info, text, url);
+      SubmittedReportInfo info = message.getSubmissionInfo();
+      url = info.getURL();
+      appendSubmissionInformation(info, text);
       text.append(". ");
     }
     else if (message.isSubmitting()) {
@@ -584,33 +580,18 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     myInfoLabel.setHyperlinkTarget(url);
   }
 
-  public static void appendSubmissionInformation(SubmittedReportInfo info, StringBuilder out, @Nullable String url) {
+  public static void appendSubmissionInformation(SubmittedReportInfo info, StringBuilder out) {
     if (info.getStatus() == SubmittedReportInfo.SubmissionStatus.FAILED) {
       out.append(" ").append(DiagnosticBundle.message("error.list.message.submission.failed"));
     }
-    else {
-      if (info.getLinkText() != null) {
-        out.append(" ").append(DiagnosticBundle.message("error.list.message.submitted.as.link", url, info.getLinkText()));
-        if (info.getStatus() == SubmittedReportInfo.SubmissionStatus.DUPLICATE) {
-          out.append(" ").append(DiagnosticBundle.message("error.list.message.duplicate"));
-        }
-      }
-      else {
-        out.append(DiagnosticBundle.message("error.list.message.submitted"));
+    else if (info.getURL() != null && info.getLinkText() != null) {
+      out.append(" ").append(DiagnosticBundle.message("error.list.message.submitted.as.link", info.getURL(), info.getLinkText()));
+      if (info.getStatus() == SubmittedReportInfo.SubmissionStatus.DUPLICATE) {
+        out.append(" ").append(DiagnosticBundle.message("error.list.message.duplicate"));
       }
     }
-  }
-
-  @Nullable
-  public static String getUrl(SubmittedReportInfo info, boolean reportedToJetbrains) {
-    if (info.getStatus() == SubmittedReportInfo.SubmissionStatus.FAILED || info.getLinkText() == null) {
-      return null;
-    }
-    if (reportedToJetbrains) {
-      return "http://ea.jetbrains.com/browser/ea_reports/" + info.getLinkText();
-    }
     else {
-      return info.getURL();
+      out.append(DiagnosticBundle.message("error.list.message.submitted"));
     }
   }
 
@@ -620,46 +601,44 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
       ErrorReportSubmitter submitter = getSubmitter(throwable);
       if (submitter == null) {
         PluginId pluginId = findPluginId(throwable);
-        if (pluginId == null || !ApplicationInfoEx.getInstanceEx().isEssentialPlugin(pluginId.getIdString())) {
-          IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
-          if (plugin == null) {
-            // unknown plugin
-            myForeignPluginWarningPanel.setVisible(false);
-            return;
-          }
-          myForeignPluginWarningPanel.setVisible(true);
-          String vendor = plugin.getVendor();
-          String contactInfo = plugin.getVendorUrl();
-          if (StringUtil.isEmpty(contactInfo)) {
-            contactInfo = plugin.getVendorEmail();
-          }
-          if (StringUtil.isEmpty(vendor)) {
-            if (StringUtil.isEmpty(contactInfo)) {
-              myForeignPluginWarningLabel.setText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text"));
-            }
-            else {
-              myForeignPluginWarningLabel
-                .setHyperlinkText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") + " ",
-                                  contactInfo, ".");
-              myForeignPluginWarningLabel.setHyperlinkTarget(contactInfo);
-            }
-          }
-          else {
-            if (StringUtil.isEmpty(contactInfo)) {
-              myForeignPluginWarningLabel.setText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") +
-                                                  " " + vendor + ".");
-            }
-            else {
-              myForeignPluginWarningLabel
-                .setHyperlinkText(
-                  DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") + " " + vendor + " (",
-                  contactInfo, ").");
-              myForeignPluginWarningLabel.setHyperlinkTarget(contactInfo);
-            }
-          }
-          myForeignPluginWarningPanel.setVisible(true);
+        IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
+        if (plugin == null || PluginManagerMain.isJetBrainsPlugin(plugin)) {
+          myForeignPluginWarningPanel.setVisible(false);
           return;
         }
+
+        myForeignPluginWarningPanel.setVisible(true);
+        String vendor = plugin.getVendor();
+        String contactInfo = plugin.getVendorUrl();
+        if (StringUtil.isEmpty(contactInfo)) {
+          contactInfo = plugin.getVendorEmail();
+        }
+        if (StringUtil.isEmpty(vendor)) {
+          if (StringUtil.isEmpty(contactInfo)) {
+            myForeignPluginWarningLabel.setText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text"));
+          }
+          else {
+            myForeignPluginWarningLabel
+              .setHyperlinkText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") + " ",
+                                contactInfo, ".");
+            myForeignPluginWarningLabel.setHyperlinkTarget(contactInfo);
+          }
+        }
+        else {
+          if (StringUtil.isEmpty(contactInfo)) {
+            myForeignPluginWarningLabel.setText(DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") +
+                                                " " + vendor + ".");
+          }
+          else {
+            myForeignPluginWarningLabel
+              .setHyperlinkText(
+                DiagnosticBundle.message("error.dialog.foreign.plugin.warning.text.vendor") + " " + vendor + " (",
+                contactInfo, ").");
+            myForeignPluginWarningLabel.setHyperlinkTarget(contactInfo);
+          }
+        }
+        myForeignPluginWarningPanel.setVisible(true);
+        return;
       }
     }
     myForeignPluginWarningPanel.setVisible(false);
@@ -672,7 +651,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
         boolean hasAttachment = false;
         for (ArrayList<AbstractMessage> merged : myMergedMessages) {
           final AbstractMessage message = merged.get(0);
-          if (message instanceof LogMessageEx && !((LogMessageEx)message).getAttachments().isEmpty()) {
+          if (!message.getAttachments().isEmpty()) {
             hasAttachment = true;
             break;
           }
@@ -716,8 +695,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
       myDetailsTabForm.setAssigneeId(message == null ? null : message.getAssigneeId());
 
-      List<Attachment> attachments =
-        message instanceof LogMessageEx ? ((LogMessageEx)message).getAttachments() : Collections.<Attachment>emptyList();
+      List<Attachment> attachments = message != null ? message.getAttachments() : Collections.<Attachment>emptyList();
       if (!attachments.isEmpty()) {
         if (myTabs.indexOfComponent(myAttachmentsTabForm.getContentPane()) == -1) {
           myTabs.addTab(DiagnosticBundle.message("error.attachments.tab.title"), myAttachmentsTabForm.getContentPane());
@@ -811,11 +789,16 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
       return ((PluginException)t).getPluginId();
     }
 
+    Set<String> visitedClassNames = ContainerUtil.newHashSet();
     for (StackTraceElement element : t.getStackTrace()) {
       if (element != null) {
         String className = element.getClassName();
-        if (PluginManager.isPluginClass(className)) {
-          return PluginManager.getPluginByClassName(className);
+        if (visitedClassNames.add(className) && PluginManagerCore.isPluginClass(className)) {
+          PluginId id = PluginManagerCore.getPluginByClassName(className);
+          if (LOG.isDebugEnabled()) {
+            LOG.debug(diagnosePluginDetection(className, id));
+          }
+          return id;
         }
       }
     }
@@ -873,6 +856,22 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     return null;
   }
 
+  @NotNull
+  private static String diagnosePluginDetection(String className, PluginId id) {
+    String msg = "Detected plugin " + id + " by class " + className;
+    IdeaPluginDescriptor descriptor = PluginManager.getPlugin(id);
+    if (descriptor != null) {
+      msg += "; ideaLoader=" + descriptor.getUseIdeaClassLoader();
+      
+      ClassLoader loader = descriptor.getPluginClassLoader();
+      msg += "; loader=" + loader;
+      if (loader instanceof PluginClassLoader) {
+        msg += "; loaded class: " + ((PluginClassLoader)loader).hasLoadedClass(className);
+      }
+    }
+    return msg;
+  }
+
   private class ClearFatalsAction extends AbstractAction {
     protected ClearFatalsAction() {
       super(DiagnosticBundle.message("error.dialog.clear.action"));
@@ -901,7 +900,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
         ErrorReportSubmitter submitter = getSubmitter(logMessage.getThrowable());
         if (submitter != null) {
           putValue(NAME, submitter.getReportActionText());
-          setEnabled(!logMessage.isSubmitted());
+          setEnabled(!(logMessage.isSubmitting() || logMessage.isSubmitted()));
           return;
         }
       }
@@ -926,38 +925,37 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
     private boolean reportMessage(final AbstractMessage logMessage, final boolean dialogClosed) {
       final ErrorReportSubmitter submitter = getSubmitter(logMessage.getThrowable());
+      if (submitter == null) return false;
 
-      if (submitter != null) {
-        logMessage.setSubmitting(true);
-        if (!dialogClosed) {
-          updateControls();
-        }
-        Container parentComponent;
-        if (dialogClosed) {
-          IdeFrame ideFrame = UIUtil.getParentOfType(IdeFrame.class, getContentPane());
-          parentComponent = ideFrame.getComponent();
-        }
-        else {
-          parentComponent = getContentPane();
-        }
-        return submitter.trySubmitAsync(getEvents(logMessage), logMessage.getAdditionalInfo(), parentComponent,
-                                        new Consumer<SubmittedReportInfo>() {
-                                          @Override
-                                          public void consume(final SubmittedReportInfo submittedReportInfo) {
-                                            logMessage.setSubmitting(false);
-                                            logMessage.setSubmitted(submittedReportInfo);
-                                            ApplicationManager.getApplication().invokeLater(new Runnable() {
-                                              @Override
-                                              public void run() {
-                                                if (!dialogClosed) {
-                                                  updateOnSubmit();
-                                                }
-                                              }
-                                            });
-                                          }
-                                        });
+      logMessage.setSubmitting(true);
+      if (!dialogClosed) {
+        updateControls();
       }
-      return false;
+      Container parentComponent;
+      if (dialogClosed) {
+        IdeFrame ideFrame = UIUtil.getParentOfType(IdeFrame.class, getContentPane());
+        parentComponent = ideFrame.getComponent();
+      }
+      else {
+        parentComponent = getContentPane();
+      }
+
+      return submitter.submit(
+        getEvents(logMessage), logMessage.getAdditionalInfo(), parentComponent, new Consumer<SubmittedReportInfo>() {
+          @Override
+          public void consume(final SubmittedReportInfo submittedReportInfo) {
+            logMessage.setSubmitting(false);
+            logMessage.setSubmitted(submittedReportInfo);
+            ApplicationManager.getApplication().invokeLater(new Runnable() {
+              @Override
+              public void run() {
+                if (!dialogClosed) {
+                  updateOnSubmit();
+                }
+              }
+            });
+          }
+        });
     }
 
     private IdeaLoggingEvent[] getEvents(final AbstractMessage logMessage) {
@@ -1011,15 +1009,28 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     catch (Throwable t) {
       return null;
     }
-    ErrorReportSubmitter submitter = null;
+    IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
+    if (plugin == null || PluginManagerMain.isJetBrainsPlugin(plugin)) {
+      return getCorePluginSubmitter(reporters);
+    }
     for (ErrorReportSubmitter reporter : reporters) {
       final PluginDescriptor descriptor = reporter.getPluginDescriptor();
-      if (pluginId == null && (descriptor == null || PluginId.getId("com.intellij") == descriptor.getPluginId())
-          || descriptor != null && Comparing.equal(pluginId, descriptor.getPluginId())) {
-        submitter = reporter;
+      if (descriptor != null && Comparing.equal(pluginId, descriptor.getPluginId())) {
+        return reporter;
       }
     }
-    return submitter;
+    return null;
+  }
+
+  @Nullable
+  private static ErrorReportSubmitter getCorePluginSubmitter(ErrorReportSubmitter[] reporters) {
+    for (ErrorReportSubmitter reporter : reporters) {
+      final PluginDescriptor descriptor = reporter.getPluginDescriptor();
+      if (descriptor == null || PluginId.getId(PluginManagerCore.CORE_PLUGIN_ID) == descriptor.getPluginId()) {
+        return reporter;
+      }
+    }
+    return null;
   }
 
   @Override
@@ -1076,17 +1087,9 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     }
 
     public void actionPerformed(ActionEvent e) {
-      final DataContext dataContext = ((DataManagerImpl)DataManager.getInstance()).getDataContextTest((Component)e.getSource());
-
-      AnActionEvent event = new AnActionEvent(
-        null, dataContext,
-        ActionPlaces.UNKNOWN,
-        myAnalyze.getTemplatePresentation(),
-        ActionManager.getInstance(),
-        e.getModifiers()
-      );
-
-      final Project project = CommonDataKeys.PROJECT.getData(dataContext);
+      DataContext dataContext = ((DataManagerImpl)DataManager.getInstance()).getDataContextTest((Component)e.getSource());
+      AnActionEvent event = AnActionEvent.createFromAnAction(myAnalyze, null, ActionPlaces.UNKNOWN, dataContext);
+      Project project = CommonDataKeys.PROJECT.getData(dataContext);
       if (project != null) {
         myAnalyze.actionPerformed(event);
         doOKAction();

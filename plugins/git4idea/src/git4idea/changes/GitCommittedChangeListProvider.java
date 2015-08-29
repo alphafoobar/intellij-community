@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.committed.DecoratorManager;
 import com.intellij.openapi.vcs.changes.committed.VcsCommittedListsZipper;
 import com.intellij.openapi.vcs.changes.committed.VcsCommittedViewAuxiliary;
@@ -34,6 +35,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.AsynchConsumer;
 import com.intellij.util.Consumer;
+import com.intellij.vcsUtil.VcsUtil;
 import git4idea.*;
 import git4idea.commands.GitSimpleHandler;
 import git4idea.history.GitHistoryUtils;
@@ -183,7 +185,7 @@ public class GitCommittedChangeListProvider implements CommittedChangesProvider<
 
   @Override
   public Pair<CommittedChangeList, FilePath> getOneList(final VirtualFile file, final VcsRevisionNumber number) throws VcsException {
-    final FilePathImpl filePath = new FilePathImpl(file);
+    FilePath filePath = VcsUtil.getFilePath(file);
 
     final List<GitHeavyCommit> gitCommits =
       GitHistoryUtils.commitsDetails(myProject, filePath, new SymbolicRefs(), Collections.singletonList(number.asString()));
@@ -197,7 +199,8 @@ public class GitCommittedChangeListProvider implements CommittedChangesProvider<
 
     final Collection<Change> changes = commit.getChanges();
     if (changes.size() == 1) {
-      return new Pair<CommittedChangeList, FilePath>(commit, changes.iterator().next().getAfterRevision().getFile());
+      Change change = changes.iterator().next();
+      return Pair.create(commit, ChangesUtil.getFilePath(change));
     }
     for (Change change : changes) {
       if (change.getAfterRevision() != null && FileUtil.filesEqual(filePath.getIOFile(), change.getAfterRevision().getFile().getIOFile())) {
@@ -205,11 +208,11 @@ public class GitCommittedChangeListProvider implements CommittedChangesProvider<
       }
     }
     final String afterTime = "--after=" + GitUtil.gitTime(gitCommit.getDate());
-    final List<VcsFileRevision> history = GitHistoryUtils.history(myProject, filePath, null, afterTime);
+    final List<VcsFileRevision> history = GitHistoryUtils.history(myProject, filePath, (VirtualFile)null, afterTime);
     if (history.isEmpty()) {
       return new Pair<CommittedChangeList, FilePath>(commit, filePath);
     }
-    return new Pair<CommittedChangeList, FilePath>(commit, ((GitFileRevision) history.get(history.size() - 1)).getPath());
+    return Pair.create(commit, ((GitFileRevision)history.get(history.size() - 1)).getPath());
   }
 
   @Override

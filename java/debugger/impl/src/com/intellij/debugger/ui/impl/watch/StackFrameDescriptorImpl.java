@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,7 @@
 package com.intellij.debugger.ui.impl.watch;
 
 import com.intellij.debugger.SourcePosition;
-import com.intellij.debugger.engine.ContextUtil;
-import com.intellij.debugger.engine.DebugProcess;
-import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
-import com.intellij.debugger.engine.DebuggerUtils;
+import com.intellij.debugger.engine.*;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.jdi.StackFrameProxyImpl;
@@ -34,13 +31,19 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.ui.FileColorManager;
 import com.intellij.util.StringBuilderSpinAllocator;
+import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.TextTransferable;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.frame.XStackFrame;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
+import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.ui.tree.ValueMarkup;
 import com.sun.jdi.*;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.Map;
 
 /**
  * Nodes of this type cannot be updated, because StackFrame objects become invalid as soon as VM has been resumed
@@ -50,26 +53,38 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
   private int myUiIndex;
   private String myName = null;
   private Location myLocation;
+  private final XStackFrame myXStackFrame;
   private MethodsTracker.MethodOccurrence myMethodOccurrence;
   private boolean myIsSynthetic;
   private boolean myIsInLibraryContent;
   private ObjectReference myThisObject;
   private Color myBackgroundColor;
+  private SourcePosition mySourcePosition;
 
   private Icon myIcon = AllIcons.Debugger.StackFrame;
 
-  public StackFrameDescriptorImpl(StackFrameProxyImpl frame, final MethodsTracker tracker) {
+  public StackFrameDescriptorImpl(@NotNull StackFrameProxyImpl frame, @NotNull MethodsTracker tracker) {
     myFrame = frame;
+
     try {
       myUiIndex = frame.getFrameIndex();
       myLocation = frame.location();
-      myThisObject = frame.thisObject();
-      myMethodOccurrence = tracker.getMethodOccurrence(myLocation.method());
+      try {
+        myThisObject = frame.thisObject();
+      } catch (EvaluateException e) {
+        // catch internal exceptions here
+        if (!(e.getCause() instanceof InternalException)) {
+          throw e;
+        }
+        LOG.info(e);
+      }
+      myMethodOccurrence = tracker.getMethodOccurrence(myUiIndex, myLocation.method());
       myIsSynthetic = DebuggerUtils.isSynthetic(myMethodOccurrence.getMethod());
       ApplicationManager.getApplication().runReadAction(new Runnable() {
+        @Override
         public void run() {
-          final SourcePosition position = ContextUtil.getSourcePosition(StackFrameDescriptorImpl.this);
-          final PsiFile file = position != null? position.getFile() : null;
+          mySourcePosition = ContextUtil.getSourcePosition(StackFrameDescriptorImpl.this);
+          final PsiFile file = mySourcePosition != null? mySourcePosition.getFile() : null;
           if (file == null) {
             myIsInLibraryContent = true;
           }
@@ -83,30 +98,41 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
         }
       });
     }
-    catch(InternalException e) {
+    catch (InternalException e) {
       LOG.info(e);
       myLocation = null;
-      myMethodOccurrence = tracker.getMethodOccurrence(null);
+      myMethodOccurrence = tracker.getMethodOccurrence(0, null);
       myIsSynthetic = false;
       myIsInLibraryContent = false;
     }
     catch (EvaluateException e) {
       LOG.info(e);
       myLocation = null;
-      myMethodOccurrence = tracker.getMethodOccurrence(null);
+      myMethodOccurrence = tracker.getMethodOccurrence(0, null);
       myIsSynthetic = false;
       myIsInLibraryContent = false;
     }
+
+    myXStackFrame = myLocation == null ? null : ((DebugProcessImpl)getDebugProcess()).getPositionManager().createStackFrame(frame, (DebugProcessImpl)getDebugProcess(), myLocation);
+  }
+
+  @Nullable
+  public XStackFrame getXStackFrame() {
+    return myXStackFrame;
   }
 
   public int getUiIndex() {
     return myUiIndex;
   }
 
+  @Override
+  @NotNull
   public StackFrameProxyImpl getFrameProxy() {
     return myFrame;
   }
 
+  @NotNull
+  @Override
   public DebugProcess getDebugProcess() {
     return myFrame.getVirtualMachine().getDebugProcess();
   }
@@ -132,20 +158,35 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
   @Nullable
   public ValueMarkup getValueMarkup() {
     if (myThisObject != null) {
-      final Map<ObjectReference, ValueMarkup> markupMap = getMarkupMap(myFrame.getVirtualMachine().getDebugProcess());
-      if (markupMap != null) {
-        return markupMap.get(myThisObject);
+      DebugProcess process = myFrame.getVirtualMachine().getDebugProcess();
+      if (process instanceof DebugProcessImpl) {
+        XDebugSession session = ((DebugProcessImpl)process).getSession().getXDebugSession();
+        if (session instanceof XDebugSessionImpl) {
+          XValueMarkers<?, ?> markers = ((XDebugSessionImpl)session).getValueMarkers();
+          if (markers != null) {
+            return markers.getAllMarkers().get(myThisObject);
+          }
+        }
       }
     }
     return null;
   }
   
+  @Override
   public String getName() {
     return myName;
   }
 
+  @Override
   protected String calcRepresentation(EvaluationContextImpl context, DescriptorLabelListener descriptorLabelListener) throws EvaluateException {
     DebuggerManagerThreadImpl.assertIsManagerThread();
+
+    if (myXStackFrame != null) {
+      TextTransferable.ColoredStringBuilder builder = new TextTransferable.ColoredStringBuilder();
+      myXStackFrame.customizePresentation(builder);
+      return builder.getBuilder().toString();
+    }
+
     if (myLocation == null) {
       return "";
     }
@@ -159,7 +200,7 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
         label.append("()");
       }
       if (settings.SHOW_LINE_NUMBER) {
-        String lineNumber = null;
+        String lineNumber;
         try {
           lineNumber = Integer.toString(myLocation.lineNumber());
         }
@@ -172,7 +213,7 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
         }
       }
       if (settings.SHOW_CLASS_NAME) {
-        String name = null;
+        String name;
         try {
           ReferenceType refType = myLocation.declaringType();
           name = refType != null ? refType.name() : null;
@@ -188,9 +229,11 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
           }
           else {
             label.append(name.substring(dotIndex + 1));
-            label.append(" {");
-            label.append(name.substring(0, dotIndex));
-            label.append("}");
+            if (settings.SHOW_PACKAGE_NAME) {
+              label.append(" {");
+              label.append(name.substring(0, dotIndex));
+              label.append("}");
+            }
           }
         }
       }
@@ -206,7 +249,7 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
           label.append(", ");
           label.append(sourceName);
         }
-        catch (AbsentInformationException exception) {
+        catch (AbsentInformationException ignored) {
         }
       }
       return label.toString();
@@ -220,10 +263,12 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
     return getFrameProxy().equals(d.getFrameProxy());
   }
 
+  @Override
   public boolean isExpandable() {
     return true;
   }
 
+  @Override
   public final void setContext(EvaluationContextImpl context) {
     myIcon = calcIcon();
   }
@@ -236,8 +281,13 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
     return myIsInLibraryContent;
   }
 
+  @Nullable
   public Location getLocation() {
     return myLocation;
+  }
+
+  public SourcePosition getSourcePosition() {
+    return mySourcePosition;
   }
 
   private Icon calcIcon() {
@@ -246,12 +296,16 @@ public class StackFrameDescriptorImpl extends NodeDescriptorImpl implements Stac
         return AllIcons.Debugger.Db_obsolete;
       }
     }
-    catch (EvaluateException e) {
+    catch (EvaluateException ignored) {
     }
-    return AllIcons.Debugger.StackFrame;
+    return EmptyIcon.create(6);//AllIcons.Debugger.StackFrame;
   }
 
   public Icon getIcon() {
     return myIcon;
+  }
+
+  public ObjectReference getThisObject() {
+    return myThisObject;
   }
 }

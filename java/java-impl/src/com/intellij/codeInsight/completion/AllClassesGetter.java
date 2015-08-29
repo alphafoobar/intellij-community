@@ -22,18 +22,20 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.search.AllClassesSearchExecutor;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.tree.java.PsiReferenceExpressionImpl;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.searches.AllClassesSearch;
 import com.intellij.util.Consumer;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
@@ -156,8 +158,13 @@ public class AllClassesGetter {
 
       @Override
       public boolean process(PsiClass psiClass) {
-        if (parameters.getInvocationCount() < 2 && PsiReferenceExpressionImpl.seemsScrambled(psiClass)) {
-          return true;
+        if (parameters.getInvocationCount() < 2) {
+          if (PsiReferenceExpressionImpl.seemsScrambled(psiClass)) {
+            return true;
+          }
+          if (!StringUtil.isCapitalized(psiClass.getName()) && !Registry.is("ide.completion.show.lower.case.classes")) {
+            return true;
+          }
         }
 
         assert psiClass != null;
@@ -177,18 +184,17 @@ public class AllClassesGetter {
                                         @NotNull Project project,
                                         @NotNull GlobalSearchScope scope,
                                         @NotNull Processor<PsiClass> processor) {
-    AllClassesSearch.search(scope, project, new Condition<String>() {
+    final Set<String> names = new THashSet<String>(10000);
+    AllClassesSearchExecutor.processClassNames(project, scope, new Consumer<String>() {
       @Override
-      public boolean value(String s) {
-        return prefixMatcher.isStartMatch(s);
+      public void consume(String s) {
+        if (prefixMatcher.prefixMatches(s)) {
+          names.add(s);
+        }
       }
-    }).forEach(processor);
-    AllClassesSearch.search(scope, project, new Condition<String>() {
-      @Override
-      public boolean value(String s) {
-        return prefixMatcher.prefixMatches(s);
-      }
-    }).forEach(processor);
+    });
+    LinkedHashSet<String> sorted = CompletionUtil.sortMatching(prefixMatcher, names);
+    AllClassesSearchExecutor.processClassesByNames(project, scope, sorted, processor);
   }
 
 
@@ -209,8 +215,6 @@ public class AllClassesGetter {
                                               @NotNull final PsiClass psiClass,
                                               final boolean filterByScope, final boolean pkgContext) {
     ProgressManager.checkCanceled();
-
-    if (!context.isValid() || !psiClass.isValid()) return false;
 
     if (JavaCompletionUtil.isInExcludedPackage(psiClass, false)) return false;
 

@@ -21,21 +21,34 @@ import com.intellij.formatting.Indent;
 import com.intellij.formatting.Wrap;
 import com.intellij.formatting.alignment.AlignmentStrategy;
 import com.intellij.lang.ASTNode;
+import com.intellij.psi.JavaTokenType;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.formatter.FormatterUtil;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
+import com.intellij.psi.tree.IElementType;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class ExtendsListBlock extends AbstractJavaBlock{
-  public ExtendsListBlock(final ASTNode node, final Wrap wrap, final Alignment alignment, CommonCodeStyleSettings settings) {
-    super(node, wrap, alignment, Indent.getNoneIndent(), settings);
+  public ExtendsListBlock(ASTNode node,
+                          Wrap wrap,
+                          Alignment alignment,
+                          CommonCodeStyleSettings settings,
+                          JavaCodeStyleSettings javaSettings)
+  {
+    super(node, wrap, alignment, Indent.getNoneIndent(), settings, javaSettings);
   }
   
-  public ExtendsListBlock(final ASTNode node, final Wrap wrap, final AlignmentStrategy alignmentStrategy, CommonCodeStyleSettings settings) {
-    super(node, wrap, alignmentStrategy, Indent.getNoneIndent(), settings);
+  public ExtendsListBlock(ASTNode node,
+                          Wrap wrap,
+                          AlignmentStrategy alignmentStrategy,
+                          CommonCodeStyleSettings settings,
+                          JavaCodeStyleSettings javaSettings)
+  {
+    super(node, wrap, alignmentStrategy, Indent.getNoneIndent(), settings, javaSettings);
   }
 
   @Override
@@ -52,18 +65,20 @@ public class ExtendsListBlock extends AbstractJavaBlock{
 
     while (child != null) {
       if (!FormatterUtil.containsWhiteSpacesOnly(child) && child.getTextLength() > 0){
-        if (ElementType.KEYWORD_BIT_SET.contains(child.getElementType())) {
+        IElementType elementType = child.getElementType();
+        if (ElementType.KEYWORD_BIT_SET.contains(elementType)) {
           if (!elementsExceptKeyword.isEmpty()) {
-            result.add(new SyntheticCodeBlock(elementsExceptKeyword, null,  mySettings, Indent.getNoneIndent(), null));
+            result.add(new SyntheticCodeBlock(elementsExceptKeyword, null,  mySettings, myJavaSettings, Indent.getNoneIndent(), null));
             elementsExceptKeyword = new ArrayList<Block>();
           }
-          result.add(createJavaBlock(child, mySettings, myChildIndent, arrangeChildWrap(child, childWrap), alignment));
+          Indent indent = mySettings.ALIGN_THROWS_KEYWORD 
+                          && elementType == JavaTokenType.THROWS_KEYWORD ? Indent.getNoneIndent() : myChildIndent;
+          
+          result.add(createJavaBlock(child, mySettings, myJavaSettings, indent, arrangeChildWrap(child, childWrap), alignment));
         } else {
-          if (myAlignmentStrategy != null) {
-            Alignment candidate = myAlignmentStrategy.getAlignment(child.getElementType());
-            if (candidate != null) {
-              alignment = myChildAlignment = candidate;
-            }
+          Alignment candidate = myAlignmentStrategy.getAlignment(elementType);
+          if (candidate != null) {
+            alignment = myChildAlignment = candidate;
           }
           processChild(elementsExceptKeyword, child, myChildAlignment, childWrap, myChildIndent);
         }
@@ -71,7 +86,7 @@ public class ExtendsListBlock extends AbstractJavaBlock{
       child = child.getTreeNext();
     }
     if (!elementsExceptKeyword.isEmpty()) {
-      result.add(new SyntheticCodeBlock(elementsExceptKeyword, alignment,  mySettings, Indent.getNoneIndent(), null));
+      result.add(new SyntheticCodeBlock(elementsExceptKeyword, alignment,  mySettings, myJavaSettings, Indent.getNoneIndent(), null));
     }
 
     return result;

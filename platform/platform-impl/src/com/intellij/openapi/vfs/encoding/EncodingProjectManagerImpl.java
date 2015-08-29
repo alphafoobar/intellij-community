@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,31 +22,25 @@
  */
 package com.intellij.openapi.vfs.encoding;
 
-import com.intellij.ide.GeneralSettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.State;
-import com.intellij.openapi.components.Storage;
-import com.intellij.openapi.components.StoragePathMacros;
-import com.intellij.openapi.components.StorageScheme;
+import com.intellij.openapi.components.*;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.ModificationTracker;
+import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.HashMap;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashSet;
 import org.jdom.Element;
@@ -66,29 +60,19 @@ import java.util.*;
     @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/encodings.xml", scheme = StorageScheme.DIRECTORY_BASED)
   }
 )
-public class EncodingProjectManagerImpl extends EncodingProjectManager {
+public class EncodingProjectManagerImpl extends EncodingProjectManager implements NamedComponent, PersistentStateComponent<Element> {
   @NonNls private static final String PROJECT_URL = "PROJECT";
   private final Project myProject;
-  private final GeneralSettings myGeneralSettings;
-  private final EditorSettingsExternalizable myEditorSettings;
-  private boolean myUseUTFGuessing = true;
   private boolean myNative2AsciiForPropertiesFiles;
   private Charset myDefaultCharsetForPropertiesFiles;
-  private volatile long myModificationCount;
-  private final ModificationTracker myModificationTracker = new ModificationTracker() {
-    @Override
-    public long getModificationCount() {
-      return myModificationCount;
-    }
-  };
+  private final SimpleModificationTracker myModificationTracker = new SimpleModificationTracker();
 
-  public EncodingProjectManagerImpl(Project project,
-                                    GeneralSettings generalSettings,
-                                    EditorSettingsExternalizable editorSettings,
-                                    PsiDocumentManager documentManager) {
+  // we should avoid changed file
+  private String myOldUTFGuessing;
+  private boolean myNative2AsciiForPropertiesFilesWasSpecified;
+
+  public EncodingProjectManagerImpl(Project project, PsiDocumentManager documentManager) {
     myProject = project;
-    myGeneralSettings = generalSettings;
-    myEditorSettings = editorSettings;
     documentManager.addListener(new PsiDocumentManager.Listener() {
       @Override
       public void documentCreated(@NotNull Document document, PsiFile psiFile) {
@@ -102,28 +86,43 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   }
 
   //null key means project
-  private final Map<VirtualFile, Charset> myMapping = new HashMap<VirtualFile, Charset>();
+  private final Map<VirtualFile, Charset> myMapping = ContainerUtil.newConcurrentMap();
+  private volatile Charset myProjectCharset;
 
   @Override
   public Element getState() {
     Element element = new Element("x");
-    List<VirtualFile> files = new ArrayList<VirtualFile>(myMapping.keySet());
-    ContainerUtil.quickSort(files, new Comparator<VirtualFile>() {
-      @Override
-      public int compare(final VirtualFile o1, final VirtualFile o2) {
-        if (o1 == null || o2 == null) return o1 == null ? o2 == null ? 0 : 1 : -1;
-        return o1.getPath().compareTo(o2.getPath());
+    if (!myMapping.isEmpty()) {
+      List<VirtualFile> files = new ArrayList<VirtualFile>(myMapping.keySet());
+      ContainerUtil.quickSort(files, new Comparator<VirtualFile>() {
+        @Override
+        public int compare(final VirtualFile o1, final VirtualFile o2) {
+          return o1.getPath().compareTo(o2.getPath());
+        }
+      });
+      for (VirtualFile file : files) {
+        Charset charset = myMapping.get(file);
+        Element child = new Element("file");
+        element.addContent(child);
+        child.setAttribute("url", file.getUrl());
+        child.setAttribute("charset", charset.name());
       }
-    });
-    for (VirtualFile file : files) {
-      Charset charset = myMapping.get(file);
+    }
+    if (myProjectCharset != null) {
       Element child = new Element("file");
       element.addContent(child);
-      child.setAttribute("url", file == null ? PROJECT_URL : file.getUrl());
-      child.setAttribute("charset", charset.name());
+      child.setAttribute("url", PROJECT_URL);
+      child.setAttribute("charset", myProjectCharset.name());
     }
-    element.setAttribute("useUTFGuessing", Boolean.toString(myUseUTFGuessing));
-    element.setAttribute("native2AsciiForPropertiesFiles", Boolean.toString(myNative2AsciiForPropertiesFiles));
+
+    if (myOldUTFGuessing != null) {
+      element.setAttribute("useUTFGuessing", myOldUTFGuessing);
+    }
+
+    if (myNative2AsciiForPropertiesFiles || myNative2AsciiForPropertiesFilesWasSpecified) {
+      element.setAttribute("native2AsciiForPropertiesFiles", Boolean.toString(myNative2AsciiForPropertiesFiles));
+    }
+
     if (myDefaultCharsetForPropertiesFiles != null) {
       element.setAttribute("defaultCharsetForPropertiesFiles", myDefaultCharsetForPropertiesFiles.name());
     }
@@ -132,36 +131,38 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
 
   @Override
   public void loadState(Element element) {
-    List<Element> files = element.getChildren("file");
-    final Map<VirtualFile, Charset> mapping = new HashMap<VirtualFile, Charset>();
-    for (Element fileElement : files) {
-      String url = fileElement.getAttributeValue("url");
-      String charsetName = fileElement.getAttributeValue("charset");
-      Charset charset = CharsetToolkit.forName(charsetName);
-      if (charset == null) continue;
-      VirtualFile file = url.equals(PROJECT_URL) ? null : VirtualFileManager.getInstance().findFileByUrl(url);
-      if (file != null || url.equals(PROJECT_URL)) {
-        mapping.put(file, charset);
-      }
-    }
     myMapping.clear();
-    myMapping.putAll(mapping);
+    List<Element> files = element.getChildren("file");
+    if (!files.isEmpty()) {
+      Map<VirtualFile, Charset> mapping = new HashMap<VirtualFile, Charset>();
+      for (Element fileElement : files) {
+        String url = fileElement.getAttributeValue("url");
+        String charsetName = fileElement.getAttributeValue("charset");
+        Charset charset = CharsetToolkit.forName(charsetName);
+        if (charset == null) continue;
+        if (url.equals(PROJECT_URL)) {
+          myProjectCharset = charset;
+        }
+        else {
+          VirtualFile file = VirtualFileManager.getInstance().findFileByUrl(url);
+          if (file != null) {
+            mapping.put(file, charset);
+          }
+        }
+      }
+      myMapping.putAll(mapping);
+    }
 
-    myUseUTFGuessing = Boolean.parseBoolean(element.getAttributeValue("useUTFGuessing"));
-    myNative2AsciiForPropertiesFiles = Boolean.parseBoolean(element.getAttributeValue("native2AsciiForPropertiesFiles"));
+    String native2AsciiForPropertiesFiles = element.getAttributeValue("native2AsciiForPropertiesFiles");
+    myNative2AsciiForPropertiesFiles = Boolean.parseBoolean(native2AsciiForPropertiesFiles);
     myDefaultCharsetForPropertiesFiles = CharsetToolkit.forName(element.getAttributeValue("defaultCharsetForPropertiesFiles"));
 
-    boolean migrated = myGeneralSettings.migrateCharsetSettingsTo(this);
-    migrated |= myEditorSettings.migrateCharsetSettingsTo(this);
-    if (migrated) {
-      // load up default project only if some settings have been migrated
-      EncodingProjectManager defaultManager = getInstance(ProjectManager.getInstance().getDefaultProject());
-      if (defaultManager != null) {
-        myGeneralSettings.migrateCharsetSettingsTo(defaultManager);
-        myEditorSettings.migrateCharsetSettingsTo(defaultManager);
-      }
+    myModificationTracker.incModificationCount();
+
+    if (!myProject.isDefault()) {
+      myOldUTFGuessing = element.getAttributeValue("useUTFGuessing");
+      myNative2AsciiForPropertiesFilesWasSpecified = native2AsciiForPropertiesFiles != null;
     }
-    myModificationCount++;
   }
 
   @Override
@@ -172,36 +173,16 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   }
 
   @Override
-  public void initComponent() {
-
-  }
-
-  @Override
-  public void disposeComponent() {
-
-  }
-
-  @Override
-  public void projectOpened() {
-
-  }
-
-  @Override
-  public void projectClosed() {
-
-  }
-
-  @Override
   @Nullable
   public Charset getEncoding(@Nullable VirtualFile virtualFile, boolean useParentDefaults) {
     VirtualFile parent = virtualFile;
-    while (true) {
+    while (parent != null) {
       Charset charset = myMapping.get(parent);
       if (charset != null || !useParentDefaults) return charset;
-      if (parent == null) break;
       parent = parent.getParent();
     }
-    return null;
+
+    return getDefaultCharset();
   }
 
   @NotNull
@@ -213,15 +194,21 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   public void setEncoding(@Nullable final VirtualFile virtualFileOrDir, @Nullable final Charset charset) {
     Charset oldCharset;
 
-    if (charset == null) {
-      oldCharset = myMapping.remove(virtualFileOrDir);
+    if (virtualFileOrDir == null) {
+      oldCharset = myProjectCharset;
+      myProjectCharset = charset;
     }
     else {
-      oldCharset = myMapping.put(virtualFileOrDir, charset);
+      if (charset == null) {
+        oldCharset = myMapping.remove(virtualFileOrDir);
+      }
+      else {
+        oldCharset = myMapping.put(virtualFileOrDir, charset);
+      }
     }
 
     if (!Comparing.equal(oldCharset, charset)) {
-      myModificationCount++;
+      myModificationTracker.incModificationCount();
       if (virtualFileOrDir != null) {
         virtualFileOrDir.setCharset(virtualFileOrDir.getBOM() == null ? charset : null);
       }
@@ -234,10 +221,15 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
     reload(virtualFileOrDir);
   }
 
-  private static void reload(@NotNull VirtualFile virtualFile) {
-    FileDocumentManager documentManager = FileDocumentManager.getInstance();
-    ((VirtualFileListener)documentManager)
-      .contentsChanged(new VirtualFileEvent(null, virtualFile, virtualFile.getName(), virtualFile.getParent()));
+  private static void reload(@NotNull final VirtualFile virtualFile) {
+    ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      @Override
+      public void run() {
+        FileDocumentManager documentManager = FileDocumentManager.getInstance();
+        ((VirtualFileListener)documentManager)
+          .contentsChanged(new VirtualFileEvent(null, virtualFile, virtualFile.getName(), virtualFile.getParent()));
+      }
+    });
   }
 
   @Override
@@ -245,6 +237,7 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   public Collection<Charset> getFavorites() {
     Set<Charset> result = new HashSet<Charset>();
     result.addAll(myMapping.values());
+    result.add(getDefaultCharset());
     result.add(CharsetToolkit.UTF8_CHARSET);
     result.add(CharsetToolkit.getDefaultSystemCharset());
     result.add(CharsetToolkit.UTF_16_CHARSET);
@@ -258,12 +251,10 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   }
 
   @NotNull
-  @Override
   public Map<VirtualFile, Charset> getAllMappings() {
     return myMapping;
   }
 
-  @Override
   public void setMapping(@NotNull final Map<VirtualFile, Charset> mapping) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     FileDocumentManager.getInstance().saveAllDocuments();  // consider all files as unmodified
@@ -279,7 +270,10 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
           VirtualFile virtualFile = entry.getKey();
           Charset charset = entry.getValue();
           if (charset == null) throw new IllegalArgumentException("Null charset for " + virtualFile + "; mapping: " + mapping);
-          if (virtualFile != null) {
+          if (virtualFile == null) {
+            myProjectCharset = charset;
+          }
+          else {
             if (!fileIndex.isInContent(virtualFile)) continue;
             if (!virtualFile.isDirectory() && !Comparing.equal(charset, oldMap.get(virtualFile))) {
               Document document;
@@ -297,8 +291,8 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
 
               if (!changed) continue;
             }
+            newMap.put(virtualFile, charset);
           }
-          newMap.put(virtualFile, charset);
         }
       }
     });
@@ -339,7 +333,7 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
       });
     }
 
-    myModificationCount++;
+    myModificationTracker.incModificationCount();
   }
 
   private static Processor<VirtualFile> createChangeCharsetProcessor() {
@@ -361,7 +355,7 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
     };
   }
 
-  private boolean processSubFiles(@Nullable("null means in the project") VirtualFile file, @NotNull final Processor<VirtualFile> processor) {
+  private boolean processSubFiles(@Nullable("null means all in the project") VirtualFile file, @NotNull final Processor<VirtualFile> processor) {
     if (file == null) {
       for (VirtualFile virtualFile : ProjectRootManager.getInstance(myProject).getContentRoots()) {
         if (!processSubFiles(virtualFile, processor)) return false;
@@ -379,30 +373,22 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
 
   //retrieves encoding for the Project node
   @Override
-  @Nullable
+  @NotNull
   public Charset getDefaultCharset() {
-    Charset charset = getEncoding(null, false);
-    return charset == null ? EncodingManager.getInstance().getDefaultCharset() : charset;
+    Charset charset = myProjectCharset;
+    return charset == null ? Charset.defaultCharset() : charset;
   }
 
   @Override
   public boolean isUseUTFGuessing(final VirtualFile virtualFile) {
-    return myUseUTFGuessing;
-  }
-
-  @Override
-  public void setUseUTFGuessing(final VirtualFile virtualFile, final boolean useUTFGuessing) {
-    if (myUseUTFGuessing != useUTFGuessing) {
-      myUseUTFGuessing = useUTFGuessing;
-      reloadAllFilesUnder(null);
-    }
+    return true;
   }
 
   private static final ThreadLocal<Boolean> SUPPRESS_RELOAD = new ThreadLocal<Boolean>();
   static void suppressReloadDuring(@NotNull Runnable action) {
     Boolean old = SUPPRESS_RELOAD.get();
     try {
-      SUPPRESS_RELOAD.set(true);
+      SUPPRESS_RELOAD.set(Boolean.TRUE);
       action.run();
     }
     finally {
@@ -422,7 +408,7 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
     }, "Reload Files", false, myProject);
   }
 
-  private void reloadAllFilesUnder(final VirtualFile root) {
+  private void reloadAllFilesUnder(@Nullable final VirtualFile root) {
     tryStartReloadWithProgress(new Runnable() {
       @Override
       public void run() {
@@ -469,6 +455,18 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
     }
   }
 
+  @NotNull // empty means system default
+  @Override
+  public String getDefaultCharsetName() {
+    Charset charset = getEncoding(null, false);
+    return charset == null ? "" : charset.name();
+  }
+
+  @Override
+  public void setDefaultCharsetName(@NotNull String name) {
+    setEncoding(null, name.isEmpty() ? null : CharsetToolkit.forName(name));
+  }
+
   @Override
   @Nullable
   public Charset getDefaultCharsetForPropertiesFiles(@Nullable final VirtualFile virtualFile) {
@@ -485,18 +483,8 @@ public class EncodingProjectManagerImpl extends EncodingProjectManager {
   }
 
   @Override
-  public void addPropertyChangeListener(@NotNull PropertyChangeListener listener){
-    EncodingManager.getInstance().addPropertyChangeListener(listener);
-  }
-
-  @Override
   public void addPropertyChangeListener(@NotNull PropertyChangeListener listener, @NotNull Disposable parentDisposable) {
     EncodingManager.getInstance().addPropertyChangeListener(listener,parentDisposable);
-  }
-
-  @Override
-  public void removePropertyChangeListener(@NotNull PropertyChangeListener listener){
-    EncodingManager.getInstance().removePropertyChangeListener(listener);
   }
 
   @Override

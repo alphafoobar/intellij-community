@@ -10,26 +10,34 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Provides the information needed to build the VCS log, such as the list of most recent commits with their parents.
- *
- * @author Kirill Likhodedov
  */
 public interface VcsLogProvider {
 
   /**
-   * Reads the given number of the most recent commits from the log.
+   * Reads the most recent commits from the log together with all repository references.<br/>
+   * Commits should be at least topologically ordered, better considering commit time as well: they will be shown in the log in this order.
+   * <p/>
+   * This method is called both on the startup and on refresh.
+   *
+   * @param requirements some limitations on commit data that should be returned, e.g. the number of commits.
+   * @return given amount of ordered commits and <b>all</b> references in the repository.
    */
   @NotNull
-  List<? extends VcsFullCommitDetails> readFirstBlock(@NotNull VirtualFile root, boolean ordered, int commitCount) throws VcsException;
+  DetailedLogData readFirstBlock(@NotNull VirtualFile root, @NotNull Requirements requirements) throws VcsException;
 
   /**
-   * <p>Reads the whole history, but only hashes & parents.</p>
-   * <p>Also reports authors/committers of this repository to the given user registry.</p>
+   * Reads the whole history.
+   * <p/>
+   * Reports commits to the consumer to avoid creation & even temporary storage of a too large commits collection.
+   *
+   * @return all references and all authors in the repository.
    */
   @NotNull
-  List<TimedVcsCommit> readAllHashes(@NotNull VirtualFile root, @NotNull Consumer<VcsUser> userRegistry) throws VcsException;
+  LogData readAllHashes(@NotNull VirtualFile root, @NotNull Consumer<TimedVcsCommit> commitConsumer) throws VcsException;
 
   /**
    * Reads those details of the given commits, which are necessary to be shown in the log table.
@@ -42,12 +50,6 @@ public interface VcsLogProvider {
    */
   @NotNull
   List<? extends VcsFullCommitDetails> readFullDetails(@NotNull VirtualFile root, @NotNull List<String> hashes) throws VcsException;
-
-  /**
-   * Read all references (branches, tags, etc.) for the given roots.
-   */
-  @NotNull
-  Collection<VcsRef> readAllRefs(@NotNull VirtualFile root) throws VcsException;
 
   /**
    * <p>Returns the VCS which is supported by this provider.</p>
@@ -74,11 +76,13 @@ public interface VcsLogProvider {
   void subscribeToRootRefreshEvents(@NotNull Collection<VirtualFile> roots, @NotNull VcsLogRefresher refresher);
 
   /**
-   * Return commits with full details, which correspond to the given filters.
+   * <p>Return commits, which correspond to the given filters.</p>
+   *
+   * @param maxCount maximum number of commits to request from the VCS, or -1 for unlimited.
    */
   @NotNull
-  List<? extends VcsFullCommitDetails> getFilteredDetails(@NotNull VirtualFile root,
-                                                          @NotNull Collection<VcsLogFilter> filters) throws VcsException;
+  List<TimedVcsCommit> getCommitsMatchingFilter(@NotNull VirtualFile root, @NotNull VcsLogFilterCollection filterCollection, int maxCount)
+    throws VcsException;
 
   /**
    * Returns the name of current user as specified for the given root,
@@ -92,5 +96,49 @@ public interface VcsLogProvider {
    */
   @NotNull
   Collection<String> getContainingBranches(@NotNull VirtualFile root, @NotNull Hash commitHash) throws VcsException;
+
+  /**
+   * In order to tune log for it's VCS, provider may set value to one of the properties specified in {@link com.intellij.vcs.log.VcsLogProperties}.
+   * @param property Property instance to return value for.
+   * @param <T>      Type of property value.
+   * @return         Property value or null if unset.
+   */
+  @Nullable
+  <T> T getPropertyValue(VcsLogProperties.VcsLogProperty<T> property);
+
+  /**
+   * Returns currently checked out branch in given root, or null if not on any branch or provided root is not under version control.
+   *
+   * @param root root for which branch is requested.
+   * @return branch that is currently checked out in the specified root.
+   */
+  @Nullable
+  String getCurrentBranch(@NotNull VirtualFile root);
+
+  interface Requirements {
+
+    /**
+     * Returns the number of commits that should be queried from the VCS. <br/>
+     * (of course it may return less commits if the repository is small)
+     */
+    int getCommitCount();
+
+  }
+
+  /**
+   * Container for references and users.
+   */
+  interface LogData {
+    @NotNull Set<VcsRef> getRefs();
+    @NotNull Set<VcsUser> getUsers();
+  }
+
+  /**
+   * Container for the ordered list of commits together with their details, and references.
+   */
+  interface DetailedLogData {
+    @NotNull List<VcsCommitMetadata> getCommits();
+    @NotNull Set<VcsRef> getRefs();
+  }
 
 }

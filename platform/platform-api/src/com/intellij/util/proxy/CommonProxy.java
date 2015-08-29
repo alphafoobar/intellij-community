@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,10 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.net.NetUtils;
+import gnu.trove.THashMap;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,15 +35,11 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Created with IntelliJ IDEA.
- * User: Irina.Chernushina
- * Date: 1/21/13
- * Time: 12:39 PM
- */
 public class CommonProxy extends ProxySelector {
+  private static final Logger LOG = Logger.getInstance("#com.intellij.util.proxy.CommonProxy");
+
   private final static CommonProxy ourInstance = new CommonProxy();
-  private final CommonAuthenticator myAuthenticator;
+  private final CommonAuthenticator myAuthenticator = new CommonAuthenticator();
 
   private final static ThreadLocal<Boolean> ourReenterDefence = new ThreadLocal<Boolean>();
 
@@ -49,30 +49,23 @@ public class CommonProxy extends ProxySelector {
   private volatile static long ourErrorTime = 0;
   private volatile static ProxySelector ourWrong;
   private static final AtomicReference<Map<String, String>> ourProps = new AtomicReference<Map<String, String>>();
+
   static {
     ProxySelector.setDefault(ourInstance);
   }
 
-  private static final Logger LOG = Logger.getInstance("#com.intellij.util.proxy.CommonProxy");
-  private final Object myLock;
-  private final Set<Pair<HostInfo, Thread>> myNoProxy;
+  private final Object myLock = new Object();
+  private final Set<Pair<HostInfo, Thread>> myNoProxy = new THashSet<Pair<HostInfo, Thread>>();
 
-  private final Map<String, ProxySelector> myCustom;
-  private final Map<String, NonStaticAuthenticator> myCustomAuth;
-  private final Set<Pair<HostInfo, Thread>> myNoAuthentication;
+  private final Map<String, ProxySelector> myCustom = new THashMap<String, ProxySelector>();
+  private final Map<String, NonStaticAuthenticator> myCustomAuth = new THashMap<String, NonStaticAuthenticator>();
 
   public static CommonProxy getInstance() {
     return ourInstance;
   }
 
   private CommonProxy() {
-    myLock = new Object();
-    myNoProxy = new HashSet<Pair<HostInfo, Thread>>();
-    myCustom = new HashMap<String, ProxySelector>();
-    myCustomAuth = new HashMap<String, NonStaticAuthenticator>();
-    myAuthenticator = new CommonAuthenticator();
     ensureAuthenticator();
-    myNoAuthentication = new HashSet<Pair<HostInfo, Thread>>();
   }
 
   public static void isInstalledAssertion() {
@@ -160,6 +153,7 @@ public class CommonProxy extends ProxySelector {
     }
   }
 
+  @SuppressWarnings("unused")
   public void removeNoAuthentication(@NotNull final String protocol, @NotNull final String host, final int port) {
     synchronized (myLock) {
       LOG.debug("no proxy removed: " + protocol + "://" + host + ":" + port);
@@ -212,40 +206,40 @@ public class CommonProxy extends ProxySelector {
     }
     try {
       ourReenterDefence.set(Boolean.TRUE);
-      final String host = uri.getHost() == null ? "" : uri.getHost();
-      final int port = correctPortByProtocol(uri);
-      final String protocol = uri.getScheme();
-      if ("localhost".equals(host) || "127.0.0.1".equals(host) || "::1".equals(host)) {
+      String host = StringUtil.notNullize(uri.getHost());
+      if (NetUtils.isLocalhost(host)) {
         return NO_PROXY_LIST;
       }
 
-      final HostInfo info = new HostInfo(protocol, host, port);
+      final HostInfo info = new HostInfo(uri.getScheme(), host, correctPortByProtocol(uri));
       final Map<String, ProxySelector> copy;
       synchronized (myLock) {
         if (myNoProxy.contains(Pair.create(info, Thread.currentThread()))) {
           LOG.debug("CommonProxy.select returns no proxy (in no proxy list) for " + uri.toString());
           return NO_PROXY_LIST;
         }
-        copy = new HashMap<String, ProxySelector>(myCustom);
+        copy = new THashMap<String, ProxySelector>(myCustom);
       }
       for (Map.Entry<String, ProxySelector> entry : copy.entrySet()) {
         final List<Proxy> proxies = entry.getValue().select(uri);
-        if (proxies != null && proxies.size() > 0) {
+        if (!ContainerUtil.isEmpty(proxies)) {
           LOG.debug("CommonProxy.select returns custom proxy for " + uri.toString() + ", " + proxies.toString());
           return proxies;
         }
       }
       return NO_PROXY_LIST;
-    } finally {
+    }
+    finally {
       ourReenterDefence.remove();
     }
   }
 
-  private int correctPortByProtocol(@NotNull URI uri) {
+  private static int correctPortByProtocol(@NotNull URI uri) {
     if (uri.getPort() == -1) {
       if ("http".equals(uri.getScheme())) {
         return ProtocolDefaultPorts.HTTP;
-      } else if ("https".equals(uri.getScheme())) {
+      }
+      else if ("https".equals(uri.getScheme())) {
         return ProtocolDefaultPorts.SSL;
       }
     }
@@ -258,7 +252,7 @@ public class CommonProxy extends ProxySelector {
 
     final Map<String, ProxySelector> copy;
     synchronized (myLock) {
-      copy = new HashMap<String, ProxySelector>(myCustom);
+      copy = new THashMap<String, ProxySelector>(myCustom);
     }
     for (Map.Entry<String, ProxySelector> entry : copy.entrySet()) {
       entry.getValue().connectFailed(uri, sa, ioe);
@@ -280,10 +274,6 @@ public class CommonProxy extends ProxySelector {
         final Pair<HostInfo, Thread> pair = Pair.create(hostInfo, Thread.currentThread());
         if (myNoProxy.contains(pair)) {
           LOG.debug("CommonAuthenticator.getPasswordAuthentication found host in no proxies set (" + siteStr + ")");
-          return null;
-        }
-        if (myNoAuthentication.contains(pair)) {
-          LOG.debug("CommonAuthenticator.getPasswordAuthentication found host in no authentication set (" + siteStr + ")");
           return null;
         }
         copy = new HashMap<String, NonStaticAuthenticator>(myCustomAuth);
@@ -330,7 +320,8 @@ public class CommonProxy extends ProxySelector {
     if (host == null) {
       if (site != null) {
         host = site.getHostName();
-      } else if (requestingUrl != null) {
+      }
+      else if (requestingUrl != null) {
         host = requestingUrl.getHost();
       }
     }
@@ -343,15 +334,11 @@ public class CommonProxy extends ProxySelector {
   }
 
   public static class HostInfo {
-    public String myProtocol;
-    @NotNull
-    public String myHost;
-    public int myPort;
+    public final String myProtocol;
+    public final String myHost;
+    public final int myPort;
 
-    public HostInfo() {
-    }
-
-    public HostInfo(String protocol, @NotNull String host, int port) {
+    public HostInfo(@Nullable String protocol, @NotNull String host, int port) {
       myPort = port;
       myHost = host;
       myProtocol = protocol;
@@ -371,16 +358,15 @@ public class CommonProxy extends ProxySelector {
 
     @Override
     public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
 
       HostInfo info = (HostInfo)o;
-
-      if (myPort != info.myPort) return false;
-      if (!myHost.equals(info.myHost)) return false;
-      if (myProtocol != null ? !myProtocol.equals(info.myProtocol) : info.myProtocol != null) return false;
-
-      return true;
+      return myPort == info.myPort && myHost.equals(info.myHost) && Comparing.equal(myProtocol, info.myProtocol);
     }
 
     @Override

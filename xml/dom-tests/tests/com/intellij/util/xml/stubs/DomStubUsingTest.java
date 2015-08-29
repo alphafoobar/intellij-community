@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.util.xml.stubs;
 
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiFile;
@@ -43,6 +44,13 @@ public class DomStubUsingTest extends DomStubTest {
 
     Foo foo = fileElement.getRootElement();
     List<Bar> bars = foo.getBars();
+    assertFalse(file.getNode().isParsed());
+
+    final List<GenericDomValue<String>> listElements = foo.getLists();
+    final GenericDomValue<String> listElement0 = listElements.get(0);
+    assertEquals("list0", listElement0.getValue());
+    final GenericDomValue<String> listElement1 = listElements.get(1);
+    assertEquals("list1", listElement1.getValue());
     assertFalse(file.getNode().isParsed());
 
     assertEquals(2, bars.size());
@@ -115,6 +123,37 @@ public class DomStubUsingTest extends DomStubTest {
   public void testFileLoading() throws Exception {
     XmlFile file = prepareFile("foo.xml");
     ((PsiManagerImpl)getPsiManager()).setAssertOnFileLoadingFilter(VirtualFileFilter.ALL, myTestRootDisposable);
-    DomManager.getDomManager(getProject()).getFileElement(file, Foo.class);
+    DomFileElement<Foo> element = DomManager.getDomManager(getProject()).getFileElement(file, Foo.class);
+    assertNotNull(element);
+    GenericDomValue<String> id = element.getRootElement().getId();
+    assertEquals("foo", id.getValue());
+  }
+
+  public void testStubbedElementUndefineNotExisting() {
+    final DomFileElement<Foo> fileElement = prepare("foo.xml", Foo.class);
+    final Bar bar = fileElement.getRootElement().getBars().get(0);
+
+    assertUndefine(bar);
+  }
+
+  public void testRootElementUndefineNotExisting() {
+    final DomFileElement<Foo> fileElement = prepare("foo.xml", Foo.class);
+
+    final DomElement rootElement = fileElement.getRootElement();
+    assertUndefine(rootElement);
+  }
+
+  private static void assertUndefine(final DomElement domElement) {
+    assertNotNull(domElement);
+    assertTrue(domElement.exists());
+
+    new WriteCommandAction.Simple(null) {
+      @Override
+      protected void run() throws Throwable {
+        domElement.undefine();
+      }
+    }.execute().throwException();
+
+    assertFalse(domElement.exists());
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,8 +39,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Set;
 
-
-public class SpellCheckingInspection extends LocalInspectionTool implements BatchSuppressableTool {
+public class SpellCheckingInspection extends LocalInspectionTool {
   public static final String SPELL_CHECKING_INSPECTION_TOOL_NAME = "SpellCheckingInspection";
 
   @Override
@@ -61,12 +60,13 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
   @Override
   public SuppressQuickFix[] getBatchSuppressActions(@Nullable PsiElement element) {
     if (element != null) {
-      SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, element.getLanguage());
+      final Language language = element.getLanguage();
+      SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, language);
       if(strategy instanceof SuppressibleSpellcheckingStrategy) {
         return ((SuppressibleSpellcheckingStrategy)strategy).getSuppressActions(element, getShortName());
       }
     }
-    return SuppressQuickFix.EMPTY_ARRAY;
+    return super.getBatchSuppressActions(element);
   }
 
   private static SpellcheckingStrategy getSpellcheckingStrategy(@NotNull PsiElement element, @NotNull Language language) {
@@ -80,9 +80,12 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
 
   @Override
   public boolean isSuppressedFor(@NotNull PsiElement element) {
-    SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, element.getLanguage());
-    return strategy instanceof SuppressibleSpellcheckingStrategy &&
-           ((SuppressibleSpellcheckingStrategy)strategy).isSuppressedFor(element, getShortName());
+    final Language language = element.getLanguage();
+    SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, language);
+    if (strategy instanceof SuppressibleSpellcheckingStrategy) {
+      return ((SuppressibleSpellcheckingStrategy)strategy).isSuppressedFor(element, getShortName());
+    }
+    return super.isSuppressedFor(element);
   }
 
   @Override
@@ -157,14 +160,13 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
     tokenizer.tokenize(element, consumer);
   }
 
-
-  private static void addBatchDescriptor(PsiElement element, int offset, @NotNull TextRange textRange, @NotNull ProblemsHolder holder) {
-    final SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, element.getLanguage());
-
-    SpellCheckerQuickFix[] fixes = strategy != null
-                                   ? strategy.getBatchFixes(element, offset, textRange)
-                                   : SpellcheckingStrategy.getDefaultBatchFixes();
-    final ProblemDescriptor problemDescriptor = createProblemDescriptor(element, offset, textRange, holder, fixes, false);
+  private static void addBatchDescriptor(PsiElement element,
+                                         int offset,
+                                         @NotNull TextRange textRange,
+                                         @NotNull ProblemsHolder holder,
+                                         String wordWithTypo) {
+    SpellCheckerQuickFix[] fixes = SpellcheckingStrategy.getDefaultBatchFixes();
+    ProblemDescriptor problemDescriptor = createProblemDescriptor(element, offset, textRange, holder, fixes, false, wordWithTypo);
     holder.registerProblem(problemDescriptor);
   }
 
@@ -176,19 +178,23 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
                                    ? strategy.getRegularFixes(element, offset, textRange, useRename, wordWithTypo)
                                    : SpellcheckingStrategy.getDefaultRegularFixes(useRename, wordWithTypo);
 
-    final ProblemDescriptor problemDescriptor = createProblemDescriptor(element, offset, textRange, holder, fixes, true);
+    final ProblemDescriptor problemDescriptor = createProblemDescriptor(element, offset, textRange, holder, fixes, true, wordWithTypo);
     holder.registerProblem(problemDescriptor);
   }
 
   private static ProblemDescriptor createProblemDescriptor(PsiElement element, int offset, TextRange textRange, ProblemsHolder holder,
                                                            SpellCheckerQuickFix[] fixes,
-                                                           boolean onTheFly) {
-    final String description = SpellCheckerBundle.message("typo.in.word.ref");
-    final TextRange highlightRange = TextRange.from(offset + textRange.getStartOffset(), textRange.getLength());
-    assert highlightRange.getStartOffset()>=0;
+                                                           boolean onTheFly, String wordWithTypo) {
+    SpellcheckingStrategy strategy = getSpellcheckingStrategy(element, element.getLanguage());
+    final Tokenizer tokenizer = strategy != null ? strategy.getTokenizer(element) : null;
+    if (tokenizer != null) {
+      textRange = tokenizer.getHighlightingRange(element, offset, textRange);
+    }
+    assert textRange.getStartOffset() >= 0;
 
+    final String description = SpellCheckerBundle.message("typo.in.word.ref", wordWithTypo);
     return holder.getManager()
-      .createProblemDescriptor(element, highlightRange, description, ProblemHighlightType.GENERIC_ERROR_OR_WARNING, onTheFly, fixes);
+      .createProblemDescriptor(element, textRange, description, ProblemHighlightType.GENERIC_ERROR_OR_WARNING, onTheFly, fixes);
   }
 
   @SuppressWarnings({"PublicField"})
@@ -217,7 +223,6 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
     final JPanel panel = new JPanel(new BorderLayout());
     panel.add(verticalBox, BorderLayout.NORTH);
     return panel;
-
   }
 
   private static class MyTokenConsumer extends TokenConsumer implements Consumer<TextRange> {
@@ -252,7 +257,7 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
 
     @Override
     public void consume(TextRange textRange) {
-      final String word = textRange.substring(myText);
+      String word = textRange.substring(myText);
       if (myHolder.isOnTheFly() && myAlreadyChecked.contains(word)) {
         return;
       }
@@ -264,12 +269,19 @@ public class SpellCheckingInspection extends LocalInspectionTool implements Batc
 
       boolean hasProblems = myManager.hasProblem(word);
       if (hasProblems) {
+        int aposIndex = word.indexOf('\'');
+        if (aposIndex != -1) {
+          word = word.substring(0, aposIndex); // IdentifierSplitter.WORD leaves &apos;
+        }
+        hasProblems = myManager.hasProblem(word);
+      }
+      if (hasProblems) {
         if (myHolder.isOnTheFly()) {
           addRegularDescriptor(myElement, myOffset, textRange, myHolder, myUseRename, word);
         }
         else {
           myAlreadyChecked.add(word);
-          addBatchDescriptor(myElement, myOffset, textRange, myHolder);
+          addBatchDescriptor(myElement, myOffset, textRange, myHolder, word);
         }
       }
     }

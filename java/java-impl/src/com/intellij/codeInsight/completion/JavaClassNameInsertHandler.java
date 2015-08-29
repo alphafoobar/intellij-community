@@ -24,14 +24,19 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.filters.FilterPositionUtil;
+import com.intellij.psi.impl.source.codeStyle.ImportHelper;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import org.jetbrains.annotations.NotNull;
 
 import static com.intellij.patterns.PsiJavaPatterns.psiElement;
+import static com.intellij.psi.codeStyle.JavaCodeStyleSettings.*;
 
 /**
 * @author peter
@@ -53,6 +58,8 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
     }
 
     PsiElement position = file.findElementAt(offset);
+    PsiJavaCodeReferenceElement ref = position != null && position.getParent() instanceof PsiJavaCodeReferenceElement ?
+                                      (PsiJavaCodeReferenceElement) position.getParent() : null;
     PsiClass psiClass = item.getObject();
     final Project project = context.getProject();
 
@@ -69,20 +76,13 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
       AutoPopupController.getInstance(context.getProject()).autoPopupMemberLookup(context.getEditor(), null);
     }
 
-    if (PsiTreeUtil.getParentOfType(position, PsiDocComment.class, false) != null &&
-        CodeStyleSettingsManager.getSettings(project).USE_FQ_CLASS_NAMES_IN_JAVADOC) {
+    if (PsiTreeUtil.getParentOfType(position, PsiDocComment.class, false) != null && shouldInsertFqnInJavadoc(item, file, project)) {
       AllClassesGetter.INSERT_FQN.handleInsert(context, item);
       return;
     }
 
-    if (position != null) {
-      PsiElement parent = position.getParent();
-      if (parent instanceof PsiJavaCodeReferenceElement) {
-        final PsiJavaCodeReferenceElement ref = (PsiJavaCodeReferenceElement)parent;
-        if (PsiTreeUtil.getParentOfType(position, PsiDocTag.class) != null && ref.isReferenceTo(psiClass)) {
-          return;
-        }
-      }
+    if (ref != null && PsiTreeUtil.getParentOfType(position, PsiDocTag.class) != null && ref.isReferenceTo(psiClass)) {
+      return;
     }
 
     OffsetKey refEnd = context.trackOffset(context.getTailOffset(), false);
@@ -92,7 +92,9 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
       context.setAddCompletionChar(false);
     }
 
-    PsiTypeLookupItem.addImportForItem(context, psiClass);
+    if (ref == null || !ref.isQualified()) {
+      PsiTypeLookupItem.addImportForItem(context, psiClass);
+    }
     if (context.getOffset(refEnd) < 0) {
       return;
     }
@@ -100,17 +102,47 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
     context.setTailOffset(context.getOffset(refEnd));
 
     context.commitDocument();
-    if (shouldInsertParentheses(file.findElementAt(context.getTailOffset() - 1))) {
+    if (item.getUserData(JavaChainLookupElement.CHAIN_QUALIFIER) == null &&
+        shouldInsertParentheses(file.findElementAt(context.getTailOffset() - 1))) {
       if (ConstructorInsertHandler.insertParentheses(context, item, psiClass, false)) {
         fillTypeArgs |= psiClass.hasTypeParameters() && PsiUtil.getLanguageLevel(file).isAtLeast(LanguageLevel.JDK_1_5);
       }
     }
-    else if (insertingAnnotationWithParameters(context, item)) {
-      JavaCompletionUtil.insertParentheses(context, item, false, true);
+    else if (insertingAnnotation(context, item)) {
+      if (shouldHaveAnnotationParameters(psiClass)) {
+        JavaCompletionUtil.insertParentheses(context, item, false, true);
+      }
+      CharSequence text = context.getDocument().getCharsSequence();
+      int tail = context.getTailOffset();
+      if (text.length() > tail && Character.isLetter(text.charAt(tail))) {
+        context.getDocument().insertString(tail, " ");
+      }
     }
 
     if (fillTypeArgs && context.getCompletionChar() != '(') {
       JavaCompletionUtil.promptTypeArgs(context, context.getOffset(refEnd));
+    }
+  }
+
+  private static boolean shouldInsertFqnInJavadoc(@NotNull JavaPsiClassReferenceElement item,
+                                                  @NotNull PsiFile file,
+                                                  @NotNull Project project) 
+  {
+    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(project);
+    JavaCodeStyleSettings javaSettings = settings.getCustomSettings(JavaCodeStyleSettings.class);
+    
+    switch (javaSettings.CLASS_NAMES_IN_JAVADOC) {
+      case FULLY_QUALIFY_NAMES_ALWAYS:
+        return true;
+      case SHORTEN_NAMES_ALWAYS_AND_ADD_IMPORT:
+        return false;
+      case FULLY_QUALIFY_NAMES_IF_NOT_IMPORTED:
+        if (file instanceof PsiJavaFile) {
+          PsiJavaFile javaFile = ((PsiJavaFile)file);
+          return item.getQualifiedName() != null && !ImportHelper.isAlreadyImported(javaFile, item.getQualifiedName());
+        }
+      default:
+        return false;
     }
   }
 
@@ -139,15 +171,12 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
     return false;
   }
 
-  private static boolean insertingAnnotationWithParameters(InsertionContext context, LookupElement item) {
+  private static boolean insertingAnnotation(InsertionContext context, LookupElement item) {
     final Object obj = item.getObject();
     if (!(obj instanceof PsiClass) || !((PsiClass)obj).isAnnotationType()) return false;
 
     PsiElement leaf = context.getFile().findElementAt(context.getStartOffset());
-    if (psiElement(PsiIdentifier.class).withParents(PsiJavaCodeReferenceElement.class, PsiAnnotation.class).accepts(leaf)) {
-      return shouldHaveAnnotationParameters((PsiClass)obj);
-    }
-    return false;
+    return psiElement(PsiIdentifier.class).withParents(PsiJavaCodeReferenceElement.class, PsiAnnotation.class).accepts(leaf);
   }
 
   static boolean shouldHaveAnnotationParameters(PsiClass annoClass) {

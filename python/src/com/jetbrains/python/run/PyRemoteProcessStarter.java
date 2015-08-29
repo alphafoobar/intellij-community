@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,9 @@ import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.util.PathMappingSettings;
-import com.jetbrains.python.remote.PyRemoteSdkData;
+import com.intellij.openapi.projectRoots.SdkAdditionalData;
+import com.jetbrains.python.remote.PyRemotePathMapper;
+import com.jetbrains.python.remote.PyRemoteSdkAdditionalDataBase;
 import com.jetbrains.python.remote.PythonRemoteInterpreterManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -36,14 +37,14 @@ public class PyRemoteProcessStarter {
   public ProcessHandler startRemoteProcess(@NotNull Sdk sdk,
                                            @NotNull GeneralCommandLine commandLine,
                                            @Nullable Project project,
-                                           @Nullable PathMappingSettings mappingSettings)
+                                           @Nullable PyRemotePathMapper pathMapper)
     throws ExecutionException {
     PythonRemoteInterpreterManager manager = PythonRemoteInterpreterManager.getInstance();
     if (manager != null) {
       ProcessHandler processHandler;
 
       try {
-        processHandler = doStartRemoteProcess(sdk, commandLine, manager, project, mappingSettings);
+        processHandler = doStartRemoteProcess(sdk, commandLine, manager, project, pathMapper);
       }
       catch (ExecutionException e) {
         final Application application = ApplicationManager.getApplication();
@@ -64,10 +65,19 @@ public class PyRemoteProcessStarter {
                                                 @NotNull GeneralCommandLine commandLine,
                                                 @NotNull PythonRemoteInterpreterManager manager,
                                                 @Nullable Project project,
-                                                @Nullable PathMappingSettings settings)
+                                                @Nullable PyRemotePathMapper pathMapper)
     throws ExecutionException {
 
-    return manager.startRemoteProcess(project, (PyRemoteSdkData)sdk.getSdkAdditionalData(), commandLine,
-                                      settings);
+    SdkAdditionalData data = sdk.getSdkAdditionalData();
+    assert data instanceof PyRemoteSdkAdditionalDataBase;
+    PyRemoteSdkAdditionalDataBase pyRemoteSdkAdditionalDataBase = (PyRemoteSdkAdditionalDataBase)data;
+    try {
+      pathMapper = manager.setupMappings(project, pyRemoteSdkAdditionalDataBase, pathMapper);
+
+      return manager.startRemoteProcess(project, pyRemoteSdkAdditionalDataBase.getRemoteSdkCredentials(true), commandLine, pathMapper);
+    }
+    catch (InterruptedException e) {
+      throw new ExecutionException(e); //TODO: handle exception
+    }
   }
 }

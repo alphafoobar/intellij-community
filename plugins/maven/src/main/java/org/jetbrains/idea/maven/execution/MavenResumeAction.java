@@ -138,6 +138,8 @@ public class MavenResumeAction extends AnAction {
             }
             else if (textWithoutInfo.length() > 0) {
               myMavenProjectNames.add(textWithoutInfo);
+            } else if (!myMavenProjectNames.isEmpty()) {
+              myState = STATE_WAIT_FOR______;
             }
             break;
 
@@ -299,7 +301,7 @@ public class MavenResumeAction extends AnAction {
 
       runConfiguration.getRunnerParameters().setGoals(goals);
 
-      myRunner.execute(new ExecutionEnvironmentBuilder(myEnvironment).setContentToReuse(null).setRunProfile(runConfiguration).build());
+      myRunner.execute(new ExecutionEnvironmentBuilder(myEnvironment).contentToReuse(null).runProfile(runConfiguration).build());
     }
     catch (RunCanceledByUserException ignore) {
     }

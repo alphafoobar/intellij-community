@@ -17,11 +17,16 @@ package com.intellij.cucumber;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Ref;
-import cucumber.io.MultiLoader;
+import com.intellij.testFramework.TestRunnerUtil;
+import com.intellij.util.ui.UIUtil;
 import cucumber.runtime.Runtime;
 import cucumber.runtime.RuntimeOptions;
+import cucumber.runtime.io.MultiLoader;
+import cucumber.runtime.io.ResourceLoaderClassFinder;
 
-import java.awt.*;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * @author Dennis.Ushakov
@@ -32,21 +37,36 @@ public class CucumberMain {
     System.setProperty("apple.awt.UIElement", "true");
   }
 
-  public static void main(final String[] args) {
+  public static void main(String[] args) throws IOException {
+    int exitStatus;
+    try {
+      exitStatus = run(args, Thread.currentThread().getContextClassLoader());
+    }
+    catch (Throwable e) {
+      exitStatus = 1;
+    }
+    System.exit(exitStatus);
+
+  }
+
+  public static int run(final String[] argv, final ClassLoader classLoader) throws IOException {
     final Ref<Throwable> errorRef = new Ref<Throwable>();
     final Ref<Runtime> runtimeRef = new Ref<Runtime>();
+
     try {
-      EventQueue.invokeAndWait(new Runnable() {
+      TestRunnerUtil.replaceIdeEventQueueSafely();
+      UIUtil.invokeAndWaitIfNeeded(new Runnable() {
         @Override
         public void run() {
           try {
-            final ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            RuntimeOptions runtimeOptions = new RuntimeOptions(System.getProperties(), args);
-            Runtime runtime = new Runtime(new MultiLoader(classLoader), classLoader, runtimeOptions);
+            RuntimeOptions runtimeOptions = new RuntimeOptions(new ArrayList(Arrays.asList(argv)));
+            MultiLoader resourceLoader = new MultiLoader(classLoader);
+            ResourceLoaderClassFinder classFinder = new ResourceLoaderClassFinder(resourceLoader, classLoader);
+            Runtime runtime = new Runtime(resourceLoader, classFinder, classLoader, runtimeOptions);
             runtimeRef.set(runtime);
-            runtime.writeStepdefsJson();
             runtime.run();
-          } catch (Throwable throwable) {
+          }
+          catch (Throwable throwable) {
             errorRef.set(throwable);
             Logger.getInstance(CucumberMain.class).error(throwable);
           }
@@ -67,6 +87,6 @@ public class CucumberMain {
       error.printStackTrace();
       System.err.println("=============================");
     }
-    System.exit(throwable != null ? 1 : 0);
+    return throwable != null ? 1 : 0;
   }
 }

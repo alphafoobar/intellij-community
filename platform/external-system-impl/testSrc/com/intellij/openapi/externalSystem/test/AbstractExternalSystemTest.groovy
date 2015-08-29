@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 package com.intellij.openapi.externalSystem.test
-
 import com.intellij.openapi.components.ServiceManager
 import com.intellij.openapi.extensions.ExtensionPoint
 import com.intellij.openapi.extensions.Extensions
 import com.intellij.openapi.externalSystem.ExternalSystemManager
 import com.intellij.openapi.externalSystem.model.DataNode
-import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.externalSystem.model.project.ProjectData
 import com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManager
 import com.intellij.openapi.externalSystem.util.DisposeAwareProjectChange
@@ -28,6 +26,7 @@ import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.testFramework.PlatformTestCase
 import com.intellij.testFramework.SkipInHeadlessEnvironment
 import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture
@@ -38,7 +37,6 @@ import org.jetbrains.annotations.Nullable
 
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
-
 /**
  * @author Denis Zhdanov
  * @since 8/7/13 2:04 PM
@@ -54,7 +52,7 @@ abstract class AbstractExternalSystemTest extends UsefulTestCase {
 
   TestExternalSystemManager externalSystemManager
   ExtensionPoint externalSystemManagerEP
-  
+
   @Override
   protected void setUp() throws Exception {
     super.setUp()
@@ -86,26 +84,29 @@ abstract class AbstractExternalSystemTest extends UsefulTestCase {
 
   @Override
   protected void tearDown() throws Exception {
-    project = null
-    UIUtil.invokeAndWaitIfNeeded {
-      try {
-        externalSystemManagerEP.unregisterExtension(externalSystemManager)
-        testFixture.tearDown();
-        testFixture = null;
+    try {
+      project = null
+      UIUtil.invokeAndWaitIfNeeded {
+        try {
+          externalSystemManagerEP.unregisterExtension(externalSystemManager)
+          testFixture.tearDown();
+          testFixture = null;
+        }
+        catch (Exception e) {
+          throw new RuntimeException(e);
+        }
       }
-      catch (Exception e) {
-        throw new RuntimeException(e);
+
+      if (!FileUtil.delete(projectDir) && projectDir.exists()) {
+        System.err.println("Cannot delete " + projectDir);
+        //printDirectoryContent(myDir);
+        projectDir.deleteOnExit();
       }
     }
-
-    if (!FileUtil.delete(projectDir) && projectDir.exists()) {
-      System.err.println("Cannot delete " + projectDir);
-      //printDirectoryContent(myDir);
-      projectDir.deleteOnExit();
+    finally {
+      super.tearDown();
+      resetClassFields(getClass());
     }
-
-    super.tearDown();
-    resetClassFields(getClass());
   }
 
   private void resetClassFields(@Nullable Class<?> aClass) {
@@ -158,7 +159,7 @@ abstract class AbstractExternalSystemTest extends UsefulTestCase {
         @Override
         void execute() {
           ProjectRootManagerEx.getInstanceEx(myProject).mergeRootsChangesDuring {
-            dataManager.importData(node.key, [node], myProject, true)
+            dataManager.importData(node, myProject, true)
           }
         }})
     }

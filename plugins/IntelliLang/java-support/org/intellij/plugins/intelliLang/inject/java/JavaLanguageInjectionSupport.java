@@ -17,13 +17,13 @@
 package org.intellij.plugins.intelliLang.inject.java;
 
 import com.intellij.codeInsight.AnnotationUtil;
-import com.intellij.codeInsight.daemon.impl.quickfix.OrderEntryFix;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.MultiHostRegistrar;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
@@ -55,7 +55,6 @@ import org.intellij.plugins.intelliLang.inject.config.InjectionPlace;
 import org.intellij.plugins.intelliLang.inject.config.MethodParameterInjection;
 import org.intellij.plugins.intelliLang.inject.config.ui.AbstractInjectionPanel;
 import org.intellij.plugins.intelliLang.inject.config.ui.MethodParameterPanel;
-import org.intellij.plugins.intelliLang.inject.config.ui.configurables.MethodParameterInjectionConfigurable;
 import org.intellij.plugins.intelliLang.util.ContextComputationProcessor;
 import org.intellij.plugins.intelliLang.util.PsiUtilEx;
 import org.jdom.Element;
@@ -175,14 +174,11 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
   }
 
   public BaseInjection createInjection(final Element element) {
-    if (element.getName().equals(MethodParameterInjection.class.getSimpleName())) {
-      return new MethodParameterInjection();
-    }
-    else return new BaseInjection(JAVA_SUPPORT_ID);
+    return new BaseInjection(JAVA_SUPPORT_ID);
   }
 
   private static boolean doInjectInJava(final Project project,
-                                        final PsiElement psiElement,
+                                        @NotNull final PsiElement psiElement,
                                         PsiLanguageInjectionHost host,
                                         final String languageId) {
     final PsiElement target = ContextComputationProcessor.getTopLevelInjectionTarget(psiElement);
@@ -217,7 +213,6 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
                                                 final PsiModifierListOwner modifierListOwner,
                                                 @NotNull PsiLanguageInjectionHost host,
                                                 final String languageId) {
-    // todo add languageId comment
     return doAddLanguageAnnotation(project, modifierListOwner, host, languageId, new Processor<PsiLanguageInjectionHost>() {
       @Override
       public boolean process(PsiLanguageInjectionHost host) {
@@ -234,37 +229,48 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
     });
   }
 
-  public static boolean doAddLanguageAnnotation(final Project project,
-                                                final PsiModifierListOwner modifierListOwner,
-                                                @NotNull PsiLanguageInjectionHost host,
+  private static boolean isAnnotationsJarInPath(Module module) {
+    if (module == null) return false;
+    return JavaPsiFacade.getInstance(module.getProject())
+             .findClass(AnnotationUtil.LANGUAGE, GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module)) != null;
+  }
+
+  public static boolean doAddLanguageAnnotation(Project project,
+                                                @Nullable final PsiModifierListOwner modifierListOwner,
+                                                @NotNull final PsiLanguageInjectionHost host,
                                                 final String languageId,
                                                 Processor<PsiLanguageInjectionHost> annotationFixer) {
-    if (modifierListOwner.getModifierList() == null || !PsiUtil.isLanguageLevel5OrHigher(modifierListOwner)) return false;
-    final Configuration.AdvancedConfiguration configuration = Configuration.getProjectInstance(project).getAdvancedConfiguration();
+    final boolean addAnnotation = isAnnotationsJarInPath(ModuleUtilCore.findModuleForPsiElement(modifierListOwner))
+      && PsiUtil.isLanguageLevel5OrHigher(modifierListOwner)
+      && modifierListOwner.getModifierList() != null;
+    final PsiStatement statement = PsiTreeUtil.getParentOfType(host, PsiStatement.class);
+    if (!addAnnotation && statement == null) return false;
+
+    Configuration.AdvancedConfiguration configuration = Configuration.getProjectInstance(project).getAdvancedConfiguration();
     if (!configuration.isSourceModificationAllowed()) {
       host.putUserData(InjectLanguageAction.FIX_KEY, annotationFixer);
       return false;
     }
-    if (!OrderEntryFix.ensureAnnotationsJarInPath(ModuleUtilCore.findModuleForPsiElement(modifierListOwner))) {
-      return false;
-    }
+
     new WriteCommandAction(modifierListOwner.getProject(), modifierListOwner.getContainingFile()) {
-      protected void run(final Result result) throws Throwable {
-        JVMElementFactory factory = JVMElementFactories.getFactory(modifierListOwner.getLanguage(), modifierListOwner.getProject());
-        if (factory == null) {
-          factory = JavaPsiFacade.getElementFactory(modifierListOwner.getProject());
-        }
-        final PsiAnnotation annotation = factory.createAnnotationFromText("@" + AnnotationUtil.LANGUAGE + "(\"" + languageId + "\")", modifierListOwner);
-        final PsiModifierList list = modifierListOwner.getModifierList();
-        assert list != null;
-        final PsiAnnotation existingAnnotation = list.findAnnotation(AnnotationUtil.LANGUAGE);
-        if (existingAnnotation != null) {
-          existingAnnotation.replace(annotation);
+      protected void run(@NotNull Result result) throws Throwable {
+        PsiElementFactory javaFacade = JavaPsiFacade.getElementFactory(getProject());
+        if (addAnnotation) {
+          JVMElementFactory factory = ObjectUtils.chooseNotNull(JVMElementFactories.getFactory(modifierListOwner.getLanguage(), getProject()), javaFacade);
+          PsiAnnotation annotation = factory.createAnnotationFromText("@" + AnnotationUtil.LANGUAGE + "(\"" + languageId + "\")", modifierListOwner);
+          PsiModifierList list = ObjectUtils.assertNotNull(modifierListOwner.getModifierList());
+          final PsiAnnotation existingAnnotation = list.findAnnotation(AnnotationUtil.LANGUAGE);
+          if (existingAnnotation != null) {
+            existingAnnotation.replace(annotation);
+          }
+          else {
+            list.addAfter(annotation, null);
+          }
+          JavaCodeStyleManager.getInstance(getProject()).shortenClassReferences(list);
         }
         else {
-          list.addAfter(annotation, null);
+          statement.getParent().addBefore(javaFacade.createCommentFromText("//language=" + languageId, host), statement);
         }
-        JavaCodeStyleManager.getInstance(getProject()).shortenClassReferences(list);
       }
     }.execute();
     return true;
@@ -371,16 +377,21 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
       originalCopy.setPlaceEnabled(currentPlace.getText(), true);
       methodParameterInjection = createFrom(project, originalCopy, contextMethod, false);
     }
-    if (InjectLanguageAction.doEditConfigurable(project, new MethodParameterInjectionConfigurable(methodParameterInjection, null, project))) {
-      final BaseInjection newInjection = new BaseInjection(methodParameterInjection.getSupportId()).copyFrom(methodParameterInjection);
-      if (originalInjection != null) {
-        newInjection.mergeOriginalPlacesFrom(originalInjection, true);
-      }
-      configuration.replaceInjectionsWithUndo(
-        project, Collections.singletonList(newInjection),
-        ContainerUtil.createMaybeSingletonList(originalInjection),
-        Collections.<PsiElement>emptyList());
+    mergePlacesAndAddToConfiguration(project, configuration, methodParameterInjection, originalInjection);
+  }
+
+  private static void mergePlacesAndAddToConfiguration(@NotNull Project project,
+                                                       @NotNull Configuration configuration,
+                                                       @NotNull MethodParameterInjection injection,
+                                                       @Nullable BaseInjection originalInjection) {
+    BaseInjection newInjection = new BaseInjection(injection.getSupportId()).copyFrom(injection);
+    if (originalInjection != null) {
+      newInjection.mergeOriginalPlacesFrom(originalInjection, true);
     }
+    configuration.replaceInjectionsWithUndo(
+      project, Collections.singletonList(newInjection),
+      ContainerUtil.createMaybeSingletonList(originalInjection),
+      Collections.<PsiElement>emptyList());
   }
 
   private static void collectInjections(PsiLiteralExpression host,
@@ -391,7 +402,7 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
     new ConcatenationInjector.InjectionProcessor(configuration, support, host) {
 
       @Override
-      protected boolean processCommentInjectionInner(PsiVariable owner, PsiElement comment, BaseInjection injection) {
+      protected boolean processCommentInjectionInner(PsiElement comment, BaseInjection injection) {
         ContainerUtil.addAll(annotations, comment);
         return true;
       }
@@ -483,7 +494,7 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
         }
       }
     }
-    else {
+//    else {
       // todo tbd
       //for (InjectionPlace place : injection.getInjectionPlaces()) {
       //  final Matcher matcher = pattern.matcher(place.getText());
@@ -491,7 +502,7 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
       //
       //  }
       //}
-    }
+//    }
     result.setMethodInfos(infos);
     result.generatePlaces();
     return result;

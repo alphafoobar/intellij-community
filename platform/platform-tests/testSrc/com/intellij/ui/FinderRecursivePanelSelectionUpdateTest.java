@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,8 @@
  */
 package com.intellij.ui;
 
-import com.intellij.idea.Bombed;
 import com.intellij.openapi.project.Project;
-import com.intellij.testFramework.PlatformTestCase;
+import com.intellij.testFramework.LightPlatformTestCase;
 import com.intellij.testFramework.SkipInHeadlessEnvironment;
 import com.intellij.ui.components.JBList;
 import org.jetbrains.annotations.NotNull;
@@ -25,44 +24,28 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.List;
 
 @SkipInHeadlessEnvironment
-public class FinderRecursivePanelSelectionUpdateTest extends PlatformTestCase {
+public class FinderRecursivePanelSelectionUpdateTest extends LightPlatformTestCase {
 
-  @Bombed(year = 2014, month = Calendar.JANUARY, day = 31, user = "Yann Cebron")
   public void testUpdate() throws InterruptedException {
-    StringFinderRecursivePanel panel_0 = new StringFinderRecursivePanel(getProject()) {
-      @NotNull
-      @Override
-      protected JComponent createRightComponent(String s) {
-        return new StringFinderRecursivePanel(this) {
-          @Override
-          @NotNull
-          protected JComponent createRightComponent(String s) {
-            return new StringFinderRecursivePanel(this) {
-              @Override
-              @NotNull
-              protected JComponent createRightComponent(String s) {
-                return new StringFinderRecursivePanel(this);
-              }
-            };
-          }
-        };
-      }
-    };
+    StringFinderRecursivePanel panel_0 = new StringFinderRecursivePanel(getProject());
     disposeOnTearDown(panel_0);
 
+    final StringFinderRecursivePanel panel_1 = new StringFinderRecursivePanel(panel_0);
+    panel_1.setSecondComponent(panel_0);
     panel_0.setTestSelectedIndex(0);
 
-    StringFinderRecursivePanel panel_1 = (StringFinderRecursivePanel)panel_0.getSecondComponent();
+    final StringFinderRecursivePanel panel_2 = new StringFinderRecursivePanel(panel_1);
+    panel_1.setSecondComponent(panel_2);
     panel_1.setTestSelectedIndex(1);
 
-    StringFinderRecursivePanel panel_2 = (StringFinderRecursivePanel)panel_1.getSecondComponent();
+    final StringFinderRecursivePanel panel_3 = new StringFinderRecursivePanel(panel_2);
+    panel_2.setSecondComponent(panel_3);
     panel_2.setTestSelectedIndex(2);
 
-    StringFinderRecursivePanel panel_3 = (StringFinderRecursivePanel)panel_2.getSecondComponent();
+    panel_3.setSecondComponent(new StringFinderRecursivePanel(panel_3));
     panel_3.setTestSelectedIndex(3);
 
     panel_0.updatePanel();
@@ -74,6 +57,7 @@ public class FinderRecursivePanelSelectionUpdateTest extends PlatformTestCase {
   }
 
 
+  @SuppressWarnings("InnerClassMayBeStatic")
   private class StringFinderRecursivePanel extends FinderRecursivePanel<String> {
 
     private JBList myList;

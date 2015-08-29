@@ -49,7 +49,7 @@ public abstract class HgChangesetsCommand {
   protected List<HgRevisionNumber> getRevisions(VirtualFile repo) {
     List<String> args = new ArrayList<String>(Arrays.asList(
       "--template",
-      HgChangesetUtil.makeTemplate("{rev}", "{node|short}", "{author}", "{desc|firstline}"),
+      HgChangesetUtil.makeTemplate("{rev}", "{node}", "{author}", "{desc|firstline}"),
       "--quiet"
     ));
 
@@ -71,8 +71,9 @@ public abstract class HgChangesetsCommand {
     
     for(String changeset: changesets) {
       List<String> parts = StringUtil.split(changeset, HgChangesetUtil.ITEM_SEPARATOR);
-      if (parts.size() == 4) {
-        revisions.add(HgRevisionNumber.getInstance(parts.get(0), parts.get(1), parts.get(2), parts.get(3)));
+      if (parts.size() >= 3) {
+        //support zero commit message
+        revisions.add(HgRevisionNumber.getInstance(parts.get(0), parts.get(1), parts.get(2), parts.size() > 3 ? parts.get(3) : ""));
       } else {
         LOG.warn("Could not parse changeset [" + changeset + "]");
       }

@@ -20,6 +20,8 @@ import com.intellij.ui.ClickListener;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.UIBundle;
+import com.intellij.ui.components.JBViewport;
+import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,6 +29,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
+import java.util.List;
 
 public abstract class StatusText {
   public static final SimpleTextAttributes DEFAULT_ATTRIBUTES = SimpleTextAttributes.GRAYED_ATTRIBUTES;
@@ -42,7 +45,8 @@ public abstract class StatusText {
 
   private String myText = "";
   protected final SimpleColoredComponent myComponent = new SimpleColoredComponent();
-  private final ArrayList<ActionListener> myClickListeners = new ArrayList<ActionListener>();
+  private final List<ActionListener> myClickListeners = new ArrayList<ActionListener>();
+  private boolean myHasActiveClickListeners; // calculated field for performance optimization
 
   protected StatusText(JComponent owner) {
     this();
@@ -52,7 +56,7 @@ public abstract class StatusText {
   public StatusText() {
     myClickListener = new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (e.getButton() == MouseEvent.BUTTON1 && clickCount == 1) {
           ActionListener actionListener = findActionListenerAt(e.getPoint());
           if (actionListener != null) {
@@ -65,14 +69,21 @@ public abstract class StatusText {
     };
 
     myMouseMotionListener = new MouseAdapter() {
+
+      private Cursor myOriginalCursor;
+
       @Override
       public void mouseMoved(final MouseEvent e) {
         if (isStatusVisible()) {
           if (findActionListenerAt(e.getPoint()) != null) {
-            myMouseTarget.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            if (myOriginalCursor == null) {
+              myOriginalCursor = myMouseTarget.getCursor();
+              myMouseTarget.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            }
           }
-          else {
-            myMouseTarget.setCursor(Cursor.getDefaultCursor());
+          else if (myOriginalCursor != null) {
+            myMouseTarget.setCursor(myOriginalCursor);
+            myOriginalCursor = null;
           }
         }
       }
@@ -107,7 +118,7 @@ public abstract class StatusText {
 
   @Nullable
   private ActionListener findActionListenerAt(Point point) {
-    if (!isStatusVisible()) return null;
+    if (!myHasActiveClickListeners || !isStatusVisible()) return null;
 
     point = SwingUtilities.convertPoint(myMouseTarget, point, myOwner);
 
@@ -147,7 +158,8 @@ public abstract class StatusText {
     myText = "";
     myComponent.clear();
     myClickListeners.clear();
-    if (myOwner != null) myOwner.repaint();
+    myHasActiveClickListeners = false;
+    if (myOwner != null && isStatusVisible()) myOwner.repaint();
     return this;
   }
 
@@ -168,17 +180,45 @@ public abstract class StatusText {
     myText += text;
     myComponent.append(text, attrs);
     myClickListeners.add(listener);
-    if (myOwner != null) myOwner.repaint();
+    if (listener != null) {
+      myHasActiveClickListeners = true;
+    }
+    if (myOwner != null && isStatusVisible()) myOwner.repaint();
     return this;
   }
 
   public void paint(Component owner, Graphics g) {
-    if (!isStatusVisible() || owner != myOwner) return;
+    if (!isStatusVisible()) return;
 
-    Rectangle b = getTextComponentBound();
-    myComponent.setBounds(0, 0, b.width, b.height);
+    if (owner == myOwner) {
+      doPaintStatusText(g, getTextComponentBound());
+    }
+    else {
+      paintOnComponentUnderViewport(owner, g);
+    }
+  }
 
-    Graphics2D g2 = (Graphics2D)g.create(b.x, b.y, b.width, b.height);
+  private void paintOnComponentUnderViewport(Component component, Graphics g) {
+    JBViewport viewport = ObjectUtils.tryCast(myOwner, JBViewport.class);
+    if (viewport == null || viewport.getView() != component || viewport.isPaintingNow()) return;
+
+    // We're painting a component which has a viewport as it's ancestor.
+    // As the viewport paints status text, we'll erase it, so we need to schedule a repaint for the viewport with status text's bounds.
+    // But it causes flicker, so we paint status text over the component first and then schedule the viewport repaint.
+
+    Rectangle textBoundsInViewport = getTextComponentBound();
+
+    int xInOwner = textBoundsInViewport.x - component.getX();
+    int yInOwner = textBoundsInViewport.y - component.getY();
+    Rectangle textBoundsInOwner = new Rectangle(xInOwner, yInOwner, textBoundsInViewport.width, textBoundsInViewport.height);
+    doPaintStatusText(g, textBoundsInOwner);
+
+    viewport.repaint(textBoundsInViewport);
+  }
+
+  private void doPaintStatusText(Graphics g, Rectangle textComponentBounds) {
+    myComponent.setBounds(0, 0, textComponentBounds.width, textComponentBounds.height);
+    Graphics2D g2 = (Graphics2D)g.create(textComponentBounds.x, textComponentBounds.y, textComponentBounds.width, textComponentBounds.height);
     myComponent.paint(g2);
     g2.dispose();
   }

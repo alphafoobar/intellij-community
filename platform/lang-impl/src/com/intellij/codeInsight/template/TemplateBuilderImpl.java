@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -279,7 +279,7 @@ public class TemplateBuilderImpl implements TemplateBuilder {
   public void run() {
     final Project project = myFile.getProject();
     VirtualFile file = myFile.getVirtualFile();
-    assert file != null;
+    assert file != null: "Virtual file is null for " + myFile;
     OpenFileDescriptor descriptor = new OpenFileDescriptor(project, file);
     final Editor editor = FileEditorManager.getInstance(project).openTextEditor(descriptor, true);
 
@@ -289,11 +289,15 @@ public class TemplateBuilderImpl implements TemplateBuilder {
 
   @Override
   public void run(@NotNull final Editor editor, final boolean inline) {
-    final Template template = inline ? buildInlineTemplate() : buildTemplate();
-
-    editor.getDocument().replaceString(myContainerElement.getStartOffset(), myContainerElement.getEndOffset(), "");
+    final Template template;
+    if (inline) {
+      template = buildInlineTemplate();
+    }
+    else {
+      template = buildTemplate();
+      editor.getDocument().replaceString(myContainerElement.getStartOffset(), myContainerElement.getEndOffset(), "");
+    }
     editor.getCaretModel().moveToOffset(myContainerElement.getStartOffset());
-
     TemplateManager.getInstance(myFile.getProject()).startTemplate(editor, template);
   }
 
@@ -303,5 +307,20 @@ public class TemplateBuilderImpl implements TemplateBuilder {
     myVariableNamesMap.put(key, varName);
     mySkipOnStartMap.put(key, Boolean.valueOf(skipOnStart));
     replaceElement(key, expression);
+  }
+
+  public void replaceRange(TextRange rangeWithinElement, String varName, Expression expression, boolean alwaysStopAt) {
+    final RangeMarker key = myDocument.createRangeMarker(rangeWithinElement.shiftRight(myContainerElement.getStartOffset()));
+    myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
+    myVariableNamesMap.put(key, varName);
+    replaceElement(key, expression);
+  }
+
+  public void replaceElement(TextRange rangeWithinElement, String varName, String dependantVariableName, boolean alwaysStopAt) {
+    final RangeMarker key = myDocument.createRangeMarker(rangeWithinElement.shiftRight(myContainerElement.getStartOffset()));
+    myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
+    myVariableNamesMap.put(key, varName);
+    myVariableExpressions.put(key, dependantVariableName);
+    myElements.add(key);
   }
 }

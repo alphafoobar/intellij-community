@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
+import com.intellij.openapi.util.JDOMExternalizerUtil;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.util.xmlb.annotations.Attribute;
+import com.intellij.util.xmlb.annotations.Transient;
 import org.jdom.Element;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,28 +41,27 @@ import java.util.List;
  * @author dyoma
  */
 public abstract class RunConfigurationBase extends UserDataHolderBase implements RunConfiguration, TargetAwareRunProfile {
+  private static final String LOG_FILE = "log_file";
+  private static final String PREDEFINED_LOG_FILE_ELEMENT = "predefined_log_file";
+  private static final String FILE_OUTPUT = "output_file";
+  private static final String SAVE = "is_save";
+  private static final String OUTPUT_FILE = "path";
+  private static final String SHOW_CONSOLE_ON_STD_OUT = "show_console_on_std_out";
+  private static final String SHOW_CONSOLE_ON_STD_ERR = "show_console_on_std_err";
+
   private final ConfigurationFactory myFactory;
   private final Project myProject;
   private String myName = "";
+  private final Icon myIcon;
 
   private ArrayList<LogFileOptions> myLogFiles = new ArrayList<LogFileOptions>();
   private ArrayList<PredefinedLogFile> myPredefinedLogFiles = new ArrayList<PredefinedLogFile>();
-
-  @NonNls private static final String LOG_FILE = "log_file";
-  @NonNls private static final String PREDEFINED_LOG_FILE_ELEMENT = "predefined_log_file";
-  @NonNls private static final String FILE_OUTPUT = "output_file";
-  @NonNls private static final String SAVE = "is_save";
-  @NonNls private static final String OUTPUT_FILE = "path";
-  @NonNls private static final String SHOW_CONSOLE_ON_STD_OUT = "show_console_on_std_out";
-  @NonNls private static final String SHOW_CONSOLE_ON_STD_ERR = "show_console_on_std_err";
-
-  private final Icon myIcon;
   private boolean mySaveOutput = false;
   private boolean myShowConsoleOnStdOut = false;
   private boolean myShowConsoleOnStdErr = false;
   private String myFileOutputPath = null;
 
-  protected RunConfigurationBase(final Project project, final ConfigurationFactory factory, final String name) {
+  protected RunConfigurationBase(final Project project, @NotNull ConfigurationFactory factory, final String name) {
     myProject = project;
     myFactory = factory;
     myName = name;
@@ -99,6 +100,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
   }
 
   @Override
+  @Transient
   public final String getName() {
     return myName;
   }
@@ -107,7 +109,8 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     return super.hashCode();
   }
 
-  public void checkRunnerSettings(@NotNull ProgramRunner runner, @Nullable RunnerSettings runnerSettings,
+  public void checkRunnerSettings(@NotNull ProgramRunner runner,
+                                  @Nullable RunnerSettings runnerSettings,
                                   @Nullable ConfigurationPerRunnerSettings configurationPerRunnerSettings) throws RuntimeConfigurationException {
   }
 
@@ -153,8 +156,9 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     return myPredefinedLogFiles;
   }
 
+  @NotNull
   public ArrayList<LogFileOptions> getAllLogFiles() {
-    final ArrayList<LogFileOptions> list = new ArrayList<LogFileOptions>(myLogFiles);
+    ArrayList<LogFileOptions> list = new ArrayList<LogFileOptions>(myLogFiles);
     for (PredefinedLogFile predefinedLogFile : myPredefinedLogFiles) {
       final LogFileOptions options = getOptionsForPredefinedLogFile(predefinedLogFile);
       if (options != null) {
@@ -206,41 +210,47 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     final Element fileOutputElement = element.getChild(FILE_OUTPUT);
     if (fileOutputElement != null) {
       myFileOutputPath = fileOutputElement.getAttributeValue(OUTPUT_FILE);
-      final String isSave = fileOutputElement.getAttributeValue(SAVE);
+      String isSave = fileOutputElement.getAttributeValue(SAVE);
       mySaveOutput = isSave != null && Boolean.parseBoolean(isSave);
     }
-    myShowConsoleOnStdOut = Boolean.parseBoolean(element.getAttributeValue(SHOW_CONSOLE_ON_STD_OUT));
-    myShowConsoleOnStdErr = Boolean.parseBoolean(element.getAttributeValue(SHOW_CONSOLE_ON_STD_ERR));
+
+    if (!isNewSerializationUsed()) {
+      myShowConsoleOnStdOut = Boolean.parseBoolean(element.getAttributeValue(SHOW_CONSOLE_ON_STD_OUT));
+      myShowConsoleOnStdErr = Boolean.parseBoolean(element.getAttributeValue(SHOW_CONSOLE_ON_STD_ERR));
+    }
   }
 
   @Override
   public void writeExternal(Element element) throws WriteExternalException {
-    for (final LogFileOptions options : myLogFiles) {
-      Element logFile = new Element(LOG_FILE);
-      options.writeExternal(logFile);
-      element.addContent(logFile);
-    }
-    for (PredefinedLogFile predefinedLogFile : myPredefinedLogFiles) {
-      Element fileElement = new Element(PREDEFINED_LOG_FILE_ELEMENT);
-      predefinedLogFile.writeExternal(fileElement);
-      element.addContent(fileElement);
-    }
-    final Element fileOutputPathElement = new Element(FILE_OUTPUT);
-    if (myFileOutputPath != null) {
-      fileOutputPathElement.setAttribute(OUTPUT_FILE, myFileOutputPath);
-    }
-    fileOutputPathElement.setAttribute(SAVE, String.valueOf(mySaveOutput));
+    JDOMExternalizerUtil.addChildren(element, LOG_FILE, myLogFiles);
+    JDOMExternalizerUtil.addChildren(element, PREDEFINED_LOG_FILE_ELEMENT, myPredefinedLogFiles);
+
     if (myFileOutputPath != null || mySaveOutput) {
+      Element fileOutputPathElement = new Element(FILE_OUTPUT);
+      if (myFileOutputPath != null) {
+        fileOutputPathElement.setAttribute(OUTPUT_FILE, myFileOutputPath);
+      }
+      if (mySaveOutput) {
+        fileOutputPathElement.setAttribute(SAVE, String.valueOf(mySaveOutput));
+      }
       element.addContent(fileOutputPathElement);
     }
-    if (myShowConsoleOnStdOut) {//default value shouldn't be written
-      element.setAttribute(SHOW_CONSOLE_ON_STD_OUT, String.valueOf(myShowConsoleOnStdOut));
-    }
-    if (myShowConsoleOnStdErr) {//default value shouldn't be written
-      element.setAttribute(SHOW_CONSOLE_ON_STD_ERR, String.valueOf(myShowConsoleOnStdErr));
+
+    if (!isNewSerializationUsed()) {
+      if (myShowConsoleOnStdOut) {//default value shouldn't be written
+        element.setAttribute(SHOW_CONSOLE_ON_STD_OUT, String.valueOf(true));
+      }
+      if (myShowConsoleOnStdErr) {//default value shouldn't be written
+        element.setAttribute(SHOW_CONSOLE_ON_STD_ERR, String.valueOf(true));
+      }
     }
   }
 
+  protected boolean isNewSerializationUsed() {
+    return false;
+  }
+
+  @Transient
   public boolean isSaveOutputToFile() {
     return mySaveOutput;
   }
@@ -249,6 +259,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     mySaveOutput = redirectOutput;
   }
 
+  @Attribute(SHOW_CONSOLE_ON_STD_OUT)
   public boolean isShowConsoleOnStdOut() {
     return myShowConsoleOnStdOut;
   }
@@ -257,6 +268,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     myShowConsoleOnStdOut = showConsoleOnStdOut;
   }
 
+  @Attribute(SHOW_CONSOLE_ON_STD_ERR)
   public boolean isShowConsoleOnStdErr() {
     return myShowConsoleOnStdErr;
   }
@@ -265,6 +277,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     myShowConsoleOnStdErr = showConsoleOnStdErr;
   }
 
+  @Transient
   public String getOutputFilePath() {
     return myFileOutputPath;
   }
@@ -279,6 +292,14 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
 
   public boolean excludeCompileBeforeLaunchOption() {
     return false;
+  }
+
+  /**
+   * @return true if "Make" Before Launch task should be added automatically on run configuration creation
+   * @see RunProfileWithCompileBeforeLaunchOption
+   */
+  public boolean isCompileBeforeLaunchAddedByDefault() {
+    return true;
   }
 
   @Override

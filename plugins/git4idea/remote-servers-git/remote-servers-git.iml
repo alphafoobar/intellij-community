@@ -15,6 +15,10 @@
     <orderEntry type="module" module-name="remote-servers-impl" />
     <orderEntry type="module" module-name="lang-api" />
     <orderEntry type="module" module-name="lang-impl" />
+    <orderEntry type="module" module-name="idea-ui" />
+    <orderEntry type="module" module-name="openapi" />
+    <orderEntry type="module" module-name="vcs-impl" />
+    <orderEntry type="module" module-name="dvcs-api" />
   </component>
 </module>
 

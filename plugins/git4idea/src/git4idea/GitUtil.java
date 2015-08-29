@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package git4idea;
 
-import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
 import com.intellij.openapi.components.ServiceManager;
@@ -23,20 +22,26 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.ui.DialogBuilder;
+import com.intellij.openapi.ui.ex.MultiLineLabel;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcsHelper;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.openapi.vcs.changes.FilePathsHelper;
+import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangeListManager;
+import com.intellij.openapi.vcs.changes.ChangeListManagerEx;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vcs.vfs.AbstractVcsVirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
 import com.intellij.util.Function;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.vcsUtil.VcsFileUtil;
 import com.intellij.vcsUtil.VcsUtil;
@@ -50,6 +55,7 @@ import git4idea.repo.GitBranchTrackInfo;
 import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
+import git4idea.util.GitSimplePathsBrowser;
 import git4idea.util.GitUIUtil;
 import git4idea.util.StringScanner;
 import org.jetbrains.annotations.NotNull;
@@ -58,7 +64,6 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.nio.charset.Charset;
 import java.util.*;
 
 /**
@@ -82,25 +87,11 @@ public class GitUtil {
       return o1.getPresentableUrl().compareTo(o2.getPresentableUrl());
     }
   };
-  /**
-   * The UTF-8 encoding name
-   */
-  public static final String UTF8_ENCODING = "UTF-8";
-  /**
-   * The UTF8 charset
-   */
-  public static final Charset UTF8_CHARSET = Charset.forName(UTF8_ENCODING);
   public static final String DOT_GIT = ".git";
 
-  private final static Logger LOG = Logger.getInstance(GitUtil.class);
-  private static final int SHORT_HASH_LENGTH = 8;
+  public static final String ORIGIN_HEAD = "origin/HEAD";
 
-  public static final Predicate<GitBranchTrackInfo> NOT_NULL_PREDICATE = new Predicate<GitBranchTrackInfo>() {
-    @Override
-    public boolean apply(@Nullable GitBranchTrackInfo input) {
-      return input != null;
-    }
-  };
+  private final static Logger LOG = Logger.getInstance(GitUtil.class);
 
   /**
    * A private constructor to suppress instance creation
@@ -190,7 +181,8 @@ public class GitUtil {
     throws VcsException {
     Map<VirtualFile, List<VirtualFile>> result = new HashMap<VirtualFile, List<VirtualFile>>();
     for (VirtualFile file : virtualFiles) {
-      final VirtualFile vcsRoot = gitRootOrNull(file);
+      // directory is reported only when it is a submodule => it should be treated in the context of super-root
+      final VirtualFile vcsRoot = gitRootOrNull(file.isDirectory() ? file.getParent() : file);
       if (vcsRoot == null) {
         if (ignoreNonGit) {
           continue;
@@ -219,22 +211,6 @@ public class GitUtil {
   public static Map<VirtualFile, List<FilePath>> sortFilePathsByGitRoot(final Collection<FilePath> files) throws VcsException {
     return sortFilePathsByGitRoot(files, false);
   }
-
-  /**
-   * Sort files by vcs root
-   *
-   * @param files files to sort.
-   * @return the map from root to the files under the root
-   */
-  public static Map<VirtualFile, List<FilePath>> sortGitFilePathsByGitRoot(Collection<FilePath> files) {
-    try {
-      return sortFilePathsByGitRoot(files, true);
-    }
-    catch (VcsException e) {
-      throw new RuntimeException("Unexpected exception:", e);
-    }
-  }
-
 
   /**
    * Sort files by vcs root
@@ -355,7 +331,7 @@ public class GitUtil {
   }
 
   public static boolean isGitRoot(final File file) {
-    return file != null && file.exists() && file.isDirectory() && new File(file, DOT_GIT).exists();
+    return file != null && file.exists() && new File(file, DOT_GIT).exists();
   }
 
   /**
@@ -649,6 +625,8 @@ public class GitUtil {
                 //noinspection AssignmentToForLoopParameter
                 i++;
               }
+              //noinspection AssignmentToForLoopParameter
+              i--;
               assert n == b.length;
               // add them to string
               final String encoding = GitConfigUtil.getFileNameEncoding();
@@ -681,53 +659,43 @@ public class GitUtil {
 
 
   @Nullable
-  public static GitRemote findRemoteByName(@NotNull GitRepository repository, @Nullable String name) {
-    if (name == null) {
-      return null;
-    }
-    for (GitRemote remote : repository.getRemotes()) {
-      if (remote.getName().equals(name)) {
-        return remote;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * @deprecated Calls Git for tracked info, use {@link GitRepository#getBranchTrackInfos()} instead.
-   */
-  @Nullable
-  @Deprecated
-  public static Pair<GitRemote, GitRemoteBranch> findMatchingRemoteBranch(GitRepository repository, GitLocalBranch branch)
-    throws VcsException {
-    /*
-    from man git-push:
-    git push
-               Works like git push <remote>, where <remote> is the current branch's remote (or origin, if no
-               remote is configured for the current branch).
-
-     */
-    String remoteName = GitBranchUtil.getTrackedRemoteName(repository.getProject(), repository.getRoot(), branch.getName());
-    GitRemote remote;
-    if (remoteName == null) {
-      remote = findOrigin(repository.getRemotes());
-    } else {
-      remote = findRemoteByName(repository, remoteName);
-    }
-    if (remote == null) {
-      return null;
-    }
-
-    for (GitRemoteBranch remoteBranch : repository.getBranches().getRemoteBranches()) {
-      if (remoteBranch.getName().equals(remote.getName() + "/" + branch.getName())) {
-        return Pair.create(remote, remoteBranch);
-      }
-    }
-    return null;
+  public static GitRemote findRemoteByName(@NotNull GitRepository repository, @NotNull final String name) {
+    return findRemoteByName(repository.getRemotes(), name);
   }
 
   @Nullable
-  private static GitRemote findOrigin(Collection<GitRemote> remotes) {
+  public static GitRemote findRemoteByName(Collection<GitRemote> remotes, @NotNull final String name) {
+    return ContainerUtil.find(remotes, new Condition<GitRemote>() {
+      @Override
+      public boolean value(GitRemote remote) {
+        return remote.getName().equals(name);
+      }
+    });
+  }
+
+  @Nullable
+  public static GitRemoteBranch findRemoteBranch(@NotNull GitRepository repository,
+                                                         @NotNull final GitRemote remote,
+                                                         @NotNull final String nameAtRemote) {
+    return ContainerUtil.find(repository.getBranches().getRemoteBranches(), new Condition<GitRemoteBranch>() {
+      @Override
+      public boolean value(GitRemoteBranch remoteBranch) {
+        return remoteBranch.getRemote().equals(remote) &&
+               remoteBranch.getNameForRemoteOperations().equals(GitBranchUtil.stripRefsPrefix(nameAtRemote));
+      }
+    });
+  }
+
+  @NotNull
+  public static GitRemoteBranch findOrCreateRemoteBranch(@NotNull GitRepository repository,
+                                                         @NotNull GitRemote remote,
+                                                         @NotNull String branchName) {
+    GitRemoteBranch remoteBranch = findRemoteBranch(repository, remote, branchName);
+    return ObjectUtils.notNull(remoteBranch, new GitStandardRemoteBranch(remote, branchName, GitBranch.DUMMY_HASH));
+  }
+
+  @Nullable
+  public static GitRemote findOrigin(Collection<GitRemote> remotes) {
     for (GitRemote remote : remotes) {
       if (remote.getName().equals("origin")) {
         return remote;
@@ -736,17 +704,14 @@ public class GitUtil {
     return null;
   }
 
-  public static boolean repoContainsRemoteBranch(@NotNull GitRepository repository, @NotNull GitRemoteBranch dest) {
-    return repository.getBranches().getRemoteBranches().contains(dest);
-  }
-
   @NotNull
   public static Collection<VirtualFile> getRootsFromRepositories(@NotNull Collection<GitRepository> repositories) {
-    Collection<VirtualFile> roots = new ArrayList<VirtualFile>(repositories.size());
-    for (GitRepository repository : repositories) {
-      roots.add(repository.getRoot());
-    }
-    return roots;
+    return ContainerUtil.map(repositories, new Function<GitRepository, VirtualFile>() {
+      @Override
+      public VirtualFile fun(@NotNull GitRepository repository) {
+        return repository.getRoot();
+      }
+    });
   }
 
   @NotNull
@@ -768,6 +733,8 @@ public class GitUtil {
   /**
    * Returns absolute paths which have changed remotely comparing to the current branch, i.e. performs
    * <code>git diff --name-only master..origin/master</code>
+   * <p/>
+   * Paths are absolute, Git-formatted (i.e. with forward slashes).
    */
   @NotNull
   public static Collection<String> getPathsDiffBetweenRefs(@NotNull Git git, @NotNull GitRepository repository,
@@ -787,7 +754,7 @@ public class GitUtil {
         continue;
       }
       final String path = repository.getRoot().getPath() + "/" + unescapePath(relative);
-      remoteChanges.add(FilePathsHelper.convertPath(path));
+      remoteChanges.add(path);
     }
     return remoteChanges;
   }
@@ -815,17 +782,6 @@ public class GitUtil {
         return remote.getName() + ": [" + StringUtil.join(remote.getUrls(), ", ") + "]";
       }
     }, "\n");
-  }
-
-  @NotNull
-  public static String getShortHash(@NotNull String hash) {
-    if (hash.length() == 0) return "";
-    if (hash.length() == 40) return hash.substring(0, SHORT_HASH_LENGTH);
-    if (hash.length() > 40)  // revision string encoded with date too
-    {
-      return hash.substring(hash.indexOf("[") + 1, SHORT_HASH_LENGTH);
-    }
-    return hash;
   }
 
   @NotNull
@@ -934,4 +890,95 @@ public class GitUtil {
     return !output.trim().isEmpty();
   }
 
+  @Nullable
+  public static VirtualFile findRefreshFileOrLog(@NotNull String absolutePath) {
+    VirtualFile file = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+    if (file == null) {
+      file = LocalFileSystem.getInstance().refreshAndFindFileByPath(absolutePath);
+    }
+    if (file == null) {
+      LOG.warn("VirtualFile not found for " + absolutePath);
+    }
+    return file;
+  }
+
+  @NotNull
+  public static String toAbsolute(@NotNull VirtualFile root, @NotNull String relativePath) {
+    return StringUtil.trimEnd(root.getPath(), "/") + "/" + StringUtil.trimStart(relativePath, "/");
+  }
+
+  @NotNull
+  public static Collection<String> toAbsolute(@NotNull final VirtualFile root, @NotNull Collection<String> relativePaths) {
+    return ContainerUtil.map(relativePaths, new Function<String, String>() {
+      @Override
+      public String fun(String s) {
+        return toAbsolute(root, s);
+      }
+    });
+  }
+
+  /**
+   * Given the list of paths converts them to the list of {@link Change Changes} found in the {@link ChangeListManager},
+   * i.e. this works only for local changes. </br>
+   * Paths can be absolute or relative to the repository.
+   * If a path is not found in the local changes, it is ignored, but the fact is logged.
+   */
+  @NotNull
+  public static List<Change> findLocalChangesForPaths(@NotNull Project project, @NotNull VirtualFile root,
+                                                      @NotNull Collection<String> affectedPaths, boolean relativePaths) {
+    ChangeListManagerEx changeListManager = (ChangeListManagerEx)ChangeListManager.getInstance(project);
+    List<Change> affectedChanges = new ArrayList<Change>();
+    for (String path : affectedPaths) {
+      String absolutePath = relativePaths ? toAbsolute(root, path) : path;
+      VirtualFile file = findRefreshFileOrLog(absolutePath);
+      if (file != null) {
+        Change change = changeListManager.getChange(file);
+        if (change != null) {
+          affectedChanges.add(change);
+        }
+        else {
+          String message = "Change is not found for " + file.getPath();
+          if (changeListManager.isInUpdate()) {
+            message += " because ChangeListManager is being updated.";
+          }
+          LOG.warn(message);
+        }
+      }
+    }
+    return affectedChanges;
+  }
+
+  public static void showPathsInDialog(@NotNull Project project, @NotNull Collection<String> absolutePaths, @NotNull String title,
+                                       @Nullable String description) {
+    DialogBuilder builder = new DialogBuilder(project);
+    builder.setCenterPanel(new GitSimplePathsBrowser(project, absolutePaths));
+    if (description != null) {
+      builder.setNorthPanel(new MultiLineLabel(description));
+    }
+    builder.addOkAction();
+    builder.setTitle(title);
+    builder.show();
+  }
+
+  @NotNull
+  public static String cleanupErrorPrefixes(@NotNull String msg) {
+    final String[] PREFIXES = { "fatal:", "error:" };
+    msg = msg.trim();
+    for (String prefix : PREFIXES) {
+      if (msg.startsWith(prefix)) {
+        return msg.substring(prefix.length()).trim();
+      }
+    }
+    return msg;
+  }
+
+  @Nullable
+  public static GitRemote getDefaultRemote(@NotNull Collection<GitRemote> remotes) {
+    for (GitRemote remote : remotes) {
+      if (remote.getName().equals(GitRemote.ORIGIN_NAME)) {
+        return remote;
+      }
+    }
+    return null;
+  }
 }

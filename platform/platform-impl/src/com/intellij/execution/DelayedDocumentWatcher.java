@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  */
 package com.intellij.execution;
 
-import com.google.common.collect.ImmutableSet;
 import com.intellij.AppTopics;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.Document;
@@ -28,6 +28,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManagerAdapter;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.problems.WolfTheProblemSolver;
@@ -55,7 +56,7 @@ public class DelayedDocumentWatcher {
   private final Project myProject;
   private final Alarm myAlarm;
   private final int myDelayMillis;
-  private final Consumer<Set<VirtualFile>> myConsumer;
+  private final Consumer<Integer> myModificationStampConsumer;
   private final Condition<VirtualFile> myChangedFileFilter;
   private final MyDocumentAdapter myListener;
   private final Runnable myAlarmRunnable;
@@ -63,16 +64,17 @@ public class DelayedDocumentWatcher {
   private final Set<VirtualFile> myChangedFiles = new THashSet<VirtualFile>();
   private boolean myDocumentSavingInProgress = false;
   private MessageBusConnection myConnection;
-  private int myEventCount = 0;
+  private int myModificationStamp = 0;
+  private Disposable myListenerDisposable;
 
   public DelayedDocumentWatcher(@NotNull Project project,
                                 int delayMillis,
-                                @NotNull Consumer<Set<VirtualFile>> consumer,
+                                @NotNull Consumer<Integer> modificationStampConsumer,
                                 @Nullable Condition<VirtualFile> changedFileFilter) {
     myProject = project;
     myAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, myProject);
     myDelayMillis = delayMillis;
-    myConsumer = consumer;
+    myModificationStampConsumer = modificationStampConsumer;
     myChangedFileFilter = changedFileFilter;
     myListener = new MyDocumentAdapter();
     myAlarmRunnable = new MyRunnable();
@@ -84,8 +86,10 @@ public class DelayedDocumentWatcher {
   }
 
   public void activate() {
-    EditorFactory.getInstance().getEventMulticaster().addDocumentListener(myListener, myProject);
     if (myConnection == null) {
+      myListenerDisposable = Disposer.newDisposable();
+      Disposer.register(myProject, myListenerDisposable);
+      EditorFactory.getInstance().getEventMulticaster().addDocumentListener(myListener, myListenerDisposable);
       myConnection = ApplicationManager.getApplication().getMessageBus().connect(myProject);
       myConnection.subscribe(AppTopics.FILE_DOCUMENT_SYNC, new FileDocumentManagerAdapter() {
         @Override
@@ -103,11 +107,18 @@ public class DelayedDocumentWatcher {
   }
 
   public void deactivate() {
-    EditorFactory.getInstance().getEventMulticaster().removeDocumentListener(myListener);
     if (myConnection != null) {
+      if (myListenerDisposable != null) {
+        Disposer.dispose(myListenerDisposable);
+        myListenerDisposable = null;
+      }
       myConnection.disconnect();
       myConnection = null;
     }
+  }
+
+  public boolean isUpToDate(int modificationStamp) {
+    return myModificationStamp == modificationStamp;
   }
 
   private class MyDocumentAdapter extends DocumentAdapter {
@@ -115,7 +126,7 @@ public class DelayedDocumentWatcher {
     public void documentChanged(DocumentEvent event) {
       if (myDocumentSavingInProgress) {
         /** When {@link FileDocumentManager#saveAllDocuments} is called,
-         *  {@link com.intellij.openapi.fileEditor.impl.TrailingSpacesStripper} can change a document.
+         *  {@link com.intellij.openapi.editor.impl.TrailingSpacesStripper} can change a document.
          *  These needless 'documentChanged' events should be filtered out.
          */
         return;
@@ -136,19 +147,18 @@ public class DelayedDocumentWatcher {
 
       myAlarm.cancelRequest(myAlarmRunnable);
       myAlarm.addRequest(myAlarmRunnable, myDelayMillis);
-      myEventCount++;
+      myModificationStamp++;
     }
   }
 
   private class MyRunnable implements Runnable {
     @Override
     public void run() {
-      final int oldEventCount = myEventCount;
-      final Set<VirtualFile> copy = ImmutableSet.copyOf(myChangedFiles);
-      asyncCheckErrors(copy, new Consumer<Boolean>() {
+      final int oldModificationStamp = myModificationStamp;
+      asyncCheckErrors(myChangedFiles, new Consumer<Boolean>() {
         @Override
         public void consume(Boolean errorsFound) {
-          if (myEventCount != oldEventCount) {
+          if (myModificationStamp != oldModificationStamp) {
             // 'documentChanged' event was raised during async checking files for errors
             // Do nothing in that case, this method will be invoked subsequently.
             return;
@@ -159,7 +169,7 @@ public class DelayedDocumentWatcher {
             return;
           }
           myChangedFiles.clear();
-          myConsumer.consume(copy);
+          myModificationStampConsumer.consume(myModificationStamp);
         }
       });
     }
@@ -193,6 +203,9 @@ public class DelayedDocumentWatcher {
 
   // This method is called in a background thread with a read lock acquired
   private boolean hasErrors(@NotNull VirtualFile file) {
+    if (!file.isValid()) {
+      return false;
+    }
     // don't use 'WolfTheProblemSolver.hasSyntaxErrors(file)' if possible
     Document document = FileDocumentManager.getInstance().getDocument(file);
     if (document != null) {
@@ -215,5 +228,4 @@ public class DelayedDocumentWatcher {
     }
     return WolfTheProblemSolver.getInstance(myProject).hasSyntaxErrors(file);
   }
-
 }

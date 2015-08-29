@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ import java.awt.event.ItemListener;
  */
 public abstract class ImportLayoutPanel extends JPanel {
   private final JBCheckBox myCbLayoutStaticImportsSeparately = new JBCheckBox("Layout static imports separately");
-  private JBTable myImportLayoutTable;
+  private final JBTable myImportLayoutTable;
 
   private final PackageEntryTable myImportLayoutList = new PackageEntryTable();
 
@@ -97,12 +97,12 @@ public abstract class ImportLayoutPanel extends JPanel {
 
     this.add(
       ToolbarDecorator.createDecorator(myImportLayoutTable = createTableForPackageEntries(myImportLayoutList, this))
-        .addExtraAction(new AnActionButton(ApplicationBundle.message("button.add.package"), IconUtil.getAddPackageIcon()) {
+        .addExtraAction(new DumbAwareActionButton(ApplicationBundle.message("button.add.package"), IconUtil.getAddPackageIcon()) {
           @Override
           public void actionPerformed(AnActionEvent e) {
             addPackageToImportLayouts();
           }
-        }).addExtraAction(new AnActionButton(ApplicationBundle.message("button.add.blank"), IconUtil.getAddBlankLineIcon()) {
+        }).addExtraAction(new DumbAwareActionButton(ApplicationBundle.message("button.add.blank"), IconUtil.getAddBlankLineIcon()) {
         @Override
         public void actionPerformed(AnActionEvent e) {
           addBlankLine();
@@ -242,7 +242,7 @@ public abstract class ImportLayoutPanel extends JPanel {
           return entry.getPackageName();
         }
         if (col == 2) {
-          return entry.isWithSubpackages() ? Boolean.TRUE : Boolean.FALSE;
+          return entry.isWithSubpackages();
         }
         throw new IllegalArgumentException(String.valueOf(col));
       }
@@ -327,7 +327,7 @@ public abstract class ImportLayoutPanel extends JPanel {
         PackageEntry entry = packageTable.getEntryAt(row);
 
         if (entry == PackageEntry.BLANK_LINE_ENTRY) {
-          append("                                               <blank line>", SimpleTextAttributes.LINK_ATTRIBUTES);
+          append("<blank line>", SimpleTextAttributes.GRAYED_ATTRIBUTES);
         }
         else {
           TextAttributes attributes = JavaHighlightingColors.KEYWORD.getDefaultAttributes();

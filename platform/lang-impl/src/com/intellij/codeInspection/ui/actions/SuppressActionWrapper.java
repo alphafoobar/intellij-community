@@ -1,4 +1,20 @@
 /*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * User: anna
  * Date: 29-Jan-2007
  */
@@ -68,7 +84,7 @@ public class SuppressActionWrapper extends ActionGroup {
   @Override
   @NotNull
   public SuppressTreeAction[] getChildren(@Nullable final AnActionEvent e) {
-    final SuppressIntentionAction[] suppressActions = InspectionManagerEx.getSuppressActions(myToolWrapper.getTool());
+    final SuppressIntentionAction[] suppressActions = InspectionManagerEx.getSuppressActions(myToolWrapper);
     if (suppressActions == null || suppressActions.length == 0) return new SuppressTreeAction[0];
     final SuppressTreeAction[] actions = new SuppressTreeAction[suppressActions.length];
     for (int i = 0; i < suppressActions.length; i++) {
@@ -78,7 +94,10 @@ public class SuppressActionWrapper extends ActionGroup {
     return actions;
   }
 
-  private boolean suppress(final PsiElement element, final SuppressIntentionAction action) {
+  private boolean suppress(@NotNull final PsiElement element,
+                           final CommonProblemDescriptor descriptor,
+                           final SuppressIntentionAction action,
+                           final RefEntity refEntity) {
     final PsiModificationTracker tracker = PsiManager.getInstance(myProject).getModificationTracker();
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
       @Override
@@ -86,13 +105,25 @@ public class SuppressActionWrapper extends ActionGroup {
         PsiDocumentManager.getInstance(myProject).commitAllDocuments();
         try {
           final long startModificationCount = tracker.getModificationCount();
+
+          PsiElement container = null;
+          if (action instanceof SuppressIntentionActionFromFix) {
+            container = ((SuppressIntentionActionFromFix)action).getContainer(element);
+          }
+          if (container == null) {
+            container = element;
+          }
+
           if (action.isAvailable(myProject, null, element)) {
             action.invoke(myProject, null, element);
           }
           if (startModificationCount != tracker.getModificationCount()) {
             final Set<GlobalInspectionContextImpl> globalInspectionContexts = myManager.getRunningContexts();
             for (GlobalInspectionContextImpl context : globalInspectionContexts) {
-              context.ignoreElement(myToolWrapper.getTool(), element);
+              context.ignoreElement(myToolWrapper.getTool(), container);
+              if (descriptor != null) {
+                context.getPresentation(myToolWrapper).ignoreCurrentElementProblem(refEntity, descriptor);
+              }
             }
           }
         }
@@ -107,7 +138,7 @@ public class SuppressActionWrapper extends ActionGroup {
   @Override
   public void update(final AnActionEvent e) {
     super.update(e);
-    e.getPresentation().setEnabled(InspectionManagerEx.getSuppressActions(myToolWrapper.getTool()) != null);
+    e.getPresentation().setEnabled(InspectionManagerEx.getSuppressActions(myToolWrapper) != null);
   }
 
   private static Pair<PsiElement, CommonProblemDescriptor> getContentToSuppress(InspectionTreeNode node) {
@@ -149,7 +180,13 @@ public class SuppressActionWrapper extends ActionGroup {
                 final Pair<PsiElement, CommonProblemDescriptor> content = getContentToSuppress(node);
                 if (content.first == null) break;
                 final PsiElement element = content.first;
-                if (!suppress(element, mySuppressAction)) break;
+                RefEntity refEntity = null;
+                if (node instanceof RefElementNode) {
+                  refEntity = ((RefElementNode)node).getElement();
+                } else if (node instanceof ProblemDescriptionNode) {
+                  refEntity = ((ProblemDescriptionNode)node).getElement();
+                }
+                if (!suppress(element, content.second, mySuppressAction, refEntity)) break;
               }
               final Set<GlobalInspectionContextImpl> globalInspectionContexts = myManager.getRunningContexts();
               for (GlobalInspectionContextImpl context : globalInspectionContexts) {

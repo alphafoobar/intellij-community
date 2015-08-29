@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ public class PyClassicStyleClassInspection extends PyInspection {
     @Override
     public void visitPyClass(PyClass node) {
       final ASTNode nameNode = node.getNameNode();
-      if (!node.isNewStyleClass() && nameNode != null) {
+      if (!node.isNewStyleClass(null) && nameNode != null) {
         PyExpression[] superClassExpressions = node.getSuperClassExpressions();
         if (superClassExpressions.length == 0) {
           registerProblem(nameNode.getPsi(), "Old-style class", new TransformClassicClassQuickFix());

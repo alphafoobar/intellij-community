@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ public class TreeChangeImpl implements TreeChange {
   private final List<Pair<ASTNode,Integer>> mySortedChanges = new ArrayList<Pair<ASTNode, Integer>>(); // change, oldoffset
   private final ASTNode myParent;
 
+  @SuppressWarnings("FieldMayBeFinal")
   private static boolean ourDoChecks = ApplicationManager.getApplication().isEAP();
 
   public TreeChangeImpl(ASTNode parent) {
@@ -130,7 +131,7 @@ public class TreeChangeImpl implements TreeChange {
   private void addChangeAtOffset(final ASTNode child, final int nodeOffset) {
     int optimizedIndex = haveNotCalculated;
 
-    Pair<ASTNode, Integer> element = new Pair<ASTNode, Integer>(child, Integer.valueOf(nodeOffset));
+    Pair<ASTNode, Integer> element = Pair.create(child, Integer.valueOf(nodeOffset));
 
     if (mySortedChanges.size() > 0) { // check adding at end
       Pair<ASTNode, Integer> pair = mySortedChanges.get(mySortedChanges.size() - 1);
@@ -175,11 +176,16 @@ public class TreeChangeImpl implements TreeChange {
   }
 
   private static boolean isAfter(final ASTNode what, final ASTNode afterWhat) {
-    ASTNode current = afterWhat.getTreeNext();
+    ASTNode previous = afterWhat;
+    ASTNode current = previous.getTreeNext();
 
     while(current != null){
-      if(current == what) return true;
-      current = current.getTreeNext();
+      if(current == what) {
+        // afterWhat can be replaced during reparse and in old tree it can reference 'what' so check they are in same tree
+        return what.getTreePrev() == previous;
+      }
+      previous = current;
+      current = previous.getTreeNext();
       if(current != null && current.getTextLength() != 0) break;
     }
     return false;

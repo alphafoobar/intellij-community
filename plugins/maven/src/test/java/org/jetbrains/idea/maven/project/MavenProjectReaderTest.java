@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenTestCase;
 import org.jetbrains.idea.maven.model.*;
 
@@ -240,17 +242,17 @@ public class MavenProjectReaderTest extends MavenTestCase {
   public void testDefaults() throws Exception {
     VirtualFile file = new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         VirtualFile res = myProjectRoot.createChildData(this, "pom.xml");
         result.setResult(res);
+        VfsUtil.saveText(res, "<project>" +
+                               "  <groupId>test</groupId>" +
+                               "  <artifactId>project</artifactId>" +
+                               "  <version>1</version>" +
+                               "</project>");
       }
     }.execute().getResultObject();
-    VfsUtil.saveText(file, "<project>" +
-                           "  <groupId>test</groupId>" +
-                           "  <artifactId>project</artifactId>" +
-                           "  <version>1</version>" +
-                           "</project>");
-
+    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     MavenModel p = readProject(file);
 
     assertEquals("jar", p.getPackaging());
@@ -305,53 +307,53 @@ public class MavenProjectReaderTest extends MavenTestCase {
   public void testCustomSettings() throws Exception {
     VirtualFile file = new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         VirtualFile res = myProjectRoot.createChildData(this, "pom.xml");
         result.setResult(res);
+        VfsUtil.saveText(res, "<project>" +
+                               "  <modelVersion>1.2.3</modelVersion>" +
+                               "  <groupId>test</groupId>" +
+                               "  <artifactId>project</artifactId>" +
+                               "  <version>1</version>" +
+                               "  <name>foo</name>" +
+                               "  <packaging>pom</packaging>" +
+
+                               "  <parent>" +
+                               "    <groupId>testParent</groupId>" +
+                               "    <artifactId>projectParent</artifactId>" +
+                               "    <version>2</version>" +
+                               "    <relativePath>../parent/pom.xml</relativePath>" +
+                               "  </parent>" +
+
+                               "  <build>" +
+                               "    <finalName>xxx</finalName>" +
+                               "    <defaultGoal>someGoal</defaultGoal>" +
+                               "    <sourceDirectory>mySrc</sourceDirectory>" +
+                               "    <testSourceDirectory>myTestSrc</testSourceDirectory>" +
+                               "    <scriptSourceDirectory>myScriptSrc</scriptSourceDirectory>" +
+                               "    <resources>" +
+                               "      <resource>" +
+                               "        <directory>myRes</directory>" +
+                               "        <filtering>true</filtering>" +
+                               "        <targetPath>dir</targetPath>" +
+                               "        <includes><include>**.properties</include></includes>" +
+                               "        <excludes><exclude>**.xml</exclude></excludes>" +
+                               "      </resource>" +
+                               "    </resources>" +
+                               "    <testResources>" +
+                               "      <testResource>" +
+                               "        <directory>myTestRes</directory>" +
+                               "        <includes><include>**.properties</include></includes>" +
+                               "      </testResource>" +
+                               "    </testResources>" +
+                               "    <directory>myOutput</directory>" +
+                               "    <outputDirectory>myClasses</outputDirectory>" +
+                               "    <testOutputDirectory>myTestClasses</testOutputDirectory>" +
+                               "  </build>" +
+                               "</project>");
       }
     }.execute().getResultObject();
-    VfsUtil.saveText(file, "<project>" +
-                           "  <modelVersion>1.2.3</modelVersion>" +
-                           "  <groupId>test</groupId>" +
-                           "  <artifactId>project</artifactId>" +
-                           "  <version>1</version>" +
-                           "  <name>foo</name>" +
-                           "  <packaging>pom</packaging>" +
-
-                           "  <parent>" +
-                           "    <groupId>testParent</groupId>" +
-                           "    <artifactId>projectParent</artifactId>" +
-                           "    <version>2</version>" +
-                           "    <relativePath>../parent/pom.xml</relativePath>" +
-                           "  </parent>" +
-
-                           "  <build>" +
-                           "    <finalName>xxx</finalName>" +
-                           "    <defaultGoal>someGoal</defaultGoal>" +
-                           "    <sourceDirectory>mySrc</sourceDirectory>" +
-                           "    <testSourceDirectory>myTestSrc</testSourceDirectory>" +
-                           "    <scriptSourceDirectory>myScriptSrc</scriptSourceDirectory>" +
-                           "    <resources>" +
-                           "      <resource>" +
-                           "        <directory>myRes</directory>" +
-                           "        <filtering>true</filtering>" +
-                           "        <targetPath>dir</targetPath>" +
-                           "        <includes><include>**.properties</include></includes>" +
-                           "        <excludes><exclude>**.xml</exclude></excludes>" +
-                           "      </resource>" +
-                           "    </resources>" +
-                           "    <testResources>" +
-                           "      <testResource>" +
-                           "        <directory>myTestRes</directory>" +
-                           "        <includes><include>**.properties</include></includes>" +
-                           "      </testResource>" +
-                           "    </testResources>" +
-                           "    <directory>myOutput</directory>" +
-                           "    <outputDirectory>myClasses</outputDirectory>" +
-                           "    <testOutputDirectory>myTestClasses</testOutputDirectory>" +
-                           "  </build>" +
-                           "</project>");
-
+    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     MavenModel p = readProject(file);
 
     assertEquals("pom", p.getPackaging());
@@ -414,6 +416,7 @@ public class MavenProjectReaderTest extends MavenTestCase {
   public void testPathsWithProperties() throws Exception {
     createProjectPom("<properties>" +
                      "  <foo>subDir</foo>" +
+                     "  <emptyProperty />" +
                      "</properties>" +
                      "<build>" +
                      "  <sourceDirectory>${foo}/mySrc</sourceDirectory>" +
@@ -422,6 +425,9 @@ public class MavenProjectReaderTest extends MavenTestCase {
                      "  <resources>" +
                      "    <resource>" +
                      "      <directory>${foo}/myRes</directory>" +
+                     "    </resource>" +
+                     "    <resource>" +
+                     "      <directory>aaa/${emptyProperty}/${unexistingProperty}</directory>" +
                      "    </resource>" +
                      "  </resources>" +
                      "  <testResources>" +
@@ -440,8 +446,10 @@ public class MavenProjectReaderTest extends MavenTestCase {
     PlatformTestUtil.assertPathsEqual(pathFromBasedir("subDir/mySrc"), p.getBuild().getSources().get(0));
     assertSize(1, p.getBuild().getTestSources());
     PlatformTestUtil.assertPathsEqual(pathFromBasedir("subDir/myTestSrc"), p.getBuild().getTestSources().get(0));
-    assertEquals(1, p.getBuild().getResources().size());
+    assertEquals(2, p.getBuild().getResources().size());
     assertResource(p.getBuild().getResources().get(0), pathFromBasedir("subDir/myRes"),
+                   false, null, Collections.<String>emptyList(), Collections.<String>emptyList());
+    assertResource(p.getBuild().getResources().get(1), pathFromBasedir("aaa/${unexistingProperty}"),
                    false, null, Collections.<String>emptyList(), Collections.<String>emptyList());
     assertEquals(1, p.getBuild().getTestResources().size());
     assertResource(p.getBuild().getTestResources().get(0), pathFromBasedir("subDir/myTestRes"),
@@ -1580,7 +1588,7 @@ public class MavenProjectReaderTest extends MavenTestCase {
                                                String... profiles) {
     MavenProjectReaderResult result = new MavenProjectReader().readProject(getMavenGeneralSettings(),
                                                                            file,
-                                                                           Arrays.asList(profiles),
+                                                                           new MavenExplicitProfiles(Arrays.asList(profiles)),
                                                                            locator);
     return result;
   }
@@ -1623,7 +1631,7 @@ public class MavenProjectReaderTest extends MavenTestCase {
   private void assertActiveProfiles(List<String> explicitProfiles, String... expected) {
     MavenProjectReaderResult result =
       readProject(myProjectPom, new NullProjectLocator(), ArrayUtil.toStringArray(explicitProfiles));
-    assertUnorderedElementsAreEqual(result.activatedProfiles, expected);
+    assertUnorderedElementsAreEqual(result.activatedProfiles.getEnabledProfiles(), expected);
   }
 
   private static class NullProjectLocator implements MavenProjectReaderProjectLocator {

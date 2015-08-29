@@ -7,10 +7,12 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.platform.templates.github.GeneratorException;
 import com.intellij.platform.templates.github.GithubTagInfo;
 import com.intellij.platform.templates.github.ZipUtil;
+import com.intellij.util.NullableFunction;
 import com.intellij.util.PlatformUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -38,10 +40,10 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
   protected abstract String getDisplayName();
 
   @NotNull
-  protected abstract String getGithubUserName();
+  public abstract String getGithubUserName();
 
   @NotNull
-  protected abstract String getGithubRepositoryName();
+  public abstract String getGithubRepositoryName();
 
   @Override
   @Nullable
@@ -59,9 +61,12 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
 
   @Override
   public void generateProject(@NotNull final Project project, @NotNull final VirtualFile baseDir,
-                              @NotNull GithubTagInfo tag, @NotNull Module module) {
+                              @Nullable GithubTagInfo tag, @NotNull Module module) {
+    if (tag == null) {
+      return;
+    }
     try {
-      unpackToDir(project, new File(baseDir.getPath()), tag);
+      unpackToDir(project, VfsUtilCore.virtualToIoFile(baseDir), tag);
     }
     catch (GeneratorException e) {
       showErrorMessage(project, e.getMessage());
@@ -89,30 +94,22 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
                            @NotNull File extractToDir,
                            @NotNull GithubTagInfo tag) throws GeneratorException {
     File zipArchiveFile = getCacheFile(tag);
-    boolean brokenZip = true;
-    if (zipArchiveFile.isFile()) {
+    String primaryUrl = getPrimaryZipArchiveUrlForDownload(tag);
+    boolean downloaded = false;
+    if (primaryUrl != null) {
       try {
-        ZipUtil.unzipWithProgressSynchronously(project, getTitle(), zipArchiveFile, extractToDir, true);
-        brokenZip = false;
-      }
-      catch (GeneratorException ignored) {
+        downloadAndUnzip(project, primaryUrl, zipArchiveFile, extractToDir, false);
+        downloaded = true;
+      } catch (GeneratorException e) {
+        LOG.info("Can't download " + primaryUrl, e);
+        FileUtil.delete(zipArchiveFile);
       }
     }
-    if (brokenZip) {
-      String primaryUrl = getPrimaryZipArchiveUrlForDownload(tag);
-      boolean downloaded = false;
-      if (primaryUrl != null) {
-        try {
-          downloadAndUnzip(project, primaryUrl, zipArchiveFile, extractToDir, false);
-          downloaded = true;
-        } catch (GeneratorException e) {
-          LOG.info("Can't download " + primaryUrl, e);
-          FileUtil.delete(zipArchiveFile);
-        }
+    if (!downloaded) {
+      if (ApplicationManager.getApplication().isUnitTestMode()) {
+        throw new GeneratorException("Download " + tag.getZipballUrl() + " is skipped in unit test mode");
       }
-      if (!downloaded) {
-        downloadAndUnzip(project, tag.getZipballUrl(), zipArchiveFile, extractToDir, true);
-      }
+      downloadAndUnzip(project, tag.getZipballUrl(), zipArchiveFile, extractToDir, true);
     }
   }
 
@@ -132,7 +129,12 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
     );
     LOG.info("Content of " + url + " has been successfully downloaded to " + zipArchiveFile.getAbsolutePath()
              + ", size " + zipArchiveFile.length() + " bytes");
-    ZipUtil.unzipWithProgressSynchronously(project, getTitle(), zipArchiveFile, extractToDir, true);
+    ZipUtil.unzipWithProgressSynchronously(project, getTitle(), zipArchiveFile, extractToDir, getPathConvertor(), true);
+  }
+
+  @Nullable
+  protected NullableFunction<String, String> getPathConvertor() {
+    return null;
   }
 
   @Nullable

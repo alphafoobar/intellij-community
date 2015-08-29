@@ -15,7 +15,9 @@
  */
 package com.jetbrains.python;
 
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.source.PsiFileImpl;
 import com.jetbrains.python.fixtures.PyMultiFileResolveTestCase;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.*;
@@ -362,5 +364,56 @@ public class PyMultiFileResolveTest extends PyMultiFileResolveTestCase {
   // PY-10819
   public void testFromPackageModuleImportStarElementNamedAsModule() {
     assertResolvesTo(PyFunction.class, "foo");
+  }
+
+  // PY-13140
+  public void testModulePrivateName() {
+    assertNull(doResolve());
+  }
+
+  // PY-13140
+  public void testModulePrivateNameInDunderAll() {
+    assertResolvesTo(PyTargetExpression.class, "_private_name");
+  }
+
+  // PY-7378
+  public void testModuleInDeeplyNestedNamespacePackage() {
+    runWithLanguageLevel(LanguageLevel.PYTHON33, new Runnable() {
+      @Override
+      public void run() {
+        assertResolvesTo(PyFile.class, "m1.py");
+      }
+    });
+  }
+
+  public void testKeywordArgument() {
+    final PsiFile file = prepareFile();
+    final PsiManager psiManager = myFixture.getPsiManager();
+    final VirtualFile dir = myFixture.findFileInTempDir("a.py");
+    final PsiFile psiFile = psiManager.findFile(dir);
+    //noinspection ConstantConditions   we need to unstub a.py here
+    ((PsiFileImpl)psiFile).calcTreeElement();
+    final PsiElement element;
+    try {
+      element = doResolve(file);
+    }
+    catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+    assertResolveResult(element, PyClass.class, "A");
+  }
+
+  public void testRelativeImport() {
+    assertResolvesTo(PyFile.class, "z.py");
+  }
+
+  // PY-11454
+  public void testImportSubModuleDunderAll() {
+    assertResolvesTo(PyFile.class, "m1.py");
+  }
+
+  // PY-11454
+  public void testFromImportSubModuleDunderAll() {
+    assertResolvesTo(PyFile.class, "m1.py");
   }
 }

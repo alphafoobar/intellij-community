@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 package com.intellij.psi.impl.source.codeStyle;
 
-import com.intellij.formatting.*;
+import com.intellij.formatting.CoreFormatterUtil;
+import com.intellij.formatting.FormattingMode;
+import com.intellij.formatting.FormattingModel;
+import com.intellij.formatting.FormattingModelBuilder;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.LanguageFormatting;
@@ -94,18 +97,12 @@ abstract class CodeStyleManagerRunnable<T> {
       mySettings = CodeStyleSettingsManager.getSettings(myCodeStyleManager.getProject());
 
       mySignificantRange = offset != -1 ? getSignificantRange(file, offset) : null;
-
-      if (builder instanceof FormattingModelBuilderEx) {
-        myIndentOptions = ((FormattingModelBuilderEx)builder).getIndentOptionsToUse(file, new FormatTextRanges(mySignificantRange, true), mySettings);
-      }
-      if (myIndentOptions == null) {
-        myIndentOptions = mySettings.getIndentOptions(file.getFileType());
-      }
+      myIndentOptions = mySettings.getIndentOptionsByFile(file, mySignificantRange);
 
       myModel = CoreFormatterUtil.buildModel(builder, file, mySettings, myMode);
 
       if (document != null && useDocumentBaseFormattingModel()) {
-        myModel = new DocumentBasedFormattingModel(myModel.getRootBlock(), document, myCodeStyleManager.getProject(), mySettings,
+        myModel = new DocumentBasedFormattingModel(myModel, document, myCodeStyleManager.getProject(), mySettings,
                                                    file.getFileType(), file);
       }
 
@@ -133,7 +130,7 @@ abstract class CodeStyleManagerRunnable<T> {
   protected abstract T doPerform(int offset, TextRange range);
 
   private static boolean isInsidePlainComment(int offset, @Nullable PsiElement element) {
-    if (!(element instanceof PsiComment) || element instanceof PsiDocCommentBase || !element.getTextRange().contains(offset)) {
+    if (!(element instanceof PsiComment) || element instanceof PsiDocCommentBase || !element.getTextRange().contains(offset - 1)) {
       return false;
     }
 
@@ -149,7 +146,7 @@ abstract class CodeStyleManagerRunnable<T> {
       SourceTreeToPsiMap.psiElementToTree(CodeStyleManagerImpl.findElementInTreeWithFormatterEnabled(file, offset));
     if (elementAtOffset == null) {
       int significantRangeStart = CharArrayUtil.shiftBackward(file.getText(), offset - 1, "\r\t ");
-      return new TextRange(significantRangeStart, offset);
+      return new TextRange(Math.max(significantRangeStart, 0), offset);
     }
 
     final FormattingModelBuilder builder = LanguageFormatting.INSTANCE.forContext(file);

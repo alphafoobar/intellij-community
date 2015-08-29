@@ -65,12 +65,18 @@ public class XsltCommandLineState extends CommandLineState {
     private UserDataHolder myExtensionData;
 
     @SuppressWarnings({ "RawUseOfParameterizedType" })
-    public XsltCommandLineState(XsltRunConfiguration xsltRunConfiguration, ExecutionEnvironment env) {
-        super(env);
+    public XsltCommandLineState(XsltRunConfiguration xsltRunConfiguration, ExecutionEnvironment environment) {
+        super(environment);
+
         myXsltRunConfiguration = xsltRunConfiguration;
-        myIsDebugger = "Debug".equals(env.getRunnerId());
+        myIsDebugger = "Debug".equals(environment.getExecutor().getId());
     }
 
+    public boolean isDebugger() {
+      return myIsDebugger;
+    }
+
+  @Override
     @NotNull
     protected OSProcessHandler startProcess() throws ExecutionException {
         final OSProcessHandler osProcessHandler = createJavaParameters().createOSProcessHandler();
@@ -204,16 +210,19 @@ public class XsltCommandLineState extends CommandLineState {
 
   private class MyProcessAdapter extends ProcessAdapter {
 
+        @Override
         public void processTerminated(final ProcessEvent event) {
 
             if (myXsltRunConfiguration.isSaveToFile()) {
                 Runnable runnable = new Runnable() {
+                    @Override
                     public void run() {
                         Runnable runnable = new Runnable() {
+                            @Override
                             public void run() {
                                 if (event.getExitCode() == 0) {
                                     if (myXsltRunConfiguration.myOpenInBrowser) {
-                                        BrowserUtil.launchBrowser(myXsltRunConfiguration.myOutputFile);
+                                      BrowserUtil.browse(myXsltRunConfiguration.myOutputFile);
                                     }
                                     if (myXsltRunConfiguration.myOpenOutputFile) {
                                         final String url = VfsUtilCore.pathToUrl(myXsltRunConfiguration.myOutputFile);

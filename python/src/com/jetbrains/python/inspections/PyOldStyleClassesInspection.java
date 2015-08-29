@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,17 @@
  */
 package com.jetbrains.python.inspections;
 
+import com.google.common.collect.Lists;
 import com.intellij.codeInspection.LocalInspectionToolSession;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
+import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.inspections.quickfix.PyChangeBaseClassQuickFix;
+import com.jetbrains.python.inspections.quickfix.PyConvertToNewStyleQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.types.PyClassLikeType;
 import com.jetbrains.python.psi.types.PyClassType;
@@ -57,15 +63,22 @@ public class PyOldStyleClassesInspection extends PyInspection {
 
     @Override
     public void visitPyClass(final PyClass node) {
-      if (!node.isNewStyleClass()) {
+      final List<PyClassLikeType> expressions = node.getSuperClassTypes(myTypeEvalContext);
+      List<LocalQuickFix> quickFixes = Lists.<LocalQuickFix>newArrayList(new PyConvertToNewStyleQuickFix());
+      if (!expressions.isEmpty()) {
+        quickFixes.add(new PyChangeBaseClassQuickFix());
+      }
+      if (!node.isNewStyleClass(null)) {
         for (PyTargetExpression attr : node.getClassAttributes()) {
           if ("__slots__".equals(attr.getName())) {
-            registerProblem(attr, "Old-style class contains __slots__ definition");
+            registerProblem(attr, "Old-style class contains __slots__ definition", ProblemHighlightType.GENERIC_ERROR_OR_WARNING, null, quickFixes.toArray(new LocalQuickFix[quickFixes.size()]));
           }
         }
-        for (PyFunction attr : node.getMethods()) {
+        for (PyFunction attr : node.getMethods(false)) {
           if ("__getattribute__".equals(attr.getName())) {
-            registerProblem(attr, "Old-style class contains __getattribute__ definition");
+            final ASTNode nameNode = attr.getNameNode();
+            assert nameNode != null;
+            registerProblem(nameNode.getPsi(), "Old-style class contains __getattribute__ definition", ProblemHighlightType.GENERIC_ERROR_OR_WARNING, null, quickFixes.toArray(new LocalQuickFix[quickFixes.size()]));
           }
         }
       }
@@ -74,7 +87,7 @@ public class PyOldStyleClassesInspection extends PyInspection {
     @Override
     public void visitPyCallExpression(final PyCallExpression node) {
       PyClass klass = PsiTreeUtil.getParentOfType(node, PyClass.class);
-      if (klass != null && !klass.isNewStyleClass()) {
+      if (klass != null && !klass.isNewStyleClass(null)) {
         final List<PyClassLikeType> types = klass.getSuperClassTypes(myTypeEvalContext);
         for (PyClassLikeType type : types) {
           if (type == null) return;
@@ -82,9 +95,18 @@ public class PyOldStyleClassesInspection extends PyInspection {
           if (qName != null && qName.contains("PyQt")) return;
           if (!(type instanceof PyClassType)) return;
         }
+        List<LocalQuickFix> quickFixes = Lists.<LocalQuickFix>newArrayList(new PyConvertToNewStyleQuickFix());
+        if (!types.isEmpty()) {
+          quickFixes.add(new PyChangeBaseClassQuickFix());
+        }
 
-        if (PyUtil.isSuperCall(node))
-          registerProblem(node.getCallee(), "Old-style class contains call for super method");
+        if (PyUtil.isSuperCall(node)) {
+          final PyExpression callee = node.getCallee();
+          if (callee != null) {
+            registerProblem(callee, "Old-style class contains call for super method", ProblemHighlightType.GENERIC_ERROR_OR_WARNING,
+                            null, quickFixes.toArray(quickFixes.toArray(new LocalQuickFix[quickFixes.size()])));
+          }
+        }
       }
     }
   }

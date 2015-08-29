@@ -21,7 +21,7 @@ import com.intellij.codeInsight.intention.AddAnnotationFix;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.fileTemplates.FileTemplateDescriptor;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
+import com.intellij.openapi.roots.ExternalLibraryDescriptor;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
@@ -49,9 +49,10 @@ public class JUnit4Framework extends JavaTestFramework {
     return JUnitUtil.TEST_ANNOTATION;
   }
 
-  @NotNull
-  public String getLibraryPath() {
-    return JavaSdkUtil.getJunit4JarPath();
+  @Nullable
+  @Override
+  public ExternalLibraryDescriptor getFrameworkLibraryDescriptor() {
+    return JUnitExternalLibraryDescriptor.JUNIT4;
   }
 
   @Nullable
@@ -146,6 +147,11 @@ public class JUnit4Framework extends JavaTestFramework {
   @Override
   public char getMnemonic() {
     return '4';
+  }
+
+  @Override
+  public FileTemplateDescriptor getTestClassFileTemplateDescriptor() {
+    return new FileTemplateDescriptor("JUnit4 Test Class.java");
   }
 
   @Override

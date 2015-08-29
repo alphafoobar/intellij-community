@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,12 @@
  */
 package com.intellij.ide.fileTemplates.impl;
 
-import com.intellij.ide.IdeBundle;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.util.List;
 import java.util.Locale;
 
@@ -33,14 +30,11 @@ import java.util.Locale;
  * @author Rustam Vishnyakov
  */
 @State(
-  name="ExportableFileTemplateSettings",
-  storages= {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/" + ExportableFileTemplateSettings.EXPORTABLE_SETTINGS_FILE
-    )}
+  name = "ExportableFileTemplateSettings",
+  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/" + ExportableFileTemplateSettings.EXPORTABLE_SETTINGS_FILE),
+  additionalExportFile = FileTemplatesLoader.TEMPLATES_DIR
 )
-public class ExportableFileTemplateSettings extends FileTemplatesLoader implements PersistentStateComponent<Element>, ExportableComponent {
-
+public class ExportableFileTemplateSettings extends FileTemplatesLoader implements PersistentStateComponent<Element> {
   public final static String EXPORTABLE_SETTINGS_FILE = "file.template.settings.xml";
 
   static final String ELEMENT_TEMPLATE = "template";
@@ -58,28 +52,12 @@ public class ExportableFileTemplateSettings extends FileTemplatesLoader implemen
     return ServiceManager.getService(ExportableFileTemplateSettings.class);
   }
 
-
-  @NotNull
-  @Override
-  public File[] getExportFiles() {
-    File exportableSettingsFile =
-      new File(PathManager.getOptionsPath() + File.separator + EXPORTABLE_SETTINGS_FILE);
-    return new File[] {getDefaultTemplatesManager().getConfigRoot(false), exportableSettingsFile};
-  }
-
-  @NotNull
-  @Override
-  public String getPresentableName() {
-    return IdeBundle.message("item.file.templates");
-  }
-
   @Nullable
   @Override
   public Element getState() {
-    Element element = new Element("fileTemplateSettings");
+    Element element = null;
     for (FTManager manager : getAllManagers()) {
-      final Element templatesGroup = new Element(getXmlElementGroupName(manager));
-      element.addContent(templatesGroup);
+      Element templatesGroup = null;
       for (FileTemplateBase template : manager.getAllTemplates(true)) {
         // save only those settings that differ from defaults
         boolean shouldSave = template.isReformatCode() != FileTemplateBase.DEFAULT_REFORMAT_CODE_VALUE;
@@ -95,6 +73,14 @@ public class ExportableFileTemplateSettings extends FileTemplatesLoader implemen
         if (template instanceof BundledFileTemplate) {
           templateElement.setAttribute(ATTRIBUTE_ENABLED, Boolean.toString(((BundledFileTemplate)template).isEnabled()));
         }
+
+        if (templatesGroup == null) {
+          templatesGroup = new Element(getXmlElementGroupName(manager));
+          if (element == null) {
+            element = new Element("fileTemplateSettings");
+          }
+          element.addContent(templatesGroup);
+        }
         templatesGroup.addContent(templateElement);
       }
     }
@@ -107,7 +93,7 @@ public class ExportableFileTemplateSettings extends FileTemplatesLoader implemen
     myLoaded = true;
   }
 
-  public void doLoad(Element element) {
+  private void doLoad(Element element) {
     for (final FTManager manager : getAllManagers()) {
       final Element templatesGroup = element.getChild(getXmlElementGroupName(manager));
       if (templatesGroup == null) {
@@ -133,7 +119,7 @@ public class ExportableFileTemplateSettings extends FileTemplatesLoader implemen
   }
 
   private static String getXmlElementGroupName(FTManager manager) {
-    return manager.getName().toLowerCase(Locale.US) + "_" + "templates";
+    return manager.getName().toLowerCase(Locale.US) + "_templates";
   }
 
   public boolean isLoaded() {

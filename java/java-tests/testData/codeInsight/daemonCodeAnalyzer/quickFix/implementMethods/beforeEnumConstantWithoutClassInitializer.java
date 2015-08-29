@@ -1,5 +1,6 @@
-// "Implement Methods" "true"
+// "Implement methods" "true"
 enum E {
-  <caret>A;
-  public abstract void foo();
+    <caret>A;
+
+    public abstract int foo();
 }

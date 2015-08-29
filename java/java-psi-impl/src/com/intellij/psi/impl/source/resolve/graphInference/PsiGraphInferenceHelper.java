@@ -38,9 +38,9 @@ public class PsiGraphInferenceHelper implements PsiInferenceHelper {
                                                  @NotNull PsiSubstitutor partialSubstitutor,
                                                  @Nullable PsiElement parent,
                                                  @NotNull ParameterTypeInferencePolicy policy) {
-    final InferenceSession inferenceSession = new InferenceSession(new PsiTypeParameter[]{typeParameter}, partialSubstitutor, myManager);
+    final InferenceSession inferenceSession = new InferenceSession(new PsiTypeParameter[]{typeParameter}, partialSubstitutor, myManager, parent);
     inferenceSession.initExpressionConstraints(parameters, arguments, parent, null);
-    return inferenceSession.infer(parameters, arguments, parent, policy).substitute(typeParameter);
+    return inferenceSession.infer(parameters, arguments, parent).substitute(typeParameter);
   }
 
   @NotNull
@@ -53,9 +53,9 @@ public class PsiGraphInferenceHelper implements PsiInferenceHelper {
                                            @NotNull ParameterTypeInferencePolicy policy,
                                            @NotNull LanguageLevel languageLevel) {
     if (typeParameters.length == 0) return partialSubstitutor;
-    final InferenceSession inferenceSession = new InferenceSession(typeParameters, partialSubstitutor, myManager);
+    final InferenceSession inferenceSession = new InferenceSession(typeParameters, partialSubstitutor, myManager, parent);
     inferenceSession.initExpressionConstraints(parameters, arguments, parent, null);
-    return inferenceSession.infer(parameters, arguments, parent, policy);
+    return inferenceSession.infer(parameters, arguments, parent);
   }
 
   @NotNull
@@ -65,14 +65,14 @@ public class PsiGraphInferenceHelper implements PsiInferenceHelper {
                                            @NotNull PsiType[] rightTypes,
                                            @NotNull LanguageLevel languageLevel) {
     if (typeParameters.length == 0) return PsiSubstitutor.EMPTY;
-    InferenceSession session = new InferenceSession(typeParameters, leftTypes, rightTypes, PsiSubstitutor.EMPTY, myManager);
+    InferenceSession session = new InferenceSession(typeParameters, leftTypes, rightTypes, PsiSubstitutor.EMPTY, myManager, null);
     for (PsiType leftType : leftTypes) {
-      if (!session.isProperType(leftType)) {
+      if (!session.isProperType(session.substituteWithInferenceVariables(leftType))) {
         return session.infer();
       }
     }
     for (PsiType rightType : rightTypes) {
-      if (!session.isProperType(rightType)) {
+      if (!session.isProperType(session.substituteWithInferenceVariables(rightType))) {
         return session.infer();
       }
     }
@@ -104,11 +104,12 @@ public class PsiGraphInferenceHelper implements PsiInferenceHelper {
       leftTypes = new PsiType[] {arg};
       rightTypes = new PsiType[]{param};
     }
-    final InferenceSession inferenceSession = new InferenceSession(new PsiTypeParameter[]{typeParam}, leftTypes, rightTypes, PsiSubstitutor.EMPTY, myManager);
-    if (inferenceSession.isProperType(param) && inferenceSession.isProperType(arg)) {
+    final InferenceSession inferenceSession = new InferenceSession(new PsiTypeParameter[]{typeParam}, leftTypes, rightTypes, PsiSubstitutor.EMPTY, myManager, null);
+    if (inferenceSession.isProperType(inferenceSession.substituteWithInferenceVariables(param)) &&
+        inferenceSession.isProperType(inferenceSession.substituteWithInferenceVariables(arg))) {
       boolean proceed = false;
       for (PsiClassType classType : typeParam.getExtendsListTypes()) {
-        if (!inferenceSession.isProperType(classType)) {
+        if (!inferenceSession.isProperType(inferenceSession.substituteWithInferenceVariables(classType))) {
           proceed = true;
           break;
         }

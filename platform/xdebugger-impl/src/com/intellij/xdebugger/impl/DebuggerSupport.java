@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,22 +15,43 @@
  */
 package com.intellij.xdebugger.impl;
 
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.xdebugger.AbstractDebuggerSession;
-import com.intellij.xdebugger.impl.actions.*;
+import com.intellij.xdebugger.impl.actions.DebuggerActionHandler;
+import com.intellij.xdebugger.impl.actions.DebuggerToggleActionHandler;
+import com.intellij.xdebugger.impl.actions.EditBreakpointActionHandler;
+import com.intellij.xdebugger.impl.actions.MarkObjectActionHandler;
 import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointPanelProvider;
+import com.intellij.xdebugger.impl.evaluate.quick.common.AbstractValueHint;
 import com.intellij.xdebugger.impl.evaluate.quick.common.QuickEvaluateHandler;
-import com.intellij.xdebugger.impl.settings.DebuggerSettingsPanelProvider;
+import com.intellij.xdebugger.impl.evaluate.quick.common.ValueHintType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.awt.*;
 
 /**
  * @author nik
  */
 public abstract class DebuggerSupport {
   private static final ExtensionPointName<DebuggerSupport> EXTENSION_POINT = ExtensionPointName.create("com.intellij.xdebugger.debuggerSupport");
+
+  protected static final class DisabledActionHandler extends DebuggerActionHandler {
+    public static final DisabledActionHandler INSTANCE = new DisabledActionHandler();
+
+    @Override
+    public void perform(@NotNull Project project, AnActionEvent event) {
+    }
+
+    @Override
+    public boolean isEnabled(@NotNull Project project, AnActionEvent event) {
+      return false;
+    }
+  }
 
   @NotNull
   public static DebuggerSupport[] getDebuggerSupports() {
@@ -39,9 +60,6 @@ public abstract class DebuggerSupport {
 
   @NotNull
   public abstract BreakpointPanelProvider<?> getBreakpointPanelProvider();
-
-  @NotNull
-  public abstract DebuggerSettingsPanelProvider getSettingsPanelProvider();
 
   @NotNull
   public abstract DebuggerActionHandler getStepOverHandler();
@@ -90,10 +108,39 @@ public abstract class DebuggerSupport {
   public abstract DebuggerActionHandler getEvaluateHandler();
 
   @NotNull
-  public abstract QuickEvaluateHandler getQuickEvaluateHandler();
+  public QuickEvaluateHandler getQuickEvaluateHandler() {
+    return DISABLED_QUICK_EVALUATE;
+  }
+
+  private static final QuickEvaluateHandler DISABLED_QUICK_EVALUATE = new QuickEvaluateHandler() {
+    @Override
+    public boolean isEnabled(@NotNull Project project) {
+      return false;
+    }
+
+    @Nullable
+    @Override
+    public AbstractValueHint createValueHint(@NotNull Project project, @NotNull Editor editor, @NotNull Point point, ValueHintType type) {
+      return null;
+    }
+
+    @Override
+    public boolean canShowHint(@NotNull Project project) {
+      return false;
+    }
+
+    @Override
+    public int getValueLookupDelay(Project project) {
+      return 0;
+    }
+  };
 
   @NotNull
   public abstract DebuggerActionHandler getAddToWatchesActionHandler();
+
+  public DebuggerActionHandler getEvaluateInConsoleActionHandler() {
+    return DisabledActionHandler.INSTANCE;
+  }
 
   @NotNull
   public abstract DebuggerToggleActionHandler getMuteBreakpointsHandler();
@@ -116,6 +163,6 @@ public abstract class DebuggerSupport {
         return support;
       }
     }
-    return null;
+    throw new IllegalStateException();
   }
 }

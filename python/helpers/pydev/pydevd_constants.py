@@ -1,12 +1,10 @@
 '''
 This module holds the constants used for specifying the states of the debugger.
 '''
-
 STATE_RUN = 1
 STATE_SUSPEND = 2
 
 PYTHON_SUSPEND = 1
-DJANGO_SUSPEND = 2
 
 try:
     __setFalse = False
@@ -17,13 +15,13 @@ except:
     setattr(__builtin__, 'False', 0)
 
 class DebugInfoHolder:
-    #we have to put it here because it can be set through the command line (so, the 
+    #we have to put it here because it can be set through the command line (so, the
     #already imported references would not have it).
     DEBUG_RECORD_SOCKET_READS = False
     DEBUG_TRACE_LEVEL = -1
     DEBUG_TRACE_BREAKPOINTS = -1
 
-#Optimize with psyco? This gave a 50% speedup in the debugger in tests 
+#Optimize with psyco? This gave a 50% speedup in the debugger in tests
 USE_PSYCO_OPTIMIZATION = True
 
 #Hold a reference to the original _getframe (because psyco will change that as soon as it's imported)
@@ -45,6 +43,11 @@ import pydevd_vm_type
 
 IS_JYTHON = pydevd_vm_type.GetVmType() == pydevd_vm_type.PydevdVmType.JYTHON
 
+IS_JYTH_LESS25 = False
+if IS_JYTHON:
+    if sys.version_info[0] == 2 and sys.version_info[1] < 5:
+        IS_JYTH_LESS25 = True
+
 #=======================================================================================================================
 # Python 3?
 #=======================================================================================================================
@@ -59,7 +62,7 @@ try:
     elif sys.version_info[0] == 2 and sys.version_info[1] == 4:
         IS_PY24 = True
 except AttributeError:
-    pass #Not all versions have sys.version_info
+    pass  #Not all versions have sys.version_info
 
 try:
     IS_64_BITS = sys.maxsize > 2 ** 32
@@ -73,22 +76,16 @@ except AttributeError:
 SUPPORT_GEVENT = os.getenv('GEVENT_SUPPORT', 'False') == 'True'
 
 USE_LIB_COPY = SUPPORT_GEVENT and not IS_PY3K and sys.version_info[1] >= 6
+import _pydev_threading as threading
 
-if USE_LIB_COPY:
-    import _pydev_threading as threading
-else:
-    import threading
-
-_nextThreadIdLock = threading.Lock()
+from _pydev_imps import _pydev_thread
+_nextThreadIdLock = _pydev_thread.allocate_lock()
 
 #=======================================================================================================================
 # Jython?
 #=======================================================================================================================
 try:
-    import org.python.core.PyDictionary #@UnresolvedImport @UnusedImport -- just to check if it could be valid
-
-    def DictContains(d, key):
-        return d.has_key(key)
+    DictContains = dict.has_key
 except:
     try:
         #Py3k does not have has_key anymore, and older versions don't have __contains__
@@ -99,13 +96,63 @@ except:
         except NameError:
             def DictContains(d, key):
                 return d.has_key(key)
+#=======================================================================================================================
+# Jython?
+#=======================================================================================================================
+try:
+    DictPop = dict.pop
+except:
+    def DictPop(d, key, default=None):
+        try:
+            ret = d[key]
+            del d[key]
+            return ret
+        except:
+            return default
+
+
+if IS_PY3K:
+    def DictKeys(d):
+        return list(d.keys())
+
+    def DictValues(d):
+        return list(d.values())
+
+    DictIterValues = dict.values
+
+    def DictIterItems(d):
+        return d.items()
+
+    def DictItems(d):
+        return list(d.items())
+
+else:
+    DictKeys = dict.keys
+    try:
+        DictIterValues = dict.itervalues
+    except:
+        DictIterValues = dict.values #Older versions don't have the itervalues
+
+    DictValues = dict.values
+
+    def DictIterItems(d):
+        return d.iteritems()
+
+    def DictItems(d):
+        return d.items()
 
 
 try:
-    xrange
+    xrange = xrange
 except:
     #Python 3k does not have it
     xrange = range
+    
+try:
+    import itertools
+    izip = itertools.izip
+except:
+    izip = zip
 
 try:
     object
@@ -118,10 +165,10 @@ try:
 except:
     def enumerate(lst):
         ret = []
-        i=0
+        i = 0
         for element in lst:
             ret.append((i, element))
-            i+=1
+            i += 1
         return ret
 
 #=======================================================================================================================
@@ -164,8 +211,7 @@ def GetThreadId(thread):
                 except AttributeError:
                     try:
                         #Jython does not have it!
-                        import java.lang.management.ManagementFactory #@UnresolvedImport -- just for jython
-
+                        import java.lang.management.ManagementFactory  #@UnresolvedImport -- just for jython
                         pid = java.lang.management.ManagementFactory.getRuntimeMXBean().getName()
                         pid = pid.replace('@', '_')
                     except:
@@ -193,6 +239,9 @@ class Null:
         return self
 
     def __getattr__(self, mname):
+        if len(mname) > 4 and mname[:2] == '__' and mname[-2:] == '__':
+            # Don't pretend to implement special method names.
+            raise AttributeError(mname)
         return self
 
     def __setattr__(self, name, value):
@@ -222,7 +271,31 @@ class Null:
     def __nonzero__(self):
         return 0
 
+    def __iter__(self):
+        return iter(())
+
+
+def call_only_once(func):
+    '''
+    To be used as a decorator
+
+    @call_only_once
+    def func():
+        print 'Calling func only this time'
+
+    Actually, in PyDev it must be called as:
+
+    func = call_only_once(func) to support older versions of Python.
+    '''
+    def new_func(*args, **kwargs):
+        if not new_func._called:
+            new_func._called = True
+            return func(*args, **kwargs)
+
+    new_func._called = False
+    return new_func
+
 if __name__ == '__main__':
     if Null():
         sys.stdout.write('here\n')
-        
+

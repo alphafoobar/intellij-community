@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,12 +28,12 @@ import java.util.List;
  * @author yole
  */
 public class PySuperMethodsSearch extends ExtensibleQueryFactory<PsiElement, PySuperMethodsSearch.SearchParameters> {
-  public static PySuperMethodsSearch INSTANCE = new PySuperMethodsSearch();
+  public static final PySuperMethodsSearch INSTANCE = new PySuperMethodsSearch();
 
   private static PyFunction getBaseMethod(List<PsiElement> superMethods,
                                          PyClass containingClass) {
 
-    for (PyClass ancestor : containingClass.getAncestorClasses()) {
+    for (PyClass ancestor : containingClass.getAncestorClasses(null)) {
       for (PsiElement method : superMethods) {
         if (ancestor.equals(((PyFunction)method).getContainingClass()))
           return (PyFunction)method;

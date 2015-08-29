@@ -26,9 +26,13 @@ import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class OrderEntryUtil {
   private OrderEntryUtil() {
@@ -132,10 +136,14 @@ public class OrderEntryUtil {
   public static void addLibraryToRoots(final LibraryOrderEntry libraryOrderEntry, final Module module) {
     Library library = libraryOrderEntry.getLibrary();
     if (library == null) return;
+    addLibraryToRoots(module, library);
+  }
+
+  public static void addLibraryToRoots(@NotNull Module module, @NotNull Library library) {
     final ModuleRootManager manager = ModuleRootManager.getInstance(module);
     final ModifiableRootModel rootModel = manager.getModifiableModel();
 
-    if (libraryOrderEntry.isModuleLevel()) {
+    if (library.getTable() == null) {
       final Library jarLibrary = rootModel.getModuleLibraryTable().createLibrary();
       final Library.ModifiableModel libraryModel = jarLibrary.getModifiableModel();
       for (OrderRootType orderRootType : OrderRootType.getAllTypes()) {
@@ -152,21 +160,45 @@ public class OrderEntryUtil {
     rootModel.commit();
   }
 
-  public static void replaceLibrary(@NotNull ModifiableRootModel model, @NotNull Library oldLibrary, @NotNull Library newLibrary) {
-    OrderEntry[] entries = model.getOrderEntries();
+  private static int findLibraryOrderEntry(@NotNull OrderEntry[] entries, @NotNull Library library) {
     for (int i = 0; i < entries.length; i++) {
-      OrderEntry orderEntry = entries[i];
-      if (orderEntry instanceof LibraryOrderEntry && oldLibrary.equals(((LibraryOrderEntry)orderEntry).getLibrary())) {
-        model.removeOrderEntry(orderEntry);
-        final LibraryOrderEntry newEntry = model.addLibraryEntry(newLibrary);
-        final OrderEntry[] newEntries = new OrderEntry[entries.length];
-        System.arraycopy(entries, 0, newEntries, 0, i);
-        newEntries[i] = newEntry;
-        System.arraycopy(entries, i, newEntries, i+1, entries.length - i - 1);
-        model.rearrangeOrderEntries(newEntries);
-        return;
+      OrderEntry entry = entries[i];
+      if (entry instanceof LibraryOrderEntry && library.equals(((LibraryOrderEntry)entry).getLibrary())) {
+        return i;
       }
     }
+    return -1;
+  }
+
+  public static void replaceLibrary(@NotNull ModifiableRootModel model, @NotNull Library oldLibrary, @NotNull Library newLibrary) {
+    int i = findLibraryOrderEntry(model.getOrderEntries(), oldLibrary);
+    if (i == -1) return;
+
+    model.addLibraryEntry(newLibrary);
+    replaceLibraryByAdded(model, i);
+  }
+
+  public static void replaceLibraryEntryByAdded(@NotNull ModifiableRootModel model, @NotNull LibraryOrderEntry entry) {
+    int i = ArrayUtil.indexOf(model.getOrderEntries(), entry);
+    if (i == -1) return;
+
+    replaceLibraryByAdded(model, i);
+  }
+
+  private static void replaceLibraryByAdded(ModifiableRootModel model, int toReplace) {
+    OrderEntry[] entries = model.getOrderEntries();
+    LibraryOrderEntry newEntry = (LibraryOrderEntry)entries[entries.length - 1];
+    LibraryOrderEntry libraryEntry = (LibraryOrderEntry)entries[toReplace];
+    boolean exported = libraryEntry.isExported();
+    DependencyScope scope = libraryEntry.getScope();
+    model.removeOrderEntry(libraryEntry);
+    newEntry.setExported(exported);
+    newEntry.setScope(scope);
+    final OrderEntry[] newEntries = new OrderEntry[entries.length-1];
+    System.arraycopy(entries, 0, newEntries, 0, toReplace);
+    newEntries[toReplace] = newEntry;
+    System.arraycopy(entries, toReplace + 1, newEntries, toReplace + 1, entries.length - toReplace - 2);
+    model.rearrangeOrderEntries(newEntries);
   }
 
   public static <T extends OrderEntry> void processOrderEntries(@NotNull Module module,
@@ -182,4 +214,26 @@ public class OrderEntryUtil {
     }
   }
 
+  public static DependencyScope intersectScopes(DependencyScope scope1, DependencyScope scope2) {
+    if (scope1 == scope2) return scope1;
+    if (scope1 == DependencyScope.COMPILE) return scope2;
+    if (scope2 == DependencyScope.COMPILE) return scope1;
+    if (scope1 == DependencyScope.TEST || scope2 == DependencyScope.TEST) return DependencyScope.TEST;
+    return scope1;
+  }
+
+  @NotNull
+  public static List<Library> getModuleLibraries(@NotNull ModuleRootModel model) {
+    OrderEntry[] orderEntries = model.getOrderEntries();
+    List<Library> libraries = new ArrayList<Library>();
+    for (OrderEntry orderEntry : orderEntries) {
+      if (orderEntry instanceof LibraryOrderEntry) {
+        final LibraryOrderEntry entry = (LibraryOrderEntry)orderEntry;
+        if (entry.isModuleLevel()) {
+          libraries.add(entry.getLibrary());
+        }
+      }
+    }
+    return libraries;
+  }
 }

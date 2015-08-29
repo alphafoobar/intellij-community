@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,8 +42,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -66,7 +64,7 @@ public abstract class RefElementImpl extends RefEntityImpl implements RefElement
   private final Module myModule;
   protected static final int IS_REACHABLE_MASK = 0x40;
 
-  protected RefElementImpl(String name, @NotNull RefElement owner) {
+  protected RefElementImpl(@NotNull String name, @NotNull RefElement owner) {
     super(name, owner.getRefManager());
     myID = null;
     myFlags = 0;
@@ -77,7 +75,7 @@ public abstract class RefElementImpl extends RefEntityImpl implements RefElement
     this(file.getName(), file, manager);
   }
 
-  protected RefElementImpl(String name, @NotNull PsiElement element, @NotNull RefManager manager) {
+  protected RefElementImpl(@NotNull String name, @NotNull PsiElement element, @NotNull RefManager manager) {
     super(name, manager);
     myID = SmartPointerManager.getInstance(manager.getProject()).createSmartPsiElementPointer(element);
     myFlags = 0;
@@ -245,20 +243,14 @@ public abstract class RefElementImpl extends RefEntityImpl implements RefElement
   }
 
   @Nullable
-  public URL getURL() {
-    try {
-      final PsiElement element = getElement();
-      if (element == null) return null;
-      final PsiFile containingFile = element.getContainingFile();
-      if (containingFile == null) return null;
-      final VirtualFile virtualFile = containingFile.getVirtualFile();
-      if (virtualFile == null) return null;
-      return new URL(virtualFile.getUrl() + "#" + element.getTextOffset());
-    } catch (MalformedURLException e) {
-      LOG.error(e);
-    }
-
-    return null;
+  public String getURL() {
+    final PsiElement element = getElement();
+    if (element == null || !element.isPhysical()) return null;
+    final PsiFile containingFile = element.getContainingFile();
+    if (containingFile == null) return null;
+    final VirtualFile virtualFile = containingFile.getVirtualFile();
+    if (virtualFile == null) return null;
+    return virtualFile.getUrl() + "#" + element.getTextOffset();
   }
 
   protected abstract void initialize();
@@ -267,7 +259,7 @@ public abstract class RefElementImpl extends RefEntityImpl implements RefElement
     mySuppressions = text.split("[, ]");
   }
 
-  public boolean isSuppressed(final String... toolId) {
+  public boolean isSuppressed(@NotNull String... toolId) {
     if (mySuppressions != null) {
       for (@NonNls String suppression : mySuppressions) {
         for (String id : toolId) {

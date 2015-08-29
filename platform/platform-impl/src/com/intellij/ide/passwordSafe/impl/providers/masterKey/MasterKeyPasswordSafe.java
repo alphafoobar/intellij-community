@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,60 +15,54 @@
  */
 package com.intellij.ide.passwordSafe.impl.providers.masterKey;
 
+import com.intellij.concurrency.AsyncFutureFactory;
+import com.intellij.concurrency.AsyncFutureResult;
 import com.intellij.ide.passwordSafe.MasterPasswordUnavailableException;
 import com.intellij.ide.passwordSafe.PasswordSafeException;
+import com.intellij.ide.passwordSafe.impl.PasswordSafeTimed;
 import com.intellij.ide.passwordSafe.impl.providers.BasePasswordSafeProvider;
 import com.intellij.ide.passwordSafe.impl.providers.ByteArrayWrapper;
 import com.intellij.ide.passwordSafe.impl.providers.EncryptionUtil;
 import com.intellij.ide.passwordSafe.impl.providers.masterKey.windows.WindowsCryptUtils;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.application.ex.ApplicationEx;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ExecutionException;
 
 /**
  * The password safe that stores information in configuration file encrypted by master password
  */
 public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
-  /**
-   * The test password key
-   */
   private static final String TEST_PASSWORD_KEY = "TEST_PASSWORD:";
-  /**
-   * The test password value
-   */
   private static final String TEST_PASSWORD_VALUE = "test password";
-  /**
-   * The password database instance
-   */
-  final PasswordDatabase database;
-  /**
-   * The key to use to encrypt data
-   */
-  private transient final AtomicReference<byte[]> key = new AtomicReference<byte[]>();
 
-  /**
-   * The constructor
-   *
-   * @param database the password database
-   */
+  private final PasswordDatabase myDatabase;
+  private transient final PasswordSafeTimed<Ref<Object>> myKey = new PasswordSafeTimed<Ref<Object>>() {
+    protected Ref<Object> compute() {
+      return Ref.create();
+    }
+
+    @Override
+    protected int getMinutesToLive() {
+      return Registry.intValue("passwordSafe.masterPassword.ttl");
+    }
+  };
+
   public MasterKeyPasswordSafe(PasswordDatabase database) {
-    this.database = database;
-  }
-
-  /**
-   * @return true if the component is running in the test mode
-   */
-  protected boolean isTestMode() {
-    return false;
+    this.myDatabase = database;
   }
 
   /**
@@ -78,15 +72,15 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
    * @param encrypt  if the password should be encrypted an stored is master database
    */
   void resetMasterPassword(String password, boolean encrypt) {
-    this.key.set(EncryptionUtil.genPasswordKey(password));
-    database.clear();
+    myKey.get().set(EncryptionUtil.genPasswordKey(password));
+    myDatabase.clear();
     try {
       storePassword(null, MasterKeyPasswordSafe.class, testKey(password), TEST_PASSWORD_VALUE);
       if (encrypt) {
-        database.setPasswordInfo(encryptPassword(password));
+        myDatabase.setPasswordInfo(encryptPassword(password));
       }
       else {
-        database.setPasswordInfo(new byte[0]);
+        myDatabase.setPasswordInfo(ArrayUtil.EMPTY_BYTE_ARRAY);
       }
     }
     catch (PasswordSafeException e) {
@@ -101,8 +95,8 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
    * @return true, if password is a correct one
    */
   boolean setMasterPassword(String password) {
-    byte[] savedKey = this.key.get();
-    this.key.set(EncryptionUtil.genPasswordKey(password));
+    Object savedKey = myKey.get().get();
+    myKey.get().set(EncryptionUtil.genPasswordKey(password));
     String rc;
     try {
       rc = getPassword(null, MasterKeyPasswordSafe.class, testKey(password));
@@ -111,13 +105,12 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
       throw new IllegalStateException("There should be no problem with password at this point", e);
     }
     if (!TEST_PASSWORD_VALUE.equals(rc)) {
-      this.key.set(savedKey);
+      myKey.get().set(savedKey);
       return false;
     }
     else {
       return true;
     }
-
   }
 
   /**
@@ -132,11 +125,11 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
     if (!setMasterPassword(oldPassword)) {
       return false;
     }
-    byte[] oldKey = key.get();
+    byte[] oldKey = (byte[])myKey.get().get(); // set right in the previous call
     byte[] newKey = EncryptionUtil.genPasswordKey(newPassword);
     ByteArrayWrapper testKey = new ByteArrayWrapper(EncryptionUtil.dbKey(oldKey, MasterKeyPasswordSafe.class, testKey(oldPassword)));
     HashMap<ByteArrayWrapper, byte[]> oldDb = new HashMap<ByteArrayWrapper, byte[]>();
-    database.copyTo(oldDb);
+    myDatabase.copyTo(oldDb);
     HashMap<ByteArrayWrapper, byte[]> newDb = new HashMap<ByteArrayWrapper, byte[]>();
     for (Map.Entry<ByteArrayWrapper, byte[]> e : oldDb.entrySet()) {
       if (testKey.equals(e.getKey())) {
@@ -146,154 +139,174 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
       String decryptedText = EncryptionUtil.decryptText(oldKey, e.getValue());
       newDb.put(new ByteArrayWrapper(EncryptionUtil.encryptKey(newKey, decryptedKey)), EncryptionUtil.encryptText(newKey, decryptedText));
     }
-    synchronized (database.getDbLock()) {
+    synchronized (myDatabase.getDbLock()) {
       resetMasterPassword(newPassword, encrypt);
-      database.putAll(newDb);
+      myDatabase.putAll(newDb);
     }
     return true;
   }
 
 
-  /**
-   * The test key
-   *
-   * @param password the password for the test key
-   * @return the test key
-   */
   private static String testKey(String password) {
     return TEST_PASSWORD_KEY + password;
   }
 
+  @NotNull
   @Override
-  protected byte[] key(@Nullable final Project project) throws PasswordSafeException {
-    ApplicationEx application = (ApplicationEx)ApplicationManager.getApplication();
-    if (!isTestMode() && application.isHeadlessEnvironment()) {
+  protected byte[] key(@Nullable final Project project, @NotNull final Class requestor) throws PasswordSafeException {
+    Object key = myKey.get().get();
+    if (key instanceof byte[]) return (byte[])key;
+    if (key instanceof PasswordSafeException && ((PasswordSafeException)key).justHappened()) throw (PasswordSafeException)key;
+
+    if (isPasswordEncrypted()) {
+      try {
+        setMasterPassword(decryptPassword(myDatabase.getPasswordInfo()));
+        key = myKey.get().get();
+        if (key instanceof byte[]) return (byte[])key;
+      }
+      catch (PasswordSafeException e) {
+        // ignore exception and ask password
+      }
+    }
+
+    if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
       throw new MasterPasswordUnavailableException("The provider is not available in headless environment");
     }
-    if (key.get() == null) {
-      if (isPasswordEncrypted()) {
+
+    key = invokeAndWait(new ThrowableComputable<Object, PasswordSafeException>() {
+      @Override
+      public Object compute() throws PasswordSafeException {
+        Object key = myKey.get().get();
+        if (key instanceof byte[] || key instanceof PasswordSafeException && ((PasswordSafeException)key).justHappened()) {
+          return key;
+        }
         try {
-          String s = decryptPassword(database.getPasswordInfo());
-          setMasterPassword(s);
-        }
-        catch (PasswordSafeException e) {
-          // ignore exception and ask password
-        }
-      }
-      if (key.get() == null) {
-        final Ref<PasswordSafeException> ex = new Ref<PasswordSafeException>();
-        if (application.holdsReadLock()) {
-          throw new IllegalStateException("Access from read action is not allowed, because it might lead to a deadlock.");
-        }
-        application.invokeAndWait(new Runnable() {
-          public void run() {
-            if (key.get() == null) {
-              try {
-                if (isTestMode()) {
-                  throw new MasterPasswordUnavailableException("Master password must be specified in test mode.");
-                }
-                if (database.isEmpty()) {
-                  if (!ResetPasswordDialog.newPassword(project, MasterKeyPasswordSafe.this)) {
-                    throw new MasterPasswordUnavailableException("Master password is required to store passwords in the database.");
-                  }
-                }
-                else {
-                  MasterPasswordDialog.askPassword(project, MasterKeyPasswordSafe.this);
-                }
-              }
-              catch (PasswordSafeException e) {
-                ex.set(e);
-              }
-              catch (Exception e) {
-                //noinspection ThrowableInstanceNeverThrown
-                ex.set(new MasterPasswordUnavailableException("The problem with retrieving the password", e));
-              }
+          if (myDatabase.isEmpty()) {
+            if (!MasterPasswordDialog.resetMasterPasswordDialog(project, MasterKeyPasswordSafe.this, requestor).showAndGet()) {
+              throw new MasterPasswordUnavailableException("Master password is required to store passwords in the database.");
             }
           }
-        }, ModalityState.defaultModalityState());
-        //noinspection ThrowableResultOfMethodCallIgnored
-        if (ex.get() != null) {
-          throw ex.get();
+          else {
+            MasterPasswordDialog.askPassword(project, MasterKeyPasswordSafe.this, requestor);
+          }
+        }
+        catch (PasswordSafeException e) {
+          myKey.get().set(e);
+          throw e;
+        }
+        return myKey.get().get();
+      }
+    }, project == null ? Conditions.alwaysFalse() : project.getDisposed());
+    if (key instanceof byte[]) return (byte[])key;
+    if (key instanceof PasswordSafeException) throw (PasswordSafeException)key;
+
+    throw new AssertionError();
+  }
+
+  private static final Object ourEDTLock = new Object();
+  public <T, E extends Throwable> T invokeAndWait(@NotNull final ThrowableComputable<T, E> computable, @NotNull final Condition<?> expired) throws E {
+    if (ApplicationManager.getApplication().isDispatchThread()) {
+      return computable.compute();
+    }
+
+    final AsyncFutureResult<Object> future = AsyncFutureFactory.getInstance().createAsyncFutureResult();
+    final ExpirableRunnable runnable = new ExpirableRunnable() {
+      @Override
+      public boolean isExpired() {
+        boolean b = expired.value(null);
+        if (b) future.setException(new ProcessCanceledException());
+        return b;
+      }
+
+      @Override
+      public void run() {
+        try {
+          future.set(computable.compute());
+        }
+        catch (Throwable e) {
+          future.setException(e);
         }
       }
+    };
+    ProgressIndicator indicator = ProgressIndicatorProvider.getGlobalProgressIndicator();
+    synchronized (ourEDTLock) {
+      if (indicator != null && indicator.isModal()) {
+        UIUtil.invokeLaterIfNeeded(new Runnable() {
+          @Override
+          public void run() {
+            if (!runnable.isExpired()) {
+              runnable.run();
+            }
+          }
+        });
+      }
+      else {
+        IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(runnable);
+      }
+      try {
+        return (T)future.get();
+      }
+      catch (InterruptedException e) {
+        throw new ProcessCanceledException(e);
+      }
+      catch (ExecutionException e) {
+        throw (E) e.getCause();
+      }
     }
-    return this.key.get();
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
-  public String getPassword(@Nullable Project project, Class requester, String key) throws PasswordSafeException {
-    if (database.isEmpty()) {
+  public String getPassword(@Nullable Project project, @NotNull Class requestor, String key) throws PasswordSafeException {
+    if (myDatabase.isEmpty()) {
       return null;
     }
-    return super.getPassword(project, requester, key);
+    return super.getPassword(project, requestor, key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
-  public void removePassword(@Nullable Project project, Class requester, String key) throws PasswordSafeException {
-    if (database.isEmpty()) {
+  public void removePassword(@Nullable Project project, @NotNull Class requester, String key) throws PasswordSafeException {
+    if (myDatabase.isEmpty()) {
       return;
     }
     super.removePassword(project, requester, key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected byte[] getEncryptedPassword(byte[] key) {
-    return database.get(key);
+    return myDatabase.get(key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected void removeEncryptedPassword(byte[] key) {
-    database.remove(key);
+    myDatabase.remove(key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   protected void storeEncryptedPassword(byte[] key, byte[] encryptedPassword) {
-    database.put(key, encryptedPassword);
+    myDatabase.put(key, encryptedPassword);
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public boolean isSupported() {
     return !ApplicationManager.getApplication().isHeadlessEnvironment();
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public String getDescription() {
     return "This provider stores passwords in IDEA config and uses master password to encrypt other passwords. " +
            "The passwords for the same resources are shared between different projects.";
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public String getName() {
     return "Master Key PasswordSafe";
   }
 
-  /**
-   * @return true, if OS protected passwords are supported for the current platform
-   */
+
+  public boolean isMasterPasswordEnabled() {
+    return setMasterPassword("");
+  }
+
   @SuppressWarnings({"MethodMayBeStatic"})
   public boolean isOsProtectedPasswordSupported() {
     // TODO extension point needed?
@@ -323,27 +336,19 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
    *          if decryption fails
    */
   private static String decryptPassword(byte[] pw) throws MasterPasswordUnavailableException {
-    assert SystemInfo.isWindows;
-    try {
-      return new String(WindowsCryptUtils.unprotect(pw), "UTF-8");
-    }
-    catch (UnsupportedEncodingException e) {
-      throw new IllegalStateException("UTF-8 not available", e);
-    }
+    if (!SystemInfo.isWindows) throw new AssertionError("Windows OS expected");
+
+    return new String(WindowsCryptUtils.unprotect(pw), CharsetToolkit.UTF8_CHARSET);
   }
 
-  /**
-   * @return true, if the password is currently encrypted in the database
-   */
   public boolean isPasswordEncrypted() {
-    byte[] i = database.getPasswordInfo();
-    return i != null && i.length > 0;
+    if (!isOsProtectedPasswordSupported()) return false;
+
+    byte[] info = myDatabase.getPasswordInfo();
+    return info != null && info.length > 0;
   }
 
-  /**
-   * @return check if provider database is empty
-   */
   public boolean isEmpty() {
-    return database.isEmpty();
+    return myDatabase.isEmpty();
   }
 }

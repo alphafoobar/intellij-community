@@ -16,6 +16,8 @@
 package com.intellij.refactoring.introduceparameterobject.usageInfo;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -66,14 +68,15 @@ public class MergeMethodArguments extends FixableUsageInfo {
   }
 
   public void fixUsage() throws IncorrectOperationException {
-    final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(method.getProject());
+    final Project project = method.getProject();
+    final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
     final PsiMethod deepestSuperMethod = method.findDeepestSuperMethod();
     final PsiClass psiClass;
     if (myContainingClass != null) {
       psiClass = myContainingClass.findInnerClassByName(className, false);
     }
     else {
-      psiClass = psiFacade.findClass(StringUtil.getQualifiedName(packageName, className), GlobalSearchScope.allScope(getProject()));
+      psiClass = psiFacade.findClass(StringUtil.getQualifiedName(packageName, className), GlobalSearchScope.allScope(project));
     }
     assert psiClass != null;
     PsiSubstitutor subst = PsiSubstitutor.EMPTY;
@@ -93,22 +96,30 @@ public class MergeMethodArguments extends FixableUsageInfo {
       }
     }
     final List<ParameterInfoImpl> parametersInfo = new ArrayList<ParameterInfoImpl>();
-    final PsiClassType classType = JavaPsiFacade.getElementFactory(getProject()).createType(psiClass, subst);
-    parametersInfo.add(new ParameterInfoImpl(-1, parameterName, classType, null) {
+    final PsiClassType classType = JavaPsiFacade.getElementFactory(project).createType(psiClass, subst);
+
+    final ParameterInfoImpl mergedParamInfo = new ParameterInfoImpl(-1, parameterName, classType, null) {
       @Override
       public PsiExpression getValue(final PsiCallExpression expr) throws IncorrectOperationException {
-        return (PsiExpression)JavaCodeStyleManager.getInstance(getProject()).shortenClassReferences(psiFacade.getElementFactory().createExpressionFromText(getMergedParam(expr), expr));
+        return (PsiExpression)JavaCodeStyleManager.getInstance(project)
+          .shortenClassReferences(psiFacade.getElementFactory().createExpressionFromText(getMergedParam(expr), expr));
       }
-    });
+    };
+
+    int firstIncludedIdx = -1;
     final PsiParameter[] parameters = method.getParameterList().getParameters();
     for (int i = 0; i < parameters.length; i++) {
       if (!isParameterToMerge(i)) {
         parametersInfo.add(new ParameterInfoImpl(i, parameters[i].getName(), parameters[i].getType()));
+      } else if (firstIncludedIdx == -1) {
+        firstIncludedIdx = i;
       }
     }
-    final SmartPsiElementPointer<PsiMethod> meth = SmartPointerManager.getInstance(getProject()).createSmartPsiElementPointer(method);
 
-    Runnable performChangeSignatureRunnable = new Runnable() {
+    parametersInfo.add(firstIncludedIdx == -1 ? 0 : firstIncludedIdx, mergedParamInfo);
+    final SmartPsiElementPointer<PsiMethod> meth = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(method);
+
+    final Runnable performChangeSignatureRunnable = new Runnable() {
       @Override
       public void run() {
         final PsiMethod psiMethod = meth.getElement();
@@ -126,7 +137,12 @@ public class MergeMethodArguments extends FixableUsageInfo {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       performChangeSignatureRunnable.run();
     } else {
-      ApplicationManager.getApplication().invokeLater(performChangeSignatureRunnable);
+      ApplicationManager.getApplication().invokeLater(new Runnable() {
+        @Override
+        public void run() {
+          CommandProcessor.getInstance().runUndoTransparentAction(performChangeSignatureRunnable);
+        }
+      });
     }
   }
 

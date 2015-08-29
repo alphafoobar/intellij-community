@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,32 +19,38 @@ package com.intellij.codeInsight.editorActions;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
 import com.intellij.util.Processor;
+import org.jetbrains.annotations.Nullable;
 
 public class UnSelectWordHandler extends EditorActionHandler {
   private final EditorActionHandler myOriginalHandler;
 
   public UnSelectWordHandler(EditorActionHandler originalHandler) {
+    super(true);
     myOriginalHandler = originalHandler;
   }
 
   @Override
-  public void execute(Editor editor, DataContext dataContext) {
+  public void doExecute(Editor editor, @Nullable Caret caret, DataContext dataContext) {
     Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(editor.getComponent()));
+    if (project == null) {
+      return;
+    }
     Document document = editor.getDocument();
     final PsiFile file = PsiDocumentManager.getInstance(project).getPsiFile(document);
 
     if (file == null) {
       if (myOriginalHandler != null) {
-        myOriginalHandler.execute(editor, dataContext);
+        myOriginalHandler.execute(editor, caret, dataContext);
       }
       return;
     }
@@ -54,7 +60,7 @@ public class UnSelectWordHandler extends EditorActionHandler {
   }
 
 
-  private static void doAction(Editor editor, PsiFile file) {
+  private static void doAction(final Editor editor, PsiFile file) {
     if (file instanceof PsiCompiledFile) {
       file = ((PsiCompiledFile)file).getDecompiledPsiFile();
       if (file == null) return;
@@ -108,13 +114,20 @@ public class UnSelectWordHandler extends EditorActionHandler {
     SelectWordUtil.processRanges(element, text, cursorOffset, editor, new Processor<TextRange>() {
       @Override
       public boolean process(TextRange range) {
-        if (selectionRange.contains(range) && !range.equals(selectionRange) && (range.contains(finalCursorOffset) || finalCursorOffset == range.getEndOffset())) {
+        if (selectionRange.contains(range) && !range.equals(selectionRange) &&
+            (range.contains(finalCursorOffset) || finalCursorOffset == range.getEndOffset()) &&
+            !isOffsetCollapsed(range.getStartOffset()) && !isOffsetCollapsed(range.getEndOffset())) {
           if (maximumRange.get() == null || range.contains(maximumRange.get())) {
             maximumRange.set(range);
           }
         }
 
         return false;
+      }
+
+      private boolean isOffsetCollapsed(int offset) {
+        FoldRegion region = editor.getFoldingModel().getCollapsedRegionAtOffset(offset);
+        return region != null && region.getStartOffset() != offset && region.getEndOffset() != offset;
       }
     });
 

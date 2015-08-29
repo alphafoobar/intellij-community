@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.ProjectTopics;
-import com.intellij.ide.caches.CacheUpdater;
 import com.intellij.openapi.application.ApplicationAdapter;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.ComponentsPackage;
+import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.components.impl.stores.BatchUpdateListener;
+import com.intellij.openapi.components.impl.stores.IProjectStore;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.FileTypeEvent;
@@ -28,31 +30,35 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.impl.ModuleEx;
+import com.intellij.openapi.project.DumbModeTask;
 import com.intellij.openapi.project.DumbServiceImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.*;
-import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.ex.VirtualFileManagerAdapter;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerListener;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
+import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.indexing.FileBasedIndexImpl;
+import com.intellij.util.indexing.FileBasedIndexProjectHandler;
+import com.intellij.util.indexing.UnindexedFilesUpdater;
 import com.intellij.util.messages.MessageBusConnection;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 
 /**
  * ProjectRootManager extended with ability to watch events.
  */
-public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
+public class ProjectRootManagerComponent extends ProjectRootManagerImpl implements ProjectComponent {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.roots.impl.ProjectManagerComponent");
 
   private boolean myPointerChangesDetected = false;
@@ -60,25 +66,21 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
   private final BatchUpdateListener myHandler;
   private final MessageBusConnection myConnection;
 
-  protected final List<CacheUpdater> myRootsChangeUpdaters = new ArrayList<CacheUpdater>();
-  protected final List<CacheUpdater> myRefreshCacheUpdaters = new ArrayList<CacheUpdater>();
+  private Set<LocalFileSystem.WatchRequest> myRootsToWatch = new THashSet<LocalFileSystem.WatchRequest>();
+  private final boolean myDoLogCachesUpdate;
 
-  private Set<LocalFileSystem.WatchRequest> myRootsToWatch = new HashSet<LocalFileSystem.WatchRequest>();
-
-  public ProjectRootManagerComponent(Project project,
-                                     DirectoryIndex directoryIndex,
-                                     StartupManager startupManager) {
-    super(project, directoryIndex);
+  public ProjectRootManagerComponent(Project project, StartupManager startupManager) {
+    super(project);
 
     myConnection = project.getMessageBus().connect(project);
     myConnection.subscribe(FileTypeManager.TOPIC, new FileTypeListener() {
       @Override
-      public void beforeFileTypesChanged(FileTypeEvent event) {
+      public void beforeFileTypesChanged(@NotNull FileTypeEvent event) {
         beforeRootsChange(true);
       }
 
       @Override
-      public void fileTypesChanged(FileTypeEvent event) {
+      public void fileTypesChanged(@NotNull FileTypeEvent event) {
         rootsChanged(true);
       }
     });
@@ -112,43 +114,32 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
     };
 
     myConnection.subscribe(VirtualFilePointerListener.TOPIC, new MyVirtualFilePointerListener());
+    myDoLogCachesUpdate = ApplicationManager.getApplication().isInternal() && !ApplicationManager.getApplication().isUnitTestMode();
   }
 
-  public void registerRootsChangeUpdater(CacheUpdater updater) {
-    myRootsChangeUpdaters.add(updater);
+  @Override
+  public void disposeComponent() {
   }
 
-  public void unregisterRootsChangeUpdater(CacheUpdater updater) {
-    boolean removed = myRootsChangeUpdaters.remove(updater);
-    LOG.assertTrue(removed);
-  }
-
-  public void registerRefreshUpdater(CacheUpdater updater) {
-    myRefreshCacheUpdaters.add(updater);
-  }
-
-  public void unregisterRefreshUpdater(CacheUpdater updater) {
-    boolean removed = myRefreshCacheUpdaters.remove(updater);
-    LOG.assertTrue(removed);
+  @NotNull
+  @Override
+  public String getComponentName() {
+    return "ProjectRootManager";
   }
 
   @Override
   public void initComponent() {
-    super.initComponent();
     myConnection.subscribe(BatchUpdateListener.TOPIC, myHandler);
   }
 
   @Override
   public void projectOpened() {
-    super.projectOpened();
     addRootsToWatch();
-    AppListener applicationListener = new AppListener();
-    ApplicationManager.getApplication().addApplicationListener(applicationListener, myProject);
+    ApplicationManager.getApplication().addApplicationListener(new AppListener(), myProject);
   }
 
   @Override
   public void projectClosed() {
-    super.projectClosed();
     LocalFileSystem.getInstance().removeWatchedRoots(myRootsToWatch);
   }
 
@@ -172,7 +163,16 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
     if (ApplicationManager.getApplication().isUnitTestMode() && (!myStartupActivityPerformed || myProject.isDisposed())) {
       return; // in test mode suppress addition to a queue unless project is properly initialized
     }
-    DumbServiceImpl.getInstance(myProject).queueCacheUpdate(myRefreshCacheUpdaters);
+    if (myProject.isDefault()) {
+      return;
+    }
+
+    if (myDoLogCachesUpdate) LOG.info("refresh");
+    DumbServiceImpl dumbService = DumbServiceImpl.getInstance(myProject);
+    DumbModeTask task = FileBasedIndexProjectHandler.createChangedFilesIndexingTask(myProject);
+    if (task != null) {
+      dumbService.queueTask(task);
+    }
   }
 
   private boolean affectsRoots(VirtualFilePointer[] pointers) {
@@ -235,10 +235,8 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
     }
     else {
       flat.add(projectFilePath);
-      final VirtualFile workspaceFile = myProject.getWorkspaceFile();
-      if (workspaceFile != null) {
-        flat.add(workspaceFile.getPath());
-      }
+      // may be not existing yet
+      ContainerUtil.addIfNotNull(flat, ((IProjectStore)ComponentsPackage.getStateStore(myProject)).getWorkspaceFilePath());
     }
 
     for (WatchedRootsProvider extension : Extensions.getExtensions(WatchedRootsProvider.EP_NAME, myProject)) {
@@ -247,39 +245,28 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
 
     final Module[] modules = ModuleManager.getInstance(myProject).getModules();
     for (Module module : modules) {
+      flat.add(module.getModuleFilePath());
+
       final ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
 
       addRootsToTrack(moduleRootManager.getContentRootUrls(), recursive, flat);
+
       if (includeSourceRoots) {
         addRootsToTrack(moduleRootManager.getSourceRootUrls(), recursive, flat);
       }
-      flat.add(module.getModuleFilePath());
 
       final OrderEntry[] orderEntries = moduleRootManager.getOrderEntries();
       for (OrderEntry entry : orderEntries) {
-        if (entry instanceof LibraryOrderEntry) {
-          final Library library = ((LibraryOrderEntry)entry).getLibrary();
-          if (library != null) {
-            for (OrderRootType orderRootType : OrderRootType.getAllTypes()) {
-              addRootsToTrack(library.getUrls(orderRootType), recursive, flat);
-            }
-          }
-        }
-        else if (entry instanceof JdkOrderEntry) {
+        if (entry instanceof LibraryOrSdkOrderEntry) {
+          final LibraryOrSdkOrderEntry libSdkEntry = (LibraryOrSdkOrderEntry)entry;
           for (OrderRootType orderRootType : OrderRootType.getAllTypes()) {
-            addRootsToTrack(((JdkOrderEntry)entry).getRootUrls(orderRootType), recursive, flat);
+            addRootsToTrack(libSdkEntry.getRootUrls(orderRootType), recursive, flat);
           }
         }
       }
     }
 
     return Pair.create(recursive, flat);
-  }
-
-  @Override
-  protected void doSynchronizeRoots() {
-    if (!myStartupActivityPerformed) return;
-    DumbServiceImpl.getInstance(myProject).queueCacheUpdate(myRootsChangeUpdaters);
   }
 
   private static void addRootsToTrack(final String[] urls, final Collection<String> recursive, final Collection<String> flat) {
@@ -292,7 +279,23 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
         else if (JarFileSystem.PROTOCOL.equals(protocol)) {
           flat.add(extractLocalPath(url));
         }
+        else if (StandardFileSystems.JRT_PROTOCOL.equals(protocol)) {
+          recursive.add(extractLocalPath(url));
+        }
       }
+    }
+  }
+
+  @Override
+  protected void doSynchronizeRoots() {
+    if (!myStartupActivityPerformed) return;
+
+    if (myDoLogCachesUpdate) LOG.info(new Throwable("sync roots"));
+    else LOG.info("project roots have changed");
+
+    DumbServiceImpl dumbService = DumbServiceImpl.getInstance(myProject);
+    if (FileBasedIndex.getInstance() instanceof FileBasedIndexImpl) {
+      dumbService.queueTask(new UnindexedFilesUpdater(myProject, false));
     }
   }
 
@@ -339,6 +342,7 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
         if (myInsideRefresh == 0) {
           if (affectsRoots(pointers)) {
             beforeRootsChange(false);
+            if (myDoLogCachesUpdate) LOG.info(new Throwable(pointers.length > 0 ? pointers[0].getPresentableUrl():""));
           }
         }
         else if (!myPointerChangesDetected) {
@@ -346,6 +350,7 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl {
           if (affectsRoots(pointers)) {
             myPointerChangesDetected = true;
             myProject.getMessageBus().syncPublisher(ProjectTopics.PROJECT_ROOTS).beforeRootsChange(new ModuleRootEventImpl(myProject, false));
+            if (myDoLogCachesUpdate) LOG.info(new Throwable(pointers.length > 0 ? pointers[0].getPresentableUrl():""));
           }
         }
       }

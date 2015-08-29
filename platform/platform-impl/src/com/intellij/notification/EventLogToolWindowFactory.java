@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.content.ContentManager;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.event.AncestorEvent;
 
@@ -44,7 +45,7 @@ import javax.swing.event.AncestorEvent;
 */
 public class EventLogToolWindowFactory implements ToolWindowFactory, DumbAware {
   @Override
-  public void createToolWindowContent(final Project project, ToolWindow toolWindow) {
+  public void createToolWindowContent(@NotNull final Project project, @NotNull ToolWindow toolWindow) {
     EventLog.getProjectComponent(project).initDefaultContent();
   }
 
@@ -82,13 +83,13 @@ public class EventLogToolWindowFactory implements ToolWindowFactory, DumbAware {
     group.add(new DisplayBalloons());
     group.add(new ToggleSoftWraps(editor));
     group.add(new ScrollToTheEndToolbarAction(editor));
-    group.add(new MarkAllAsRead(project));
+    group.add(ActionManager.getInstance().getAction(IdeActions.ACTION_MARK_ALL_NOTIFICATIONS_AS_READ));
     group.add(new EventLogConsole.ClearLogAction(console));
     group.add(new ContextHelpAction(EventLog.HELP_ID));
 
     return ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, group, false);
   }
-
+  
   private static class DisplayBalloons extends ToggleAction implements DumbAware {
     public DisplayBalloons() {
       super("Show balloons", "Enable or suppress notification balloons", AllIcons.General.Balloon);
@@ -96,12 +97,12 @@ public class EventLogToolWindowFactory implements ToolWindowFactory, DumbAware {
 
     @Override
     public boolean isSelected(AnActionEvent e) {
-      return NotificationsConfigurationImpl.getNotificationsConfigurationImpl().SHOW_BALLOONS;
+      return NotificationsConfigurationImpl.getInstanceImpl().SHOW_BALLOONS;
     }
 
     @Override
     public void setSelected(AnActionEvent e, boolean state) {
-      NotificationsConfigurationImpl.getNotificationsConfigurationImpl().SHOW_BALLOONS = state;
+      NotificationsConfigurationImpl.getInstanceImpl().SHOW_BALLOONS = state;
     }
   }
 
@@ -130,30 +131,6 @@ public class EventLogToolWindowFactory implements ToolWindowFactory, DumbAware {
     @Override
     protected Editor getEditor(AnActionEvent e) {
       return myEditor;
-    }
-  }
-
-  private static class MarkAllAsRead extends DumbAwareAction {
-    private final Project myProject;
-
-    public MarkAllAsRead(Project project) {
-      super("Mark all as read", "Mark all unread notifications as read", AllIcons.Actions.Selectall);
-      myProject = project;
-    }
-
-    @Override
-    public void update(AnActionEvent e) {
-      if (myProject.isDisposed()) return;
-      e.getPresentation().setEnabled(!EventLog.getLogModel(myProject).getNotifications().isEmpty());
-    }
-
-    @Override
-    public void actionPerformed(AnActionEvent e) {
-      LogModel model = EventLog.getLogModel(myProject);
-      for (Notification notification : model.getNotifications()) {
-        model.removeNotification(notification);
-        notification.expire();
-      }
     }
   }
 

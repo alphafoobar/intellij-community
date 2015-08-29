@@ -32,6 +32,7 @@ import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.AsynchConsumer;
 import com.intellij.util.PlatformIcons;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -102,7 +103,7 @@ public class HgCachingCommittedChangesProvider implements CachingCommittedChange
 
     if (!StringUtil.isEmpty(revisionPath)) {
       VirtualFile root = ((HgRepositoryLocation)repositoryLocation).getRoot();
-      return new HgContentRevision(project, new HgFile(root, new File(revisionPath)), revisionNumber);
+      return HgContentRevision.create(project, new HgFile(root, new File(revisionPath)), revisionNumber);
     }
     else {
       return null;
@@ -266,9 +267,9 @@ public class HgCachingCommittedChangesProvider implements CachingCommittedChange
                               FileStatus aStatus) {
 
     HgContentRevision beforeRevision =
-      fileBefore == null ? null : new HgContentRevision(project, new HgFile(root, new File(root.getPath(), fileBefore)), revisionBefore);
+      fileBefore == null ? null : HgContentRevision.create(project, new HgFile(root, new File(root.getPath(), fileBefore)), revisionBefore);
     HgContentRevision afterRevision =
-      fileAfter == null ? null : new HgContentRevision(project, new HgFile(root, new File(root.getPath(), fileAfter)), revisionAfter);
+      fileAfter == null ? null : HgContentRevision.create(project, new HgFile(root, new File(root.getPath(), fileAfter)), revisionAfter);
     return new Change(beforeRevision, afterRevision, aStatus);
   }
 
@@ -309,7 +310,7 @@ public class HgCachingCommittedChangesProvider implements CachingCommittedChange
     if (localVirtualFile == null) {
       return null;
     }
-    final FilePathImpl filePath = new FilePathImpl(localVirtualFile);
+    final FilePath filePath = VcsUtil.getFilePath(localVirtualFile);
     final CommittedChangeList list = getCommittedChangesForRevision(getLocationFor(filePath), number.asString());
     if (list != null) {
       return new Pair<CommittedChangeList, FilePath>(list, filePath);
@@ -348,12 +349,13 @@ public class HgCachingCommittedChangesProvider implements CachingCommittedChange
       new HgCommandResultNotifier(project).notifyError(null, HgVcsMessages.message("hg4idea.error.log.command.execution"), e.getMessage());
       return null;
     }
-    if (revisions == null || revision.isEmpty()) {
+    if (ContainerUtil.isEmpty(revisions)) {
       return null;
     }
     HgFileRevision localRevision = revisions.get(0);
     HgRevisionNumber vcsRevisionNumber = localRevision.getRevisionNumber();
-    HgRevisionNumber firstParent = vcsRevisionNumber.getParents().get(0);
+    List<HgRevisionNumber> parents = vcsRevisionNumber.getParents();
+    HgRevisionNumber firstParent = parents.isEmpty() ? null : parents.get(0); // can have no parents if it is a root
     List<Change> changes = new ArrayList<Change>();
     for (String file : localRevision.getModifiedFiles()) {
       changes.add(createChange(root, file, firstParent, file, vcsRevisionNumber, FileStatus.MODIFIED));

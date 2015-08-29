@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,25 +21,21 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.DumbServiceImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiDocumentManager;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiManager;
+import com.intellij.psi.*;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.StubElement;
-import com.intellij.psi.stubs.StubUpdatingIndex;
+import com.intellij.psi.util.QualifiedName;
 import com.intellij.testFramework.TestDataPath;
-import com.intellij.util.indexing.FileBasedIndex;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyFileImpl;
-import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
-import com.jetbrains.python.psi.stubs.PyClassStub;
 import com.jetbrains.python.psi.stubs.PyVariableNameIndex;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.toolbox.Maybe;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 import java.util.List;
@@ -57,12 +53,12 @@ public class PyStubsTest extends PyTestCase {
   }
 
   public void testStubStructure() {
-    final PyFile file = getTestFile();
     // vfile is problematic, but we need an SDK to check builtins
-    final Project project = file.getProject();
+    final Project project = myFixture.getProject();
 
+    PythonLanguageLevelPusher.setForcedLanguageLevel(project, LanguageLevel.PYTHON26); // we need 2.6+ for @foo.setter
     try {
-      PythonLanguageLevelPusher.setForcedLanguageLevel(project, LanguageLevel.PYTHON26); // we need 2.6+ for @foo.setter
+      final PyFile file = getTestFile();
       final List<PyClass> classes = file.getTopLevelClasses();
       assertEquals(3, classes.size());
       PyClass pyClass = classes.get(0);
@@ -74,7 +70,7 @@ public class PyStubsTest extends PyTestCase {
       assertEquals("staticField", attrs.get(0).getName());
       assertTrue(attrs.get(0).getAssignedQName().matches("deco"));
 
-      final PyFunction[] methods = pyClass.getMethods();
+      final PyFunction[] methods = pyClass.getMethods(false);
       assertEquals(2, methods.length);
       assertEquals("__init__", methods [0].getName());
       assertEquals("fooFunction", methods [1].getName());
@@ -118,26 +114,26 @@ public class PyStubsTest extends PyTestCase {
       pyClass = classes.get(1);
       assertEquals("BarClass", pyClass.getName());
 
-      Property prop = pyClass.findProperty("value");
-      Maybe<Callable> maybe_function = prop.getGetter();
+      Property prop = pyClass.findProperty("value", true, null);
+      Maybe<PyCallable> maybe_function = prop.getGetter();
       assertTrue(maybe_function.isDefined());
-      assertEquals(pyClass.getMethods()[0], maybe_function.value());
+      assertEquals(pyClass.getMethods(false)[0], maybe_function.value());
 
-      Property setvalueProp = pyClass.findProperty("setvalue");
-      Maybe<Callable> setter = setvalueProp.getSetter();
+      Property setvalueProp = pyClass.findProperty("setvalue", true, null);
+      Maybe<PyCallable> setter = setvalueProp.getSetter();
       assertTrue(setter.isDefined());
       assertEquals("__set", setter.value().getName());
 
       // properties by decorator
       pyClass = classes.get(2);
       assertEquals("BazClass", pyClass.getName());
-      prop = pyClass.findProperty("x");
+      prop = pyClass.findProperty("x", true, null);
       maybe_function = prop.getGetter();
       assertTrue(maybe_function.isDefined());
-      assertEquals(pyClass.getMethods()[0], maybe_function.value());
+      assertEquals(pyClass.getMethods(false)[0], maybe_function.value());
       maybe_function = prop.getSetter();
       assertTrue(maybe_function.isDefined());
-      assertEquals(pyClass.getMethods()[1], maybe_function.value());
+      assertEquals(pyClass.getMethods(false)[1], maybe_function.value());
 
       // ...and the juice:
       assertNotParsed(file);
@@ -204,7 +200,7 @@ public class PyStubsTest extends PyTestCase {
 
     new WriteCommandAction(myFixture.getProject(), fileImpl) {
       @Override
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         pyClass.setName("RenamedClass");
         assertEquals("RenamedClass", pyClass.getName());
       }
@@ -213,20 +209,15 @@ public class PyStubsTest extends PyTestCase {
     StubElement fileStub = fileImpl.getStub();
     assertNull("There should be no stub if file holds tree element", fileStub);
 
-    FileBasedIndex.getInstance().ensureUpToDate(StubUpdatingIndex.INDEX_ID, myFixture.getProject(), null);
     new WriteCommandAction(myFixture.getProject(), fileImpl) {
       @Override
-      protected void run(Result result) throws Throwable {
-        fileImpl.unloadContent();
+      protected void run(@NotNull Result result) throws Throwable {
+        ((SingleRootFileViewProvider)fileImpl.getViewProvider()).onContentReload();
       }
     }.execute();
-    assertNull(fileImpl.getTreeElement()); // Test unload successed.
+    assertNull(fileImpl.getTreeElement()); // Test unload succeeded.
 
-    fileStub = fileImpl.getStub();
-    assertNotNull("After tree element have been unloaded we must be able to create updated stub", fileStub);
-
-    final PyClassStub newclassstub = (PyClassStub)fileStub.getChildrenStubs().get(0);
-    assertEquals("RenamedClass", newclassstub.getName());
+    assertEquals("RenamedClass", fileImpl.getTopLevelClasses().get(0).getName());
   }
 
   public void testImportStatement() {
@@ -283,7 +274,7 @@ public class PyStubsTest extends PyTestCase {
   public void testSlots() {
     final PyFileImpl file = (PyFileImpl) getTestFile();
     final PyClass pyClass = file.getTopLevelClasses().get(0);
-    assertSameElements(pyClass.getSlots(), "foo", "bar");
+    assertSameElements(pyClass.getSlots(null), "foo", "bar");
     assertNotParsed(file);
   }
 
@@ -341,7 +332,7 @@ public class PyStubsTest extends PyTestCase {
   public void testWrappedStaticMethod() {
     final PyFileImpl file = (PyFileImpl) getTestFile();
     final PyClass pyClass = file.getTopLevelClasses().get(0);
-    final PyFunction[] methods = pyClass.getMethods();
+    final PyFunction[] methods = pyClass.getMethods(false);
     assertEquals(1, methods.length);
     final PyFunction.Modifier modifier = methods[0].getModifier();
     assertEquals(PyFunction.Modifier.STATICMETHOD, modifier);
@@ -351,7 +342,7 @@ public class PyStubsTest extends PyTestCase {
   public void testBuiltinAncestor() {
     final PyFileImpl file = (PyFileImpl) getTestFile();
     final PyClass pyClass = file.getTopLevelClasses().get(0);
-    final PyClass cls = pyClass.getAncestorClasses().iterator().next();
+    final PyClass cls = pyClass.getAncestorClasses(null).iterator().next();
     assertNotNull(cls);
     assertNotParsed(file);
   }
@@ -395,6 +386,7 @@ public class PyStubsTest extends PyTestCase {
     DumbServiceImpl.getInstance(project).setDumb(true);
     try {
       assertEquals(1, ((PyFile) fooPyFile).getTopLevelClasses().size());
+      assertFalse(fooPyFile.isContentsLoaded());
     }
     finally {
       DumbServiceImpl.getInstance(project).setDumb(false);
@@ -410,5 +402,17 @@ public class PyStubsTest extends PyTestCase {
     final PyTargetExpression foo = c.findClassAttribute("foo", false);
     final String docString = foo.getDocStringValue();
     assertEquals("Foo docstring.", docString);
+  }
+
+  public void testMetaClass() {
+    final PyFile file = getTestFile();
+    final PyClass c = file.findTopLevelClass("C");
+    assertNotNull(c);
+    final TypeEvalContext context = TypeEvalContext.codeInsightFallback(myFixture.getProject());
+    assertNotNull(c.getMetaClassType(context));
+    final PyClass d = file.findTopLevelClass("D");
+    assertNotNull(d);
+    assertNotNull(d.getMetaClassType(context));
+    assertNotParsed(file);
   }
 }

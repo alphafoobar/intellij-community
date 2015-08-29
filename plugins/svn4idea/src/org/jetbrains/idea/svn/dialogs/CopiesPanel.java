@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,12 +45,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.*;
 import org.jetbrains.idea.svn.actions.CleanupWorker;
-import org.jetbrains.idea.svn.actions.SelectBranchPopup;
 import org.jetbrains.idea.svn.api.ClientFactory;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.branchConfig.BranchConfigurationDialog;
+import org.jetbrains.idea.svn.branchConfig.SelectBranchPopup;
 import org.jetbrains.idea.svn.branchConfig.SvnBranchConfigurationNew;
 import org.jetbrains.idea.svn.checkout.SvnCheckoutProvider;
+import org.jetbrains.idea.svn.integrate.MergeContext;
+import org.jetbrains.idea.svn.integrate.QuickMerge;
 import org.jetbrains.idea.svn.integrate.QuickMergeInteractionImpl;
-import org.tmatesoft.svn.core.SVNDepth;
+import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.util.SVNPathUtil;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 
@@ -218,7 +222,7 @@ public class CopiesPanel {
           if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
             if (CONFIGURE_BRANCHES.equals(e.getDescription())) {
               if (! checkRoot(root, wcInfo.getPath(), " invoke Configure Branches")) return;
-              BranchConfigurationDialog.configureBranches(myProject, root, true);
+              BranchConfigurationDialog.configureBranches(myProject, root);
             } else if (FIX_DEPTH.equals(e.getDescription())) {
               final int result =
                 Messages.showOkCancelDialog(myVcs.getProject(), "You are going to checkout into '" + wcInfo.getPath() + "' with 'infinity' depth.\n" +
@@ -228,7 +232,7 @@ public class CopiesPanel {
               if (result == Messages.OK) {
                 // update of view will be triggered by roots changed event
                 SvnCheckoutProvider.checkout(myVcs.getProject(), new File(wcInfo.getPath()), wcInfo.getRootUrl(), SVNRevision.HEAD,
-                                             SVNDepth.INFINITY, false, null, wcInfo.getFormat());
+                                             Depth.INFINITY, false, null, wcInfo.getFormat());
               }
             } else if (CHANGE_FORMAT.equals(e.getDescription())) {
               changeFormat(wcInfo, upgradeFormats);
@@ -287,7 +291,7 @@ public class CopiesPanel {
         .append(info.getErrorMessage()).append("</td></tr>");
     }
     else {
-      sb.append("<tr valign=\"top\"><td>URL:</td><td colspan=\"2\">").append(info.getRootUrl()).append("</td></tr>");
+      sb.append("<tr valign=\"top\"><td>URL:</td><td colspan=\"2\">").append(info.getUrl().toDecodedString()).append("</td></tr>");
     }
     if (upgradeFormats.size() > 1) {
       sb.append("<tr valign=\"top\"><td>Format:</td><td>").append(info.getFormat().getName()).append("</td><td><a href=\"").
@@ -296,7 +300,7 @@ public class CopiesPanel {
       sb.append("<tr valign=\"top\"><td>Format:</td><td colspan=\"2\">").append(info.getFormat().getName()).append("</td></tr>");
     }
 
-    if (!SVNDepth.INFINITY.equals(info.getStickyDepth()) && !info.hasError()) {
+    if (!Depth.INFINITY.equals(info.getStickyDepth()) && !info.hasError()) {
       // can fix
       sb.append("<tr valign=\"top\"><td>Depth:</td><td>").append(info.getStickyDepth().getName()).append("</td><td><a href=\"").
         append(FIX_DEPTH).append("\">Fix</a></td></tr>");
@@ -312,7 +316,7 @@ public class CopiesPanel {
       sb.append("<tr valign=\"top\"><td colspan=\"3\"><i>").append("Working copy root</i></td></tr>");
     }
     if (!info.hasError()) {
-      if (WorkingCopyFormat.ONE_DOT_SEVEN.equals(info.getFormat()) || WorkingCopyFormat.ONE_DOT_EIGHT.equals(info.getFormat())) {
+      if (info.getFormat().isOrGreater(WorkingCopyFormat.ONE_DOT_SEVEN)) {
         sb.append("<tr valign=\"top\"><td colspan=\"3\"><a href=\"").append(CLEANUP).append("\">Cleanup</a></td></tr>");
       }
       sb.append("<tr valign=\"top\"><td colspan=\"3\"><a href=\"").append(CONFIGURE_BRANCHES).append("\">Configure Branches</a></td></tr>");
@@ -356,10 +360,23 @@ public class CopiesPanel {
   private void mergeFrom(@NotNull final WCInfo wcInfo, @NotNull final VirtualFile root, @Nullable final Component mergeLabel) {
     SelectBranchPopup.showForBranchRoot(myProject, root, new SelectBranchPopup.BranchSelectedCallback() {
       @Override
-      public void branchSelected(Project project, SvnBranchConfigurationNew configuration, String url, long revision) {
-        new QuickMerge(project, url, wcInfo, SVNPathUtil.tail(url), root).execute(new QuickMergeInteractionImpl(myProject));
+      public void branchSelected(Project project,
+                                 @NotNull SvnBranchConfigurationNew configuration,
+                                 @NotNull String branchUrl,
+                                 long revision) {
+        String workingCopyUrlInSelectedBranch = getCorrespondingUrlInOtherBranch(configuration, wcInfo.getUrl(), branchUrl);
+        MergeContext mergeContext = new MergeContext(myVcs, workingCopyUrlInSelectedBranch, wcInfo, SVNPathUtil.tail(branchUrl), root);
+
+        new QuickMerge(mergeContext).execute(new QuickMergeInteractionImpl(myProject));
       }
     }, "Select branch", mergeLabel);
+  }
+
+  @NotNull
+  private static String getCorrespondingUrlInOtherBranch(@NotNull SvnBranchConfigurationNew configuration,
+                                                         @NotNull SVNURL url,
+                                                         @NotNull String otherBranchUrl) {
+    return SVNPathUtil.append(otherBranchUrl, configuration.getRelativeUrl(url.toDecodedString()));
   }
 
   @SuppressWarnings("MethodMayBeStatic")
@@ -390,12 +407,11 @@ public class CopiesPanel {
   }
 
   private void changeFormat(@NotNull final WCInfo wcInfo, @NotNull final Collection<WorkingCopyFormat> supportedFormats) {
-    ChangeFormatDialog dialog = new ChangeFormatDialog(myProject, new File(wcInfo.getPath()), false, ! wcInfo.isIsWcRoot());
+    ChangeFormatDialog dialog = new ChangeFormatDialog(myProject, new File(wcInfo.getPath()), false, !wcInfo.isIsWcRoot());
 
     dialog.setSupported(supportedFormats);
     dialog.setData(wcInfo.getFormat());
-    dialog.show();
-    if (! dialog.isOK()) {
+    if (!dialog.showAndGet()) {
       return;
     }
     final WorkingCopyFormat newFormat = dialog.getUpgradeMode();

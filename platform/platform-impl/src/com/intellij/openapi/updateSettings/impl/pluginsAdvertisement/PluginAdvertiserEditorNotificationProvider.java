@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,13 @@
  */
 package com.intellij.openapi.updateSettings.impl.pluginsAdvertisement;
 
-import com.intellij.ide.plugins.*;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileTypes.FileTypeFactory;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.updateSettings.impl.*;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.EditorNotificationPanel;
@@ -34,14 +31,13 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
  * User: anna
  * Date: 10/11/13
  */
-public class PluginAdvertiserEditorNotificationProvider extends EditorNotifications.Provider<EditorNotificationPanel> {
+public class PluginAdvertiserEditorNotificationProvider extends EditorNotifications.Provider<EditorNotificationPanel> implements DumbAware {
   private static final Key<EditorNotificationPanel> KEY = Key.create("file.type.associations.detected");
   private final Project myProject;
   private final EditorNotifications myNotifications;
@@ -52,6 +48,7 @@ public class PluginAdvertiserEditorNotificationProvider extends EditorNotificati
     myNotifications = notifications;
   }
 
+  @NotNull
   @Override
   public Key<EditorNotificationPanel> getKey() {
     return KEY;
@@ -59,7 +56,7 @@ public class PluginAdvertiserEditorNotificationProvider extends EditorNotificati
 
   @Nullable
   @Override
-  public EditorNotificationPanel createNotificationPanel(VirtualFile file, FileEditor fileEditor) {
+  public EditorNotificationPanel createNotificationPanel(@NotNull VirtualFile file, @NotNull FileEditor fileEditor) {
     if (file.getFileType() != PlainTextFileType.INSTANCE) return null;
 
     final String extension = file.getExtension();
@@ -93,7 +90,8 @@ public class PluginAdvertiserEditorNotificationProvider extends EditorNotificati
   @Nullable
   private EditorNotificationPanel createPanel(final String extension, final Set<PluginsAdvertiser.Plugin> plugins) {
     final EditorNotificationPanel panel = new EditorNotificationPanel();
-    panel.setText("Plugins supporting files with " + extension + " are found");
+    
+    panel.setText("Plugins supporting " + extension + " files are found");
     final IdeaPluginDescriptor disabledPlugin = PluginsAdvertiser.getDisabledPlugin(plugins);
     if (disabledPlugin != null) {
       panel.createActionLabel("Enable " + disabledPlugin.getName() + " plugin", new Runnable() {
@@ -108,40 +106,23 @@ public class PluginAdvertiserEditorNotificationProvider extends EditorNotificati
       panel.createActionLabel("Install plugins", new Runnable() {
         @Override
         public void run() {
-          ProgressManager.getInstance().run(new Task.Modal(null, "Search for plugins in repository", true) {
-            private final Set<PluginDownloader> myPlugins = new HashSet<PluginDownloader>();
-            private List<IdeaPluginDescriptor> myAllPlugins;
-
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-              try {
-                myAllPlugins = RepositoryHelper.loadPluginsFromRepository(indicator);
-                for (IdeaPluginDescriptor loadedPlugin : myAllPlugins) {
-                  if (plugins.contains(new PluginsAdvertiser.Plugin(loadedPlugin.getPluginId(), false))) {
-                    myPlugins.add(PluginDownloader.createDownloader(loadedPlugin));
-                  }
-                }
-              }
-              catch (Exception ignore) {
-              }
-            }
-
-            @Override
-            public void onSuccess() {
-              final PluginsAdvertiserDialog advertiserDialog = new PluginsAdvertiserDialog(null, myPlugins.toArray(new PluginDownloader[myPlugins.size()]), myAllPlugins);
-              advertiserDialog.show();
-              if (advertiserDialog.isOK()) {
-                myEnabledExtensions.add(extension);
-                myNotifications.updateAllNotifications();
-              }
+          Set<String> pluginIds = new HashSet<String>();
+          for (PluginsAdvertiser.Plugin plugin : plugins) {
+            pluginIds.add(plugin.myPluginId);
+          }
+          PluginsAdvertiser.installAndEnablePlugins(pluginIds, new Runnable() {
+            public void run() {
+              myEnabledExtensions.add(extension);
+              myNotifications.updateAllNotifications();
             }
           });
         }
       });
-    } else if (PluginsAdvertiser.hasBundledNotInstalledPlugin(plugins)){
+    } else if (PluginsAdvertiser.hasBundledPluginToInstall(plugins) != null){
       if (PropertiesComponent.getInstance().isTrueValue(PluginsAdvertiser.IGNORE_ULTIMATE_EDITION)) {
         return null;
       }
+      panel.setText(extension + " files are supported by " + PluginsAdvertiser.IDEA_ULTIMATE_EDITION);
 
       panel.createActionLabel(PluginsAdvertiser.CHECK_ULTIMATE_EDITION_TITLE, new Runnable() {
         @Override
@@ -179,6 +160,6 @@ public class PluginAdvertiserEditorNotificationProvider extends EditorNotificati
   }
 
   private static UnknownFeature createExtensionFeature(String extension) {
-    return new UnknownFeature(FileTypeFactory.FILE_TYPE_FACTORY_EP.getName(), extension);
+    return new UnknownFeature(FileTypeFactory.FILE_TYPE_FACTORY_EP.getName(), "File Type", extension);
   }
 }

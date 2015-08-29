@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
@@ -69,6 +70,26 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
     myElementType = node.getElementType();
   }
 
+  /**
+   * This constructor is created to allow inheriting from this class in JVM languages which doesn't support multiple constructors (e.g. Scala).
+   * If your language does support multiple constructors use {@link #StubBasedPsiElementBase(StubElement, IStubElementType)} and
+   * {@link #StubBasedPsiElementBase(ASTNode)} instead.
+   */
+  public StubBasedPsiElementBase(T stub, IElementType nodeType, ASTNode node) {
+    if (stub != null) {
+      if (nodeType == null) throw new IllegalArgumentException("null cannot be passed to 'nodeType' when 'stub' is non-null");
+      if (node != null) throw new IllegalArgumentException("null must be passed to 'node' parameter when 'stub' is non-null");
+      myStub = stub;
+      myElementType = nodeType;
+    }
+    else {
+      if (node == null) throw new IllegalArgumentException("'stub' and 'node' parameters cannot be null both");
+      if (nodeType != null) throw new IllegalArgumentException("null must be passed to 'nodeType' parameter when 'node' is non-null");
+      myNode = node;
+      myElementType = node.getElementType();
+    }
+  }
+
   @Override
   @NotNull
   public ASTNode getNode() {
@@ -79,23 +100,23 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
       if (!file.isValid()) throw new PsiInvalidElementAccessException(this);
 
       FileElement treeElement = file.getTreeElement();
-      StubTree stubTree = file.getStubTree();
       if (treeElement != null && myNode == null) {
-        return notBoundInExistingAst(file, treeElement, stubTree);
+        return notBoundInExistingAst(file, treeElement);
       }
 
-      final FileElement fileElement = file.calcTreeElement();
+      treeElement = file.calcTreeElement();
       node = myNode;
       if (node == null) {
-        return failedToBindStubToAst(file, stubTree, fileElement);
+        return failedToBindStubToAst(file, treeElement);
       }
     }
 
     return node;
   }
 
-  private ASTNode failedToBindStubToAst(PsiFileImpl file, StubTree stubTree, FileElement fileElement) {
+  private ASTNode failedToBindStubToAst(PsiFileImpl file, FileElement fileElement) {
     VirtualFile vFile = file.getVirtualFile();
+    StubTree stubTree = file.getStubTree();
     String stubString = stubTree != null ? ((PsiFileStubImpl)stubTree.getRoot()).printTree() : "is null";
     String astString = DebugUtil.treeToString(fileElement, true);
     if (!ourTraceStubAstBinding) {
@@ -105,7 +126,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
 
     @NonNls String message = "Failed to bind stub to AST for element " + getClass() + " in " +
                              (vFile == null ? "<unknown file>" : vFile.getPath()) +
-                             "\nFile:\n" + file.toString() + "@" + System.identityHashCode(file) +
+                             "\nFile:\n" + file + "@" + System.identityHashCode(file) +
                              "\nFile stub tree:\n" + stubString +
                              "\nLoaded file AST:\n" + astString;
     if (ourTraceStubAstBinding) {
@@ -123,7 +144,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
       public void visitComposite(CompositeElement composite) {
         PsiElement psi = composite.getPsi();
         if (psi != null) {
-          traces.append(psi.toString()).append("@").append(System.identityHashCode(psi)).append("\n");
+          traces.append(psi).append("@").append(System.identityHashCode(psi)).append("\n");
           String trace = psi.getUserData(CREATION_TRACE);
           if (trace != null) {
             traces.append(trace).append("\n");
@@ -135,16 +156,18 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
     return traces.toString();
   }
 
-  private ASTNode notBoundInExistingAst(PsiFileImpl file, FileElement treeElement, StubTree stubTree) {
-    @NonNls String message = "this=" + this.getClass() + "; file.isPhysical=" + file.isPhysical() + "; node=" + myNode + "; file=" + file +
-                             "; tree=" + treeElement + "; stubTree=" + stubTree;
+  private ASTNode notBoundInExistingAst(PsiFileImpl file, FileElement treeElement) {
+    String message = "file=" + file + "; tree=" + treeElement;
     PsiElement each = this;
     while (each != null) {
-      message += "\n each of class " + each.getClass();
+      message += "\n each of class " + each.getClass() + "; valid=" + each.isValid();
       if (each instanceof StubBasedPsiElementBase) {
         message += "; node=" + ((StubBasedPsiElementBase)each).myNode + "; stub=" + ((StubBasedPsiElementBase)each).myStub;
         each = ((StubBasedPsiElementBase)each).getParentByStub();
       } else {
+        if (each instanceof PsiFile) {
+          message += "; same file=" + (each == file) + "; current tree= " + file.getTreeElement() + "; stubTree=" + file.getStubTree() + "; physical=" + file.isPhysical();
+        }
         break;
       }
     }
@@ -154,7 +177,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
     throw new AssertionError(message);
   }
 
-  public final void setNode(final ASTNode node) {
+  public final void setNode(@NotNull ASTNode node) {
     myNode = node;
   }
 
@@ -179,7 +202,16 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
       ApplicationManager.getApplication().assertReadAccessAllowed();
       synchronized (PsiLock.LOCK) {
         if (myStub != null) {
-          throw new PsiInvalidElementAccessException(this, "no psi for file stub " + stub + ", invalidation reason=" + ((PsiFileStubImpl<?>) stub).getInvalidationReason(), null);
+          String reason = ((PsiFileStubImpl<?>)stub).getInvalidationReason();
+          PsiInvalidElementAccessException exception =
+            new PsiInvalidElementAccessException(this, "no psi for file stub " + stub + ", invalidation reason=" + reason, null);
+          if (PsiFileImpl.STUB_PSI_MISMATCH.equals(reason)) {
+            // we're between finding stub-psi mismatch and the next EDT spot where the file is reparsed and stub rebuilt
+            //    see com.intellij.psi.impl.source.PsiFileImpl.rebuildStub()
+            // most likely it's just another highlighting thread accessing the same PSI concurrently and not yet canceled, so cancel it
+            throw new ProcessCanceledException(exception);  
+          }
+          throw exception;
         }
       }
     }

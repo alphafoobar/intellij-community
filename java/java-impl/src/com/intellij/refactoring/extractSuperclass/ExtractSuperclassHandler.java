@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import com.intellij.history.LocalHistoryAction;
 import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
@@ -60,6 +59,7 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
   private Project myProject;
 
 
+  @Override
   public void invoke(@NotNull Project project, Editor editor, PsiFile file, DataContext dataContext) {
     editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
     int offset = editor.getCaretModel().getOffset();
@@ -78,6 +78,7 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
     }
   }
 
+  @Override
   public void invoke(@NotNull final Project project, @NotNull PsiElement[] elements, DataContext dataContext) {
     if (elements.length != 1) return;
 
@@ -102,19 +103,23 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
 
 
     final List<MemberInfo> memberInfos = MemberInfo.extractClassMembers(mySubclass, new MemberInfo.Filter<PsiMember>() {
+      @Override
       public boolean includeMember(PsiMember element) {
         return true;
       }
     }, false);
 
     final ExtractSuperclassDialog dialog =
-      new ExtractSuperclassDialog(project, mySubclass, memberInfos, ExtractSuperclassHandler.this);
-    dialog.show();
-    if (!dialog.isOK() || !dialog.isExtractSuperclass()) return;
+      new ExtractSuperclassDialog(project, mySubclass, memberInfos, this);
+    if (!dialog.showAndGet() || !dialog.isExtractSuperclass()) {
+      return;
+    }
 
     CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
+      @Override
       public void run() {
         final Runnable action = new Runnable() {
+          @Override
           public void run() {
             doRefactoring(project, mySubclass, dialog);
           }
@@ -122,9 +127,9 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
         ApplicationManager.getApplication().runWriteAction(action);
       }
     }, REFACTORING_NAME, null);
-
   }
 
+  @Override
   public boolean checkConflicts(final ExtractSuperclassDialog dialog) {
     final MemberInfo[] infos = ArrayUtil.toObjectArray(dialog.getSelectedMemberInfos(), MemberInfo.class);
     final PsiDirectory targetDirectory = dialog.getTargetDirectory();
@@ -137,9 +142,17 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
     }
     final MultiMap<PsiElement,String> conflicts = new MultiMap<PsiElement, String>();
     if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
+      @Override
       public void run() {
-        final PsiClass superClass = mySubclass.getExtendsListTypes().length > 0 || mySubclass instanceof PsiAnonymousClass ? mySubclass.getSuperClass() : null;
-        conflicts.putAllValues(PullUpConflictsUtil.checkConflicts(infos, mySubclass, superClass, targetPackage, targetDirectory, dialog.getContainmentVerifier(), false));
+        ApplicationManager.getApplication().runReadAction(new Runnable() {
+          @Override
+          public void run() {
+            final PsiClass superClass =
+              mySubclass.getExtendsListTypes().length > 0 || mySubclass instanceof PsiAnonymousClass ? mySubclass.getSuperClass() : null;
+            conflicts.putAllValues(PullUpConflictsUtil.checkConflicts(infos, mySubclass, superClass, targetPackage, targetDirectory,
+                                                                      dialog.getContainmentVerifier(), false));
+          }
+        });
       }
     }, RefactoringBundle.message("detecting.possible.conflicts"), true, myProject)) return false;
     ExtractSuperClassUtil.checkSuperAccessible(targetDirectory, conflicts, mySubclass);
@@ -169,6 +182,7 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
         final SmartPsiElementPointer<PsiClass> classPointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(subclass);
         final SmartPsiElementPointer<PsiClass> interfacePointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(superclass);
         final Runnable turnRefsToSuperRunnable = new Runnable() {
+          @Override
           public void run() {
             ExtractClassUtil.askAndTurnRefsToSuper(project, classPointer, interfacePointer);
           }
@@ -186,6 +200,7 @@ public class ExtractSuperclassHandler implements RefactoringActionHandler, Extra
     return RefactoringBundle.message("extract.superclass.command.name", newName, DescriptiveNameUtil.getDescriptiveName(subclass));
   }
 
+  @Override
   public boolean isEnabledOnElements(PsiElement[] elements) {
     return elements.length == 1 && elements[0] instanceof PsiClass && !((PsiClass) elements[0]).isInterface()
       &&!((PsiClass)elements[0]).isEnum();

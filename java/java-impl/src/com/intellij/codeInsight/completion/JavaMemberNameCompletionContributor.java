@@ -17,6 +17,7 @@ package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.TailType;
 import com.intellij.codeInsight.completion.util.ParenthesesInsertHandler;
+import com.intellij.codeInsight.generation.GenerateMembersUtil;
 import com.intellij.codeInsight.lookup.*;
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
 import com.intellij.featureStatistics.FeatureUsageTracker;
@@ -39,6 +40,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -63,7 +65,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
   static final int MAX_SCOPE_SIZE_TO_SEARCH_UNRESOLVED = 50000;
 
   @Override
-  public void fillCompletionVariants(CompletionParameters parameters, CompletionResultSet result) {
+  public void fillCompletionVariants(@NotNull CompletionParameters parameters, @NotNull CompletionResultSet result) {
     if (parameters.getCompletionType() != CompletionType.BASIC && parameters.getCompletionType() != CompletionType.SMART) {
       return;
     }
@@ -109,7 +111,9 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
     String propertyName = null;
     if (variableKind == VariableKind.PARAMETER) {
       final PsiMethod method = PsiTreeUtil.getParentOfType(var, PsiMethod.class);
-      propertyName = PropertyUtil.getPropertyName(method);
+      if (method != null) {
+        propertyName = PropertyUtil.getPropertyName(method);
+      }
       if (method != null && method.getName().startsWith("with")) {
         propertyName = StringUtil.decapitalize(method.getName().substring(4));
       }
@@ -133,7 +137,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
       addLookupItems(set, null, matcher, project, getOverlappedNameVersions(matcher.getPrefix(), suggestedNames, ""));
     }
     PsiElement parent = PsiTreeUtil.getParentOfType(var, PsiCodeBlock.class);
-    if(parent == null) parent = PsiTreeUtil.getParentOfType(var, PsiMethod.class);
+    if(parent == null) parent = PsiTreeUtil.getParentOfType(var, PsiMethod.class, PsiLambdaExpression.class);
     addLookupItems(set, suggestedNameInfo, matcher, project, getUnresolvedReferences(parent, false));
     if (var instanceof PsiParameter && parent instanceof PsiMethod) {
       addSuggestionsInspiredByFieldNames(set, matcher, var, project, codeStyleManager);
@@ -379,6 +383,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
 
     for (final PsiField field : psiClass.getFields()) {
       if (field == element) continue;
+      if (StringUtil.isEmpty(field.getName())) continue;
 
       PsiUtilCore.ensureValid(field);
       PsiType fieldType = field.getType();
@@ -390,7 +395,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
       if (fieldType.equals(varType)) {
         final String getterName = PropertyUtil.suggestGetterName(field);
         if ((psiClass.findMethodsByName(getterName, true).length == 0 ||
-             psiClass.findMethodBySignature(PropertyUtil.generateGetterPrototype(field), true) == null)) {
+             psiClass.findMethodBySignature(GenerateMembersUtil.generateGetterPrototype(field), true) == null)) {
           propertyHandlers.add(getterName);
         }
       }
@@ -398,7 +403,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
       if (PsiType.VOID.equals(varType)) {
         final String setterName = PropertyUtil.suggestSetterName(field);
         if ((psiClass.findMethodsByName(setterName, true).length == 0 ||
-             psiClass.findMethodBySignature(PropertyUtil.generateSetterPrototype(field), true) == null)) {
+             psiClass.findMethodBySignature(GenerateMembersUtil.generateSetterPrototype(field), true) == null)) {
           propertyHandlers.add(setterName);
         }
       }
@@ -411,7 +416,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
     outer:
     for (int i = 0; i < strings.length; i++) {
       String name = strings[i];
-      if (!matcher.prefixMatches(name) || !JavaPsiFacade.getInstance(project).getNameHelper().isIdentifier(name, LanguageLevel.HIGHEST)) {
+      if (!matcher.prefixMatches(name) || !PsiNameHelper.getInstance(project).isIdentifier(name, LanguageLevel.HIGHEST)) {
         continue;
       }
 

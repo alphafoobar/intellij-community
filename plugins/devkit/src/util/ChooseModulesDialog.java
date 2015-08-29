@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,11 @@ import com.intellij.psi.xml.XmlFile;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.TableUtil;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.components.BorderLayoutPanel;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.idea.devkit.DevKitBundle;
 import org.jetbrains.idea.devkit.module.PluginModuleType;
@@ -97,8 +100,8 @@ public class ChooseModulesDialog extends DialogWrapper {
 
     myView.setShowGrid(false);
     myView.setTableHeader(null);
-    myView.setIntercellSpacing(new Dimension(0, 0));
-    myView.getColumnModel().getColumn(0).setMaxWidth(new JCheckBox().getPreferredSize().width);
+    myView.setIntercellSpacing(JBUI.emptySize());
+    TableUtil.setupCheckboxColumn(myView, 0);
     myView.getModel().addTableModelListener(new TableModelListener() {
       public void tableChanged(TableModelEvent e) {
         getOKAction().setEnabled(getSelectedModules().size() > 0);
@@ -121,28 +124,25 @@ public class ChooseModulesDialog extends DialogWrapper {
   }
 
   protected JComponent createNorthPanel() {
-    JPanel panel = new JPanel(new BorderLayout(15, 10));
+    BorderLayoutPanel panel = JBUI.Panels.simplePanel(15, 10);
     if (myIcon != null) {
       JLabel iconLabel = new JLabel(myIcon);
-      Container container = new Container();
-      container.setLayout(new BorderLayout());
-      container.add(iconLabel, BorderLayout.NORTH);
-      panel.add(container, BorderLayout.WEST);
+      panel.addToLeft(JBUI.Panels.simplePanel().addToTop(iconLabel));
     }
 
-    JPanel messagePanel = new JPanel(new BorderLayout());
+    BorderLayoutPanel messagePanel = JBUI.Panels.simplePanel();
     if (myMessage != null) {
       JLabel textLabel = new JLabel(myMessage);
-      textLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+      textLabel.setBorder(JBUI.Borders.emptyBottom(5));
       textLabel.setUI(new MultiLineLabelUI());
-      messagePanel.add(textLabel, BorderLayout.NORTH);
+      messagePanel.addToTop(textLabel);
     }
     panel.add(messagePanel, BorderLayout.CENTER);
 
     final JScrollPane jScrollPane = ScrollPaneFactory.createScrollPane();
     jScrollPane.setViewportView(myView);
-    jScrollPane.setPreferredSize(new Dimension(300, 80));
-    panel.add(jScrollPane, BorderLayout.SOUTH);
+    jScrollPane.setPreferredSize(JBUI.size(300, 80));
+    panel.addToBottom(jScrollPane);
     return panel;
   }
 

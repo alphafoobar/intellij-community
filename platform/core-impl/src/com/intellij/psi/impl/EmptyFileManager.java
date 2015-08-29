@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,18 +22,19 @@ import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.SingleRootFileViewProvider;
 import com.intellij.psi.impl.file.impl.FileManager;
-import com.intellij.util.containers.ConcurrentWeakValueHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author max
  */
 class EmptyFileManager implements FileManager {
   private final PsiManagerImpl myManager;
-  private final ConcurrentWeakValueHashMap<VirtualFile, FileViewProvider> myVFileToViewProviderMap = new ConcurrentWeakValueHashMap<VirtualFile, FileViewProvider>();
+  private final ConcurrentMap<VirtualFile, FileViewProvider> myVFileToViewProviderMap = ContainerUtil.createConcurrentWeakValueMap();
 
   EmptyFileManager(final PsiManagerImpl manager) {
     myManager = manager;
@@ -64,6 +65,7 @@ class EmptyFileManager implements FileManager {
 
   @Override
   public void cleanupForNextTest() {
+    myVFileToViewProviderMap.clear();
   }
 
   @Override
@@ -78,8 +80,8 @@ class EmptyFileManager implements FileManager {
 
   @Override
   @NotNull
-  public FileViewProvider createFileViewProvider(@NotNull final VirtualFile file, final boolean physical) {
-    return new SingleRootFileViewProvider(myManager, file, physical);
+  public FileViewProvider createFileViewProvider(@NotNull final VirtualFile file, final boolean eventSystemEnabled) {
+    return new SingleRootFileViewProvider(myManager, file, eventSystemEnabled);
   }
 
   @Override

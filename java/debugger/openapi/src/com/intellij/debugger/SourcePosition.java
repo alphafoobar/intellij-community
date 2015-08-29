@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Computable;
@@ -31,6 +32,7 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.ref.WeakReference;
 import java.util.List;
 
 /**
@@ -58,7 +60,7 @@ public abstract class SourcePosition implements Navigatable{
     @NotNull private final PsiFile myFile;
     private long myModificationStamp = -1L;
 
-    private PsiElement myPsiElement;
+    private WeakReference<PsiElement> myPsiElementRef;
     private Integer myLine;
     private Integer myOffset;
 
@@ -119,7 +121,7 @@ public abstract class SourcePosition implements Navigatable{
         myModificationStamp = myFile.getModificationStamp();
         myLine = null;
         myOffset = null;
-        myPsiElement = null;
+        myPsiElementRef = null;
       }
     }
 
@@ -127,8 +129,13 @@ public abstract class SourcePosition implements Navigatable{
       if (myModificationStamp != myFile.getModificationStamp()) {
         return true;
       }
-      final PsiElement psiElement = myPsiElement;
-      return psiElement != null && !psiElement.isValid();
+      final PsiElement psiElement = myPsiElementRef != null ? myPsiElementRef.get() : null;
+      return psiElement != null && !ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+        @Override
+        public Boolean compute() {
+          return psiElement.isValid();
+        }
+      });
     }
 
     @Override
@@ -152,10 +159,13 @@ public abstract class SourcePosition implements Navigatable{
     @Override
     public PsiElement getElementAt() {
       updateData();
-      if (myPsiElement == null) {
-        myPsiElement = calcPsiElement();
+      PsiElement element = myPsiElementRef != null ? myPsiElementRef.get() : null;
+      if (element == null) {
+        element = calcPsiElement();
+        myPsiElementRef = new WeakReference<PsiElement>(element);
+        return element;
       }
-      return myPsiElement;
+      return element;
     }
 
     protected int calcLine() {
@@ -163,7 +173,11 @@ public abstract class SourcePosition implements Navigatable{
       Document document = null;
       try {
         document = PsiDocumentManager.getInstance(file.getProject()).getDocument(file);
+        if (document == null) { // may be decompiled psi - try to get document for the original file
+          document = PsiDocumentManager.getInstance(file.getProject()).getDocument(file.getOriginalFile());
+        }
       }
+      catch (ProcessCanceledException ignored) {}
       catch (Throwable e) {
         LOG.error(e);
       }
@@ -194,64 +208,73 @@ public abstract class SourcePosition implements Navigatable{
 
     @Nullable
     protected PsiElement calcPsiElement() {
-      PsiFile psiFile = getFile();
+      // currently PsiDocumentManager does not store documents for mirror file, so we store original file
+      PsiFile origPsiFile = getFile();
+      final PsiFile psiFile = origPsiFile instanceof PsiCompiledFile ? ((PsiCompiledFile)origPsiFile).getDecompiledPsiFile() : origPsiFile;
       int lineNumber = getLine();
       if(lineNumber < 0) {
         return psiFile;
       }
 
-      final Document document = PsiDocumentManager.getInstance(psiFile.getProject()).getDocument(psiFile);
+      final Document document = PsiDocumentManager.getInstance(origPsiFile.getProject()).getDocument(origPsiFile);
       if (document == null) {
         return null;
       }
       if (lineNumber >= document.getLineCount()) {
         return psiFile;
       }
-      int startOffset = document.getLineStartOffset(lineNumber);
+      final int startOffset = document.getLineStartOffset(lineNumber);
       if(startOffset == -1) {
         return null;
       }
 
-      PsiElement rootElement = psiFile;
+      return ApplicationManager.getApplication().runReadAction(new Computable<PsiElement>() {
+        @Override
+        public PsiElement compute() {
+          PsiElement rootElement = psiFile;
 
-      List<PsiFile> allFiles = psiFile.getViewProvider().getAllFiles();
-      if (allFiles.size() > 1) { // jsp & gsp
-        PsiClassOwner owner = ContainerUtil.findInstance(allFiles, PsiClassOwner.class);
-        if (owner != null) {
-          PsiClass[] classes = owner.getClasses();
-          if (classes.length == 1 && classes[0]  instanceof SyntheticElement) {
-            rootElement = classes[0];
+          List<PsiFile> allFiles = psiFile.getViewProvider().getAllFiles();
+          if (allFiles.size() > 1) { // jsp & gsp
+            PsiClassOwner owner = ContainerUtil.findInstance(allFiles, PsiClassOwner.class);
+            if (owner != null) {
+              PsiClass[] classes = owner.getClasses();
+              if (classes.length == 1 && classes[0] instanceof SyntheticElement) {
+                rootElement = classes[0];
+              }
+            }
           }
-        }
-      }
 
-      PsiElement element;
-      while(true) {
-        final CharSequence charsSequence = document.getCharsSequence();
-        for (; startOffset < charsSequence.length(); startOffset++) {
-          char c = charsSequence.charAt(startOffset);
-          if (c != ' ' && c != '\t') {
-            break;
+          PsiElement element = null;
+          int offset = getOffset();
+          while (true) {
+            final CharSequence charsSequence = document.getCharsSequence();
+            for (; offset < charsSequence.length(); offset++) {
+              char c = charsSequence.charAt(offset);
+              if (c != ' ' && c != '\t') {
+                break;
+              }
+            }
+            if (offset >= charsSequence.length()) break;
+
+            element = rootElement.findElementAt(offset);
+
+            if (element instanceof PsiComment) {
+              offset = element.getTextRange().getEndOffset() + 1;
+            }
+            else {
+              break;
+            }
           }
+          if (element != null && element.getParent() instanceof PsiForStatement) {
+            return ((PsiForStatement)element.getParent()).getInitialization();
+          }
+          return element;
         }
-        element = rootElement.findElementAt(startOffset);
-
-        if(element instanceof PsiComment) {
-          startOffset = element.getTextRange().getEndOffset() + 1;
-        }
-        else{
-          break;
-        }
-      }
-
-      if (element != null && element.getParent() instanceof PsiForStatement) {
-        return ((PsiForStatement)element.getParent()).getInitialization();
-      }
-      return element;
+      });
     }
   }
 
-  public static SourcePosition createFromLineComputable(final PsiFile file, final Computable<Integer> line) {
+  public static SourcePosition createFromLineComputable(@NotNull final PsiFile file, final Computable<Integer> line) {
     return new SourcePositionCache(file) {
       @Override
       protected int calcLine() {
@@ -260,27 +283,40 @@ public abstract class SourcePosition implements Navigatable{
     };
   }
 
-  public static SourcePosition createFromLine(final PsiFile file, final int line) {
+  public static SourcePosition createFromLine(@NotNull final PsiFile file, final int line) {
     return new SourcePositionCache(file) {
       @Override
       protected int calcLine() {
         return line;
       }
+
+      @Override
+      public String toString() {
+        return getFile().getName() + ":" + line;
+      }
     };
   }
 
-  public static SourcePosition createFromOffset(final PsiFile file, final int offset) {
+  public static SourcePosition createFromOffset(@NotNull final PsiFile file, final int offset) {
     return new SourcePositionCache(file) {
-
       @Override
       protected int calcOffset() {
         return offset;
       }
+
+      @Override
+      public String toString() {
+        return getFile().getName() + " offset " + offset;
+      }
     };
   }
-     
-  public static SourcePosition createFromElement(PsiElement element) {
-    final PsiElement navigationElement = element.getNavigationElement();
+
+  @Nullable
+  public static SourcePosition createFromElement(@NotNull PsiElement element) {
+    ApplicationManager.getApplication().assertReadAccessAllowed();
+    PsiElement navigationElement = element.getNavigationElement();
+    final SmartPsiElementPointer<PsiElement> pointer =
+      SmartPointerManager.getInstance(navigationElement.getProject()).createSmartPsiElementPointer(navigationElement);
     final PsiFile psiFile;
     if (JspPsiUtil.isInJspFile(navigationElement)) {
       psiFile = JspPsiUtil.getJspFile(navigationElement);
@@ -288,15 +324,23 @@ public abstract class SourcePosition implements Navigatable{
     else {
       psiFile = navigationElement.getContainingFile();
     }
+    if (psiFile == null) return null;
     return new SourcePositionCache(psiFile) {
       @Override
       protected PsiElement calcPsiElement() {
-        return navigationElement;
+        ApplicationManager.getApplication().assertReadAccessAllowed();
+        return pointer.getElement();
       }
 
       @Override
       protected int calcOffset() {
-        return navigationElement.getTextOffset();
+        return ApplicationManager.getApplication().runReadAction(new Computable<Integer>() {
+          @Override
+          public Integer compute() {
+            PsiElement elem = pointer.getElement();
+            return elem != null ? elem.getTextOffset() : -1;
+          }
+        });
       }
     };
   }

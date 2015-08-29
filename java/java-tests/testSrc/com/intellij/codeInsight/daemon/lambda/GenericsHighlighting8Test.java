@@ -1,11 +1,11 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http:www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,18 +17,13 @@ package com.intellij.codeInsight.daemon.lambda;
 
 import com.intellij.codeInsight.daemon.LightDaemonAnalyzerTestCase;
 import com.intellij.codeInspection.LocalInspectionTool;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
 import com.intellij.codeInspection.unusedImport.UnusedImportLocalInspection;
-import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.JavaPsiFacade;
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.impl.source.resolve.PsiResolveHelperImpl;
-import com.intellij.psi.impl.source.resolve.graphInference.PsiGraphInferenceHelper;
-import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.testFramework.IdeaTestUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -36,10 +31,16 @@ import org.jetbrains.annotations.NotNull;
 public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
   @NonNls private static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/genericsHighlighting8";
 
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    enableInspectionTool(new UnusedDeclarationInspection());
+  }
+
   @NotNull
   @Override
   protected LocalInspectionTool[] configureLocalInspectionTools() {
-    return new LocalInspectionTool[]{new UncheckedWarningLocalInspection(), new UnusedSymbolLocalInspection(), new UnusedImportLocalInspection()};
+    return new LocalInspectionTool[]{new UncheckedWarningLocalInspection(), new UnusedImportLocalInspection()};
   }
 
   @Override
@@ -246,7 +247,7 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
   public void testIDEA66311_16() {
     doTest();
   }
-  public void _testIDEA76283() {//todo bounds
+  public void testIDEA76283() {
     doTest();
   }
   public void testIDEA74899() {
@@ -690,7 +691,7 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
   public void testIDEA110869() {
     doTest();
   }
-  /*public void testIDEA110947() { doTest5(false); }*/
+  public void testIDEA110947() { doTest(false); }
   public void testIDEA112122() {
     doTest();
   }
@@ -741,6 +742,60 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
     doTest();
   }
 
+  public void testCastToIntersectionType() throws Exception {
+    doTest();
+  }
+
+  public void testCastToIntersection() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA122401() throws Exception {
+    doTest();
+  }
+
+  public void testCaptureInsideNestedCalls() throws Exception {
+    doTest();
+  }
+
+  public void testSuperWildcardWithBoundPromotion() { doTest();}
+
+  public void testErasure() throws Exception { doTest(); }
+
+  public void testWildcardBoundsCombination() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA128333() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA78402() { doTest(); }
+
+  public void testUncheckedWarningInsideLambdaReturnStatement() throws Exception {
+    doTest(true);
+  }
+
+  public void testInferredParameterInBoundsInRecursiveGenerics() {
+    doTest(false);
+  }
+
+  public void testSuperWildcardCapturedSuperExtendsWildcardCapturedExtends() throws Exception {
+    doTest(false);
+  }
+
+  public void testRejectContradictingEqualsBounds() throws Exception {
+    doTest(false);
+  }
+
+  public void testRejectEqualsBoundsContradictingLowerBound() throws Exception {
+    doTest(false);
+  }
+
+  public void testSuperInterfaceMethodCalledByMatterOfInterface() throws Exception {
+    doTest(false);
+  }
+
   private void doTest() {
     doTest(false);
   }
@@ -748,14 +803,7 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
    private void doTest(boolean warnings) {
      LanguageLevelProjectExtension.getInstance(getJavaFacade().getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
      IdeaTestUtil.setTestVersion(JavaSdkVersion.JDK_1_8, getModule(), myTestRootDisposable);
-     final PsiResolveHelperImpl helper = (PsiResolveHelperImpl)JavaPsiFacade.getInstance(getProject()).getResolveHelper();
-     helper.setTestHelper(new PsiGraphInferenceHelper(getPsiManager()));
-     try {
-       doTest(BASE_PATH + "/" + getTestName(false) + ".java", warnings, false);
-     }
-     finally {
-       helper.setTestHelper(null);
-     }
+     doTest(BASE_PATH + "/" + getTestName(false) + ".java", warnings, false);
    }
 
 
@@ -766,4 +814,51 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
     doTest();
   }
 
+  public void testIDEA139069() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA67745() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57313() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57387() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57314() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57322() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57362() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57320() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA139090() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA57502() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA67746() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA67592() throws Exception {
+    doTest();
+  }
 }

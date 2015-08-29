@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
  */
 package com.jetbrains.python.codeInsight.userSkeletons;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkModificator;
 import com.intellij.openapi.roots.OrderRootType;
-import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDirectory;
@@ -53,15 +53,17 @@ import java.util.List;
  */
 public class PyUserSkeletonsUtil {
   public static final String USER_SKELETONS_DIR = "python-skeletons";
+  private static final Logger LOG = Logger.getInstance("#com.jetbrains.python.codeInsight.userSkeletons.PyUserSkeletonsUtil");
+  public static final Key<Boolean> HAS_SKELETON = Key.create("PyUserSkeleton.hasSkeleton");
+
   @Nullable private static VirtualFile ourUserSkeletonsDirectory;
+  private static boolean ourNoSkeletonsErrorReported = false;
 
   @NotNull
   private static List<String> getPossibleUserSkeletonsPaths() {
     final List<String> result = new ArrayList<String>();
     result.add(PathManager.getConfigPath() + File.separator + USER_SKELETONS_DIR);
-    result.add(ApplicationManager.getApplication().isInternal()
-               ? StringUtil.join(new String[]{PythonHelpersLocator.getPythonCommunityPath(), "helpers", USER_SKELETONS_DIR}, File.separator)
-               : PythonHelpersLocator.getHelperPath(USER_SKELETONS_DIR));
+    result.add(PythonHelpersLocator.getHelperPath(USER_SKELETONS_DIR));
     return result;
   }
 
@@ -69,11 +71,15 @@ public class PyUserSkeletonsUtil {
   public static VirtualFile getUserSkeletonsDirectory() {
     if (ourUserSkeletonsDirectory == null) {
       for (String path : getPossibleUserSkeletonsPaths()) {
-        ourUserSkeletonsDirectory = LocalFileSystem.getInstance().findFileByPath(path);
+        ourUserSkeletonsDirectory = StandardFileSystems.local().findFileByPath(path);
         if (ourUserSkeletonsDirectory != null) {
           break;
         }
       }
+    }
+    if (!ourNoSkeletonsErrorReported && ourUserSkeletonsDirectory == null) {
+      ourNoSkeletonsErrorReported = true;
+      LOG.warn("python-skeletons directory not found in paths: " + getPossibleUserSkeletonsPaths());
     }
     return ourUserSkeletonsDirectory;
   }
@@ -119,7 +125,7 @@ public class PyUserSkeletonsUtil {
         final PsiDirectory psiDirectory = PsiManager.getInstance(project).findDirectory(directory);
         PsiElement fileSkeleton = new QualifiedNameResolverImpl(qName).resolveModuleAt(psiDirectory);
         if (fileSkeleton instanceof PsiDirectory) {
-          fileSkeleton = PyUtil.getPackageElement((PsiDirectory)fileSkeleton);
+          fileSkeleton = PyUtil.getPackageElement((PsiDirectory)fileSkeleton, foothold);
         }
         if (fileSkeleton instanceof PyFile) {
           cache.put(cacheQName, Collections.singletonList(fileSkeleton));
@@ -149,7 +155,8 @@ public class PyUserSkeletonsUtil {
       assert owner != element;
       final PsiElement originalOwner = getUserSkeleton(owner, skeletonFile);
       if (originalOwner instanceof PyClass) {
-        final PyType type = TypeEvalContext.codeInsightFallback().getType((PyClass)originalOwner);
+        final PyClass classOwner = (PyClass)originalOwner;
+        final PyType type = TypeEvalContext.codeInsightFallback(classOwner.getProject()).getType(classOwner);
         if (type instanceof PyClassLikeType) {
           final PyClassLikeType classType = (PyClassLikeType)type;
           final PyClassLikeType instanceType = classType.toInstance();
@@ -169,6 +176,10 @@ public class PyUserSkeletonsUtil {
 
   @Nullable
   private static PyFile getUserSkeletonForFile(@NotNull PyFile file) {
+    final Boolean hasSkeleton = file.getUserData(HAS_SKELETON);
+    if (hasSkeleton != null && !hasSkeleton) {
+      return null;
+    }
     final VirtualFile moduleVirtualFile = file.getVirtualFile();
     if (moduleVirtualFile != null) {
       String moduleName = QualifiedNameFinder.findShortestImportableName(file, moduleVirtualFile);
@@ -180,7 +191,9 @@ public class PyUserSkeletonsUtil {
             moduleName = restored.toString();
           }
         }
-        return getUserSkeletonForModuleQName(moduleName, file);
+        final PyFile skeletonFile = getUserSkeletonForModuleQName(moduleName, file);
+        file.putUserData(HAS_SKELETON, skeletonFile != null);
+        return skeletonFile;
       }
     }
     return null;

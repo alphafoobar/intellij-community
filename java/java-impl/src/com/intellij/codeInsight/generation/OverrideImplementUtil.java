@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,11 +28,14 @@ import com.intellij.ide.fileTemplates.FileTemplateManager;
 import com.intellij.ide.fileTemplates.FileTemplateUtil;
 import com.intellij.ide.fileTemplates.JavaTemplateUtil;
 import com.intellij.ide.util.MemberChooser;
+import com.intellij.idea.ActionsBundle;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.actionSystem.KeyboardShortcut;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -114,9 +117,8 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
       return false;
     }
     if (PsiUtil.isLanguageLevel6OrHigher(targetClass)) return true;
-    if (targetClass.isInterface()) return true;
     PsiClass superClass = superMethod.getContainingClass();
-    return !superClass.isInterface();
+    return superClass != null && !superClass.isInterface();
   }
 
   public static List<PsiMethod> overrideOrImplementMethod(PsiClass aClass,
@@ -259,6 +261,11 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
       for (String annotation : each.getAnnotations(project)) {
         if (moduleScope != null && facade.findClass(annotation, moduleScope) == null) continue;
         if (AnnotationUtil.isAnnotated(overridden, annotation, false, false) && !AnnotationUtil.isAnnotated(method, annotation, false, false)) {
+          PsiAnnotation psiAnnotation = AnnotationUtil.findAnnotation(overridden, annotation);
+          if (psiAnnotation != null && AnnotationUtil.isInferredAnnotation(psiAnnotation)) {
+            continue;
+          }
+
           AddAnnotationPsiFix.removePhysicalAnnotations(method, each.annotationsToRemove(project, annotation));
           AddAnnotationPsiFix.addPhysicalAnnotation(annotation, PsiNameValuePair.EMPTY_ARRAY, method.getModifierList());
         }
@@ -352,7 +359,7 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
   public static void setupMethodBody(PsiMethod result, PsiMethod originalMethod, PsiClass targetClass) throws IncorrectOperationException {
     boolean isAbstract = originalMethod.hasModifierProperty(PsiModifier.ABSTRACT) || originalMethod.hasModifierProperty(PsiModifier.DEFAULT);
     String templateName = isAbstract ? JavaTemplateUtil.TEMPLATE_IMPLEMENTED_METHOD_BODY : JavaTemplateUtil.TEMPLATE_OVERRIDDEN_METHOD_BODY;
-    FileTemplate template = FileTemplateManager.getInstance().getCodeTemplate(templateName);
+    FileTemplate template = FileTemplateManager.getInstance(originalMethod.getProject()).getCodeTemplate(templateName);
     setupMethodBody(result, originalMethod, targetClass, template);
   }
 
@@ -361,15 +368,20 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
                                      final PsiClass targetClass,
                                      final FileTemplate template) throws IncorrectOperationException {
     if (targetClass.isInterface()) {
-      final PsiCodeBlock body = result.getBody();
-      if (body != null) body.delete();
+      if (isImplementInterfaceInJava8Interface(targetClass)) {
+        PsiUtil.setModifierProperty(result, PsiModifier.DEFAULT, true);
+      }
+      else {
+        final PsiCodeBlock body = result.getBody();
+        if (body != null) body.delete();
+      }
     }
     FileType fileType = FileTypeManager.getInstance().getFileTypeByExtension(template.getExtension());
     PsiType returnType = result.getReturnType();
     if (returnType == null) {
       returnType = PsiType.VOID;
     }
-    Properties properties = FileTemplateManager.getInstance().getDefaultProperties(targetClass.getProject());
+    Properties properties = FileTemplateManager.getInstance(targetClass.getProject()).getDefaultProperties();
     properties.setProperty(FileTemplate.ATTRIBUTE_RETURN_TYPE, returnType.getPresentableText());
     properties.setProperty(FileTemplate.ATTRIBUTE_DEFAULT_RETURN_VALUE, PsiTypesUtil.getDefaultValueOfType(returnType));
     properties.setProperty(FileTemplate.ATTRIBUTE_CALL_SUPER, callSuper(originalMethod, result));
@@ -382,8 +394,9 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
     try {
       methodText = "void foo () {\n" + template.getText(properties) + "\n}";
       methodText = FileTemplateUtil.indent(methodText, result.getProject(), fileType);
-    } catch (Exception e) {
-      throw new IncorrectOperationException("Failed to parse file template",e);
+    }
+    catch (Exception e) {
+      throw new IncorrectOperationException("Failed to parse file template", (Throwable)e);
     }
     if (methodText != null) {
       PsiMethod m;
@@ -405,6 +418,16 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
         oldBody.replace(m.getBody());
       }
     }
+  }
+
+  private static boolean isImplementInterfaceInJava8Interface(PsiClass targetClass) {
+    if (!PsiUtil.isLanguageLevel8OrHigher(targetClass)){
+      return false;
+    }
+    final String implementMethodsName = ActionsBundle.message("action.ImplementMethods.text");
+    final Presentation presentation = new Presentation();
+    presentation.setText(implementMethodsName);
+    return presentation.getText().equals(CommandProcessor.getInstance().getCurrentCommandName());
   }
 
   public static void chooseAndOverrideMethods(Project project, Editor editor, PsiClass aClass){
@@ -437,7 +460,7 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
     LOG.assertTrue(aClass.isValid());
     new WriteCommandAction(project, aClass.getContainingFile()) {
       @Override
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         overrideOrImplementMethodsInRightPlace(editor, aClass, selectedElements, chooser.isCopyJavadoc(), chooser.isInsertOverrideAnnotation());
       }
     }.execute();
@@ -568,7 +591,7 @@ public class OverrideImplementUtil extends OverrideImplementExploreUtil {
       if (name != null) {
         MethodSignature signature = MethodSignatureUtil.createMethodSignature(name, prevBaseMethod.getParameterList(), prevBaseMethod.getTypeParameterList(), substitutor, prevBaseMethod.isConstructor());
         PsiMethod prevMethod = MethodSignatureUtil.findMethodBySignature(aClass, signature, false);
-        if (prevMethod != null){
+        if (prevMethod != null && prevMethod.isPhysical()){
           return prevMethod.getNextSibling();
         }
       }

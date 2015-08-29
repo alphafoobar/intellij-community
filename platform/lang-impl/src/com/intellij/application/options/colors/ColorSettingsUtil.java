@@ -19,10 +19,8 @@ package com.intellij.application.options.colors;
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.SeveritiesProvider;
 import com.intellij.openapi.editor.colors.CodeInsightColors;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.openapi.editor.colors.impl.EditorColorsManagerImpl;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.options.OptionsBundle;
 import com.intellij.openapi.options.colors.AttributesDescriptor;
@@ -75,7 +73,7 @@ public class ColorSettingsUtil {
   }
 
   static boolean isSharedScheme(EditorColorsScheme selected) {
-      return ((EditorColorsManagerImpl) EditorColorsManager.getInstance()).getSchemesManager().isShared(selected);
+      return false;
   }
 
   private static void addInspectionSeverityAttributes(List<AttributesDescriptor> descriptors) {
@@ -98,6 +96,9 @@ public class ColorSettingsUtil {
 
   @NotNull
   private static String toDisplayName(@NotNull TextAttributesKey attributesKey) {
-    return StringUtil.capitalize(attributesKey.getExternalName().toLowerCase().replaceAll("_", " "));
+    //noinspection StringToUpperCaseOrToLowerCaseWithoutLocale
+    return OptionsBundle.message(
+      "options.java.attribute.descriptor.errors.group",
+      StringUtil.capitalize(attributesKey.getExternalName().toLowerCase().replaceAll("_", " ")));
   }
 }

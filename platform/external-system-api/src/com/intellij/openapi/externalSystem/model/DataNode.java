@@ -15,10 +15,14 @@
  */
 package com.intellij.openapi.externalSystem.model;
 
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.UserDataHolderBase;
+import com.intellij.openapi.util.UserDataHolderEx;
 import com.intellij.openapi.util.io.StreamUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.io.*;
 import java.lang.reflect.Modifier;
@@ -38,22 +42,30 @@ import java.util.*;
  * @author Denis Zhdanov
  * @since 4/12/13 11:53 AM
  */
-public class DataNode<T> implements Serializable {
+public class DataNode<T> implements Serializable, UserDataHolderEx {
 
   private static final long serialVersionUID = 1L;
+  private static final Logger LOG = Logger.getInstance(DataNode.class);
 
   @NotNull private final List<DataNode<?>> myChildren = ContainerUtilRt.newArrayList();
+  @NotNull private transient List<DataNode<?>> myChildrenView = Collections.unmodifiableList(myChildren);
+  @NotNull private transient UserDataHolderBase myUserData = new UserDataHolderBase();
 
   @NotNull private final Key<T> myKey;
   private transient T myData;
   private byte[] myRawData;
+  private boolean myIgnored;
 
-  @Nullable private final DataNode<?> myParent;
+  @Nullable private DataNode<?> myParent;
 
   public DataNode(@NotNull Key<T> key, @NotNull T data, @Nullable DataNode<?> parent) {
     myKey = key;
     myData = data;
     myParent = parent;
+  }
+
+  private DataNode(@NotNull Key<T> key) {
+    myKey = key;
   }
 
   @Nullable
@@ -79,6 +91,14 @@ public class DataNode<T> implements Serializable {
       prepareData(getClass().getClassLoader(), Thread.currentThread().getContextClassLoader());
     }
     return myData;
+  }
+
+  public boolean isIgnored() {
+    return myIgnored;
+  }
+
+  public void setIgnored(boolean ignored) {
+    myIgnored = ignored;
   }
 
   /**
@@ -159,6 +179,8 @@ public class DataNode<T> implements Serializable {
       };
       myData = (T)oIn.readObject();
       myRawData = null;
+
+      assert myData != null;
     }
     catch (IOException e) {
       throw new IllegalStateException(
@@ -218,22 +240,43 @@ public class DataNode<T> implements Serializable {
 
   @NotNull
   public Collection<DataNode<?>> getChildren() {
-    return myChildren;
+    return myChildrenView;
   }
 
   private void writeObject(ObjectOutputStream out) throws IOException {
+    try {
+      myRawData = getDataBytes();
+    }
+    catch (IOException e) {
+      LOG.warn("Unable to serialize the data node - " + toString());
+      throw e;
+    }
+    out.defaultWriteObject();
+  }
+
+  private void readObject(ObjectInputStream in)
+    throws IOException, ClassNotFoundException {
+    in.defaultReadObject();
+    myChildrenView = Collections.unmodifiableList(myChildren);
+    myUserData = new UserDataHolderBase();
+  }
+
+  public byte[] getDataBytes() throws IOException {
+    if (myRawData != null) return myRawData;
+
     ByteArrayOutputStream bOut = new ByteArrayOutputStream();
     ObjectOutputStream oOut = new ObjectOutputStream(bOut);
     try {
       oOut.writeObject(myData);
+      final byte[] bytes = bOut.toByteArray();
+      myRawData = bytes;
+      return bytes;
     }
     finally {
       oOut.close();
     }
-    myRawData = bOut.toByteArray();
-    out.defaultWriteObject();
   }
-  
+
   @Override
   public int hashCode() {
     int result = myChildren.hashCode();
@@ -258,6 +301,97 @@ public class DataNode<T> implements Serializable {
 
   @Override
   public String toString() {
-    return String.format("%s: %s", myKey, getData());
+    String dataDescription;
+    try {
+      dataDescription = getData().toString();
+    }
+    catch (Exception e) {
+      dataDescription = "failed to load";
+      LOG.debug(e);
+    }
+    return String.format("%s: %s", myKey, dataDescription);
+  }
+
+  public void clear(boolean removeFromGraph) {
+    if (removeFromGraph && myParent != null) {
+      for (Iterator<DataNode<?>> iterator = myParent.myChildren.iterator(); iterator.hasNext(); ) {
+        DataNode<?> dataNode = iterator.next();
+        if (System.identityHashCode(dataNode) == System.identityHashCode(this)) {
+          iterator.remove();
+          break;
+        }
+      }
+    }
+    myParent = null;
+    myRawData = null;
+    myChildren.clear();
+  }
+
+  @NotNull
+  public DataNode<T> graphCopy() {
+    return сopy(this, null);
+  }
+
+  @NotNull
+  public DataNode<T> nodeCopy() {
+    return nodeCopy(this);
+  }
+
+  @Nullable
+  @Override
+  public <U> U getUserData(@NotNull com.intellij.openapi.util.Key<U> key) {
+    return (U)myUserData.getUserData(key);
+  }
+
+  @Override
+  public <U> void putUserData(@NotNull com.intellij.openapi.util.Key<U> key, U value) {
+    myUserData.putUserData(key, value);
+  }
+
+  public <U> void removeUserData(@NotNull com.intellij.openapi.util.Key<U> key) {
+    myUserData.putUserData(key, null);
+  }
+
+  @NotNull
+  @Override
+  public <T> T putUserDataIfAbsent(@NotNull com.intellij.openapi.util.Key<T> key, @NotNull T value) {
+    return myUserData.putUserDataIfAbsent(key, value);
+  }
+
+  @Override
+  public <T> boolean replace(@NotNull com.intellij.openapi.util.Key<T> key, @Nullable T oldValue, @Nullable T newValue) {
+    return myUserData.replace(key, oldValue, newValue);
+  }
+
+  public <T> void putCopyableUserData(@NotNull com.intellij.openapi.util.Key<T> key, T value) {
+    myUserData.putCopyableUserData(key, value);
+  }
+
+  public boolean isUserDataEmpty() {
+    return myUserData.isUserDataEmpty();
+  }
+
+  public <T> T getCopyableUserData(@NotNull com.intellij.openapi.util.Key<T> key) {
+    return myUserData.getCopyableUserData(key);
+  }
+
+  @NotNull
+  public static <T> DataNode<T> nodeCopy(@NotNull DataNode<T> dataNode) {
+    DataNode<T> copy = new DataNode<T>(dataNode.myKey);
+    copy.myData = dataNode.myData;
+    copy.myRawData = dataNode.myRawData;
+    copy.myIgnored = dataNode.myIgnored;
+    dataNode.myUserData.copyCopyableDataTo(copy.myUserData);
+    return copy;
+  }
+
+  @NotNull
+  private static <T> DataNode<T> сopy(@NotNull DataNode<T> dataNode, @Nullable DataNode<?> newParent) {
+    DataNode<T> copy = nodeCopy(dataNode);
+    copy.myParent = newParent;
+    for (DataNode<?> child : dataNode.myChildren) {
+      copy.addChild(сopy(child, copy));
+    }
+    return copy;
   }
 }

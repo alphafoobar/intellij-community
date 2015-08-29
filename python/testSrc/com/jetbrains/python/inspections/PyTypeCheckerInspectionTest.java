@@ -228,4 +228,47 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
   public void testSecondFormIter() {
     doTest();
   }
+
+  public void testMetaClassIteration() {
+    doTest();
+  }
+
+  // PY-10967
+  public void testDefaultTupleParameter() {
+    doTest();
+  }
+
+  // PY-14222
+  public void testRecursiveDictAttribute() {
+    doTest();
+  }
+
+  // PY-13394
+  public void testContainsArguments() {
+    doTest();
+  }
+
+  public void testExpectedStructuralType() {
+    doTest();
+  }
+
+  public void testActualStructuralType() {
+    doTest();
+  }
+
+  public void testStructuralTypesForNestedCalls() {
+    doTest();
+  }
+
+  public void testIterateOverParamWithNoAttributes() {
+    doTest();
+  }
+
+  public void testGetAttributeAgainstStructuralType() {
+    doTest();
+  }
+
+  public void testComparisonOperatorsForNumericTypes() {
+    doTest();
+  }
 }

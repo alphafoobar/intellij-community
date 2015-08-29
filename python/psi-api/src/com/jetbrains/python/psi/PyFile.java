@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.psi;
 
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import org.jetbrains.annotations.NotNull;
@@ -27,6 +28,7 @@ public interface PyFile extends PyElement, PsiFile, PyDocStringOwner, ScopeOwner
 
   List<PyClass> getTopLevelClasses();
 
+  @NotNull
   List<PyFunction> getTopLevelFunctions();
 
   List<PyTargetExpression> getTopLevelAttributes();
@@ -49,6 +51,9 @@ public interface PyFile extends PyElement, PsiFile, PyDocStringOwner, ScopeOwner
    */
   @NotNull
   List<PyFromImportStatement> getFromImports();
+
+  @Nullable
+  PsiElement findExportedName(String name);
 
   /**
    * Returns the list of import elements in all 'import xxx' statements in the top-level scope of the file.

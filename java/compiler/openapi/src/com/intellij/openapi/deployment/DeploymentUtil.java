@@ -16,7 +16,6 @@
 package com.intellij.openapi.deployment;
 
 import com.intellij.openapi.compiler.CompileContext;
-import com.intellij.openapi.compiler.make.BuildRecipe;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.util.text.StringUtil;
@@ -35,14 +34,12 @@ public abstract class DeploymentUtil {
     return ServiceManager.getService(DeploymentUtil.class);
   }
 
+  @Deprecated
   public abstract void copyFile(@NotNull File fromFile,
                                 @NotNull File toFile,
                                 @NotNull CompileContext context,
                                 @Nullable Set<String> writtenPaths,
                                 @Nullable FileFilter fileFilter) throws IOException;
-
-  @Deprecated
-  public abstract boolean addItemsRecursively(@NotNull BuildRecipe items, @NotNull File root, String outputRelativePath);
 
   public static String trimForwardSlashes(@NotNull String path) {
     while (path.length() != 0 && (path.charAt(0) == '/' || path.charAt(0) == File.separatorChar)) {
@@ -51,6 +48,7 @@ public abstract class DeploymentUtil {
     return path;
   }
 
+  @Deprecated
   public abstract void reportDeploymentDescriptorDoesNotExists(ConfigFile descriptor, CompileContext context, Module module);
 
   public static String concatPaths(String... paths) {
@@ -82,9 +80,6 @@ public abstract class DeploymentUtil {
     }
     return basePath + tail;
   }
-
-  @Deprecated
-  public abstract BuildRecipe createBuildRecipe();
 
   @Nullable
   public abstract String getConfigFileErrorMessage(ConfigFile configFile);
@@ -126,6 +121,7 @@ public abstract class DeploymentUtil {
     }
   }
 
+  @Deprecated
   public abstract void checkConfigFile(final ConfigFile descriptor, final CompileContext compileContext, final Module module);
 
 }

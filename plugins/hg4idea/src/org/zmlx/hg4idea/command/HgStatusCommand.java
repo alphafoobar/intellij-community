@@ -18,6 +18,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.ObjectsConvertor;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.vcsUtil.VcsFileUtil;
 import org.jetbrains.annotations.NotNull;
@@ -77,6 +78,11 @@ public class HgStatusCommand {
       targetRevision = null;
     }
 
+    public Builder removed(boolean val) {
+      includeRemoved = val;
+      return this;
+    }
+
     public Builder unknown(boolean val) {
       includeUnknown = val;
       return this;
@@ -130,7 +136,7 @@ public class HgStatusCommand {
       return Collections.emptySet();
     }
 
-    HgCommandExecutor executor = new HgCommandExecutor(myProject, null);
+    HgCommandExecutor executor = new HgCommandExecutor(myProject);
     executor.setSilent(true);
 
     List<String> options = new LinkedList<String>();
@@ -182,11 +188,21 @@ public class HgStatusCommand {
     return changes;
   }
 
-  private static Collection<HgChange> parseChangesFromResult(VirtualFile repo, HgCommandResult result, List<String> args) {
+  private  Collection<HgChange> parseChangesFromResult(VirtualFile repo, HgCommandResult result, List<String> args) {
     final Set<HgChange> changes = new HashSet<HgChange>();
     HgChange previous = null;
     if (result == null) {
       return changes;
+    }
+    List<String> errors = result.getErrorLines();
+    if (errors != null && !errors.isEmpty()) {
+      if (result.getExitValue() != 0 && !myProject.isDisposed()) {
+        String title = "Could not execute hg status command ";
+        LOG.warn(title + errors.toString());
+        VcsNotifier.getInstance(myProject).logInfo(title, errors.toString());
+        return changes;
+      }
+      LOG.warn(errors.toString());
     }
     for (String line : result.getOutputLines()) {
       if (StringUtil.isEmptyOrSpaces(line) || line.length() < ITEM_COUNT) {

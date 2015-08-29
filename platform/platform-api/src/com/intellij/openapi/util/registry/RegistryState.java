@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,37 +15,42 @@
  */
 package com.intellij.openapi.util.registry;
 
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
+import com.intellij.openapi.diagnostic.Logger;
 import org.jdom.Element;
-import org.jetbrains.annotations.NotNull;
+
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 @State(
-    name = "Registry",
-    storages = {
-        @Storage(
-            file = StoragePathMacros.APP_CONFIG + "/other.xml")}
-)
-public class RegistryState implements BaseComponent, PersistentStateComponent<Element> {
-
-  public RegistryState() {
+  name = "Registry",
+  storages = {
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/ide.general.xml"),
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/other.xml", deprecated = true)
   }
+)
+public class RegistryState implements PersistentStateComponent<Element> {
+  private static final Logger LOG = Logger.getInstance(RegistryState.class);
 
+  @Override
   public Element getState() {
     return Registry.getInstance().getState();
   }
 
+  @Override
   public void loadState(Element state) {
     Registry.getInstance().loadState(state);
-  }
-
-  @NotNull
-  public String getComponentName() {
-    return "Registry";
-  }
-
-  public void initComponent() {
-  }
-
-  public void disposeComponent() {
+    SortedMap<String, String> userProperties = new TreeMap<String, String>(Registry.getInstance().getUserProperties());
+    userProperties.remove("ide.firstStartup");
+    if (!userProperties.isEmpty()) {
+      LOG.info("Registry values changed by user:");
+      for (Map.Entry<String, String> entry : userProperties.entrySet()) {
+        LOG.info("  " + entry.getKey() + " = " + entry.getValue());
+      }
+    }
   }
 }

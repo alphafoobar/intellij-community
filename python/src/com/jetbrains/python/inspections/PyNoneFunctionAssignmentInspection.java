@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.util.containers.hash.HashMap;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.inspections.quickfix.PyRemoveAssignmentQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.search.PyOverridingMethodsSearch;
 import com.jetbrains.python.psi.types.PyNoneType;
@@ -73,7 +74,7 @@ public class PyNoneFunctionAssignmentInspection extends PyInspection {
         if (type instanceof PyNoneType && callee != null) {
           final PyTypeChecker.AnalyzeCallResults analyzeCallResults = PyTypeChecker.analyzeCall(((PyCallExpression)value), myTypeEvalContext);
           if (analyzeCallResults != null) {
-            final Callable callable = analyzeCallResults.getCallable();
+            final PyCallable callable = analyzeCallResults.getCallable();
             if (PySdkUtil.isElementInSkeletons(callable)) {
               return;
             }
@@ -84,7 +85,7 @@ public class PyNoneFunctionAssignmentInspection extends PyInspection {
                 return;
               }
             }
-            registerProblem(node, PyBundle.message("INSP.none.function.assignment", callee.getName()));
+            registerProblem(node, PyBundle.message("INSP.none.function.assignment", callee.getName()), new PyRemoveAssignmentQuickFix());
           }
         }
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 package com.intellij.codeInsight.intention.impl.config;
 
 import com.intellij.codeInsight.CodeInsightBundle;
+import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.ide.plugins.PluginManagerConfigurable;
@@ -33,8 +34,12 @@ import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.HintHint;
 import com.intellij.ui.HyperlinkLabel;
 import com.intellij.ui.TitledSeparator;
+import com.intellij.util.ui.UIUtil;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 
@@ -43,6 +48,7 @@ import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
 import java.awt.*;
 import java.io.IOException;
+import java.io.StringReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,13 +68,31 @@ public class IntentionDescriptionPanel {
   @NonNls private static final String BEFORE_TEMPLATE = "before.java.template";
   @NonNls private static final String AFTER_TEMPLATE = "after.java.template";
 
+  // TODO 134099: see SingleInspectionProfilePanel#readHTML
+  private boolean readHTML(String text) {
+    try {
+      myDescriptionBrowser.read(new StringReader(text), null);
+      return true;
+    }
+    catch (IOException ignored) {
+      return false;
+    }
+  }
+
+  // TODO 134099: see SingleInspectionProfilePanel#toHTML
+  private String toHTML(String text) {
+    final HintHint hintHint = new HintHint(myDescriptionBrowser, new Point(0, 0));
+    hintHint.setFont(UIUtil.getLabelFont());
+    return HintUtil.prepareHintText(text, hintHint);
+  }
+
   public void reset(IntentionActionMetaData actionMetaData, String filter)  {
     try {
       final TextDescriptor url = actionMetaData.getDescription();
-      final String description = url == null ?
-                                 CodeInsightBundle.message("under.construction.string") :
-                                 SearchUtil.markup(url.getText(), filter);
-      myDescriptionBrowser.setText(description);
+      final String description = StringUtil.isEmpty(url.getText()) ?
+                                 toHTML(CodeInsightBundle.message("under.construction.string")) :
+                                 SearchUtil.markup(toHTML(url.getText()), filter);
+      readHTML(description);
       setupPoweredByPanel(actionMetaData);
 
       showUsages(myBeforePanel, myBeforeSeparator, myBeforeUsagePanels, actionMetaData.getExampleUsagesBefore());
@@ -91,7 +115,7 @@ public class IntentionDescriptionPanel {
     PluginId pluginId = actionMetaData == null ? null : actionMetaData.getPluginId();
     JComponent owner;
     if (pluginId == null) {
-      @NonNls String label = "<html><body><b>" + ApplicationNamesInfo.getInstance().getFullProductName() + "</b></body></html>";
+      @NonNls String label = XmlStringUtil.wrapInHtml("<b>" + ApplicationNamesInfo.getInstance().getFullProductName() + "</b>");
       owner = new JLabel(label);
     }
     else {
@@ -121,9 +145,7 @@ public class IntentionDescriptionPanel {
 
   public void reset(String intentionCategory)  {
     try {
-      String text = CodeInsightBundle.message("intention.settings.category.text", intentionCategory);
-
-      myDescriptionBrowser.setText(text);
+      readHTML(toHTML(CodeInsightBundle.message("intention.settings.category.text", intentionCategory)));
       setupPoweredByPanel(null);
 
       URL beforeURL = getClass().getClassLoader().getResource(getClass().getPackage().getName().replace('.','/') + "/" + BEFORE_TEMPLATE);

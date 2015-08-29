@@ -17,7 +17,6 @@ package com.intellij.ide.fileTemplates;
 
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.fileTypes.FileType;
-import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.project.Project;
@@ -26,6 +25,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.impl.file.JavaDirectoryServiceImpl;
 import com.intellij.util.IncorrectOperationException;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
 
@@ -40,8 +40,7 @@ public class JavaCreateFromTemplateHandler implements CreateFromTemplateHandler 
                                                 String extension) throws IncorrectOperationException {
     if (extension == null) extension = StdFileTypes.JAVA.getDefaultExtension();
     final String name = "myClass" + "." + extension;
-    final FileType type = FileTypeRegistry.getInstance().getFileTypeByFileName(name);
-    final PsiFile psiFile = PsiFileFactory.getInstance(project).createFileFromText(name, type, content);
+    final PsiFile psiFile = PsiFileFactory.getInstance(project).createFileFromText(name, StdFileTypes.JAVA, content);
     if (!(psiFile instanceof PsiJavaFile)){
       throw new IncorrectOperationException("This template did not produce a Java class or an interface\n"+psiFile.getText());
     }
@@ -100,8 +99,9 @@ public class JavaCreateFromTemplateHandler implements CreateFromTemplateHandler 
     return fileType.equals(StdFileTypes.JAVA) && !FileTemplateUtil.INTERNAL_PACKAGE_INFO_TEMPLATE_NAME.equals(template.getName());
   }
 
+  @NotNull
   public PsiElement createFromTemplate(final Project project, final PsiDirectory directory, final String fileName, FileTemplate template,
-                                       String templateText, Map<String, Object> props) throws IncorrectOperationException {
+                                       String templateText, @NotNull Map<String, Object> props) throws IncorrectOperationException {
     String extension = template.getExtension();
     PsiElement result = createClassOrInterface(project, directory, templateText, template.isReformatCode(), extension);
     hackAwayEmptyPackage((PsiJavaFile)result.getContainingFile(), template, props);
@@ -109,6 +109,9 @@ public class JavaCreateFromTemplateHandler implements CreateFromTemplateHandler 
   }
 
   public boolean canCreate(final PsiDirectory[] dirs) {
+    for (PsiDirectory dir : dirs) {
+      if (canCreate(dir)) return true;
+    }
     return false;
   }
 

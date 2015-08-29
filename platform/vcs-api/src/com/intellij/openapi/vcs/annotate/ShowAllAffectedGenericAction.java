@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Pair;
@@ -32,6 +33,8 @@ import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vcs.versionBrowser.ChangeBrowserSettings;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
+import com.intellij.openapi.vcs.vfs.VcsFileSystem;
+import com.intellij.openapi.vcs.vfs.VcsVirtualFile;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
@@ -42,7 +45,7 @@ import java.util.List;
  *         Date: 3/16/11
  *         Time: 2:41 PM
  */
-public class ShowAllAffectedGenericAction extends AnAction {
+public class ShowAllAffectedGenericAction extends AnAction implements DumbAware {
 
   private static final String ACTION_ID = "VcsHistory.ShowAllAffected";
 
@@ -84,6 +87,7 @@ public class ShowAllAffectedGenericAction extends AnAction {
                                                ? ((ShortVcsRevisionNumber) revision).toShortString()
                                                :  revision.asString());
     final CommittedChangeList[] list = new CommittedChangeList[1];
+    final FilePath[] targetPath = new FilePath[1];
     final VcsException[] exc = new VcsException[1];
     Task.Backgroundable task = new Task.Backgroundable(project, title, true, BackgroundFromStartOption.getInstance()) {
       @Override
@@ -94,6 +98,7 @@ public class ShowAllAffectedGenericAction extends AnAction {
             final Pair<CommittedChangeList, FilePath> pair = provider.getOneList(virtualFile, revision);
             if (pair != null) {
               list[0] = pair.getFirst();
+              targetPath[0] = pair.getSecond();
             }
           }
           else {
@@ -140,7 +145,10 @@ public class ShowAllAffectedGenericAction extends AnAction {
           Messages.showErrorDialog(project, failedText(virtualFile, revision), getTitle());
         }
         else {
-          instance.showChangesListBrowser(list[0], virtualFile, title);
+          VirtualFile navigateToFile = targetPath[0] != null ?
+                                       new VcsVirtualFile(targetPath[0].getPath(), null, VcsFileSystem.getInstance()) :
+                                       virtualFile;
+          instance.showChangesListBrowser(list[0], navigateToFile, title);
         }
       }
     };

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,6 @@ import com.intellij.psi.impl.source.tree.AstBufferUtil;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.PairProcessor;
 import com.intellij.util.WalkingState;
-import com.intellij.util.containers.ConcurrentHashMap;
-import com.intellij.util.containers.ConcurrentHashSet;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FactoryMap;
 import gnu.trove.TObjectHashingStrategy;
@@ -170,7 +168,7 @@ public class SliceLeafAnalyzer {
           if (leaves == null) return;  //cancelled
 
           if (leaves.isEmpty()) {
-            Messages.showErrorDialog("Unable to find leaf expressions to group by", "Cannot group");
+            Messages.showErrorDialog("Unable to find leaf expressions to group by", "Cannot Group");
             return;
           }
 
@@ -187,12 +185,12 @@ public class SliceLeafAnalyzer {
     return new FactoryMap<SliceNode, Collection<PsiElement>>() {
       @Override
       protected Map<SliceNode, Collection<PsiElement>> createMap() {
-        return new ConcurrentHashMap<SliceNode, Collection<PsiElement>>(ContainerUtil.<SliceNode>identityStrategy());
+        return ContainerUtil.newConcurrentMap(ContainerUtil.<SliceNode>identityStrategy());
       }
 
       @Override
       protected Collection<PsiElement> create(SliceNode key) {
-        return new ConcurrentHashSet<PsiElement>(SliceLeafAnalyzer.LEAF_ELEMENT_EQUALITY);
+        return ContainerUtil.newConcurrentSet(LEAF_ELEMENT_EQUALITY);
       }
     };
   }
@@ -244,7 +242,7 @@ public class SliceLeafAnalyzer {
     final SliceNodeGuide guide = new SliceNodeGuide(treeStructure);
     WalkingState<SliceNode> walkingState = new WalkingState<SliceNode>(guide) {
       @Override
-      public void visit(@NotNull SliceNode element) {
+      public void visit(@NotNull final SliceNode element) {
         element.calculateDupNode();
         node(element, map).clear();
         SliceNode duplicate = element.getDuplicate();
@@ -252,20 +250,21 @@ public class SliceLeafAnalyzer {
           node(element, map).addAll(node(duplicate, map));
         }
         else {
-          final SliceUsage sliceUsage = element.getValue();
+          ApplicationManager.getApplication().runReadAction(new Runnable() {
+            @Override
+            public void run() {
+              final SliceUsage sliceUsage = element.getValue();
 
-          Collection<? extends AbstractTreeNode> children = element.getChildren();
-          if (children.isEmpty()) {
-            PsiElement value = ApplicationManager.getApplication().runReadAction(new Computable<PsiElement>() {
-              @Override
-              public PsiElement compute() {
-                return sliceUsage.indexNesting == 0 ? sliceUsage.getElement() : null;
+              Collection<? extends AbstractTreeNode> children = element.getChildren();
+              if (children.isEmpty()) {
+                PsiElement value = sliceUsage.indexNesting == 0 ? sliceUsage.getElement() : null;
+                if (value != null) {
+                  node(element, map).addAll(ContainerUtil.singleton(value, LEAF_ELEMENT_EQUALITY));
+                }
               }
-            });
-            if (value != null) {
-              node(element, map).addAll(ContainerUtil.singleton(value, LEAF_ELEMENT_EQUALITY));
             }
-          }
+          });
+
           super.visit(element);
         }
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.TypeConversionUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -68,7 +69,7 @@ public class TypeUtils {
   public static boolean isNarrowingConversion(@NotNull PsiType operandType, @NotNull PsiType castType) {
     final Integer operandPrecision = typePrecisions.get(operandType);
     final Integer castPrecision = typePrecisions.get(castType);
-    return operandPrecision.intValue() > castPrecision.intValue();
+    return operandPrecision != null && castPrecision != null && operandPrecision.intValue() > castPrecision.intValue();
   }
 
   public static boolean isJavaLangObject(@Nullable PsiType targetType) {
@@ -95,19 +96,7 @@ public class TypeUtils {
   }
 
   public static boolean expressionHasTypeOrSubtype(@Nullable PsiExpression expression, @NonNls @NotNull String typeName) {
-    if (expression == null) {
-      return false;
-    }
-    final PsiType type = expression.getType();
-    if (type == null) {
-      return false;
-    }
-    if (!(type instanceof PsiClassType)) {
-      return false;
-    }
-    final PsiClassType classType = (PsiClassType)type;
-    final PsiClass aClass = classType.resolve();
-    return aClass != null && InheritanceUtil.isInheritor(aClass, typeName);
+    return expressionHasTypeOrSubtype(expression, new String[] {typeName}) != null;
   }
 
   //getTypeIfOneOfOrSubtype
@@ -115,7 +104,8 @@ public class TypeUtils {
     if (expression == null) {
       return null;
     }
-    final PsiType type = expression.getType();
+    PsiType type = expression instanceof PsiFunctionalExpression ? ((PsiFunctionalExpression)expression).getFunctionalInterfaceType() 
+                                                                 : expression.getType();
     if (type == null) {
       return null;
     }
@@ -186,5 +176,65 @@ public class TypeUtils {
     }
     final PsiType type = expression.getType();
     return type != null && (PsiType.FLOAT.equals(type) || PsiType.DOUBLE.equals(type));
+  }
+
+  public static boolean areConvertible(PsiType type1, PsiType type2) {
+    if (TypeConversionUtil.areTypesConvertible(type1, type2)) {
+      return true;
+    }
+    final PsiType comparedTypeErasure = TypeConversionUtil.erasure(type1);
+    final PsiType comparisonTypeErasure = TypeConversionUtil.erasure(type2);
+    if (comparedTypeErasure == null || comparisonTypeErasure == null ||
+        TypeConversionUtil.areTypesConvertible(comparedTypeErasure, comparisonTypeErasure)) {
+      if (type1 instanceof PsiClassType && type2 instanceof PsiClassType) {
+        final PsiClassType classType1 = (PsiClassType)type1;
+        final PsiClassType classType2 = (PsiClassType)type2;
+        final PsiType[] parameters1 = classType1.getParameters();
+        final PsiType[] parameters2 = classType2.getParameters();
+        if (parameters1.length != parameters2.length) {
+          return ((PsiClassType)type1).isRaw() || ((PsiClassType)type2).isRaw();
+        }
+        for (int i = 0; i < parameters1.length; i++) {
+          if (!areConvertible(parameters1[i], parameters2[i])) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  public static boolean isTypeParameter(PsiType type) {
+    if (!(type instanceof PsiClassType)) {
+      return false;
+    }
+    final PsiClassType classType = (PsiClassType)type;
+    final PsiClass aClass = classType.resolve();
+    return aClass != null && aClass instanceof PsiTypeParameter;
+  }
+
+  /**
+   * JLS 5.6.1 Unary Numeric Promotion
+   */
+  public static PsiType unaryNumericPromotion(PsiType type) {
+    if (type == null) {
+      return null;
+    }
+    if (type.equalsToText("java.lang.Byte") || type.equalsToText("java.lang.Short") ||
+        type.equalsToText("java.lang.Character") || type.equalsToText("java.lang.Integer") ||
+        type.equals(PsiType.BYTE) || type.equals(PsiType.SHORT) || type.equals(PsiType.CHAR)) {
+      return PsiType.INT;
+    }
+    else if (type.equalsToText("java.lang.Long")) {
+      return PsiType.LONG;
+    }
+    else if (type.equalsToText("java.lang.Float")) {
+      return PsiType.FLOAT;
+    }
+    else if (type.equalsToText("java.lang.Double")) {
+      return PsiType.DOUBLE;
+    }
+    return type;
   }
 }

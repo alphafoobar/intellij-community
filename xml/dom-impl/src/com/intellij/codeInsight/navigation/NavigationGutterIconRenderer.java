@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import com.intellij.ide.util.PsiElementListCellRenderer;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -44,7 +46,8 @@ import java.util.List;
 /**
  * @author peter
  */
-public abstract class NavigationGutterIconRenderer extends GutterIconRenderer implements GutterIconNavigationHandler<PsiElement>{
+public abstract class NavigationGutterIconRenderer extends GutterIconRenderer
+  implements GutterIconNavigationHandler<PsiElement>, DumbAware {
   private final String myPopupTitle;
   private final String myEmptyText;
   private final Computable<PsiElementListCellRenderer> myCellRenderer;
@@ -58,12 +61,14 @@ public abstract class NavigationGutterIconRenderer extends GutterIconRenderer im
     myPointers = pointers;
   }
 
+  @Override
   public boolean isNavigateAction() {
     return true;
   }
 
   public List<PsiElement> getTargetElements() {
     return ContainerUtil.mapNotNull(myPointers.getValue(), new NullableFunction<SmartPsiElementPointer, PsiElement>() {
+      @Override
       public PsiElement fun(final SmartPsiElementPointer smartPsiElementPointer) {
         return smartPsiElementPointer.getElement();
       }
@@ -91,17 +96,30 @@ public abstract class NavigationGutterIconRenderer extends GutterIconRenderer im
     return result;
   }
 
+  @Override
   @Nullable
   public AnAction getClickAction() {
     return new AnAction() {
+      @Override
       public void actionPerformed(AnActionEvent e) {
         navigate(e == null ? null : (MouseEvent)e.getInputEvent(), null);
       }
     };
   }
 
+  @Override
   public void navigate(@Nullable final MouseEvent event, @Nullable final PsiElement elt) {
-    final List<PsiElement> list = getTargetElements();
+    final List<PsiElement> list;
+
+    DumbService dumbService = elt != null ? DumbService.getInstance(elt.getProject()) : null;
+    if (dumbService != null) dumbService.setAlternativeResolveEnabled(true);
+    try {
+      list = getTargetElements();
+    }
+    finally {
+      if (dumbService != null) dumbService.setAlternativeResolveEnabled(false);
+    }
+    
     if (list.isEmpty()) {
       if (myEmptyText != null) {
         if (event != null) {

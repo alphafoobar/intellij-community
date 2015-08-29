@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,12 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 
 public class ProjectFileType implements InternalFileType {
+  public static final ProjectFileType INSTANCE = new ProjectFileType();
+
   @NonNls public static final String DEFAULT_EXTENSION = "ipr";
   @NonNls public static final String DOT_DEFAULT_EXTENSION = ".ipr";
+
+  private ProjectFileType() {}
 
   @Override
   @NotNull
@@ -63,7 +67,7 @@ public class ProjectFileType implements InternalFileType {
   }
 
   @Override
-  public String getCharset(@NotNull VirtualFile file, final byte[] content) {
+  public String getCharset(@NotNull VirtualFile file, @NotNull final byte[] content) {
     return CharsetToolkit.UTF8;
   }
 }

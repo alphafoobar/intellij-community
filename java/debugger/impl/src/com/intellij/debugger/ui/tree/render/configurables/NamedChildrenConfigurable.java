@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,22 @@ package com.intellij.debugger.ui.tree.render.configurables;
 import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.debugger.engine.evaluation.TextWithImports;
-import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.ui.CompletionEditor;
+import com.intellij.debugger.ui.DebuggerExpressionComboBox;
 import com.intellij.debugger.ui.tree.render.EnumerationChildrenRenderer;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.UnnamedConfigurable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.TableUtil;
 import com.intellij.util.ui.AbstractTableCellEditor;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.Table;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -40,7 +44,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
 
-public class NamedChildrenConfigurable implements UnnamedConfigurable{
+public class NamedChildrenConfigurable implements UnnamedConfigurable, Disposable {
   private Table myTable;
   private final EnumerationChildrenRenderer myRenderer;
   private JPanel myPanel;
@@ -51,7 +55,7 @@ public class NamedChildrenConfigurable implements UnnamedConfigurable{
   private JButton myButtonDown;
   private CompletionEditor myCompletionEditor;
 
-  public NamedChildrenConfigurable(Project project, EnumerationChildrenRenderer renderer) {
+  public NamedChildrenConfigurable(@NotNull Project project, EnumerationChildrenRenderer renderer) {
     myRenderer = renderer;
 
     myTableLabel.setLabelFor(myTable);
@@ -61,10 +65,10 @@ public class NamedChildrenConfigurable implements UnnamedConfigurable{
     getModel().addColumn(expressionColumnName, (Object[])null);
 
     PsiClass psiClass = DebuggerUtils.findClass(myRenderer.getClassName(), project, GlobalSearchScope.allScope(project));
-    myCompletionEditor = ((DebuggerUtilsEx)DebuggerUtils.getInstance()).createEditor(project, psiClass, "NamedChildrenConfigurable");
+    myCompletionEditor = new DebuggerExpressionComboBox(project, this, psiClass, "NamedChildrenConfigurable");
 
     myTable.setDragEnabled(false);
-    myTable.setIntercellSpacing(new Dimension(0, 0));
+    myTable.setIntercellSpacing(JBUI.emptySize());
 
     myTable.getColumn(expressionColumnName).setCellEditor(new AbstractTableCellEditor() {
       public Object getCellEditorValue() {
@@ -138,7 +142,7 @@ public class NamedChildrenConfigurable implements UnnamedConfigurable{
     java.util.List<Pair<String, TextWithImports>> result = new ArrayList<Pair<String, TextWithImports>>();
 
     for (int idx = 0; idx < size; idx++) {
-      result.add(new Pair<String, TextWithImports>((String)model.getValueAt(idx, 0), (TextWithImports)model.getValueAt(idx, 1)));
+      result.add(Pair.create((String)model.getValueAt(idx, 0), (TextWithImports)model.getValueAt(idx, 1)));
     }
     myRenderer.setChildren(result);
   }
@@ -154,12 +158,12 @@ public class NamedChildrenConfigurable implements UnnamedConfigurable{
   }
 
   public void disposeUIResources() {
-    if (myCompletionEditor != null) {
-      myCompletionEditor.dispose();
-      myCompletionEditor = null;
-    }
+    Disposer.dispose(this);
   }
 
+  @Override
+  public void dispose() {
+  }
 
   /*
   private class TextWithImportsTableRenderer implements TableCellRenderer{
@@ -183,5 +187,4 @@ public class NamedChildrenConfigurable implements UnnamedConfigurable{
     }
   }
   */
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.util.Clock;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Computable;
@@ -49,14 +50,17 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   protected VirtualFile myRoot;
   protected IdeaGateway myGateway;
 
-  @SuppressWarnings({"JUnitTestCaseWithNonTrivialConstructors"})
-  public IntegrationTestCase() {
-    PlatformTestCase.initPlatformLangPrefix();
+  // let it be as if someone (e.g. dumb mode indexing) has loaded the content so it's available to local history
+  protected static void loadContent(VirtualFile f) throws IOException {
+    f.contentsToByteArray();
   }
 
   @Override
   public void setUp() throws Exception {
     super.setUp();
+
+    LocalHistoryImpl.getInstanceImpl().cleanupForNextTest();
+    
     Clock.reset();
     Paths.useSystemCaseSensitivity();
 
@@ -110,7 +114,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   }
 
   protected void setContent(VirtualFile f, String content, long timestamp) throws IOException {
-    f.setBinaryContent(content.getBytes("UTF-8"), -1, timestamp);
+    f.setBinaryContent(content.getBytes(CharsetToolkit.UTF8_CHARSET), -1, timestamp);
   }
 
   protected String createFileExternally(String name) throws IOException {
@@ -121,7 +125,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
     File f = new File(myRoot.getPath(), name);
     assertTrue(f.getPath(), f.getParentFile().mkdirs() || f.getParentFile().isDirectory());
     assertTrue(f.getPath(), f.createNewFile() || f.exists());
-    if (content != null) FileUtil.writeToFile(f, content.getBytes("UTF-8"));
+    if (content != null) FileUtil.writeToFile(f, content.getBytes(CharsetToolkit.UTF8_CHARSET));
     return FileUtil.toSystemIndependentName(f.getPath());
   }
 
@@ -133,7 +137,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
 
   protected void setContentExternally(String path, String content) throws IOException {
     File f = new File(path);
-    FileUtil.writeToFile(f, content.getBytes("UTF-8"));
+    FileUtil.writeToFile(f, content.getBytes(CharsetToolkit.UTF8_CHARSET));
     assertTrue(f.getPath(), f.setLastModified(f.lastModified() + 2000));
   }
 
@@ -170,10 +174,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   protected static void addContentRoot(final Module module, final String path) {
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
       public void run() {
-        ModuleRootManager rm = ModuleRootManager.getInstance(module);
-        ModifiableRootModel m = rm.getModifiableModel();
-        m.addContentEntry(VfsUtilCore.pathToUrl(FileUtil.toSystemIndependentName(path)));
-        m.commit();
+        ModuleRootModificationUtil.addContentRoot(module, FileUtil.toSystemIndependentName(path));
       }
     });
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ import com.intellij.ui.speedSearch.ListWithFilter;
 import com.intellij.util.Alarm;
 import com.intellij.util.Function;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -122,7 +123,7 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
     myList.setCellRenderer(new MyListCellRenderer());
     myList.addKeyListener(new KeyAdapter() {
       @Override
-      public void keyReleased(KeyEvent e) {
+      public void keyPressed(KeyEvent e) {
         if (e.getKeyCode() == KeyEvent.VK_DELETE) {
           int newSelectionIndex = -1;
           for (Object o : myList.getSelectedValues()) {
@@ -150,6 +151,8 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
             int idx = aChar == '0' ? 9 : aChar - '1';
             if (idx < myAllContents.size()) {
               myList.setSelectedIndex(idx);
+              e.consume();
+              doOKAction();
             }
           }
         }
@@ -165,8 +168,8 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
     mySplitter.setSecondComponent(new JPanel());
     rebuildListContent();
 
-    ListScrollingUtil.installActions(myList);
-    ListScrollingUtil.ensureSelectionExists(myList);
+    ScrollingUtil.installActions(myList);
+    ScrollingUtil.ensureSelectionExists(myList);
     updateViewerForSelection();
     myList.addListSelectionListener(new ListSelectionListener() {
       @Override
@@ -181,7 +184,7 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
       }
     });
 
-    mySplitter.setPreferredSize(new Dimension(500, 500));
+    mySplitter.setPreferredSize(JBUI.size(500, 500));
 
     SplitterProportionsData d = new SplitterProportionsDataImpl();
     d.externalizeToDimensionService(getClass().getName());
@@ -214,7 +217,7 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
     if (myUseIdeaEditor) {
       myViewer = createIdeaEditor(fullString);
       JComponent component = myViewer.getComponent();
-      component.setPreferredSize(new Dimension(300, 500));
+      component.setPreferredSize(JBUI.size(300, 500));
       mySplitter.setSecondComponent(component);
     } else {
       final JTextArea textArea = new JTextArea(fullString);
@@ -306,7 +309,7 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
   
   public void setSelectedIndex(int index) {
     myList.setSelectedIndex(index);
-    ListScrollingUtil.ensureIndexIsVisible(myList, index, 0);
+    ScrollingUtil.ensureIndexIsVisible(myList, index, 0);
     updateViewerForSelection();
   }
 
@@ -327,7 +330,10 @@ public abstract class ContentChooser<Data> extends DialogWrapper {
   @NotNull
   public String getSelectedText() {
     StringBuilder sb = new StringBuilder();
+    boolean first = true;
     for (Object o : myList.getSelectedValues()) {
+      if (first) first = false;
+      else sb.append("\n");
       String s = ((Item)o).longText;
       sb.append(StringUtil.convertLineSeparators(s));
     }

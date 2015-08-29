@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.command.undo.UndoUtil;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
@@ -28,15 +29,17 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.*;
-import com.intellij.util.ArrayUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashSet;
+
 /**
  * @author Dmitry Avdeev
  */
-public class DefaultXmlSuppressionProvider extends XmlSuppressionProvider {
+public class DefaultXmlSuppressionProvider extends XmlSuppressionProvider implements InspectionSuppressor {
 
   public static final String SUPPRESS_MARK = "suppress";
 
@@ -109,8 +112,8 @@ public class DefaultXmlSuppressionProvider extends XmlSuppressionProvider {
     if (id == null) {
       return true;
     }
-    @NonNls final String[] parts = text.split("[ ,]");
-    return ArrayUtil.find(parts, id) != -1 || ArrayUtil.find(parts, XmlSuppressableInspectionTool.ALL) != -1;
+    @NonNls final HashSet<String> parts = ContainerUtil.newHashSet(StringUtil.getWordsIn(text));
+    return parts.contains(id) || parts.contains(XmlSuppressableInspectionTool.ALL);
   }
 
   protected void suppress(PsiFile file, final PsiElement suppressionElement, String inspectionId, final int offset) {
@@ -136,12 +139,12 @@ public class DefaultXmlSuppressionProvider extends XmlSuppressionProvider {
 
   protected String getSuppressionText(String inspectionId, @Nullable String originalText) {
     if (originalText == null) {
-      return getPrefix() + inspectionId + getSuffix();
+      return getPrefix() + inspectionId + getSuffix() + "\n";
     } else if (inspectionId.equals(XmlSuppressableInspectionTool.ALL)) {
       final int pos = originalText.indexOf(getPrefix());
-      return originalText.substring(0, pos) + getPrefix() + inspectionId + getSuffix();
+      return originalText.substring(0, pos) + getPrefix() + inspectionId + getSuffix() + "\n";
     }
-    return originalText.replace(getSuffix(), ", " + inspectionId + getSuffix());
+    return StringUtil.replace(originalText, getSuffix(), ", " + inspectionId + getSuffix());
   }
 
   @NonNls
@@ -153,6 +156,6 @@ public class DefaultXmlSuppressionProvider extends XmlSuppressionProvider {
 
   @NonNls
   protected String getSuffix() {
-    return " -->\n";
+    return " -->";
   }
 }

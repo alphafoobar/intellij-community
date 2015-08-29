@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.codeInsight;
 
-import com.intellij.openapi.application.PathManager;
+import com.intellij.codeInsight.editorActions.SmartBackspaceMode;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.ArrayUtil;
@@ -24,42 +23,23 @@ import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializationException;
 import com.intellij.util.xmlb.XmlSerializer;
 import com.intellij.util.xmlb.annotations.AbstractCollection;
+import com.intellij.util.xmlb.annotations.OptionTag;
 import com.intellij.util.xmlb.annotations.Property;
+import com.intellij.util.xmlb.annotations.Transient;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jdom.Element;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-
-
 @State(
   name = "CodeInsightSettings",
-  storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/editor.codeinsight.xml"
-    )}
+  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/editor.codeinsight.xml")
 )
-public class CodeInsightSettings implements PersistentStateComponent<Element>, Cloneable, ExportableComponent {
+public class CodeInsightSettings implements PersistentStateComponent<Element>, Cloneable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.CodeInsightSettings");
-
-  @NonNls public static final String EXTERNAL_FILE_NAME = "editor.codeinsight";
 
   public static CodeInsightSettings getInstance() {
     return ServiceManager.getService(CodeInsightSettings.class);
-  }
-
-  @Override
-  @NotNull
-  public File[] getExportFiles() {
-    return new File[]{PathManager.getOptionsFile(EXTERNAL_FILE_NAME)};
-  }
-
-  @Override
-  @NotNull
-  public String getPresentableName() {
-    return CodeInsightBundle.message("codeinsight.settings");
   }
 
   @Override
@@ -94,11 +74,34 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
   public boolean SELECT_AUTOPOPUP_SUGGESTIONS_BY_CHARS = false;
   public boolean AUTOCOMPLETE_ON_CODE_COMPLETION = true;
   public boolean AUTOCOMPLETE_ON_SMART_TYPE_COMPLETION = true;
+
+  /** todo remove in IDEA 16 */
   @Deprecated public boolean AUTOCOMPLETE_ON_CLASS_NAME_COMPLETION = false;
+
   public boolean AUTOCOMPLETE_COMMON_PREFIX = true;
+
+  /** todo remove in IDEA 16 */
+  @Deprecated
   public boolean SHOW_STATIC_AFTER_INSTANCE = false;
 
   public boolean SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO = false;
+
+  public boolean SHOW_SOURCE_INFERRED_ANNOTATIONS = true;
+
+  @OptionTag
+  private int SMART_BACKSPACE = SmartBackspaceMode.AUTOINDENT.ordinal();
+  
+  @Transient
+  @NotNull
+  public SmartBackspaceMode getBackspaceMode() {
+    SmartBackspaceMode[] values = SmartBackspaceMode.values();
+    return SMART_BACKSPACE >= 0 && SMART_BACKSPACE < values.length ? values[SMART_BACKSPACE] : SmartBackspaceMode.OFF; 
+  }
+
+  @Transient
+  public void setBackspaceMode(@NotNull SmartBackspaceMode mode) {
+    SMART_BACKSPACE = mode.ordinal();
+  }
 
   public boolean SMART_INDENT_ON_ENTER = true;
   public boolean INSERT_BRACE_ON_ENTER = true;
@@ -111,7 +114,9 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
 
   public boolean AUTOINSERT_PAIR_BRACKET = true;
   public boolean AUTOINSERT_PAIR_QUOTE = true;
+  public boolean REFORMAT_BLOCK_ON_RBRACE = true;
 
+  @MagicConstant(intValues = {NO_REFORMAT, INDENT_BLOCK, INDENT_EACH_LINE, REFORMAT_BLOCK})
   public int REFORMAT_ON_PASTE = INDENT_EACH_LINE;
   public static final int NO_REFORMAT = 1;
   public static final int INDENT_BLOCK = 2;
@@ -120,7 +125,8 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
 
   public boolean INDENT_TO_CARET_ON_PASTE = false;
 
-  public int ADD_IMPORTS_ON_PASTE = ASK; // YES, NO or ASK
+  @MagicConstant(intValues = {YES, NO, ASK})
+  public int ADD_IMPORTS_ON_PASTE = ASK;
   public static final int YES = 1;
   public static final int NO = 2;
   public static final int ASK = 3;
@@ -129,6 +135,7 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
   public boolean HIGHLIGHT_SCOPE = false;
 
   public boolean USE_INSTANCEOF_ON_EQUALS_PARAMETER = false;
+  public boolean USE_ACCESSORS_IN_EQUALS_HASHCODE = false;
 
   public boolean HIGHLIGHT_IDENTIFIER_UNDER_CARET = true;
 

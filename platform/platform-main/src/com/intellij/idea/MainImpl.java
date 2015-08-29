@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@
 package com.intellij.idea;
 
 import com.intellij.ide.plugins.PluginManager;
+import com.intellij.openapi.application.ConfigImportHelper;
 import com.intellij.util.PlatformUtils;
-import com.intellij.util.PlatformUtilsCore;
 
 import javax.swing.*;
 
@@ -29,16 +29,21 @@ public class MainImpl {
    * Called from PluginManager via reflection.
    */
   protected static void start(final String[] args) {
-    System.setProperty(PlatformUtilsCore.PLATFORM_PREFIX_KEY, PlatformUtils.getPlatformPrefix(PlatformUtilsCore.COMMUNITY_PREFIX));
+    System.setProperty(PlatformUtils.PLATFORM_PREFIX_KEY, PlatformUtils.getPlatformPrefix(PlatformUtils.IDEA_CE_PREFIX));
 
     StartupUtil.prepareAndStart(args, new StartupUtil.AppStarter() {
       @Override
-      public void start(boolean newConfigFolder) {
+      public void start(final boolean newConfigFolder) {
         //noinspection SSBasedInspection
         SwingUtilities.invokeLater(new Runnable() {
           @Override
           public void run() {
             PluginManager.installExceptionHandler();
+
+            if (newConfigFolder && !Boolean.getBoolean(ConfigImportHelper.CONFIG_IMPORTED_IN_CURRENT_SESSION_KEY)) {
+              StartupUtil.runStartupWizard();
+            }
+
             final IdeaApplication app = new IdeaApplication(args);
             //noinspection SSBasedInspection
             SwingUtilities.invokeLater(new Runnable() {

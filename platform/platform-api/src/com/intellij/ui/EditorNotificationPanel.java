@@ -22,9 +22,13 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.ui.components.panels.HorizontalLayout;
+import com.intellij.ui.components.panels.NonOpaquePanel;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.PlatformColors;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
@@ -35,23 +39,35 @@ import java.awt.*;
  */
 public class EditorNotificationPanel extends JPanel {
   protected final JLabel myLabel = new JLabel();
-  protected final JPanel myLinksPanel;
+  protected final JLabel myGearLabel = new JLabel();
+  protected final JPanel myLinksPanel = new NonOpaquePanel(new HorizontalLayout(JBUI.scale(5)));
 
   public EditorNotificationPanel() {
     super(new BorderLayout());
-    setBorder(BorderFactory.createEmptyBorder(1, 15, 1, 15));
 
-    setPreferredSize(new Dimension(-1, 24));
+    JPanel panel = new NonOpaquePanel(new BorderLayout());
+    panel.add(BorderLayout.CENTER, myLabel);
+    panel.add(BorderLayout.EAST, myLinksPanel);
+    panel.setBorder(JBUI.Borders.empty(5, 0, 5, 5));
+    panel.setMinimumSize(new Dimension(0, 0));
 
-    add(myLabel, BorderLayout.CENTER);
-
-    myLinksPanel = new JPanel(new FlowLayout());
-    myLinksPanel.setBackground(getBackground());
-    add(myLinksPanel, BorderLayout.EAST);
+    add(BorderLayout.CENTER, panel);
+    add(BorderLayout.EAST, myGearLabel);
+    setBorder(JBUI.Borders.empty(0, 10));
   }
 
   public void setText(String text) {
     myLabel.setText(text);
+  }
+
+  public EditorNotificationPanel text(@NotNull String text) {
+    myLabel.setText(text);
+    return this;
+  }
+
+  public EditorNotificationPanel icon(@NotNull Icon icon) {
+    myLabel.setIcon(icon);
+    return this;
   }
 
   @Override
@@ -83,19 +99,13 @@ public class EditorNotificationPanel extends JPanel {
 
   protected void executeAction(final String actionId) {
     final AnAction action = ActionManager.getInstance().getAction(actionId);
-    final AnActionEvent event = new AnActionEvent(null, DataManager.getInstance().getDataContext(this), ActionPlaces.UNKNOWN,
-                                                  action.getTemplatePresentation(), ActionManager.getInstance(),
-                                                  0);
+    final AnActionEvent event = AnActionEvent.createFromAnAction(action, null, ActionPlaces.UNKNOWN,
+                                                                 DataManager.getInstance().getDataContext(this));
     action.beforeActionPerformedUpdate(event);
     action.update(event);
 
     if (event.getPresentation().isEnabled() && event.getPresentation().isVisible()) {
       action.actionPerformed(event);
     }
-  }
-
-  @Override
-  public Dimension getMinimumSize() {
-    return new Dimension(0, 0);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@
  */
 package com.intellij.refactoring.extractMethodObject;
 
+import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.psi.*;
@@ -43,7 +45,7 @@ import java.awt.event.ActionListener;
 import java.util.Enumeration;
 
 
-public class ExtractMethodObjectDialog extends AbstractExtractDialog {
+public class ExtractMethodObjectDialog extends DialogWrapper implements AbstractExtractDialog {
   private final Project myProject;
   private final PsiType myReturnType;
   private final PsiTypeParameterList myTypeParameterList;
@@ -85,7 +87,7 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
   public ExtractMethodObjectDialog(Project project, PsiClass targetClass, final InputVariables inputVariables, PsiType returnType,
                                    PsiTypeParameterList typeParameterList, PsiType[] exceptions, boolean isStatic, boolean canBeStatic,
                                    final PsiElement[] elementsToExtract, final boolean multipleExitPoints) {
-    super(project);
+    super(project, true);
     myProject = project;
     myTargetClass = targetClass;
     myReturnType = returnType;
@@ -128,6 +130,11 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
     return false;
   }
 
+  @Override
+  public PsiType getReturnType() {
+    return null;
+  }
+
   @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(), getCancelAction(), getHelpAction()};
@@ -159,8 +166,7 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
     }
     if (conflicts.size() > 0) {
       final ConflictsDialog conflictsDialog = new ConflictsDialog(myProject, conflicts);
-      conflictsDialog.show();
-      if (!conflictsDialog.isOK()){
+      if (!conflictsDialog.showAndGet()) {
         if (conflictsDialog.isShowConflicts()) close(CANCEL_EXIT_CODE);
         return;
       }
@@ -188,7 +194,7 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
   private void update() {
     myCbMakeStatic.setEnabled(myCreateInnerClassRb.isSelected() && myCanBeStatic && !myStaticFlag);
     updateSignature();
-    final PsiNameHelper helper = JavaPsiFacade.getInstance(myProject).getNameHelper();
+    final PsiNameHelper helper = PsiNameHelper.getInstance(myProject);
     setOKActionEnabled((myCreateInnerClassRb.isSelected() && helper.isIdentifier(myInnerClassName.getText())) ||
                         (!myCreateInnerClassRb.isSelected() && helper.isIdentifier(myMethodName.getText())));
   }
@@ -233,6 +239,7 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
         myInputVariables = myVariableData.getInputVariables().toArray(new VariableData[myVariableData.getInputVariables().size()]);
         myParametersTableContainer.removeAll();
         myParametersTableContainer.add(createParametersPanel(), BorderLayout.CENTER);
+        myParametersTableContainer.revalidate();
         updateSignature();
         updateVarargsEnabled();
       }
@@ -264,7 +271,7 @@ public class ExtractMethodObjectDialog extends AbstractExtractDialog {
     myCbMakeVarargsAnonymous.setSelected(myWasStatic);
     myCbMakeVarargsAnonymous.addActionListener(updateSugnatureListener);
 
-    final com.intellij.openapi.editor.event.DocumentAdapter nameListener = new com.intellij.openapi.editor.event.DocumentAdapter() {
+    final DocumentAdapter nameListener = new DocumentAdapter() {
       @Override
       public void documentChanged(final DocumentEvent e) {
         update();

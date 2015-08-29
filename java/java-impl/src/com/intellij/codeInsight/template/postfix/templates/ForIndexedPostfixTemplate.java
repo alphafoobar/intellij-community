@@ -1,92 +1,75 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.template.postfix.templates;
 
 import com.intellij.codeInsight.template.Template;
-import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.codeInsight.template.impl.MacroCallNode;
 import com.intellij.codeInsight.template.macro.SuggestVariableNameMacro;
-import com.intellij.codeInsight.template.postfix.util.PostfixTemplatesUtils;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Condition;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionStatement;
 import com.intellij.psi.PsiType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public abstract class ForIndexedPostfixTemplate extends PostfixTemplate {
-  protected ForIndexedPostfixTemplate(@NotNull String key, @NotNull String description, @NotNull String example) {
-    super(key, description, example);
+import static com.intellij.codeInsight.template.postfix.util.JavaPostfixTemplatesUtils.*;
+
+public abstract class ForIndexedPostfixTemplate extends StringBasedPostfixTemplate {
+
+  public static final Condition<PsiElement> IS_NUMBER_OR_ARRAY_OR_ITERABLE = new Condition<PsiElement>() {
+    @Override
+    public boolean value(PsiElement element) {
+      return IS_ITERABLE_OR_ARRAY.value(element) || IS_NUMBER.value(element);
+    }
+  };
+
+  protected ForIndexedPostfixTemplate(@NotNull String key, @NotNull String example) {
+    super(key, example, selectorTopmost(IS_NUMBER_OR_ARRAY_OR_ITERABLE));
   }
 
   @Override
-  public boolean isApplicable(@NotNull PsiElement context, @NotNull Document copyDocument, int newOffset) {
-    PsiExpression expr = getTopmostExpression(context);
-    if (expr == null || !(expr.getParent() instanceof PsiExpressionStatement)) return false;
-    return PostfixTemplatesUtils.isNumber(expr.getType()) || PostfixTemplatesUtils.isArray(expr.getType()) || PostfixTemplatesUtils
-      .isIterable(expr.getType());
-  }
-
-  @Override
-  public void expand(@NotNull PsiElement context, @NotNull Editor editor) {
-    PsiExpression expr = getTopmostExpression(context);
-    if (expr == null) {
-      PostfixTemplatesUtils.showErrorHint(context.getProject(), editor);
-      return;
-    }
-
-    Pair<String, String> bounds = calculateBounds(expr);
-    if (bounds == null) {
-      PostfixTemplatesUtils.showErrorHint(context.getProject(), editor);
-      return;
-    }
-    Project project = context.getProject();
-
-    Document document = editor.getDocument();
-    document.deleteString(expr.getTextRange().getStartOffset(), expr.getTextRange().getEndOffset());
-    TemplateManager manager = TemplateManager.getInstance(project);
-
-    Template template = manager.createTemplate("", "");
-    template.setToReformat(true);
-    template.addTextSegment("for (" + suggestIndexType(expr) + " ");
+  public void setVariables(@NotNull Template template, @NotNull PsiElement element) {
     MacroCallNode index = new MacroCallNode(new SuggestVariableNameMacro());
-    String indexVariable = "index";
-    template.addVariable(indexVariable, index, index, true);
-    template.addTextSegment(" = " + bounds.first + "; ");
-    template.addVariableSegment(indexVariable);
-    template.addTextSegment(getComparativeSign(expr));
-    template.addTextSegment(bounds.second);
-    template.addTextSegment("; ");
-    template.addVariableSegment(indexVariable);
-    template.addTextSegment(getOperator());
-    template.addTextSegment(") {\n");
-    template.addEndVariable();
-    template.addTextSegment("\n}");
+    template.addVariable("index", index, index, true);
+  }
 
-    manager.startTemplate(editor, template);
+  @Override
+  public final String getTemplateString(@NotNull PsiElement element) {
+    PsiExpression expr = (PsiExpression)element;
+    String bound = getExpressionBound(expr);
+    if (bound == null) {
+      return null;
+    }
+
+    return getStringTemplate(expr).replace("$bound$", bound).replace("$type$", suggestIndexType(expr));
   }
 
   @NotNull
-  protected abstract String getComparativeSign(@NotNull PsiExpression expr);
+  protected abstract String getStringTemplate(@NotNull PsiExpression expr);
 
   @Nullable
-  protected abstract Pair<String, String> calculateBounds(@NotNull PsiExpression expression);
-
-  @NotNull
-  protected abstract String getOperator();
-
-  @Nullable
-  protected static String getExpressionBound(@NotNull PsiExpression expr) {
+  private static String getExpressionBound(@NotNull PsiExpression expr) {
     PsiType type = expr.getType();
-    if (PostfixTemplatesUtils.isNumber(type)) {
+    if (isNumber(type)) {
       return expr.getText();
     }
-    else if (PostfixTemplatesUtils.isArray(type)) {
+    else if (isArray(type)) {
       return expr.getText() + ".length";
     }
-    else if (PostfixTemplatesUtils.isIterable(type)) {
+    else if (isIterable(type)) {
       return expr.getText() + ".size()";
     }
     return null;
@@ -95,9 +78,14 @@ public abstract class ForIndexedPostfixTemplate extends PostfixTemplate {
   @NotNull
   private static String suggestIndexType(@NotNull PsiExpression expr) {
     PsiType type = expr.getType();
-    if (PostfixTemplatesUtils.isNumber(type)) {
+    if (isNumber(type)) {
       return type.getCanonicalText();
     }
     return "int";
+  }
+
+  @Override
+  protected boolean shouldAddExpressionToContext() {
+    return false;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.application.options.codeStyle;
 
-import com.intellij.openapi.options.SchemesManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.codeStyle.CodeStyleScheme;
 import com.intellij.psi.codeStyle.CodeStyleSchemes;
@@ -26,13 +24,12 @@ import com.intellij.psi.impl.source.codeStyle.CodeStyleSchemeImpl;
 import com.intellij.psi.impl.source.codeStyle.CodeStyleSchemesImpl;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-
 public class CodeStyleSchemesModel {
-
   private final List<CodeStyleScheme> mySchemes = new ArrayList<CodeStyleScheme>();
   private CodeStyleScheme myGlobalSelected;
   private final CodeStyleSchemeImpl myProjectScheme;
@@ -43,7 +40,7 @@ public class CodeStyleSchemesModel {
   private final Project myProject;
   private boolean myUsePerProjectSettings;
   
-  public final static String PROJECT_SCHEME_NAME = "Project";
+  public static final String PROJECT_SCHEME_NAME = "Project";
 
   public CodeStyleSchemesModel(Project project) {
     myProject = project;
@@ -153,13 +150,12 @@ public class CodeStyleSchemesModel {
     CodeStyleSchemes schemes = CodeStyleSchemes.getInstance();
     if (getProjectSettings().USE_PER_PROJECT_SETTINGS != myUsePerProjectSettings) return true;
     if (!myUsePerProjectSettings &&
-        (getSelectedScheme() != schemes.findPreferredScheme(getProjectSettings().PREFERRED_PROJECT_CODE_STYLE))) {
+        getSelectedScheme() != schemes.findPreferredScheme(getProjectSettings().PREFERRED_PROJECT_CODE_STYLE)) {
       return true;
     }
     Set<CodeStyleScheme> configuredSchemesSet = new HashSet<CodeStyleScheme>(getSchemes());
     Set<CodeStyleScheme> savedSchemesSet = new HashSet<CodeStyleScheme>(Arrays.asList(schemes.getSchemes()));
-    if (!configuredSchemesSet.equals(savedSchemesSet)) return true;
-    return false;
+    return !configuredSchemesSet.equals(savedSchemesSet);
   }
   
   public void apply() {
@@ -169,36 +165,16 @@ public class CodeStyleSchemesModel {
       myUsePerProjectSettings || myGlobalSelected == null ? null : myGlobalSelected.getName();
     projectSettingsManager.PER_PROJECT_SETTINGS = myProjectScheme.getCodeStyleSettings();
 
-    final CodeStyleScheme[] savedSchemes = CodeStyleSchemes.getInstance().getSchemes();
-    final Set<CodeStyleScheme> savedSchemesSet = new HashSet<CodeStyleScheme>(Arrays.asList(savedSchemes));
-    List<CodeStyleScheme> configuredSchemes = getSchemes();
+    ((CodeStyleSchemesImpl)CodeStyleSchemes.getInstance()).getSchemeManager().setSchemes(mySchemes, myGlobalSelected, null);
 
-    for (CodeStyleScheme savedScheme : savedSchemes) {
-      if (!configuredSchemes.contains(savedScheme)) {
-        CodeStyleSchemes.getInstance().deleteScheme(savedScheme);
-      }
-    }
-
-    for (CodeStyleScheme configuredScheme : configuredSchemes) {
-      if (!savedSchemesSet.contains(configuredScheme)) {
-        CodeStyleSchemes.getInstance().addScheme(configuredScheme);
-      }
-    }
-
-    CodeStyleSchemes.getInstance().setCurrentScheme(myGlobalSelected);
-    
     // We want to avoid the situation when 'real code style' differs from the copy stored here (e.g. when 'real code style' changes
     // are 'committed' by pressing 'Apply' button). So, we reset the copies here assuming that this method is called on 'Apply'
     // button processing
     mySettingsToClone.clear();
   }
 
-  static SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> getSchemesManager() {
-    return ((CodeStyleSchemesImpl) CodeStyleSchemes.getInstance()).getSchemesManager();
-  }
-
   public static boolean cannotBeModified(final CodeStyleScheme currentScheme) {
-    return currentScheme.isDefault() || getSchemesManager().isShared(currentScheme);
+    return currentScheme.isDefault();
   }
 
   public static boolean cannotBeDeleted(final CodeStyleScheme currentScheme) {
@@ -220,26 +196,9 @@ public class CodeStyleSchemesModel {
   public void copyToProject(final CodeStyleScheme selectedScheme) {
     myProjectScheme.getCodeStyleSettings().copyFrom(selectedScheme.getCodeStyleSettings());
     myDispatcher.getMulticaster().schemeChanged(myProjectScheme);
-    //if (mySettingsToClone.containsKey(myProjectScheme)) {
-    //  CodeStyleSettings projectSettings = mySettingsToClone.get(myProjectScheme);
-    //  projectSettings.copyFrom(getEditedSchemeSettings(selectedScheme));
-    //}
-    //else {
-    //  mySettingsToClone.put(myProjectScheme, getEditedSchemeSettings(selectedScheme).clone());
-    //}
-    //myDispatcher.getMulticaster().schemeChanged(myProjectScheme);
   }
 
-  private CodeStyleSettings getEditedSchemeSettings(final CodeStyleScheme selectedScheme) {
-    if (mySettingsToClone.containsKey(selectedScheme)) {
-      return mySettingsToClone.get(selectedScheme);
-    }
-    else {
-      return selectedScheme.getCodeStyleSettings();
-    }
-  }
-
-  public CodeStyleScheme exportProjectScheme(final String name) {
+  public CodeStyleScheme exportProjectScheme(@NotNull String name) {
     CodeStyleScheme newScheme = createNewScheme(name, myProjectScheme);
     ((CodeStyleSchemeImpl)newScheme).setCodeStyleSettings(getCloneSettings(myProjectScheme));
     addScheme(newScheme, false);
@@ -250,11 +209,12 @@ public class CodeStyleSchemesModel {
   public CodeStyleScheme createNewScheme(final String preferredName, final CodeStyleScheme parentScheme) {
     String name;
     if (preferredName == null) {
+      if (parentScheme == null) throw new IllegalArgumentException("parentScheme must not be null");
       // Generate using parent name
       name = null;
       for (int i = 1; name == null; i++) {
         String currName = parentScheme.getName() + " (" + i + ")";
-        if (null == findSchemeByName(currName)) {
+        if (findSchemeByName(currName) == null) {
           name = currName;
         }
       }
@@ -263,7 +223,7 @@ public class CodeStyleSchemesModel {
       name = null;
       for (int i = 0; name == null; i++) {
         String currName = i == 0 ? preferredName : preferredName + " (" + i + ")";
-        if (null == findSchemeByName(currName)) {
+        if (findSchemeByName(currName) == null) {
           name = currName;
         }
       }
@@ -303,5 +263,9 @@ public class CodeStyleSchemesModel {
       }
     });
     return schemes;
+  }
+
+  public Project getProject() {
+    return myProject;
   }
 }

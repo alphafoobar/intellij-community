@@ -40,7 +40,7 @@ import java.util.List;
 public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstract implements Configurable.NoScroll {
   private final Project myProject;
   private VcsDirectoryConfigurationPanel myMappings;
-  private VcsGeneralConfigurationPanel myGeneralPanel;
+  private VcsGeneralConfigurationConfigurable myGeneralPanel;
 
   public VcsManagerConfigurable(Project project) {
     myProject = project;
@@ -49,9 +49,6 @@ public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstra
   @Override
   public JComponent createComponent() {
     myMappings = new VcsDirectoryConfigurationPanel(myProject);
-    if (myGeneralPanel != null) {
-      addListenerToGeneralPanel();
-    }
     return myMappings;
   }
 
@@ -75,6 +72,11 @@ public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstra
   public void reset() {
     super.reset();
     myMappings.reset();
+  }
+
+  @Override
+  public boolean isVisible() {
+    return ProjectLevelVcsManager.getInstance(myProject).getAllVcss().length > 0;
   }
 
   @Override
@@ -113,26 +115,12 @@ public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstra
 
   @Override
   protected Configurable[] buildConfigurables() {
-    myGeneralPanel = new VcsGeneralConfigurationPanel(myProject){
-      @Override
-      public void disposeUIResources() {
-        super.disposeUIResources();
-        myGeneralPanel = null;
-      }
-    };
-
-    if (myMappings != null) {
-      myGeneralPanel.updateAvailableOptions(myMappings.getActiveVcses());
-      addListenerToGeneralPanel();
-    }
-    else {
-      myGeneralPanel.updateAvailableOptions(Arrays.asList(ProjectLevelVcsManager.getInstance(myProject).getAllActiveVcss()));
-    }
+    myGeneralPanel = new VcsGeneralConfigurationConfigurable(myProject, this);
 
     List<Configurable> result = new ArrayList<Configurable>();
 
     result.add(myGeneralPanel);
-    result.add(new VcsBackgroundOperationsConfigurationPanel(myProject));
+    result.add(new VcsBackgroundOperationsConfigurable(myProject));
 
     if (!myProject.isDefault()) {
       result.add(new IgnoredSettingsPanel(myProject));
@@ -160,13 +148,8 @@ public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstra
     return result.toArray(new Configurable[result.size()]);
   }
 
-  private void addListenerToGeneralPanel() {
-    myMappings.addVcsListener(new ModuleVcsListener() {
-      @Override
-      public void activeVcsSetChanged(Collection<AbstractVcs> activeVcses) {
-        myGeneralPanel.updateAvailableOptions(activeVcses);
-      }
-    });
+  public VcsDirectoryConfigurationPanel getMappings() {
+    return myMappings;
   }
 
   private Configurable createVcsConfigurableWrapper(final VcsDescriptor vcs) {
@@ -232,5 +215,4 @@ public class VcsManagerConfigurable extends SearchableConfigurable.Parent.Abstra
       }
     };
   }
-
 }

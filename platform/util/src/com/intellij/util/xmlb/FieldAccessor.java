@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,47 +13,109 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.xmlb;
 
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 
-class FieldAccessor implements Accessor {
+class FieldAccessor implements MutableAccessor {
   private final Field myField;
 
-  public FieldAccessor(Field myField) {
-    this.myField = myField;
+  public FieldAccessor(@NotNull Field field) {
+    myField = field;
+    field.setAccessible(true);
   }
 
   @Override
-  public Object read(Object o) {
-    assert myField.getDeclaringClass().isInstance(o) : "Wrong class: " + o.getClass() + " should be: " + myField.getDeclaringClass();
+  public Object read(@NotNull Object o) {
+    assert myField.getDeclaringClass().isInstance(o) : "Wrong class: " + o.getClass() + "; should be: " + myField.getDeclaringClass();
     try {
       return myField.get(o);
     }
     catch (IllegalAccessException e) {
-      throw new XmlSerializationException(e);
+      throw new XmlSerializationException("Reading " + myField, e);
     }
   }
 
   @Override
-  public void write(Object o, Object value) {
-    assert myField.getDeclaringClass().isInstance(o) : "Wrong class: " + o.getClass() + " should be: " + myField.getDeclaringClass();
+  public void set(@NotNull Object host, @Nullable Object value) {
     try {
-      myField.set(o, XmlSerializerImpl.convert(value, myField.getType()));
+      myField.set(host, value);
     }
     catch (IllegalAccessException e) {
-      throw new XmlSerializationException(e);
+      throw new XmlSerializationException("Writing " + myField, e);
     }
   }
 
   @Override
-  public Annotation[] getAnnotations() {
-    return myField.getAnnotations();
+  public void setBoolean(@NotNull Object host, boolean value) {
+    try {
+      myField.setBoolean(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public void setInt(@NotNull Object host, int value) {
+    try {
+      myField.setInt(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public void setShort(@NotNull Object host, short value) {
+    try {
+      myField.setShort(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public void setLong(@NotNull Object host, long value) {
+    try {
+      myField.setLong(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public void setFloat(@NotNull Object host, float value) {
+    try {
+      myField.setFloat(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public void setDouble(@NotNull Object host, double value) {
+    try {
+      myField.setDouble(host, value);
+    }
+    catch (IllegalAccessException e) {
+      throw new XmlSerializationException("Writing " + myField, e);
+    }
+  }
+
+  @Override
+  public <T extends Annotation> T getAnnotation(@NotNull Class<T> annotationClass) {
+    return myField.getAnnotation(annotationClass);
   }
 
   @Override
@@ -69,6 +131,16 @@ class FieldAccessor implements Accessor {
   @Override
   public Type getGenericType() {
     return myField.getGenericType();
+  }
+
+  @Override
+  public boolean isFinal() {
+    return Modifier.isFinal(myField.getModifiers());
+  }
+
+  @Override
+  public void write(Object o, Object value) {
+    set(o, value);
   }
 
   @NonNls

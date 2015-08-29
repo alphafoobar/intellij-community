@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,11 +27,13 @@ import com.intellij.debugger.engine.jdi.ThreadReferenceProxy;
 import com.intellij.debugger.engine.managerThread.SuspendContextCommand;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.rt.debugger.BatchEvaluatorServer;
 import com.intellij.util.containers.HashMap;
 import com.sun.jdi.*;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -98,7 +100,7 @@ public class BatchEvaluator {
         if(constructor != null){
           ObjectReference evaluator = null;
           try {
-            evaluator = myDebugProcess.newInstance(evaluationContext, batchEvaluatorClass, constructor, new ArrayList());
+            evaluator = myDebugProcess.newInstance(evaluationContext, batchEvaluatorClass, constructor, Collections.emptyList());
           }
           catch (Exception e) {
             LOG.debug(e);
@@ -120,7 +122,7 @@ public class BatchEvaluator {
     final EvaluationContext evaluationContext = command.getEvaluationContext();
     final SuspendContext suspendContext = evaluationContext.getSuspendContext();
 
-    if(!hasBatchEvaluator(evaluationContext)) {
+    if(!Registry.is("debugger.batch.evaluation") || !hasBatchEvaluator(evaluationContext)) {
       myDebugProcess.getManagerThread().invokeCommand(command);
     }
     else {

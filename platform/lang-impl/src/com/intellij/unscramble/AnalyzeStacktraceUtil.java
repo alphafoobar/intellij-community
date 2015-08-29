@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,19 +42,19 @@ import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.Transferable;
 
 /**
  * @author yole
  */
 public class AnalyzeStacktraceUtil {
-  public static ExtensionPointName<Filter> EP_NAME = ExtensionPointName.create("com.intellij.analyzeStacktraceFilter");
+  public static final ExtensionPointName<Filter> EP_NAME = ExtensionPointName.create("com.intellij.analyzeStacktraceFilter");
 
   private AnalyzeStacktraceUtil() {
   }
@@ -67,16 +67,7 @@ public class AnalyzeStacktraceUtil {
 
   @Nullable
   public static String getTextInClipboard() {
-    final CopyPasteManager copyPasteManager = CopyPasteManager.getInstance();
-    if (copyPasteManager.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
-      final Transferable contents = copyPasteManager.getContents();
-      if (contents != null) {
-        try {
-          return (String)contents.getTransferData(DataFlavor.stringFlavor);
-        } catch (Exception ignore) { }
-      }
-    }
-    return null;
+    return CopyPasteManager.getInstance().getContents(DataFlavor.stringFlavor);
   }
 
   public interface ConsoleFactory {
@@ -112,11 +103,15 @@ public class AnalyzeStacktraceUtil {
     for (AnAction action: consoleView.createConsoleActions()) {
       toolbarActions.add(action);
     }
-    toolbarActions.add(new AnnotateStackTraceAction((ConsoleViewImpl)consoleView));
+    final ConsoleViewImpl console = (ConsoleViewImpl)consoleView;
+    console.getEditor().getSettings().setCaretRowShown(true);
+    toolbarActions.add(new AnnotateStackTraceAction(console.getEditor(), console.getHyperlinks()));
     toolbarActions.add(new CloseAction(executor, descriptor, project));
     ExecutionManager.getInstance(project).getContentManager().showRunContent(executor, descriptor);
     consoleView.allowHeavyFilters();
-    printStacktrace(consoleView, text);
+    if (consoleFactory == null) {
+      printStacktrace(consoleView, text);
+    }
     return descriptor;
   }
 
@@ -142,7 +137,7 @@ public class AnalyzeStacktraceUtil {
     settings.setRightMarginShown(false);
 
     StacktraceEditorPanel editorPanel = new StacktraceEditorPanel(project, editor);
-    editorPanel.setPreferredSize(new Dimension(600, 400));
+    editorPanel.setPreferredSize(JBUI.size(600, 400));
     Disposer.register(parentDisposable, editorPanel);
     return editorPanel;
   }

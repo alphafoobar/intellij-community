@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,19 +16,21 @@
 package com.intellij.lang.ant.config.impl;
 
 import com.intellij.lang.ant.config.explorer.AntExplorer;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentManager;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author yole
  */
-public class AntToolWindowFactory implements ToolWindowFactory {
+public class AntToolWindowFactory implements ToolWindowFactory, DumbAware{
   @Override
-  public void createToolWindowContent(Project project, ToolWindow toolWindow) {
+  public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
     AntExplorer explorer = new AntExplorer(project);
     final ContentManager contentManager = toolWindow.getContentManager();
     final Content content = contentManager.getFactory().createContent(explorer, null, false);

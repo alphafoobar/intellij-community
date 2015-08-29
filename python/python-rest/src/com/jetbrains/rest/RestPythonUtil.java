@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,22 +15,18 @@
  */
 package com.jetbrains.rest;
 
+import com.intellij.execution.ExecutionException;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.util.SystemInfo;
-import com.jetbrains.python.packaging.PyExternalProcessException;
 import com.jetbrains.python.packaging.PyPackage;
 import com.jetbrains.python.packaging.PyPackageManager;
-import com.jetbrains.python.packaging.PyPackageManagerImpl;
 import com.jetbrains.python.sdk.PythonSdkType;
-import org.jetbrains.annotations.Nullable;
 
 /**
  * User : catherine
@@ -51,23 +47,16 @@ public class RestPythonUtil {
       if (module != null) {
         Sdk sdk = PythonSdkType.findPythonSdk(module);
         if (sdk != null) {
-          PyPackageManagerImpl manager = (PyPackageManagerImpl)PyPackageManager.getInstance(sdk);
+          PyPackageManager manager = PyPackageManager.getInstance(sdk);
           try {
-            final PyPackage sphinx = manager.findPackage("Sphinx");
-            String quickStart = findQuickStart(sdk);
-            presentation.setEnabled(sphinx != null && quickStart != null);
+            final PyPackage sphinx = manager.findPackage("Sphinx", false);
+            presentation.setEnabled(sphinx != null);
           }
-          catch (PyExternalProcessException ignored) {
+          catch (ExecutionException ignored) {
           }
         }
       }
     }
     return presentation;
-  }
-
-  @Nullable
-  public static String findQuickStart(final Sdk sdkHome) {
-    final String runnerName = "sphinx-quickstart" + (SystemInfo.isWindows ? ".exe" : "");
-    return PythonSdkType.getExecutablePath(sdkHome, runnerName);
   }
 }

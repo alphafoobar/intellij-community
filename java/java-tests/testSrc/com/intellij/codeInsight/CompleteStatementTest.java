@@ -16,11 +16,8 @@
 package com.intellij.codeInsight;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.roots.LanguageLevelProjectExtension;
-import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.JavaPsiFacade;
-import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.testFramework.EditorActionTestCase;
@@ -33,6 +30,10 @@ import org.jetbrains.annotations.NotNull;
 @TestDataPath("$CONTENT_ROOT/testData")
 public class CompleteStatementTest extends EditorActionTestCase {
   public void testAddMissingSemicolon() throws Exception { doTest(); }
+  
+  public void testAddMissingSemicolonToPackageStatement() { doTest(); }
+
+  public void testAddMissingSemicolonAfterAnonymous() { doTest(); }
 
   public void testAddMissingParen() throws Exception { doTest(); }
 
@@ -54,6 +55,20 @@ public class CompleteStatementTest extends EditorActionTestCase {
   
   public void testCompleteCatchLParen() throws Exception { doTest(); }
 
+  public void testAlreadyCompleteCatch() throws Exception {
+    CommonCodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
+    int old = settings.BRACE_STYLE;
+    settings.BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+    try {
+      doTest();
+    }
+    finally {
+      settings.BRACE_STYLE = old;
+    }
+  }
+
+  public void testNoBlockReformat() { doTest(); }
+
   public void testCompleteCatchWithExpression() throws Exception { doTest(); }
 
   public void testCompleteCatchBody() throws Exception { doTest(); }
@@ -73,6 +88,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testTwoStatementsInLine() throws Exception { doTest(); }
 
   public void testFor() throws Exception { doTest(); }
+
+  public void testEmptyFor() { doTest(); }
 
   public void testForEach() throws Exception { doTest(); }
 
@@ -114,6 +131,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
 
   public void testCompleteElseIf() throws Exception { doTest(); }
 
+  public void testReformatElseIf() { doTest(); }
+
   public void testCompleteStringLiteral() throws Exception {
     doTest();
   }
@@ -147,6 +166,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
 
   public void testFieldBeforeAnnotation() throws Exception { doTest(); }
   public void testMethodBeforeAnnotation() throws Exception { doTest(); }
+  public void testMethodBeforeCommentField() throws Exception { doTest(); }
+  public void testMethodBeforeCommentMethod() throws Exception { doTest(); }
 
   public void testParenthesized() throws Exception { doTest(); }
 
@@ -155,22 +176,20 @@ public class CompleteStatementTest extends EditorActionTestCase {
   }
 
   public void testCompleteIfNextLineBraceStyle() throws Exception {
-    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    CommonCodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
     settings.BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
     doTest();
     settings.BRACE_STYLE = CommonCodeStyleSettings.END_OF_LINE;
   }
 
   public void testCompleteIfNextLineBraceStyle2() throws Exception {
-    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    CommonCodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
     settings.BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
     doTest();
     settings.BRACE_STYLE = CommonCodeStyleSettings.END_OF_LINE;
   }
 
   public void testSCR36110() throws Exception {
-    JavaPsiFacade facade = JavaPsiFacade.getInstance(getProject());
-    LanguageLevel old = LanguageLevelProjectExtension.getInstance(facade.getProject()).getLanguageLevel();
     doTest();
   }
 
@@ -199,6 +218,7 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testSwitchKeyword() throws Exception { doTest(); }
 
   public void testSwitchKeywordWithCondition() throws Exception { doTest(); }
+  public void testCaseColon() { doTest(); }
 
   public void testNewInParentheses() throws Exception { doTest(); }
   
@@ -220,7 +240,11 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testIDEA25139() throws Exception {
     doTestBracesNextLineStyle();
   }
-  
+
+  public void testClassBracesNextLine() throws Exception {
+    doTestBracesNextLineStyle();
+  }
+
   public void testBeforeIfRBrace() throws Exception {
     CodeStyleSettingsManager.getSettings(getProject()).KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
     doTest();
@@ -236,7 +260,7 @@ public class CompleteStatementTest extends EditorActionTestCase {
   }
 
   public void testNoSpaceAfterSemicolon() throws Exception {
-    CodeStyleSettingsManager.getSettings(getProject()).SPACE_AFTER_SEMICOLON = false;
+    CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE).SPACE_AFTER_SEMICOLON = false;
     doTest();
   }
   
@@ -257,9 +281,19 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testCompleteMethodCallAtReturn() throws Exception { doTest(); }
   
   public void testGenericMethodBody() throws Exception { doTest(); }
+
+  public void testDefaultMethodBody() { doTest(); }
+  public void testStaticInterfaceMethodBody() { doTest(); }
+  public void testPrivateInterfaceMethodBody() { doTest(); }
+
+  public void testArrayInitializerRBracket() throws Exception { doTest(); }
+  public void testArrayInitializerRBrace() { doTest(); }
+  public void testArrayInitializerSeveralLines() { doTest(); }
+
+  public void testReturnInLambda() { doTest(); }
   
   private void doTestBracesNextLineStyle() throws Exception {
-    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    CommonCodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
     settings.BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
     settings.METHOD_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
     settings.CLASS_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;

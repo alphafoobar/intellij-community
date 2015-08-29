@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -150,7 +150,7 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
   }
 
   @Nullable
-  private DomFileDescription<T> findFileDescription(final XmlFileHeader rootTagName, @Nullable StringBuilder sb) {
+  private DomFileDescription<T> findFileDescription(final XmlFileHeader xmlFileHeader, @Nullable StringBuilder sb) {
     final DomFileDescription<T> mockDescription = myXmlFile.getUserData(DomManagerImpl.MOCK_DESCRIPTION);
     if (mockDescription != null) return mockDescription;
 
@@ -172,7 +172,7 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
     }
 
     //noinspection unchecked
-    final Set<DomFileDescription> namedDescriptions = myDomManager.getFileDescriptions(rootTagName.getRootTagLocalName());
+    final Set<DomFileDescription> namedDescriptions = myDomManager.getFileDescriptions(xmlFileHeader.getRootTagLocalName());
     if (sb != null) {
       sb.append("named " + new HashSet<DomFileDescription>(namedDescriptions) + "\n");
     }
@@ -202,6 +202,7 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
   private class MyCondition implements Condition<DomFileDescription> {
     public Module module;
 
+    @Override
     public boolean value(final DomFileDescription description) {
       return description.isMyFile(myXmlFile, module);
     }

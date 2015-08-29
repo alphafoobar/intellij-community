@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,12 +21,14 @@
 package com.intellij.debugger.actions;
 
 import com.intellij.debugger.DebuggerManagerEx;
-import com.intellij.debugger.engine.requests.RequestManagerImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.ui.breakpoints.Breakpoint;
 import com.intellij.debugger.ui.breakpoints.BreakpointManager;
 import com.intellij.debugger.ui.breakpoints.MethodBreakpoint;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -38,6 +40,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiMethod;
+import com.intellij.util.DocumentUtil;
 import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,14 +69,10 @@ public class ToggleMethodBreakpointAction extends AnAction {
     }
     final BreakpointManager manager = debugManager.getBreakpointManager();
     final PlaceInDocument place = getPlace(e);
-    if(place != null) {
+    if(place != null && DocumentUtil.isValidOffset(place.getOffset(), place.getDocument())) {
       Breakpoint breakpoint = manager.findBreakpoint(place.getDocument(), place.getOffset(), MethodBreakpoint.CATEGORY);
       if(breakpoint == null) {
-        final int methodLine = place.getDocument().getLineNumber(place.getOffset());
-        MethodBreakpoint methodBreakpoint = manager.addMethodBreakpoint(place.getDocument(), methodLine);
-        if(methodBreakpoint != null) {
-          RequestManagerImpl.createRequests(methodBreakpoint);
-        }
+        manager.addMethodBreakpoint(place.getDocument(), place.getDocument().getLineNumber(place.getOffset()));
       }
       else {
         manager.removeBreakpoint(breakpoint);
@@ -94,7 +93,7 @@ public class ToggleMethodBreakpointAction extends AnAction {
     if (ActionPlaces.PROJECT_VIEW_POPUP.equals(event.getPlace()) ||
         ActionPlaces.STRUCTURE_VIEW_POPUP.equals(event.getPlace()) ||
         ActionPlaces.FAVORITES_VIEW_POPUP.equals(event.getPlace()) ||
-        ActionPlaces.NAVIGATION_BAR.equals(event.getPlace())) {
+        ActionPlaces.NAVIGATION_BAR_POPUP.equals(event.getPlace())) {
       final PsiElement psiElement = event.getData(CommonDataKeys.PSI_ELEMENT);
       if(psiElement instanceof PsiMethod) {
         final PsiFile containingFile = psiElement.getContainingFile();
@@ -122,21 +121,7 @@ public class ToggleMethodBreakpointAction extends AnAction {
       }
     }
 
-    if(method != null) {
-      final PsiElement method1 = method;
-      final Document document1 = document;
-
-      return new PlaceInDocument() {
-        public Document getDocument() {
-          return document1;
-        }
-
-        public int getOffset() {
-          return method1.getTextOffset();
-        }
-      };
-    }
-    return null;
+    return method != null ? new PlaceInDocument(document, method.getTextOffset()) : null;
   }
 
   @Nullable

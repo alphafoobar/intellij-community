@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ public class ExcludedEntriesConfigurable implements UnnamedConfigurable {
   private final Project myProject;
   private final ArrayList<ExcludeEntryDescription> myExcludeEntryDescriptions = new ArrayList<ExcludeEntryDescription>();
   private final FileChooserDescriptor myDescriptor;
-  private final ExcludedEntriesConfiguration myConfiguration;
+  private final ExcludesConfiguration myConfiguration;
   private ExcludedEntriesPanel myExcludedEntriesPanel;
 
   public ExcludedEntriesConfigurable(Project project) {
@@ -54,7 +54,7 @@ public class ExcludedEntriesConfigurable implements UnnamedConfigurable {
          CompilerConfiguration.getInstance(project).getExcludedEntriesConfiguration());
   }
 
-  public ExcludedEntriesConfigurable(Project project, FileChooserDescriptor descriptor, final ExcludedEntriesConfiguration configuration) {
+  public ExcludedEntriesConfigurable(Project project, FileChooserDescriptor descriptor, final ExcludesConfiguration configuration) {
     myDescriptor = descriptor;
     myConfiguration = configuration;
     myProject = project;
@@ -251,7 +251,7 @@ public class ExcludedEntriesConfigurable implements UnnamedConfigurable {
           }
           if(col == 1) {
             if(!description.isFile()) {
-              return description.isIncludeSubdirectories() ? Boolean.TRUE : Boolean.FALSE;
+              return description.isIncludeSubdirectories();
             }
             else {
               return null;

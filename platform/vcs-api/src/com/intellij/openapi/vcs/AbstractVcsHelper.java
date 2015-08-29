@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ public abstract class AbstractVcsHelper {
     myProject = project;
   }
 
+  @NotNull
   public static AbstractVcsHelper getInstance(Project project) {
     return PeriodicalTasksCloser.getInstance().safeGetService(project, AbstractVcsHelper.class);
   }
@@ -69,6 +70,8 @@ public abstract class AbstractVcsHelper {
   }
 
   public abstract void showAnnotation(FileAnnotation annotation, VirtualFile file, AbstractVcs vcs);
+
+  public abstract void showAnnotation(FileAnnotation annotation, VirtualFile file, AbstractVcs vcs, int line);
 
   public abstract void showDifferences(final VcsFileRevision cvsVersionOn, final VcsFileRevision cvsVersionOn1, final File file);
 
@@ -143,11 +146,16 @@ public abstract class AbstractVcsHelper {
     return showMergeDialog(files, provider);
   }
 
-  public abstract void showFileHistory(VcsHistoryProvider vcsHistoryProvider, FilePath path, final AbstractVcs vcs,
-                                       final String repositoryPath);
+  public abstract void showFileHistory(@NotNull VcsHistoryProvider historyProvider,
+                                       @NotNull FilePath path,
+                                       @NotNull AbstractVcs vcs,
+                                       @Nullable String repositoryPath);
 
-  public abstract void showFileHistory(VcsHistoryProvider vcsHistoryProvider, AnnotationProvider annotationProvider, FilePath path,
-                                       final String repositoryPath, final AbstractVcs vcs);
+  public abstract void showFileHistory(@NotNull VcsHistoryProvider historyProvider,
+                                       @Nullable AnnotationProvider annotationProvider,
+                                       @NotNull FilePath path,
+                                       @Nullable String repositoryPath,
+                                       @NotNull final AbstractVcs vcs);
 
   /**
    * Shows the "Rollback Changes" dialog with the specified list of changes.

@@ -43,7 +43,7 @@
     <action id="Debug">
       <keyboard-shortcut first-keystroke="meta F11" />
     </action>
-    <action id="Debugger.Inspect">
+    <action id="XDebugger.Inspect">
       <keyboard-shortcut first-keystroke="shift meta I" />
     </action>
     <action id="DelegateMethods"/>
@@ -91,6 +91,16 @@
     <action id="ExpandAllRegions">
       <keyboard-shortcut first-keystroke="meta MULTIPLY" />
     </action>
+    <action id="ExpandAllToLevel1"/>
+    <action id="ExpandAllToLevel2"/>
+    <action id="ExpandAllToLevel3"/>
+    <action id="ExpandAllToLevel4"/>
+    <action id="ExpandAllToLevel5"/>
+    <action id="ExpandToLevel1"/>
+    <action id="ExpandToLevel2"/>
+    <action id="ExpandToLevel3"/>
+    <action id="ExpandToLevel4"/>
+    <action id="ExpandToLevel5"/>
     <action id="ExternalJavaDoc">
       <keyboard-shortcut first-keystroke="shift F2" />
     </action>
@@ -123,6 +133,9 @@
     </action>
     <action id="GotoTest"/>
     <action id="GotoClass">
+      <keyboard-shortcut first-keystroke="shift meta T" />
+    </action>
+    <action id="GotoChangedFile">
       <keyboard-shortcut first-keystroke="shift meta T" />
     </action>
     <action id="GotoDeclaration">
@@ -212,6 +225,7 @@
     <action id="ParameterInfo">
       <keyboard-shortcut first-keystroke="control shift SPACE"/>
     </action>
+    <action id="ExpressionTypeInfo"/>
     <action id="PreviousOccurence" />
     <action id="PreviousTab">
       <keyboard-shortcut first-keystroke="shift meta F6" />
@@ -310,6 +324,13 @@
     </action>
     <action id="GotoAction">
       <keyboard-shortcut first-keystroke="meta 3"/>
+    </action>
+
+    <action id="Vcs.RollbackChangedLines">
+      <keyboard-shortcut first-keystroke="control shift alt Z"/>
+    </action>
+    <action id="ChangesView.Revert">
+      <keyboard-shortcut first-keystroke="control shift alt Z"/>
     </action>
 
     <action id="ActivateProjectToolWindow"/>

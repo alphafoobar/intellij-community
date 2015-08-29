@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,24 @@
  */
 package com.intellij.xdebugger.impl.ui.tree.actions;
 
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Alarm;
+import com.intellij.ui.AppUIUtil;
 import com.intellij.util.SmartList;
-import com.intellij.util.concurrency.Semaphore;
-import com.intellij.xdebugger.XDebuggerBundle;
+import com.intellij.util.containers.IntIntHashMap;
 import com.intellij.xdebugger.frame.XFullValueEvaluator;
-import com.intellij.xdebugger.impl.XDebugSessionImpl;
+import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTree;
+import com.intellij.xdebugger.impl.ui.tree.nodes.HeadlessValueEvaluationCallback;
 import com.intellij.xdebugger.impl.ui.tree.nodes.WatchMessageNode;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.tree.TreePath;
-import java.awt.*;
 import java.util.List;
 
 public abstract class XFetchValueActionBase extends AnAction {
@@ -47,19 +43,12 @@ public abstract class XFetchValueActionBase extends AnAction {
   }
 
   @Override
-  public void update(AnActionEvent e) {
+  public void update(@NotNull AnActionEvent e) {
     TreePath[] paths = getSelectedNodes(e.getDataContext());
     if (paths != null) {
       for (TreePath path : paths) {
         Object node = path.getLastPathComponent();
-        if (node instanceof XValueNodeImpl) {
-          if (((XValueNodeImpl)node).isComputed()) {
-            e.getPresentation().setEnabled(true);
-            return;
-          }
-        }
-        else if (node instanceof WatchMessageNode) {
-          e.getPresentation().setEnabled(true);
+        if (isEnabled(e, node)) {
           return;
         }
       }
@@ -67,46 +56,104 @@ public abstract class XFetchValueActionBase extends AnAction {
     e.getPresentation().setEnabled(false);
   }
 
+  protected boolean isEnabled(@NotNull AnActionEvent event, @NotNull Object node) {
+    if (node instanceof XValueNodeImpl) {
+      if (((XValueNodeImpl)node).isComputed()) {
+        event.getPresentation().setEnabled(true);
+        return true;
+      }
+    }
+    else if (node instanceof WatchMessageNode) {
+      event.getPresentation().setEnabled(true);
+      return true;
+    }
+    return false;
+  }
+
   @Override
-  public void actionPerformed(final AnActionEvent e) {
+  public void actionPerformed(@NotNull AnActionEvent e) {
     TreePath[] paths = getSelectedNodes(e.getDataContext());
     if (paths == null) {
       return;
     }
 
-    ValueCollector valueCollector = new ValueCollector();
+    ValueCollector valueCollector = createCollector(e);
     for (TreePath path : paths) {
-      Object node = path.getLastPathComponent();
-      if (node instanceof XValueNodeImpl) {
-        XValueNodeImpl valueNode = (XValueNodeImpl)node;
-        XFullValueEvaluator fullValueEvaluator = valueNode.getFullValueEvaluator();
-        if (fullValueEvaluator == null) {
-          valueCollector.add(StringUtil.notNullize(valueNode.getRawValue()));
-        }
-        else {
-          startFetchingValue(fullValueEvaluator, new CopyValueEvaluationCallback(valueNode, valueCollector));
-        }
-      }
-      else if (node instanceof WatchMessageNode) {
-        valueCollector.add(((WatchMessageNode)node).getExpression());
-      }
+      addToCollector(paths, path.getLastPathComponent(), valueCollector);
     }
     valueCollector.processed = true;
-    valueCollector.finish(e.getProject());
+    valueCollector.finish();
   }
 
-  private final class ValueCollector {
+  protected void addToCollector(@NotNull TreePath[] paths, @NotNull Object node, @NotNull ValueCollector valueCollector) {
+    if (node instanceof XValueNodeImpl) {
+      XValueNodeImpl valueNode = (XValueNodeImpl)node;
+      XFullValueEvaluator fullValueEvaluator = valueNode.getFullValueEvaluator();
+      if (paths.length > 1) { // multiselection - copy the whole node text, see IDEA-136722
+        valueCollector.add(valueNode.getText().toString(), valueNode.getPath().getPathCount());
+      }
+      else {
+        if (fullValueEvaluator == null || !fullValueEvaluator.isShowValuePopup()) {
+          valueCollector.add(StringUtil.notNullize(DebuggerUIUtil.getNodeRawValue(valueNode)));
+        }
+        else {
+          new CopyValueEvaluationCallback(valueNode, valueCollector).startFetchingValue(fullValueEvaluator);
+        }
+      }
+    }
+    else if (node instanceof WatchMessageNode) {
+      valueCollector.add(((WatchMessageNode)node).getExpression().getExpression());
+    }
+  }
+
+  @NotNull
+  protected ValueCollector createCollector(@NotNull AnActionEvent e) {
+    return new ValueCollector(XDebuggerTree.getTree(e.getDataContext()));
+  }
+
+  protected class ValueCollector {
     private final List<String> values = new SmartList<String>();
+    private final IntIntHashMap indents = new IntIntHashMap();
+    private final XDebuggerTree myTree;
     private volatile boolean processed;
+
+    public ValueCollector(XDebuggerTree tree) {
+      myTree = tree;
+    }
 
     public void add(@NotNull String value) {
       values.add(value);
     }
 
-    public void finish(Project project) {
+    public void add(@NotNull String value, int indent) {
+      values.add(value);
+      indents.put(values.size() - 1, indent);
+    }
+
+    public void finish() {
+      Project project = myTree.getProject();
       if (processed && !values.contains(null) && !project.isDisposed()) {
-        handle(project, StringUtil.join(values, "\n"));
+        int minIndent = Integer.MAX_VALUE;
+        for (int indent : indents.getValues()) {
+          minIndent = Math.min(minIndent, indent);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+          if (i > 0) {
+            sb.append("\n");
+          }
+          int indent = indents.get(i);
+          if (indent > 0) {
+            StringUtil.repeatSymbol(sb, ' ', indent - minIndent);
+          }
+          sb.append(values.get(i));
+        }
+        handleInCollector(project, sb.toString(), myTree);
       }
+    }
+
+    public void handleInCollector(final Project project, final String value, XDebuggerTree tree) {
+      handle(project, value, tree);
     }
 
     public int acquire() {
@@ -115,103 +162,33 @@ public abstract class XFetchValueActionBase extends AnAction {
       return index;
     }
 
-    public void evaluationComplete(int index, @NotNull String value, Project project) {
-      values.set(index, value);
-      finish(project);
+    public void evaluationComplete(final int index, @NotNull final String value) {
+      AppUIUtil.invokeOnEdt(new Runnable() {
+        @Override
+        public void run() {
+          values.set(index, value);
+          finish();
+        }
+      });
     }
   }
 
-  protected abstract void handle(final Project project, final String value);
+  protected abstract void handle(final Project project, final String value, XDebuggerTree tree);
 
-  private static void startFetchingValue(XFullValueEvaluator fullValueEvaluator, final CopyValueEvaluationCallback callback) {
-    fullValueEvaluator.startEvaluation(callback);
-    new Alarm().addRequest(new Runnable() {
-      @Override
-      public void run() {
-        callback.showProgress();
-      }
-    }, 500);
-  }
-
-  private static final class CopyValueEvaluationCallback implements XFullValueEvaluator.XFullValueEvaluationCallback {
-    private final XValueNodeImpl myNode;
-
+  private static final class CopyValueEvaluationCallback extends HeadlessValueEvaluationCallback {
     private final int myValueIndex;
     private final ValueCollector myValueCollector;
 
-    private volatile boolean myEvaluated;
-    private volatile boolean myCanceled;
-    private final Semaphore mySemaphore;
+    public CopyValueEvaluationCallback(@NotNull XValueNodeImpl node, @NotNull ValueCollector valueCollector) {
+      super(node);
 
-    public CopyValueEvaluationCallback(@NotNull XValueNodeImpl node, ValueCollector valueCollector) {
-      myNode = node;
       myValueCollector = valueCollector;
       myValueIndex = valueCollector.acquire();
-      mySemaphore = new Semaphore();
-      mySemaphore.down();
     }
 
     @Override
-    public void evaluated(@NotNull String fullValue) {
-      evaluationComplete(fullValue);
-    }
-
-    @Override
-    public void evaluated(@NotNull String fullValue, @Nullable Font font) {
-      evaluated(fullValue);
-    }
-
-    @Override
-    public void errorOccurred(@NotNull String errorMessage) {
-      try {
-        String message = XDebuggerBundle.message("load.value.task.error", errorMessage);
-        XDebugSessionImpl.NOTIFICATION_GROUP.createNotification(message, NotificationType.ERROR).notify(myNode.getTree().getProject());
-      }
-      finally {
-        evaluationComplete(errorMessage);
-      }
-    }
-
-    private void evaluationComplete(String value) {
-      try {
-        myEvaluated = true;
-        mySemaphore.up();
-      }
-      finally {
-        myValueCollector.evaluationComplete(myValueIndex, value, myNode.getTree().getProject());
-      }
-    }
-
-    @Override
-    public boolean isObsolete() {
-      return myCanceled;
-    }
-
-    public void showProgress() {
-      if (myEvaluated || myNode.isObsolete()) return;
-
-      new Task.Backgroundable(myNode.getTree().getProject(), XDebuggerBundle.message("load.value.task.text")) {
-        @Override
-        public void run(@NotNull ProgressIndicator indicator) {
-          indicator.setIndeterminate(true);
-          int i = 0;
-          while (!myCanceled && !myEvaluated) {
-            indicator.checkCanceled();
-            indicator.setFraction(((i++) % 100) * 0.01);
-            mySemaphore.waitFor(300);
-          }
-        }
-
-        @Override
-        public boolean shouldStartInBackground() {
-          return false;
-        }
-
-        @Override
-        public void onCancel() {
-          myCanceled = true;
-        }
-      }.queue();
+    protected void evaluationComplete(@NotNull String value, @NotNull Project project) {
+      myValueCollector.evaluationComplete(myValueIndex, value);
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ public class PyBroadExceptionInspection extends PyInspection {
 
   public static boolean equalsException(@NotNull PyClass cls, @NotNull TypeEvalContext context) {
     final PyType type = context.getType(cls);
-    return ("Exception".equals(cls.getName()) || "BaseException".equals(cls.getName())) && type != null && type.isBuiltin(context);
+    return ("Exception".equals(cls.getName()) || "BaseException".equals(cls.getName())) && type != null && type.isBuiltin();
   }
 
   private static class Visitor extends PyInspectionVisitor {

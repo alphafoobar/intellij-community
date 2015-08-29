@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,12 @@ import com.intellij.openapi.externalSystem.ExternalSystemManager;
 import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.execution.ExternalTaskExecutionInfo;
 import com.intellij.openapi.externalSystem.model.execution.ExternalTaskPojo;
+import com.intellij.openapi.externalSystem.model.project.ExternalProjectBuildClasspathPojo;
 import com.intellij.openapi.externalSystem.model.project.ExternalProjectPojo;
 import com.intellij.openapi.externalSystem.service.project.PlatformFacade;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
+import com.intellij.openapi.externalSystem.view.ExternalProjectsViewState;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.SystemProperties;
@@ -64,9 +66,17 @@ public abstract class AbstractExternalSystemLocalSettings {
     new AtomicReference<Map<String, Collection<ExternalTaskPojo>>>(
       ContainerUtilRt.<String, Collection<ExternalTaskPojo>>newHashMap()
     );
+  private final AtomicReference<Map<String/* external project config path */, ExternalProjectBuildClasspathPojo>> myProjectBuildClasspath =
+    new AtomicReference<Map<String, ExternalProjectBuildClasspathPojo>>(
+      ContainerUtilRt.<String, ExternalProjectBuildClasspathPojo>newHashMap()
+    );
   private final AtomicReference<Map<String/* external project config path */, Long>>
                                                                                                              myExternalConfigModificationStamps =
     new AtomicReference<Map<String, Long>>(ContainerUtilRt.<String, Long>newHashMap());
+
+  private final AtomicReference<ExternalProjectsViewState> myExternalProjectsViewState = new AtomicReference<ExternalProjectsViewState>(
+    new ExternalProjectsViewState()
+  );
 
   @NotNull private final ProjectSystemId myExternalSystemId;
   @NotNull private final Project         myProject;
@@ -114,6 +124,15 @@ public abstract class AbstractExternalSystemLocalSettings {
       }
     }
 
+    for (Iterator<Map.Entry<String, ExternalProjectBuildClasspathPojo>> it = myProjectBuildClasspath.get().entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<String, ExternalProjectBuildClasspathPojo> entry = it.next();
+      if (linkedProjectPathsToForget.contains(entry.getKey())
+          || linkedProjectPathsToForget.contains(ExternalSystemApiUtil.getRootProjectPath(entry.getKey(), myExternalSystemId, myProject)))
+      {
+        it.remove();
+      }
+    }
+
     Map<String, Long> modificationStamps = myExternalConfigModificationStamps.get();
     for (String path : linkedProjectPathsToForget) {
       modificationStamps.remove(path);
@@ -152,7 +171,7 @@ public abstract class AbstractExternalSystemLocalSettings {
   public void setRecentTasks(@NotNull List<ExternalTaskExecutionInfo> tasks) {
     myRecentTasks.set(tasks);
   }
-  
+
   @NotNull
   public Map<String, Long> getExternalConfigModificationStamps() {
     return myExternalConfigModificationStamps.get();
@@ -163,7 +182,28 @@ public abstract class AbstractExternalSystemLocalSettings {
     // Required for IJ serialization.
     myExternalConfigModificationStamps.set(modificationStamps);
   }
-  
+
+  @NotNull
+  public Map<String, ExternalProjectBuildClasspathPojo> getProjectBuildClasspath() {
+    return myProjectBuildClasspath.get();
+  }
+
+  @SuppressWarnings("UnusedDeclaration")
+  public void setProjectBuildClasspath(@NotNull Map<String, ExternalProjectBuildClasspathPojo> projectsBuildClasspath) {
+    // Required for IJ serialization.
+    myProjectBuildClasspath.set(projectsBuildClasspath);
+  }
+
+  public ExternalProjectsViewState getExternalProjectsViewState() {
+    return myExternalProjectsViewState.get();
+  }
+
+  @SuppressWarnings("UnusedDeclaration")
+  public void setExternalProjectsViewState(ExternalProjectsViewState externalProjectsViewState) {
+    // Required for IJ serialization.
+    myExternalProjectsViewState.set(externalProjectsViewState);
+  }
+
   public void fillState(@NotNull State state) {
     if (PRESERVE_EXPAND_STATE) {
       state.tasksExpandState = myExpandStates.get();
@@ -175,6 +215,8 @@ public abstract class AbstractExternalSystemLocalSettings {
     state.availableProjects = myAvailableProjects.get();
     state.availableTasks = myAvailableTasks.get();
     state.modificationStamps = myExternalConfigModificationStamps.get();
+    state.projectBuildClasspath = myProjectBuildClasspath.get();
+    state.externalProjectsViewState = myExternalProjectsViewState.get();
   }
 
   public void loadState(@NotNull State state) {
@@ -182,6 +224,8 @@ public abstract class AbstractExternalSystemLocalSettings {
     setIfNotNull(myAvailableProjects, state.availableProjects);
     setIfNotNull(myAvailableTasks, state.availableTasks);
     setIfNotNull(myExternalConfigModificationStamps, state.modificationStamps);
+    setIfNotNull(myProjectBuildClasspath, state.projectBuildClasspath);
+    myExternalProjectsViewState.set(state.externalProjectsViewState);
     if (state.recentTasks != null) {
       List<ExternalTaskExecutionInfo> recentTasks = myRecentTasks.get();
       if (recentTasks != state.recentTasks) {
@@ -242,5 +286,7 @@ public abstract class AbstractExternalSystemLocalSettings {
 
     public Map<String/* linked project path */, Long/* last config modification stamp */> modificationStamps
       = ContainerUtilRt.newHashMap();
+    public Map<String/* linked project path */, ExternalProjectBuildClasspathPojo> projectBuildClasspath = ContainerUtilRt.newHashMap();
+    public ExternalProjectsViewState externalProjectsViewState;
   }
 }

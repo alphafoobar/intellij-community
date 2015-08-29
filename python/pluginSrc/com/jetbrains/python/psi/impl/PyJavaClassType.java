@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ package com.jetbrains.python.psi.impl;
 import com.intellij.psi.*;
 import com.intellij.util.ProcessingContext;
 import com.jetbrains.python.psi.AccessDirection;
+import com.jetbrains.python.psi.PyCallSiteExpression;
 import com.jetbrains.python.psi.PyExpression;
-import com.jetbrains.python.psi.PyQualifiedExpression;
 import com.jetbrains.python.psi.resolve.CompletionVariantsProcessor;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.RatedResolveResult;
@@ -89,7 +89,7 @@ public class PyJavaClassType implements PyClassLikeType {
   }
 
   @Override
-  public boolean isBuiltin(TypeEvalContext context) {
+  public boolean isBuiltin() {
     return false;  // TODO: JDK's types could be considered built-in.
   }
 
@@ -104,11 +104,17 @@ public class PyJavaClassType implements PyClassLikeType {
 
   @Nullable
   @Override
-  public PyType getCallType(@NotNull TypeEvalContext context, @Nullable PyQualifiedExpression callSite) {
+  public PyType getReturnType(@NotNull TypeEvalContext context) {
     if (myDefinition) {
       return new PyJavaClassType(myClass, false);
     }
     return null;
+  }
+
+  @Nullable
+  @Override
+  public PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteExpression callSite) {
+    return getReturnType(context);
   }
 
   @Nullable
@@ -148,7 +154,33 @@ public class PyJavaClassType implements PyClassLikeType {
     return myClass.isValid();
   }
 
+  @Nullable
+  @Override
+  public PyClassLikeType getMetaClassType(@NotNull TypeEvalContext context, boolean inherited) {
+    return null;
+  }
+
   public PsiClass getPsiClass() {
     return myClass;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof PyJavaClassType)) return false;
+
+    PyJavaClassType type = (PyJavaClassType)o;
+
+    if (myDefinition != type.myDefinition) return false;
+    if (myClass != null ? !myClass.equals(type.myClass) : type.myClass != null) return false;
+
+    return true;
+  }
+
+  @Override
+  public int hashCode() {
+    int result = myClass != null ? myClass.hashCode() : 0;
+    result = 31 * result + (myDefinition ? 1 : 0);
+    return result;
   }
 }

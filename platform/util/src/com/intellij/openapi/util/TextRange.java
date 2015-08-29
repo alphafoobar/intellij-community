@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ public class TextRange implements Segment, Serializable {
 
   /**
    * @param checkForProperTextRange <code>true</code> if offsets should be checked by {@link #assertProperRange(int, int, Object)}
-   * @see com.intellij.openapi.util.UnfairTextRange
+   * @see UnfairTextRange
    */
   protected TextRange(int startOffset, int endOffset, boolean checkForProperTextRange) {
     myStartOffset = startOffset;
@@ -58,28 +58,38 @@ public class TextRange implements Segment, Serializable {
     return myEndOffset - myStartOffset;
   }
 
+  @Override
   public boolean equals(Object obj) {
     if (!(obj instanceof TextRange)) return false;
     TextRange range = (TextRange)obj;
     return myStartOffset == range.myStartOffset && myEndOffset == range.myEndOffset;
   }
 
+  @Override
   public int hashCode() {
     return myStartOffset + myEndOffset;
   }
 
   public boolean contains(@NotNull TextRange range) {
+    return contains((Segment)range);
+  }
+  public boolean contains(@NotNull Segment range) {
     return containsRange(range.getStartOffset(), range.getEndOffset());
   }
 
   public boolean containsRange(int startOffset, int endOffset) {
-    return myStartOffset <= startOffset && myEndOffset >= endOffset;
+    return getStartOffset() <= startOffset && getEndOffset() >= endOffset;
+  }
+
+  public static boolean containsRange(@NotNull Segment outer, @NotNull Segment inner) {
+    return outer.getStartOffset() <= inner.getStartOffset() && inner.getEndOffset() <= outer.getEndOffset();
   }
 
   public boolean containsOffset(int offset) {
     return myStartOffset <= offset && offset <= myEndOffset;
   }
 
+  @Override
   public String toString() {
     return "(" + myStartOffset + "," + myEndOffset + ")";
   }
@@ -95,6 +105,16 @@ public class TextRange implements Segment, Serializable {
     }
     catch (StringIndexOutOfBoundsException e) {
       throw new StringIndexOutOfBoundsException("Can't extract " + this + " range from " + str);
+    }
+  }
+
+  @NotNull
+  public CharSequence subSequence(@NotNull CharSequence str) {
+    try {
+      return str.subSequence(myStartOffset, myEndOffset);
+    }
+    catch (IndexOutOfBoundsException e) {
+      throw new IndexOutOfBoundsException("Can't extract " + this + " range from " + str);
     }
   }
 
@@ -182,7 +202,8 @@ public class TextRange implements Segment, Serializable {
     return startOffset == myStartOffset && endOffset == myEndOffset;
   }
 
-  public static TextRange allOf(String s) {
+  @NotNull
+  public static TextRange allOf(@NotNull String s) {
     return new TextRange(0, s.length());
   }
 
@@ -190,11 +211,11 @@ public class TextRange implements Segment, Serializable {
     assertProperRange(range, "");
   }
 
-  public static void assertProperRange(@NotNull Segment range, Object message) throws AssertionError {
+  public static void assertProperRange(@NotNull Segment range, @NotNull Object message) throws AssertionError {
     assertProperRange(range.getStartOffset(), range.getEndOffset(), message);
   }
 
-  public static void assertProperRange(int startOffset, int endOffset, Object message) {
+  public static void assertProperRange(int startOffset, int endOffset, @NotNull Object message) {
     if (startOffset > endOffset) {
       LOG.error("Invalid range specified: (" + startOffset + "," + endOffset + "); " + message);
     }

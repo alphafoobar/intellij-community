@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,22 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.xmlb;
 
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.beans.PropertyDescriptor;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.List;
 
-class PropertyAccessor implements Accessor {
+class PropertyAccessor implements MutableAccessor {
   private final String myName;
   private final Class<?> myType;
   private final Method myReadMethod;
@@ -45,6 +42,12 @@ class PropertyAccessor implements Accessor {
     myReadMethod = readMethod;
     myWriteMethod = writeMethod;
     myGenericType = myReadMethod.getGenericReturnType();
+
+    try {
+      myReadMethod.setAccessible(true);
+      myWriteMethod.setAccessible(true);
+    }
+    catch (SecurityException ignored) { }
   }
 
   @Override
@@ -61,9 +64,9 @@ class PropertyAccessor implements Accessor {
   }
 
   @Override
-  public void write(Object o, Object value) {
+  public void set(@NotNull Object host, @Nullable Object value) {
     try {
-      myWriteMethod.invoke(o, XmlSerializerImpl.convert(value, myType));
+      myWriteMethod.invoke(host, value);
     }
     catch (IllegalAccessException e) {
       throw new XmlSerializationException(e);
@@ -73,23 +76,41 @@ class PropertyAccessor implements Accessor {
     }
   }
 
-  private Annotation[] myAnnotationCache;
-
   @Override
-  @NotNull
-  public Annotation[] getAnnotations() {
-    Annotation[] annotations = myAnnotationCache;
-    if (annotations == null) {
-      annotations = myAnnotationCache = calcAnnotations();
-    }
-    return annotations;
+  public void setBoolean(@NotNull Object host, boolean value) {
+    set(host, value);
   }
 
-  private Annotation[] calcAnnotations() {
-    List<Annotation> result = new ArrayList<Annotation>();
-    ContainerUtil.addAll(result, myReadMethod.getAnnotations());
-    ContainerUtil.addAll(result, myWriteMethod.getAnnotations());
-    return result.toArray(new Annotation[result.size()]);
+  @Override
+  public void setInt(@NotNull Object host, int value) {
+    set(host, value);
+  }
+
+  @Override
+  public void setShort(@NotNull Object host, short value) {
+    set(host, value);
+  }
+
+  @Override
+  public void setLong(@NotNull Object host, long value) {
+    set(host, value);
+  }
+
+  @Override
+  public void setDouble(@NotNull Object host, double value) {
+    set(host, value);
+  }
+
+  @Override
+  public void setFloat(@NotNull Object host, float value) {
+    set(host, value);
+  }
+
+  @Override
+  public <T extends Annotation> T getAnnotation(@NotNull Class<T> annotationClass) {
+    T annotation = myReadMethod.getAnnotation(annotationClass);
+    if (annotation == null) annotation = myWriteMethod.getAnnotation(annotationClass);
+    return annotation;
   }
 
   @Override
@@ -107,8 +128,18 @@ class PropertyAccessor implements Accessor {
     return myGenericType;
   }
 
+  @Override
+  public boolean isFinal() {
+    return false;
+  }
+
   @NonNls
   public String toString() {
     return "PropertyAccessor[" + myReadMethod.getDeclaringClass().getName() + "." + getName() +"]";
+  }
+
+  @Override
+  public void write(Object o, Object value) {
+    set(o, value);
   }
 }

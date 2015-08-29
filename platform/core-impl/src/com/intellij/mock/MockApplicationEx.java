@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.InvalidDataException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,7 +43,12 @@ public class MockApplicationEx extends MockApplication implements ApplicationEx 
   }
 
   @Override
-  public void load(String path) throws IOException, InvalidDataException {
+  public void load(String path) {
+  }
+
+  @Override
+  public void load() throws IOException {
+    load(null);
   }
 
   @Override
@@ -53,11 +57,11 @@ public class MockApplicationEx extends MockApplication implements ApplicationEx 
   }
 
   @Override
-  public void exit(boolean force) {
+  public void exit(boolean force, boolean exitConfirmed) {
   }
 
   @Override
-  public void restart(boolean force) {
+  public void restart(boolean exitConfirmed) {
   }
 
   @Override
@@ -97,6 +101,16 @@ public class MockApplicationEx extends MockApplication implements ApplicationEx 
     return false;
   }
 
+  @Override
+  public boolean runProcessWithProgressSynchronouslyInReadAction(@Nullable Project project,
+                                                                 @NotNull String progressTitle,
+                                                                 boolean canBeCanceled,
+                                                                 String cancelText,
+                                                                 JComponent parentComponent,
+                                                                 @NotNull Runnable process) {
+    return false;
+  }
+
   @NotNull
   @Override
   public <T> T[] getExtensions(@NotNull final ExtensionPointName<T> extensionPointName) {
@@ -120,5 +134,15 @@ public class MockApplicationEx extends MockApplication implements ApplicationEx 
   public boolean tryRunReadAction(@NotNull Runnable runnable) {
     runReadAction(runnable);
     return true;
+  }
+
+  @Override
+  public boolean isWriteActionInProgress() {
+    return false;
+  }
+
+  @Override
+  public boolean isWriteActionPending() {
+    return false;
   }
 }

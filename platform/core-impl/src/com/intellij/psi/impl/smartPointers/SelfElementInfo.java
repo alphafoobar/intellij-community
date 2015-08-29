@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,159 +18,118 @@ package com.intellij.psi.impl.smartPointers;
 import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.impl.FrozenDocument;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.impl.PsiDocumentManagerBase;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.lang.ref.Reference;
-import java.lang.ref.SoftReference;
+import java.util.List;
 
 /**
 * User: cdr
 */
-public class SelfElementInfo implements SmartPointerElementInfo {
-  protected final VirtualFile myVirtualFile;
-  private Reference<RangeMarker> myMarkerRef; // create marker only in case of live document
-  private int mySyncStartOffset;
-  private int mySyncEndOffset;
-  protected boolean mySyncMarkerIsValid;
+public class SelfElementInfo extends SmartPointerElementInfo {
+  private static final FileDocumentManager ourFileDocManager = FileDocumentManager.getInstance();
   private final Class myType;
-  protected final Project myProject;
-  @SuppressWarnings({"UnusedDeclaration"})
-  private RangeMarker myRangeMarker; //maintain hard reference during modification
-  protected final Language myLanguage;
+  private final SmartPointerManagerImpl myManager;
+  private final Language myLanguage;
+  private final MarkerCache myMarkerCache;
+  private final boolean myForInjected;
+  private boolean myHasRange;
+  private int myStartOffset;
+  private int myEndOffset;
 
-  protected SelfElementInfo(@NotNull Project project, @NotNull PsiElement anchor) {
-    this(project, ProperTextRange.create(anchor.getTextRange()), anchor.getClass(), anchor.getContainingFile(),
-         anchor.getContainingFile().getLanguage());
-  }
-  public SelfElementInfo(@NotNull Project project,
-                         @NotNull ProperTextRange range,
-                         @NotNull Class anchorClass,
-                         @NotNull PsiFile containingFile,
-                         @NotNull Language language) {
+  SelfElementInfo(@NotNull Project project,
+                  @NotNull ProperTextRange range,
+                  @NotNull Class anchorClass,
+                  @NotNull PsiFile containingFile,
+                  @NotNull Language language,
+                  boolean forInjected) {
     myLanguage = language;
-    myVirtualFile = PsiUtilCore.getVirtualFile(containingFile);
+    myForInjected = forInjected;
     myType = anchorClass;
     assert !PsiFile.class.isAssignableFrom(anchorClass) : "FileElementInfo must be used for files";
 
-    myProject = project;
-    PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myProject);
-    Document document = documentManager.getDocument(containingFile);
-    if (document == null || documentManager.isUncommited(document)) {
-      mySyncMarkerIsValid = false;
-      return;
-    }
-
-    mySyncMarkerIsValid = true;
+    myManager = (SmartPointerManagerImpl)SmartPointerManager.getInstance(project);
+    myMarkerCache = myManager.getMarkerCache(containingFile.getViewProvider().getVirtualFile());
     setRange(range);
   }
 
-  protected void setRange(@NotNull Segment range) {
-    mySyncStartOffset = range.getStartOffset();
-    mySyncEndOffset = range.getEndOffset();
+  void setRange(@Nullable Segment range) {
+    if (range != null) {
+      myHasRange = true;
+      myStartOffset = range.getStartOffset();
+      myEndOffset = range.getEndOffset();
+      myMarkerCache.rangeChanged(markerCacheKey());
+    } else {
+      myHasRange = false;
+    }
+  }
+
+  long markerCacheKey() {
+    if (!myHasRange) return 0;
+
+    long start = myStartOffset;
+    assert start >= 0;
+    assert start < Integer.MAX_VALUE;
+
+    long packed = (start + 1) | ((long)myEndOffset << 32);
+    assert packed > 0;
+    assert packed != Long.MIN_VALUE;
+
+    long result = myForInjected ? -packed : packed;
+    assert result != 0;
+    return result;
+  }
+
+
+  boolean isForInjected() {
+    return myForInjected;
   }
 
   @Override
   public Document getDocumentToSynchronize() {
-    RangeMarker marker = getMarker();
-    if (marker != null) {
-      return marker.getDocument();
-    }
-    return myVirtualFile == null ? null : FileDocumentManager.getInstance().getCachedDocument(myVirtualFile);
-  }
-
-  // before change
-  @Override
-  public void fastenBelt(int offset, @Nullable RangeMarker[] cachedRangeMarkers) {
-    if (!mySyncMarkerIsValid) return;
-    RangeMarker marker = getMarker();
-    int actualEndOffset = marker == null || !marker.isValid() ? getSyncEndOffset() : marker.getEndOffset();
-    if (offset > actualEndOffset) {
-      return; // no need to update, the change is far after
-    }
-    if (marker == null) {
-      Document document = myVirtualFile == null ? null : FileDocumentManager.getInstance().getDocument(myVirtualFile);
-      if (document == null) {
-        mySyncMarkerIsValid = false;
-      }
-      else {
-        int start = Math.min(getSyncStartOffset(), document.getTextLength());
-        int end = Math.min(Math.max(getSyncEndOffset(), start), document.getTextLength());
-        // use supplied cached markers if available
-        if (cachedRangeMarkers != null) {
-          for (RangeMarker cachedRangeMarker : cachedRangeMarkers) {
-            if (cachedRangeMarker.isValid() &&
-                cachedRangeMarker.getStartOffset() == start &&
-                cachedRangeMarker.getEndOffset() == end) {
-              marker = cachedRangeMarker;
-              break;
-            }
-          }
-        }
-        else {
-          marker = document.createRangeMarker(start, end, true);
-        }
-      }
-      setMarker(marker);
-    }
-    else if (!marker.isValid()) {
-      mySyncMarkerIsValid = false;
-      setMarker(null);
-      marker = null;
-    }
-    myRangeMarker = marker; //make sure marker wont be gced
-  }
-
-  // after change
-  @Override
-  public void unfastenBelt(int offset) {
-    if (!mySyncMarkerIsValid) return;
-    RangeMarker marker = getMarker();
-    if (marker != null) {
-      if (marker.isValid()) {
-        setRange(marker);
-        assert mySyncEndOffset <= marker.getDocument().getTextLength() : "mySyncEndOffset: "+mySyncEndOffset+"; docLength: "+marker.getDocument().getTextLength()+"; marker: "+marker +"; "+marker.getClass();
-      }
-      else {
-        mySyncMarkerIsValid = false;
-      }
-    }
-    myRangeMarker = null;  // clear hard ref to avoid leak, hold soft ref for not recreating marker later
+    return ourFileDocManager.getCachedDocument(getVirtualFile());
   }
 
   @Override
   public PsiElement restoreElement() {
-    if (!mySyncMarkerIsValid) return null;
+    Segment segment = getPsiRange();
+    if (segment == null) return null;
+
     PsiFile file = restoreFile();
     if (file == null || !file.isValid()) return null;
 
-    return restoreFromFile(file);
+    return findElementInside(file, segment.getStartOffset(), segment.getEndOffset(), myType, myLanguage);
   }
 
-  protected PsiElement restoreFromFile(@NotNull PsiFile file) {
-    final int syncStartOffset = getSyncStartOffset();
-    final int syncEndOffset = getSyncEndOffset();
+  @Nullable
+  @Override
+  public ProperTextRange getPsiRange() {
+    return calcPsiRange();
+  }
 
-    return findElementInside(file, syncStartOffset, syncEndOffset, myType, myLanguage);
+  @Nullable
+  private ProperTextRange calcPsiRange() {
+    return myHasRange ? ProperTextRange.create(myStartOffset, myEndOffset) : null;
   }
 
   @Override
   public PsiFile restoreFile() {
-    return restoreFileFromVirtual(myVirtualFile, myProject, myLanguage);
+    return restoreFileFromVirtual(getVirtualFile(), getProject(), myLanguage);
   }
 
-  protected static PsiElement findElementInside(@NotNull PsiFile file,
-                                                int syncStartOffset,
-                                                int syncEndOffset,
-                                                @NotNull Class type,
-                                                @NotNull Language language) {
+  static PsiElement findElementInside(@NotNull PsiFile file,
+                                      int syncStartOffset,
+                                      int syncEndOffset,
+                                      @NotNull Class type,
+                                      @NotNull Language language) {
     PsiElement anchor = file.getViewProvider().findElementAt(syncStartOffset, language);
     if (anchor == null) return null;
 
@@ -192,34 +151,17 @@ public class SelfElementInfo implements SmartPointerElementInfo {
     return range.getEndOffset() == syncEndOffset ? anchor : null;
   }
 
-  private RangeMarker getMarker() {
-    return com.intellij.reference.SoftReference.dereference(myMarkerRef);
-  }
-
   @Override
   public void cleanup() {
-    RangeMarker marker = getMarker();
-    if (marker != null) marker.dispose();
-    unfastenBelt(0);
-    setMarker(null);
-    mySyncMarkerIsValid = false;
-  }
-
-  private void setMarker(RangeMarker marker) {
-    myMarkerRef = marker == null ? null : new SoftReference<RangeMarker>(marker);
+    myHasRange = false;
   }
 
   @Nullable
-  public static PsiFile restoreFileFromVirtual(final VirtualFile virtualFile, @NotNull final Project project) {
-    return restoreFileFromVirtual(virtualFile, project, null);
-  }
-  @Nullable
-  public static PsiFile restoreFileFromVirtual(final VirtualFile virtualFile, @NotNull final Project project, @Nullable final Language language) {
-    if (virtualFile == null) return null;
-
+  public static PsiFile restoreFileFromVirtual(@NotNull final VirtualFile virtualFile, @NotNull final Project project, @Nullable final Language language) {
     return ApplicationManager.getApplication().runReadAction(new NullableComputable<PsiFile>() {
       @Override
       public PsiFile compute() {
+        if (project.isDisposed()) return null;
         VirtualFile child;
         if (virtualFile.isValid()) {
           child = virtualFile;
@@ -266,49 +208,59 @@ public class SelfElementInfo implements SmartPointerElementInfo {
     });
   }
 
-  protected int getSyncEndOffset() {
-    return mySyncEndOffset;
-  }
-
-  protected int getSyncStartOffset() {
-    return mySyncStartOffset;
-  }
-
   @Override
   public int elementHashCode() {
-    VirtualFile virtualFile = myVirtualFile;
-    return virtualFile == null ? 0 : virtualFile.hashCode();
+    return getVirtualFile().hashCode();
   }
 
   @Override
-  public boolean pointsToTheSameElementAs(@NotNull SmartPointerElementInfo other) {
+  public boolean pointsToTheSameElementAs(@NotNull final SmartPointerElementInfo other) {
     if (other instanceof SelfElementInfo) {
       SelfElementInfo otherInfo = (SelfElementInfo)other;
-      return Comparing.equal(myVirtualFile, otherInfo.myVirtualFile)
+      Segment range1 = getPsiRange();
+      Segment range2 = otherInfo.getPsiRange();
+      return Comparing.equal(getVirtualFile(), otherInfo.getVirtualFile())
              && myType == otherInfo.myType
-             && mySyncMarkerIsValid
-             && otherInfo.mySyncMarkerIsValid
-             && mySyncStartOffset == otherInfo.mySyncStartOffset
-             && mySyncEndOffset == otherInfo.mySyncEndOffset
+             && range1 != null
+             && range2 != null
+             && range1.getStartOffset() == range2.getStartOffset()
+             && range1.getEndOffset() == range2.getEndOffset()
         ;
     }
-    return Comparing.equal(restoreElement(), other.restoreElement());
+    return ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+      @Override
+      public Boolean compute() {
+        return Comparing.equal(restoreElement(), other.restoreElement());
+      }
+    });
   }
 
   @Override
-  public VirtualFile getVirtualFile() {
-    return myVirtualFile;
+  @NotNull
+  public final VirtualFile getVirtualFile() {
+    return myMarkerCache.getVirtualFile();
   }
 
   @Override
+  @Nullable
   public Segment getRange() {
-    if (!mySyncMarkerIsValid) return null;
-    return new TextRange(getSyncStartOffset(), getSyncEndOffset());
+    if (myHasRange) {
+      Document document = getDocumentToSynchronize();
+      if (document != null) {
+        PsiDocumentManagerBase documentManager = myManager.getPsiDocumentManager();
+        List<DocumentEvent> events = documentManager.getEventsSinceCommit(document);
+        if (!events.isEmpty()) {
+          return myMarkerCache.getUpdatedRange(markerCacheKey(), (FrozenDocument)documentManager.getLastCommittedDocument(document), events);
+        }
+      }
+    }
+    return calcPsiRange();
   }
 
   @NotNull
   @Override
-  public Project getProject() {
-    return myProject;
+  public final Project getProject() {
+    return myManager.getProject();
   }
+
 }

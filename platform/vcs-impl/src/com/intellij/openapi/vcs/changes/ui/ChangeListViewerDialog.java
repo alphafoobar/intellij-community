@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,21 +23,21 @@
 package com.intellij.openapi.vcs.changes.ui;
 
 import com.intellij.CommonBundle;
+import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Splitter;
+import com.intellij.openapi.vcs.VcsActions;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.committed.CommittedChangesBrowserUseCase;
 import com.intellij.openapi.vcs.changes.committed.RepositoryChangesBrowser;
 import com.intellij.openapi.vcs.changes.issueLinks.IssueLinkHtmlRenderer;
-import com.intellij.openapi.vcs.history.CopyRevisionNumberAction;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeListImpl;
-import com.intellij.openapi.vcs.versionBrowser.VcsRevisionNumberAware;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.BrowserHyperlinkListener;
 import com.intellij.ui.ScrollPaneFactory;
@@ -117,7 +117,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     myCommitMessageArea.setEditable(false);
     @NonNls final String text = IssueLinkHtmlRenderer.formatTextIntoHtml(project, changeList.getComment().trim());
     myCommitMessageArea.setBackground(UIUtil.getComboBoxDisabledBackground());
-    myCommitMessageArea.addHyperlinkListener(new BrowserHyperlinkListener());
+    myCommitMessageArea.addHyperlinkListener(BrowserHyperlinkListener.INSTANCE);
     commitMessageScroll = ScrollPaneFactory.createScrollPane(myCommitMessageArea);
     myCommitMessageArea.setText(text);
     myCommitMessageArea.setCaretPosition(0);
@@ -132,11 +132,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     if (VcsDataKeys.CHANGES.is(dataId)) {
       return myChanges;
     }
-    else if (VcsDataKeys.VCS_REVISION_NUMBER.is(dataId)) {
-      if (myChangeList instanceof VcsRevisionNumberAware) {
-        return ((VcsRevisionNumberAware)myChangeList).getRevisionNumber();
-      }
-    }
+
     return null;
   }
 
@@ -155,16 +151,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
       @Override
       protected void buildToolBar(DefaultActionGroup toolBarGroup) {
         super.buildToolBar(toolBarGroup);
-        toolBarGroup.add(new CopyRevisionNumberAction());
-      }
-
-      @Override
-      public Object getData(@NonNls String dataId) {
-        Object data = super.getData(dataId);
-        if (data != null) {
-          return data;
-        }
-        return ChangeListViewerDialog.this.getData(dataId);
+        toolBarGroup.add(ActionManager.getInstance().getAction(VcsActions.ACTION_COPY_REVISION_NUMBER));
       }
 
       @Override

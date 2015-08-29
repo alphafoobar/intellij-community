@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,18 @@ package com.intellij.openapi.editor.impl.softwrap.mapping;
 
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.FoldRegion;
-import com.intellij.openapi.editor.impl.EditorTextRepresentationHelper;
 import com.intellij.openapi.util.Ref;
 import gnu.trove.TIntObjectHashMap;
 import gnu.trove.TIntObjectProcedure;
 import gnu.trove.TObjectProcedure;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Encapsulates information to cache for the single visual line.
@@ -56,10 +59,7 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
   public int endFoldedLines;
   public int endFoldingColumnDiff;
 
-  public boolean locked;
-
   private final Editor myEditor;
-  private final EditorTextRepresentationHelper myRepresentationHelper;
 
   /** Holds positions for the tabulation symbols on a target visual line sorted by offset in ascending order. */
   private List<TabData> myTabPositions = Collections.EMPTY_LIST;
@@ -67,10 +67,9 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
   /** Holds information about single line fold regions representation data. */
   private TIntObjectHashMap<FoldingData> myFoldingData = DUMMY;
 
-  CacheEntry(int visualLine, @NotNull Editor editor, @NotNull EditorTextRepresentationHelper representationHelper) {
+  CacheEntry(int visualLine, @NotNull Editor editor) {
     this.visualLine = visualLine;
     myEditor = editor;
-    myRepresentationHelper = representationHelper;
   }
 
   public void setLineStartPosition(@NotNull EditorPosition context) {
@@ -99,7 +98,7 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
   }
 
   public EditorPosition buildStartLinePosition() {
-    EditorPosition result = new EditorPosition(myEditor, myRepresentationHelper);
+    EditorPosition result = new EditorPosition(myEditor);
     result.logicalLine = startLogicalLine;
     result.logicalColumn = startLogicalColumn;
     result.offset = startOffset;
@@ -114,7 +113,7 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
   }
 
   public EditorPosition buildEndLinePosition() {
-    EditorPosition result = new EditorPosition(myEditor, myRepresentationHelper);
+    EditorPosition result = new EditorPosition(myEditor);
     result.logicalLine = endLogicalLine;
     result.logicalColumn = endLogicalColumn;
     result.offset = endOffset;
@@ -129,20 +128,26 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
   }
 
   /**
-   * Removes fold data for all fold regions that start at or after the given offset.
+   * Removes data for all tabs and fold regions that start at or after the given offset.
    * 
    * @param offset  target offset
    */
-  public void removeAllFoldDataAtOrAfter(final int offset) {
-    if (myFoldingData == DUMMY || myFoldingData.isEmpty()) {
-      return;
+  public void removeAllDataAtOrAfter(final int offset) {
+    if (myFoldingData != DUMMY && !myFoldingData.isEmpty()) {
+      myFoldingData.retainEntries(new TIntObjectProcedure<FoldingData>() {
+        @Override
+        public boolean execute(int a, FoldingData b) {
+          return a < offset;
+        }
+      });
     }
-    myFoldingData.retainEntries(new TIntObjectProcedure<FoldingData>() {
-      @Override
-      public boolean execute(int a, FoldingData b) {
-        return a < offset;
+    int i;
+    for (i = 0; i < myTabPositions.size(); i++) {
+      if (myTabPositions.get(i).offset >= offset) {
+        break;
       }
-    });
+    }
+    myTabPositions.subList(i, myTabPositions.size()).clear();
   }
   
   @Nullable
@@ -170,10 +175,6 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
     return result.get();
   }
   
-  public void store(FoldRegion foldRegion, int startX) {
-    store(new FoldingData(foldRegion, startX, myRepresentationHelper, myEditor), foldRegion.getStartOffset());
-  }
-
   public void store(FoldingData foldData, int offset) {
     if (myFoldingData == DUMMY) {
       myFoldingData = new TIntObjectHashMap<FoldingData>();
@@ -218,19 +219,9 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
     myFoldingData = newFoldingData;
   }
 
-  /**
-   * Asks current entry to update its state in a way to set start line data to the end line data.
-   */
-  public void collapse() {
-    endOffset = startOffset;
-    endLogicalLine = startLogicalLine;
-    endLogicalColumn = startLogicalColumn;
-    endVisualColumn = 0;
-    endSoftWrapLinesBefore = startSoftWrapLinesBefore;
-    endSoftWrapLinesCurrent = startSoftWrapLinesCurrent;
-    endSoftWrapColumnDiff = startSoftWrapColumnDiff;
-    endFoldedLines = startFoldedLines;
-    endFoldingColumnDiff = startFoldingColumnDiff;
+  @TestOnly
+  public TIntObjectHashMap<FoldingData> getFoldingData() {
+    return myFoldingData;
   }
 
   @Override
@@ -250,7 +241,7 @@ class CacheEntry implements Comparable<CacheEntry>, Cloneable {
 
   @Override
   protected CacheEntry clone() {
-    final CacheEntry result = new CacheEntry(visualLine, myEditor, myRepresentationHelper);
+    final CacheEntry result = new CacheEntry(visualLine, myEditor);
 
     result.startLogicalLine = startLogicalLine;
     result.startLogicalColumn = startLogicalColumn;

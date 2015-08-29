@@ -46,16 +46,15 @@ import java.awt.event.ActionListener;
 public class ContextMenuImpl extends JPanel implements Disposable {
   @NonNls
   public static final String ACTION_GROUP = "EditorContextBarMenu";
-
-  private ActionGroup myActionGroup;
   private final JComponent myComponent;
+  private final JLayeredPane myLayeredPane;
+  private ActionGroup myActionGroup;
   private boolean myVisible = false;
   private boolean myShow = false;
   private int myCurrentOpacity;
   private Timer myTimer;
   private EditorImpl myEditor;
   private boolean myDisposed;
-  private final JLayeredPane myLayeredPane;
   private ActionToolbar myActionToolbar;
 
   public ContextMenuImpl(JLayeredPane layeredPane, @NotNull final JScrollPane container, @NotNull final EditorImpl editor) {
@@ -81,7 +80,7 @@ public class ContextMenuImpl extends JPanel implements Disposable {
       }
     });
 
-    AnAction action = actionManager.getAction("EditorContextBarMenu");
+    AnAction action = actionManager.getAction(ACTION_GROUP);
     if (action == null) {
       action = new DefaultActionGroup();
       actionManager.registerAction(ACTION_GROUP, action);
@@ -103,22 +102,27 @@ public class ContextMenuImpl extends JPanel implements Disposable {
     final Rectangle r = viewport.getBounds();
     final Point viewPosition = viewport.getViewPosition();
 
-    final Rectangle activationArea = new Rectangle(0, 0, r.width, 150);
+    final Rectangle activationArea = new Rectangle(0, 0, r.width, r.height);
     return activationArea.contains(p.x, p.y - viewPosition.y);
   }
 
+  public static boolean mayShowToolbar(@Nullable final Document document) {
+    if (document == null) {
+      return false;
+    }
+
+    final VirtualFile file = FileDocumentManager.getInstance().getFile(document);
+    return file != null && file.isValid() && (file.isInLocalFileSystem() || file instanceof HttpVirtualFile);
+  }
+
   private void toggleContextToolbar(final boolean show) {
-    final Component toolbar = myComponent.getComponent(0);
-    final int count = ((Container)toolbar).getComponentCount();
-    if (count == 0) {
+    myActionToolbar.updateActionsImmediately();
+    if (((Container)myActionToolbar).getComponentCount() == 0) {
       return;
     }
 
     if (myShow != show) {
       myShow = show;
-      if (myShow && myActionToolbar != null) {
-        myActionToolbar.updateActionsImmediately();
-      }
       restartTimer();
     }
   }
@@ -199,15 +203,6 @@ public class ContextMenuImpl extends JPanel implements Disposable {
       myTimer.stop();
       myTimer = null;
     }
-  }
-
-  public static boolean mayShowToolbar(@Nullable final Document document) {
-    if (document == null) {
-      return false;
-    }
-
-    final VirtualFile file = FileDocumentManager.getInstance().getFile(document);
-    return file != null && file.isValid() && (file.isInLocalFileSystem() || file instanceof HttpVirtualFile);
   }
 
   private void scheduleHide() {

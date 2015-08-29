@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.module;
 
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.ide.util.projectWizard.ProjectTemplateParameterFactory;
 import com.intellij.ide.util.projectWizard.WizardInputField;
 import com.intellij.openapi.options.ConfigurationException;
@@ -22,6 +23,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiNameHelper;
 import com.intellij.psi.PsiPackage;
 import com.intellij.psi.impl.PsiNameHelperImpl;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -41,7 +43,7 @@ public class BasePackageParameterFactory extends ProjectTemplateParameterFactory
   private static final Condition<PsiPackage> PACKAGE_CONDITION = new Condition<PsiPackage>() {
     @Override
     public boolean value(PsiPackage aPackage) {
-      return JavaPsiFacade.getInstance(aPackage.getProject()).getNameHelper().isQualifiedName(aPackage.getQualifiedName()) &&
+      return PsiNameHelper.getInstance(aPackage.getProject()).isQualifiedName(aPackage.getQualifiedName()) &&
              Character.isLowerCase(aPackage.getName().charAt(0));
     }
   };
@@ -56,7 +58,7 @@ public class BasePackageParameterFactory extends ProjectTemplateParameterFactory
 
     return new WizardInputField<JTextField>(IJ_BASE_PACKAGE, defaultValue) {
 
-      private final JTextField myField = new JTextField(defaultValue);
+      private final JTextField myField = new JTextField(PropertiesComponent.getInstance().getValue(IJ_BASE_PACKAGE, defaultValue));
 
       @Override
       public String getLabel() {
@@ -78,14 +80,17 @@ public class BasePackageParameterFactory extends ProjectTemplateParameterFactory
         HashMap<String, String> map = new HashMap<String, String>(2);
         map.put(getId(), getValue());
         map.put("IJ_BASE_PACKAGE_DIR", getValue().replace('.', '/'));
+        map.put("IJ_BASE_PACKAGE_PREFIX", StringUtil.isEmpty(getValue()) ? "" : getValue() + ".");
         return map;
       }
 
       @Override
       public boolean validate() throws ConfigurationException {
-        if (!PsiNameHelperImpl.getInstance().isQualifiedName(getValue())) {
-          throw new ConfigurationException(getValue() + " is not a valid package name");
+        String value = getValue();
+        if (!StringUtil.isEmpty(value) && !PsiNameHelperImpl.getInstance().isQualifiedName(value)) {
+          throw new ConfigurationException(value + " is not a valid package name");
         }
+        PropertiesComponent.getInstance().setValue(IJ_BASE_PACKAGE, value);
         return true;
       }
     };

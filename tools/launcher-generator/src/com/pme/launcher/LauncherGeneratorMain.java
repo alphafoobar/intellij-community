@@ -164,6 +164,7 @@ public class LauncherGeneratorMain {
       generator.setVersionInfoString("LegalCopyright", "Copyright (C) 2000-" + year + " " + companyName);
       generator.setVersionInfoString("ProductName", productFullName);
       generator.setVersionInfoString("FileVersion", versionString);
+      generator.setVersionInfoString("FileDescription", productFullName);
       generator.setVersionInfoString("ProductVersion", versionString);
       generator.setVersionInfoString("InternalName", productShortName.toLowerCase() + ".exe");
       generator.setVersionInfoString("OriginalFilename", productShortName.toLowerCase() + ".exe");
@@ -178,7 +179,7 @@ public class LauncherGeneratorMain {
 
   private static Map<String, Integer> loadResourceIDs(String arg) throws IOException {
     Map<String, Integer> result = new HashMap<String, Integer>();
-    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(arg), Charset.forName("UTF-16")));
+    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(arg)));
     Pattern pattern = Pattern.compile("#define (\\w+)\\s+(\\d+)");
     try {
       while(true) {

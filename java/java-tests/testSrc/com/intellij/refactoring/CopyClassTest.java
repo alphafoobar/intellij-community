@@ -23,6 +23,7 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.search.ProjectScope;
 import com.intellij.refactoring.copy.CopyClassesHandler;
@@ -33,6 +34,7 @@ import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.util.IncorrectOperationException;
 
 import java.io.File;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 
@@ -46,8 +48,14 @@ public class CopyClassTest extends CodeInsightTestCase {
   public void testReplaceAllOccurrences() throws Exception {
     doTest("Foo", "Bar");
   }
+  
+  public void testReplaceAllOccurrences1() throws Exception {
+    doTest("Foo", "Bar");
+  }
 
   public void testLibraryClass() throws Exception {  // IDEADEV-28791
+    JavaCodeStyleSettings javaSettings = getCurrentCodeStyleSettings().getCustomSettings(JavaCodeStyleSettings.class);
+    javaSettings.CLASS_NAMES_IN_JAVADOC = JavaCodeStyleSettings.FULLY_QUALIFY_NAMES_ALWAYS;
     doTest("java.util.ArrayList", "Bar");
   }
 
@@ -57,7 +65,7 @@ public class CopyClassTest extends CodeInsightTestCase {
     PsiTestUtil.removeAllRoots(myModule, IdeaTestUtil.getMockJdk17("java 1.5"));
     myRootDir = PsiTestUtil.createTestProjectStructure(myProject, myModule, root, myFilesToDelete);
 
-    PsiElement element = performAction(oldName, copyName);
+    performAction(oldName, copyName);
 
     myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting();
     FileDocumentManager.getInstance().saveAllDocuments();
@@ -68,19 +76,13 @@ public class CopyClassTest extends CodeInsightTestCase {
     PlatformTestUtil.assertFilesEqual(fileExpected, fileAfter);
   }
 
-  private PsiElement performAction(final String oldName, final String copyName) throws IncorrectOperationException {
+  private void performAction(final String oldName, final String copyName) throws IncorrectOperationException {
     final PsiClass oldClass = JavaPsiFacade.getInstance(myProject).findClass(oldName, ProjectScope.getAllScope(myProject));
 
-    return WriteCommandAction.runWriteCommandAction(null, new Computable<PsiElement>(){
-      @Override
-      public PsiElement compute() {
-        return     CopyClassesHandler.doCopyClasses(
-              Collections.singletonMap(oldClass.getNavigationElement().getContainingFile(), new PsiClass[]{oldClass}), copyName,
-              myPsiManager.findDirectory(myRootDir),
-              myProject);
-
-      }
-    });
+    WriteCommandAction.runWriteCommandAction(null, (Computable<Collection<PsiFile>>)() -> CopyClassesHandler.doCopyClasses(
+          Collections.singletonMap(oldClass.getNavigationElement().getContainingFile(), new PsiClass[]{oldClass}), copyName,
+          myPsiManager.findDirectory(myRootDir),
+          myProject));
   }
 
   public void testPackageLocalClasses() throws Exception {
@@ -98,7 +100,7 @@ public class CopyClassTest extends CodeInsightTestCase {
     PsiTestUtil.removeAllRoots(myModule, IdeaTestUtil.getMockJdk17());
     VirtualFile rootDir = PsiTestUtil.createTestProjectStructure(myProject, myModule, rootBefore, myFilesToDelete);
 
-    final HashMap<PsiFile, PsiClass[]> map = new HashMap<PsiFile, PsiClass[]>();
+    final HashMap<PsiFile, PsiClass[]> map = new HashMap<>();
     final VirtualFile sourceDir = rootDir.findChild("p1");
     for (VirtualFile file : sourceDir.getChildren()) {
       final PsiFile psiFile = myPsiManager.findFile(file);

@@ -1,7 +1,7 @@
 package com.intellij.updater;
 
 import java.io.*;
-import java.util.LinkedHashSet;
+import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -20,6 +20,7 @@ public class Utils {
       myTempDir = File.createTempFile("idea.updater.", ".tmp");
       delete(myTempDir);
       myTempDir.mkdirs();
+      Runner.logger.info("created temp file: " + myTempDir.getPath());
     }
 
     return File.createTempFile("temp.", ".tmp", myTempDir);
@@ -28,13 +29,16 @@ public class Utils {
   public static File createTempDir() throws IOException {
     File result = createTempFile();
     delete(result);
+    Runner.logger.info("deleted tmp dir: " + result.getPath());
     result.mkdirs();
+    Runner.logger.info("created tmp dir: " + result.getPath());
     return result;
   }
 
   public static void cleanup() throws IOException {
     if (myTempDir == null) return;
     delete(myTempDir);
+    Runner.logger.info("deleted file " + myTempDir.getPath());
     myTempDir = null;
   }
 
@@ -44,6 +48,7 @@ public class Utils {
       if (files != null) {
         for (File each : files) {
           delete(each);
+          Runner.logger.info("deleted file " + each.getPath());
         }
       }
     }
@@ -51,21 +56,24 @@ public class Utils {
       if (file.delete() || !file.exists()) return;
       try {
         Thread.sleep(10);
-      }
-      catch (InterruptedException ignore) {
+      } catch (InterruptedException ignore) {
+        Runner.printStackTrace(ignore);
       }
     }
     if (file.exists()) throw new IOException("Cannot delete file " + file);
   }
 
   public static void setExecutable(File file, boolean executable) throws IOException {
-    if (executable && !file.setExecutable(true)) {
+    if (executable && !file.setExecutable(true, false)) {
+      Runner.logger.error("Can't set executable permissions for file");
       throw new IOException("Cannot set executable permissions for: " + file);
     }
   }
 
   public static void copy(File from, File to) throws IOException {
+    Runner.logger.info("from " + from.getPath() + " to " + to.getPath());
     if (from.isDirectory()) {
+      to.mkdirs();
       File[] files = from.listFiles();
       if (files == null) throw new IOException("Cannot get directory's content: " + from);
       for (File each : files) {
@@ -81,6 +89,15 @@ public class Utils {
         in.close();
       }
       setExecutable(to, from.canExecute());
+    }
+  }
+
+
+  public static void mirror(File from, File to) throws IOException {
+    if (from.exists()) {
+      copy(from, to);
+    } else {
+      delete(to);
     }
   }
 
@@ -139,39 +156,121 @@ public class Utils {
   }
 
   public static InputStream getEntryInputStream(ZipFile zipFile, String entryPath) throws IOException {
-    InputStream result = findEntryInputStream(zipFile, entryPath);
-    if (result == null) throw new IOException("Entry " + entryPath + " not found");
-    return result;
+    ZipEntry entry = getZipEntry(zipFile, entryPath);
+    return findEntryInputStreamForEntry(zipFile, entry);
   }
 
   public static InputStream findEntryInputStream(ZipFile zipFile, String entryPath) throws IOException {
     ZipEntry entry = zipFile.getEntry(entryPath);
-    if (entry == null || entry.isDirectory()) return null;
+    if (entry == null) return null;
+    return findEntryInputStreamForEntry(zipFile, entry);
+  }
 
-    // if isDirectory check failed, check presence of 'file/' manually
-    if (!entryPath.endsWith("/") && zipFile.getEntry(entryPath + "/") != null) return null;
+  public static ZipEntry getZipEntry(ZipFile zipFile, String entryPath) throws IOException {
+    ZipEntry entry = zipFile.getEntry(entryPath);
+    if (entry == null) throw new IOException("Entry " + entryPath + " not found");
+    Runner.logger.info("entryPath: " + entryPath);
+    return entry;
+  }
+
+  public static InputStream findEntryInputStreamForEntry(ZipFile zipFile, ZipEntry entry) throws IOException {
+    if (entry.isDirectory()) return null;
+    // There is a bug in some JVM implementations where for a directory "X/" in a zipfile, if we do
+    // "zip.getEntry("X/").isDirectory()" returns true, but if we do "zip.getEntry("X").isDirectory()" is false.
+    // getEntry for "name" falls back to finding "X/", so here we make sure that didn't happen.
+    if (zipFile.getEntry(entry.getName() + "/") != null) return null;
 
     return new BufferedInputStream(zipFile.getInputStream(entry));
   }
 
-  public static LinkedHashSet<String> collectRelativePaths(File dir) {
+  public static LinkedHashSet<String> collectRelativePaths(File dir, boolean includeDirectories) {
     LinkedHashSet<String> result = new LinkedHashSet<String>();
-    collectRelativePaths(dir, result, null);
+    collectRelativePaths(dir, result, null, includeDirectories);
     return result;
   }
 
-  private static void collectRelativePaths(File dir, LinkedHashSet<String> result, String parentPath) {
+  private static void collectRelativePaths(File dir, LinkedHashSet<String> result, String parentPath, boolean includeDirectories) {
     File[] children = dir.listFiles();
     if (children == null) return;
 
     for (File each : children) {
       String relativePath = (parentPath == null ? "" : parentPath + "/") + each.getName();
       if (each.isDirectory()) {
-        collectRelativePaths(each, result, relativePath);
+        if (includeDirectories) {
+          // The trailing slash is very important, as it's used by zip to determine whether it is a directory.
+          result.add(relativePath + "/");
+        }
+        collectRelativePaths(each, result, relativePath, includeDirectories);
       }
       else {
         result.add(relativePath);
       }
+    }
+  }
+
+  public static InputStream newFileInputStream(File file, boolean normalize) throws IOException {
+    if (!normalize || !isZipFile(file.getName())) {
+      return new FileInputStream(file);
+    }
+    return new NormalizedZipInputStream(file);
+  }
+
+  static class NormalizedZipInputStream extends InputStream {
+
+    private ArrayList<? extends ZipEntry> myEntries;
+    private InputStream myStream = null;
+    private int myNextEntry = 0;
+    private final ZipFile myZip;
+    private byte[] myByte = new byte[1];
+
+    NormalizedZipInputStream(File file) throws IOException {
+      myZip = new ZipFile(file);
+      myEntries = Collections.list(myZip.entries());
+      Collections.sort(myEntries, new Comparator<ZipEntry>() {
+        @Override
+        public int compare(ZipEntry a, ZipEntry b) {
+          return a.getName().compareTo(b.getName());
+        }
+      });
+
+      loadNextEntry();
+    }
+
+    private void loadNextEntry() throws IOException {
+      if (myStream != null) {
+        myStream.close();
+      }
+      myStream = null;
+      while (myNextEntry < myEntries.size() && myStream == null) {
+        myStream = findEntryInputStreamForEntry(myZip, myEntries.get(myNextEntry++));
+      }
+    }
+
+    @Override
+    public int read(byte[] bytes, int off, int len) throws IOException {
+      if (myStream == null) {
+        return -1;
+      }
+      int b = myStream.read(bytes, off, len);
+      if (b == -1) {
+        loadNextEntry();
+        return read(bytes, off, len);
+      }
+      return b;
+    }
+
+    @Override
+    public int read() throws IOException {
+      int b = read(myByte, 0, 1);
+      return b == -1 ? -1 : myByte[0];
+    }
+
+    @Override
+    public void close() throws IOException {
+      if (myStream != null) {
+        myStream.close();
+      }
+      myZip.close();
     }
   }
 }

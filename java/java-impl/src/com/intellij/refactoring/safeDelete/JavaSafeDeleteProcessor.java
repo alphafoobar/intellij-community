@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.javadoc.PsiDocTag;
+import com.intellij.psi.search.searches.FunctionalExpressionSearch;
 import com.intellij.psi.search.searches.OverridingMethodsSearch;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.MethodSignatureUtil;
@@ -38,16 +39,24 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringBundle;
+import com.intellij.refactoring.changeSignature.inCallers.JavaCallerChooser;
 import com.intellij.refactoring.safeDelete.usageInfo.*;
+import com.intellij.refactoring.util.ConflictsUtil;
+import com.intellij.refactoring.util.RefactoringChangeUtil;
 import com.intellij.refactoring.util.RefactoringMessageUtil;
 import com.intellij.refactoring.util.RefactoringUIUtil;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewUtil;
 import com.intellij.usages.*;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
+import com.intellij.util.containers.MultiMap;
+import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -61,7 +70,7 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
   }
 
   @Nullable
-  public NonCodeUsageSearchInfo findUsages(final PsiElement element, final PsiElement[] allElementsToDelete, final List<UsageInfo> usages) {
+  public NonCodeUsageSearchInfo findUsages(@NotNull final PsiElement element, @NotNull final PsiElement[] allElementsToDelete, @NotNull final List<UsageInfo> usages) {
     Condition<PsiElement> insideDeletedCondition = getUsageInsideDeletedFilter(allElementsToDelete);
     if (element instanceof PsiClass) {
       findClassUsages((PsiClass) element, allElementsToDelete, usages);
@@ -100,9 +109,9 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
 
   @Nullable
   @Override
-  public Collection<? extends PsiElement> getElementsToSearch(PsiElement element,
+  public Collection<? extends PsiElement> getElementsToSearch(@NotNull PsiElement element,
                                                               @Nullable Module module,
-                                                              Collection<PsiElement> allElementsToDelete) {
+                                                              @NotNull Collection<PsiElement> allElementsToDelete) {
     Project project = element.getProject();
     if (element instanceof PsiPackage && module != null) {
       final PsiDirectory[] directories = ((PsiPackage)element).getDirectories(module.getModuleScope());
@@ -138,14 +147,44 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
 
       if (parametersToDelete.size() > 1 && !ApplicationManager.getApplication().isUnitTestMode()) {
         String message = RefactoringBundle.message("0.is.a.part.of.method.hierarchy.do.you.want.to.delete.multiple.parameters", UsageViewUtil.getLongName(method));
-        if (Messages.showYesNoDialog(project, message, SafeDeleteHandler.REFACTORING_NAME,
-            Messages.getQuestionIcon()) != Messages.YES) return null;
+        int result = Messages.showYesNoCancelDialog(project, message, SafeDeleteHandler.REFACTORING_NAME,
+                                               Messages.getQuestionIcon());
+        if (result == Messages.CANCEL) return null;
+        if (result == Messages.NO) return Collections.singletonList(element);
       }
       return parametersToDelete;
     }
-    else {
-      return Collections.singletonList(element);
+    else if (element instanceof PsiTypeParameter) {
+      final PsiTypeParameterListOwner owner = ((PsiTypeParameter)element).getOwner();
+      if (owner instanceof PsiMethod && !owner.hasModifierProperty(PsiModifier.STATIC)) {
+        final PsiTypeParameterList typeParameterList = owner.getTypeParameterList();
+        if (typeParameterList != null) {
+          final int index = typeParameterList.getTypeParameterIndex((PsiTypeParameter)element);
+          if (index >= 0) {
+            final ArrayList<PsiTypeParameter> overriders = new ArrayList<PsiTypeParameter>();
+            overriders.add((PsiTypeParameter)element);
+            OverridingMethodsSearch.search((PsiMethod)owner).forEach(new Processor<PsiMethod>() {
+              public boolean process(PsiMethod overrider) {
+                final PsiTypeParameter[] typeParameters = overrider.getTypeParameters();
+                if (index < typeParameters.length) {
+                  overriders.add(typeParameters[index]);
+                }
+                return true;
+              }
+            });
+            if (!overriders.isEmpty()) {
+              String message = RefactoringBundle.message("0.is.a.part.of.method.hierarchy.do.you.want.to.delete.multiple.type.parameters", UsageViewUtil.getLongName(owner));
+              int result = ApplicationManager.getApplication().isUnitTestMode() 
+                           ? Messages.YES :Messages.showYesNoCancelDialog(project, message, SafeDeleteHandler.REFACTORING_NAME, Messages.getQuestionIcon());
+              if (result == Messages.CANCEL) return null;
+              if (result == Messages.YES) return overriders;
+            }
+          }
+        }
+      }
     }
+    
+    return Collections.singletonList(element);
   }
 
   @Override
@@ -170,14 +209,14 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
     }
 
     return manager.showUsages(targets,
-                              UsageInfoToUsageConverter.convert(new UsageInfoToUsageConverter.TargetElementsDescriptor(elements),
+                              UsageInfoToUsageConverter.convert(elements,
                                                                 others.toArray(new UsageInfo[others.size()])),
                               presentation
     );
   }
 
-  public Collection<PsiElement> getAdditionalElementsToDelete(final PsiElement element,
-                                                              final Collection<PsiElement> allElementsToDelete,
+  public Collection<PsiElement> getAdditionalElementsToDelete(@NotNull final PsiElement element,
+                                                              @NotNull final Collection<PsiElement> allElementsToDelete,
                                                               final boolean askUser) {
     if (element instanceof PsiField) {
       PsiField field = (PsiField)element;
@@ -217,11 +256,11 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
     return null;
   }
 
-  public Collection<String> findConflicts(final PsiElement element, final PsiElement[] allElementsToDelete) {
+  public Collection<String> findConflicts(@NotNull final PsiElement element, @NotNull final PsiElement[] allElementsToDelete) {
     if (element instanceof PsiMethod) {
       final PsiClass containingClass = ((PsiMethod)element).getContainingClass();
 
-      if (!containingClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
+      if (containingClass != null && !containingClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
         final PsiMethod[] superMethods = ((PsiMethod) element).findSuperMethods();
         for (PsiMethod superMethod : superMethods) {
           if (isInside(superMethod, allElementsToDelete)) continue;
@@ -233,19 +272,42 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         }
       }
     }
+    else if (element instanceof PsiParameter) {
+      final PsiElement scope = ((PsiParameter)element).getDeclarationScope();
+      if (scope instanceof PsiMethod) {
+        final PsiMethod method = (PsiMethod)scope;
+        final PsiClass containingClass = method.getContainingClass();
+        if (containingClass != null) {
+          final int parameterIndex = method.getParameterList().getParameterIndex((PsiParameter)element);
+          final PsiMethod methodCopy = (PsiMethod)method.copy();
+          methodCopy.getParameterList().getParameters()[parameterIndex].delete();
+          final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
+          ConflictsUtil.checkMethodConflicts(containingClass, method, methodCopy, conflicts);
+          return (Collection<String>)conflicts.values();
+        }
+      }
+    }
     return null;
   }
 
   @Nullable
   public UsageInfo[] preprocessUsages(final Project project, final UsageInfo[] usages) {
-    ArrayList<UsageInfo> result = new ArrayList<UsageInfo>();
-    ArrayList<UsageInfo> overridingMethods = new ArrayList<UsageInfo>();
+    final ArrayList<UsageInfo> result = new ArrayList<UsageInfo>();
+    final ArrayList<UsageInfo> overridingMethods = new ArrayList<UsageInfo>();
+    final ArrayList<SafeDeleteParameterCallHierarchyUsageInfo> delegatingParams = new ArrayList<SafeDeleteParameterCallHierarchyUsageInfo>();
+    final ArrayList<SafeDeleteMethodCalleeUsageInfo> calleesSafeToDelete = new ArrayList<SafeDeleteMethodCalleeUsageInfo>();
     for (UsageInfo usage : usages) {
       if (usage.isNonCodeUsage) {
         result.add(usage);
       }
+      else if (usage instanceof SafeDeleteMethodCalleeUsageInfo) {
+        calleesSafeToDelete.add((SafeDeleteMethodCalleeUsageInfo)usage);
+      }
       else if (usage instanceof SafeDeleteOverridingMethodUsageInfo) {
         overridingMethods.add(usage);
+      }
+      else if (usage instanceof SafeDeleteParameterCallHierarchyUsageInfo) {
+        delegatingParams.add((SafeDeleteParameterCallHierarchyUsageInfo)usage);
       }
       else {
         result.add(usage);
@@ -258,13 +320,99 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
       }
       else {
         OverridingMethodsDialog dialog = new OverridingMethodsDialog(project, overridingMethods);
-        dialog.show();
-        if(!dialog.isOK()) return null;
-        result.addAll(dialog.getSelected());
+        if (!dialog.showAndGet()) {
+          return null;
+        }
+        final ArrayList<UsageInfo> selected = dialog.getSelected();
+        final Set<UsageInfo> unselected = new HashSet<UsageInfo>(overridingMethods);
+        unselected.removeAll(selected);
+
+        if (!unselected.isEmpty()) {
+          final List<PsiMethod> unselectedMethods = ContainerUtil.map(unselected, new Function<UsageInfo, PsiMethod>() {
+            @Override
+            public PsiMethod fun(UsageInfo info) {
+              return ((SafeDeleteOverridingMethodUsageInfo)info).getOverridingMethod();
+            }
+          });
+
+          for (Iterator<UsageInfo> iterator = result.iterator(); iterator.hasNext(); ) {
+            final UsageInfo info = iterator.next();
+            if (info instanceof SafeDeleteOverrideAnnotation &&
+                !allSuperMethodsSelectedToDelete(unselectedMethods, ((SafeDeleteOverrideAnnotation)info).getMethod())) {
+              iterator.remove();
+            }
+          }
+        }
+
+        result.addAll(selected);
+      }
+    }
+
+    if (!delegatingParams.isEmpty()) {
+      final SafeDeleteParameterCallHierarchyUsageInfo parameterHierarchyUsageInfo = delegatingParams.get(0);
+      if (ApplicationManager.getApplication().isUnitTestMode()) {
+        result.addAll(delegatingParams);
+      } else {
+        final PsiMethod method = parameterHierarchyUsageInfo.getCalledMethod();
+        final PsiParameter parameter = parameterHierarchyUsageInfo.getReferencedElement();
+        final int parameterIndex = method.getParameterList().getParameterIndex(parameter);
+        final JavaCallerChooser chooser = new SafeDeleteJavaCallerChooser(method, project, result) {
+          @Override
+          protected ArrayList<SafeDeleteParameterCallHierarchyUsageInfo> getTopLevelItems() {
+            return delegatingParams;
+          }
+
+          @Override
+          protected int getParameterIdx() {
+            return parameterIndex;
+          }
+        };
+        TreeUtil.expand(chooser.getTree(), 2);
+        if (!chooser.showAndGet()) {
+          return null;
+        }
+      }
+    }
+
+    if (!calleesSafeToDelete.isEmpty()) {
+      if (ApplicationManager.getApplication().isUnitTestMode()) {
+        result.addAll(calleesSafeToDelete);
+      }
+      else {
+        final PsiMethod method = calleesSafeToDelete.get(0).getCallerMethod();
+        final ArrayList<UsageInfo> list = new ArrayList<UsageInfo>();
+        JavaCallerChooser chooser = new SafeDeleteJavaCalleeChooser(method, project, list) {
+          @Override
+          protected ArrayList<SafeDeleteMethodCalleeUsageInfo> getTopLevelItems() {
+            return calleesSafeToDelete;
+          }
+        };
+        TreeUtil.expand(chooser.getTree(), 2);
+        if (!chooser.showAndGet()) {
+          return null;
+        }
+        result.addAll(list);
+        final List<PsiElement> methodsToDelete = new ArrayList<PsiElement>();
+        for (UsageInfo info : list) {
+          methodsToDelete.add(info.getElement());
+        }
+        methodsToDelete.add(method);
+        final Condition<PsiElement> insideDeletedCondition = getUsageInsideDeletedFilter(methodsToDelete.toArray(new PsiElement[methodsToDelete.size()]));
+        for (UsageInfo info : list) {
+          SafeDeleteProcessor.addNonCodeUsages(info.getElement(), result, insideDeletedCondition, 
+                                               JavaRefactoringSettings.getInstance().RENAME_SEARCH_FOR_TEXT_FOR_METHOD, 
+                                               JavaRefactoringSettings.getInstance().RENAME_SEARCH_IN_COMMENTS_FOR_METHOD );
+        }
       }
     }
 
     return result.toArray(new UsageInfo[result.size()]);
+  }
+
+  private static boolean allSuperMethodsSelectedToDelete(List<PsiMethod> unselectedMethods, PsiMethod method) {
+    final ArrayList<PsiMethod> superMethods = new ArrayList<PsiMethod>(Arrays.asList(method.findSuperMethods()));
+    superMethods.retainAll(unselectedMethods);
+    return superMethods.isEmpty();
   }
 
   public void prepareForDeletion(final PsiElement element) throws IncorrectOperationException {
@@ -358,7 +506,7 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
           PsiElement parent = element.getParent();
           if (parent instanceof PsiReferenceList) {
             final PsiElement pparent = parent.getParent();
-            if (pparent instanceof PsiClass) {
+            if (pparent instanceof PsiClass && element instanceof PsiJavaCodeReferenceElement) {
               final PsiClass inheritor = (PsiClass) pparent;
               //If psiClass contains only private members, then it is safe to remove it and change inheritor's extends/implements accordingly
               if (justPrivates) {
@@ -370,7 +518,11 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
             }
           }
           LOG.assertTrue(element.getTextRange() != null);
-          usages.add(new SafeDeleteReferenceJavaDeleteUsageInfo(element, psiClass, isInNonStaticImport(element)));
+          final PsiFile containingFile = psiClass.getContainingFile();
+          final boolean sameFileWithSingleClass = containingFile instanceof PsiClassOwner &&
+                                                  ((PsiClassOwner)containingFile).getClasses().length == 1 &&
+                                                  element.getContainingFile() == containingFile;
+          usages.add(new SafeDeleteReferenceJavaDeleteUsageInfo(element, psiClass, sameFileWithSingleClass || isInNonStaticImport(element)));
         }
         return true;
       }
@@ -446,7 +598,7 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
   }
 
   @Nullable
-  private static Condition<PsiElement> findMethodUsages(PsiMethod psiMethod, final PsiElement[] allElementsToDelete, List<UsageInfo> usages) {
+  private static Condition<PsiElement> findMethodUsages(final PsiMethod psiMethod, final PsiElement[] allElementsToDelete, List<UsageInfo> usages) {
     final Collection<PsiReference> references = ReferencesSearch.search(psiMethod).findAll();
 
     if(psiMethod.isConstructor()) {
@@ -455,6 +607,8 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
     final PsiMethod[] overridingMethods =
             removeDeletedMethods(OverridingMethodsSearch.search(psiMethod, true).toArray(PsiMethod.EMPTY_ARRAY),
                                  allElementsToDelete);
+
+    findFunctionalExpressions(usages, ArrayUtil.prepend(psiMethod, overridingMethods));
 
     final HashMap<PsiMethod, Collection<PsiReference>> methodToReferences = new HashMap<PsiMethod, Collection<PsiReference>>();
     for (PsiMethod overridingMethod : overridingMethods) {
@@ -470,12 +624,33 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         usages.add(new SafeDeleteReferenceJavaDeleteUsageInfo(element, psiMethod, PsiTreeUtil.getParentOfType(element, PsiImportStaticStatement.class) != null));
       }
     }
+
+    final List<PsiMethod> calleesSafeToDelete = SafeDeleteJavaCalleeChooser.computeCalleesSafeToDelete(psiMethod);
+    if (calleesSafeToDelete != null) {
+      for (PsiMethod method : calleesSafeToDelete) {
+        usages.add(new SafeDeleteMethodCalleeUsageInfo(method, psiMethod));
+      }
+    }
+
     return new Condition<PsiElement>() {
       public boolean value(PsiElement usage) {
         if(usage instanceof PsiFile) return false;
         return isInside(usage, allElementsToDelete) || isInside(usage,  validOverriding);
       }
     };
+  }
+
+  private static void findFunctionalExpressions(final List<UsageInfo> usages, PsiMethod... methods) {
+    for (PsiMethod method : methods) {
+      final PsiClass containingClass = method.getContainingClass();
+      FunctionalExpressionSearch.search(method).forEach(new Processor<PsiFunctionalExpression>() {
+        @Override
+        public boolean process(PsiFunctionalExpression expression) {
+          usages.add(new SafeDeleteFunctionalExpressionUsageInfo(expression, containingClass));
+          return true;
+        }
+      });
+    }
   }
 
   private static PsiMethod[] removeDeletedMethods(PsiMethod[] methods, final PsiElement[] allElementsToDelete) {
@@ -691,12 +866,28 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
 
   private static void findParameterUsages(final PsiParameter parameter, final List<UsageInfo> usages) {
     final PsiMethod method = (PsiMethod)parameter.getDeclarationScope();
+    final int parameterIndex = method.getParameterList().getParameterIndex(parameter);
     //search for refs to current method only, do not search for refs to overriding methods, they'll be searched separately
     ReferencesSearch.search(method).forEach(new Processor<PsiReference>() {
       public boolean process(final PsiReference reference) {
         PsiElement element = reference.getElement();
         if (element != null) {
-          JavaSafeDeleteDelegate.EP.forLanguage(element.getLanguage()).createUsageInfoForParameter(reference, usages, parameter, method);
+          final JavaSafeDeleteDelegate safeDeleteDelegate = JavaSafeDeleteDelegate.EP.forLanguage(element.getLanguage());
+          if (safeDeleteDelegate != null) {
+            safeDeleteDelegate.createUsageInfoForParameter(reference, usages, parameter, method);
+          }
+          if (!parameter.isVarArgs() && !RefactoringChangeUtil.isSuperMethodCall(element.getParent())) {
+            final PsiParameter paramInCaller = SafeDeleteJavaCallerChooser.isTheOnlyOneParameterUsage(element.getParent(), parameterIndex, method);
+            if (paramInCaller != null) {
+              final PsiMethod callerMethod = (PsiMethod)paramInCaller.getDeclarationScope();
+              if (ApplicationManager.getApplication().isUnitTestMode()) {
+                usages.add(new SafeDeleteParameterCallHierarchyUsageInfo(callerMethod, paramInCaller, callerMethod));
+              } 
+              else {
+                usages.add(new SafeDeleteParameterCallHierarchyUsageInfo(method, parameter, callerMethod));
+              }
+            }
+          }
         }
         return true;
       }
@@ -730,6 +921,8 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         return true;
       }
     });
+
+    findFunctionalExpressions(usages, method);
   }
 
 
@@ -759,5 +952,14 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
     }
 
     return false;
+  }
+  
+  private static class SafeDeleteFunctionalExpressionUsageInfo extends SafeDeleteReferenceUsageInfo {
+    public SafeDeleteFunctionalExpressionUsageInfo(@NotNull PsiElement element, PsiElement referencedElement) {
+      super(element, referencedElement, false);
+    }
+
+    @Override
+    public void deleteElement() throws IncorrectOperationException {}
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,9 @@
  */
 
 package org.jetbrains.plugins.groovy.refactoring.optimizeImports
-
 import com.intellij.codeInsight.CodeInsightSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.CommandProcessor
-import com.intellij.openapi.fileEditor.impl.TrailingSpacesStripper
 import com.intellij.psi.codeStyle.CodeStyleSettings
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager
 import com.intellij.psi.impl.source.PostprocessReformattingAspect
@@ -125,8 +123,6 @@ public class OptimizeImportsTest extends LightGroovyTestCase {
     doTest();
   }
 
-  public void testJavaUtilString() { doTest(); }
-
   public void testSamePackage() {
     myFixture.addClass("package foo; public class Bar {}");
     myFixture.configureFromExistingVirtualFile(myFixture.copyFileToProject(getTestName(false) + ".groovy", "foo/Foo.groovy"));
@@ -146,6 +142,14 @@ public class OptimizeImportsTest extends LightGroovyTestCase {
   public void testRemoveImplicitlyImported() { doTest(); }
   public void testRemoveImplicitlyDemandImported() { doTest(); }
   public void testDontRemoveRedImports() { doTest(); }
+  public void testDontRemoveRedImports2() { doTest(); }
+  public void testDontRemoveRedImports3() { doTest(); }
+  public void testDontRemoveRedImports4() { doTest(); }
+  public void testDontRemoveRedImports5() { doTest(); }
+  public void testDontRemoveRedImports6() { doTest(); }
+  public void testDontRemoveRedImports7() { doTest(); }
+  public void testDontRemoveRedImports8() { doTest(); }
+  public void testDontRemoveRedImports9() { doTest(); }
 
   public void testRemoveSamePackaged() {
     myFixture.addClass("package foo.bar; public class Aaaa {}");
@@ -157,9 +161,9 @@ public class OptimizeImportsTest extends LightGroovyTestCase {
   }
 
   public void testJustWrongImport() throws Exception {
-    myFixture.configureByText("a.groovy", "import a.b.c.d");
+    myFixture.configureByText("a.groovy", "import a.b.c.d; final d c;");
     doOptimizeImports();
-    myFixture.checkResult("import a.b.c.d");
+    myFixture.checkResult("import a.b.c.d; final d c;");
   }
 
   public void testCleanBeforeJavadoc() throws Exception {
@@ -189,7 +193,6 @@ class Fooxx <caret>{
 
       doOptimizeImports();
       PostprocessReformattingAspect.getInstance(getProject()).doPostponedFormatting();
-      TrailingSpacesStripper.stripIfNotCurrentLine(myFixture.getEditor().getDocument(), false);
       myFixture.checkResultByFile(getTestName(false) + "_after.groovy");
     }
     finally {

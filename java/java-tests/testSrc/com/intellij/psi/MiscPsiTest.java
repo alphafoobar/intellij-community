@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,16 +19,22 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.tree.LazyParseableElement;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.testFramework.SkipSlowTestLocally;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import org.jetbrains.annotations.NotNull;
 
+@SkipSlowTestLocally
 public class MiscPsiTest extends LightCodeInsightFixtureTestCase {
   @Override
-  protected void invokeTestRunnable(final Runnable runnable) throws Exception {
+  protected void invokeTestRunnable(@NotNull final Runnable runnable) throws Exception {
     new WriteCommandAction.Simple(getProject()) {
       @Override
       protected void run() throws Throwable {
@@ -44,12 +50,12 @@ public class MiscPsiTest extends LightCodeInsightFixtureTestCase {
     VirtualFile vDir = myFixture.getTempDirFixture().findOrCreateDir("dir");
 
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
-    assertTrue(file instanceof PsiPlainTextFile);
+    assertInstanceOf(file, PsiPlainTextFile.class);
     PsiDirectory dir = getPsiManager().findDirectory(vDir);
     PsiFile fileCopy = (PsiFile)file.copy();
     fileCopy = (PsiFile) fileCopy.setName("NewTest.txt");
     PsiFile newFile = (PsiFile)dir.add(fileCopy);
-    assertTrue(newFile instanceof PsiPlainTextFile);
+    assertInstanceOf(newFile, PsiPlainTextFile.class);
 
     assertEquals(text, new String(newFile.getVirtualFile().contentsToByteArray()));
     assertEquals(newFile.getVirtualFile().getModificationStamp(), newFile.getViewProvider().getModificationStamp());
@@ -66,12 +72,18 @@ public class MiscPsiTest extends LightCodeInsightFixtureTestCase {
 
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     PsiFile file = getPsiManager().findFile(vFile);
-    assertTrue(file instanceof PsiBinaryFile);
+    assertInstanceOf(file, PsiBinaryFile.class);
     PsiDirectory dir = getPsiManager().findDirectory(vDir);
+
     PsiFile fileCopy = (PsiFile)file.copy();
     fileCopy = (PsiFile) fileCopy.setName("NewTest.xxx");
     PsiFile newFile = (PsiFile)dir.add(fileCopy);
-    assertTrue(newFile instanceof PsiBinaryFile);
+    if (!(newFile instanceof PsiBinaryFile)) {
+      System.out.println(newFile.getVirtualFile().getFileType());
+      System.out.println(newFile.getFileType());
+      System.out.println(newFile.getText());
+    }
+    assertInstanceOf(newFile, PsiBinaryFile.class);
 
     assertOrderedEquals(newFile.getVirtualFile().contentsToByteArray(), bytes);
   }
@@ -88,7 +100,7 @@ public class MiscPsiTest extends LightCodeInsightFixtureTestCase {
     PsiFile fileCopy = (PsiFile)file.copy();
     fileCopy = (PsiFile) fileCopy.setName("NewTest.txt");
     PsiFile newFile = (PsiFile)dir.add(fileCopy);
-    assertTrue(newFile instanceof PsiPlainTextFile);
+    assertInstanceOf(newFile, PsiPlainTextFile.class);
 
     assertEquals(text, VfsUtil.loadText(newFile.getVirtualFile()));
     assertEquals(newFile.getVirtualFile().getModificationStamp(), newFile.getViewProvider().getModificationStamp());
@@ -259,4 +271,79 @@ public class MiscPsiTest extends LightCodeInsightFixtureTestCase {
     assertEquals("some.unknown.Foo<? extends String>", type.getCanonicalText());
   }
 
+  public void testNoPsiModificationsInUncommittedDocument() {
+    final PsiJavaFile file = (PsiJavaFile)myFixture.addFileToProject("a.java", "class A{}");
+    Document document = file.getViewProvider().getDocument();
+    document.insertString(0, " ");
+
+    PsiClass psiClass = file.getClasses()[0];
+    try {
+      psiClass.addBefore(PsiParserFacade.SERVICE.getInstance(getProject()).createWhiteSpaceFromText(" "), psiClass.getLBrace());
+      fail();
+    }
+    catch (IllegalStateException e) {
+      assertEquals("Attempt to modify PSI for non-committed Document!", e.getMessage());
+    }
+    assertEquals("class A{}", psiClass.getText());
+    assertEquals(" class A{}", document.getText());
+  }
+
+  public void testASTBecomesInvalidOnExternalChange() {
+    final String text = "class A{}";
+    final PsiJavaFile file = (PsiJavaFile)myFixture.addFileToProject("a.java", text);
+    PsiElement leaf = file.findElementAt(5);
+
+    PlatformTestUtil.tryGcSoftlyReachableObjects();
+    assertNull(PsiDocumentManager.getInstance(getProject()).getCachedDocument(file));
+
+    new WriteCommandAction.Simple(getProject()) {
+      @Override
+      protected void run() throws Throwable {
+        VfsUtil.saveText(file.getVirtualFile(), text + "   ");
+      }
+    }.execute();
+
+    assertTrue(file.isValid());
+    assertFalse(leaf.isValid());
+    assertNotSame(leaf, file.findElementAt(5));
+  }
+
+  public void testPsiModificationsWithNoDocumentDocument() {
+    final PsiJavaFile file = (PsiJavaFile)myFixture.addFileToProject("a.java", "class A{}");
+
+    PsiClass aClass = file.getClasses()[0];
+    aClass.getNode();
+    assertNotNull(PsiDocumentManager.getInstance(getProject()).getCachedDocument(file));
+    
+    PlatformTestUtil.tryGcSoftlyReachableObjects();
+    assertNull(PsiDocumentManager.getInstance(getProject()).getCachedDocument(file));
+
+    aClass.add(JavaPsiFacade.getElementFactory(getProject()).createMethodFromText("void foo(){}", null));
+    assertNotNull(PsiDocumentManager.getInstance(getProject()).getCachedDocument(file));
+
+    PostprocessReformattingAspect.getInstance(getProject()).doPostponedFormatting();
+
+    assertTrue(file.getText(), file.getText().contains("foo() {\n"));
+
+  }
+
+  public void testPsiModificationNotAffectingDocument() {
+    final PsiJavaFile file = (PsiJavaFile)myFixture.addFileToProject("a.java", "class A{public static void foo() { }}");
+
+    PsiClass aClass = file.getClasses()[0];
+    //noinspection ResultOfMethodCallIgnored
+    aClass.getNode();
+    PlatformTestUtil.tryGcSoftlyReachableObjects();
+
+    PsiKeyword kw = assertInstanceOf(aClass.getMethods()[0].getModifierList().getFirstChild(), PsiKeyword.class);
+    kw.delete();
+
+    Document document = PsiDocumentManager.getInstance(getProject()).getDocument(file);
+    assertNotNull(document);
+    assertTrue(document.getModificationStamp() != file.getVirtualFile().getModificationStamp());
+    assertEquals(document.getModificationStamp(), file.getViewProvider().getModificationStamp());
+    FileDocumentManager.getInstance().saveDocument(document);
+
+    assertEquals(file.getText(), LoadTextUtil.loadText(file.getVirtualFile()).toString());
+  }
 }

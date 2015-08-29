@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,10 @@ package com.intellij.codeInsight.daemon.impl.analysis;
 import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.XmlErrorMessages;
 import com.intellij.codeInsight.intention.HighPriorityAction;
-import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.codeInsight.template.*;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
@@ -31,28 +29,30 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.html.HtmlTag;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
 import com.intellij.psi.xml.XmlChildRole;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.xml.XmlAttributeDescriptor;
 import com.intellij.xml.XmlElementDescriptor;
 import com.intellij.xml.XmlExtension;
+import com.intellij.xml.util.HtmlUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * User: anna
  * Date: 18-Nov-2005
  */
-public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFix, HighPriorityAction {
-  private final XmlTag myTag;
+public class InsertRequiredAttributeFix extends LocalQuickFixAndIntentionActionOnPsiElement implements HighPriorityAction {
   private final String myAttrName;
   private final String[] myValues;
   @NonNls
   private static final String NAME_TEMPLATE_VARIABLE = "name";
 
   public InsertRequiredAttributeFix(@NotNull XmlTag tag, @NotNull String attrName,@NotNull String... values) {
-    myTag = tag;
+    super(tag);
     myAttrName = attrName;
     myValues = values;
   }
@@ -65,29 +65,18 @@ public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFi
 
   @Override
   @NotNull
-  public String getName() {
-    return getText();
-  }
-
-  @Override
-  @NotNull
   public String getFamilyName() {
     return XmlErrorMessages.message("insert.required.attribute.quickfix.family");
   }
 
   @Override
-  public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
-    invoke(project, null, myTag.getContainingFile());
-  }
-
-  @Override
-  public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
-    return myTag.isValid();
-  }
-
-  @Override
-  public void invoke(@NotNull final Project project, final Editor editor, PsiFile file) {
+  public void invoke(@NotNull final Project project,
+                     @NotNull PsiFile file,
+                     @Nullable("is null when called from inspection") final Editor editor,
+                     @NotNull PsiElement startElement,
+                     @NotNull PsiElement endElement) {
     if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
+    XmlTag myTag = (XmlTag)startElement;
     ASTNode treeElement = SourceTreeToPsiMap.psiElementToTree(myTag);
 
     final XmlElementDescriptor descriptor = myTag.getDescriptor();
@@ -95,7 +84,8 @@ public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFi
       return;
     }
     final XmlAttributeDescriptor attrDescriptor = descriptor.getAttributeDescriptor(myAttrName, myTag);
-    boolean indirectSyntax = XmlExtension.getExtension(myTag.getContainingFile()).isIndirectSyntax(attrDescriptor);
+    final boolean indirectSyntax = XmlExtension.getExtension(myTag.getContainingFile()).isIndirectSyntax(attrDescriptor);
+    boolean insertShorthand = myTag instanceof HtmlTag && attrDescriptor != null && HtmlUtil.isBooleanAttribute(attrDescriptor, myTag);
 
     PsiElement anchor = SourceTreeToPsiMap.treeElementToPsi(
       XmlChildRole.EMPTY_TAG_END_FINDER.findChild(treeElement)
@@ -116,11 +106,11 @@ public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFi
       if (anchorIsEmptyTag) template.addTextSegment(">");
       template.addTextSegment("<jsp:attribute name=\"" + myAttrName + "\">");
     } else {
-      template.addTextSegment(" " + myAttrName + "=\"");
+      template.addTextSegment(" " + myAttrName + (!insertShorthand ? "=\"" : ""));
     }
 
     Expression expression = new Expression() {
-      TextResult result = new TextResult("");
+      final TextResult result = new TextResult("");
 
       @Override
       public Result calculateResult(ExpressionContext context) {
@@ -142,18 +132,18 @@ public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFi
         return items;
       }
     };
-    template.addVariable(NAME_TEMPLATE_VARIABLE, expression, expression, true);
+    if (!insertShorthand) template.addVariable(NAME_TEMPLATE_VARIABLE, expression, expression, true);
+
     if (indirectSyntax) {
       template.addTextSegment("</jsp:attribute>");
       template.addEndVariable();
       if (anchorIsEmptyTag) template.addTextSegment("</" + myTag.getName() + ">");
-    } else {
+    } else if (!insertShorthand) {
       template.addTextSegment("\"");
     }
 
     final PsiElement anchor1 = anchor;
 
-    final boolean indirectSyntax1 = indirectSyntax;
     final Runnable runnable = new Runnable() {
       @Override
       public void run() {
@@ -162,9 +152,9 @@ public class InsertRequiredAttributeFix implements IntentionAction, LocalQuickFi
             @Override
             public void run() {
               int textOffset = anchor1.getTextOffset();
-              if (!anchorIsEmptyTag && indirectSyntax1) ++textOffset;
+              if (!anchorIsEmptyTag && indirectSyntax) ++textOffset;
               editor.getCaretModel().moveToOffset(textOffset);
-              if (anchorIsEmptyTag && indirectSyntax1) {
+              if (anchorIsEmptyTag && indirectSyntax) {
                 editor.getDocument().deleteString(textOffset,textOffset + 2);
               }
               TemplateManager.getInstance(project).startTemplate(editor, template);

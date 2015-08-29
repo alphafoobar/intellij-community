@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.ui.HyperlinkLabel;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -91,7 +92,7 @@ public class HectorComponent extends JPanel {
     Collections.sort(languages, PsiUtilBase.LANGUAGE_COMPARATOR);
     for (Language language : languages) {
       @SuppressWarnings("UseOfObsoleteCollectionType")
-      final Hashtable<Integer, JLabel> sliderLabels = new Hashtable<Integer, JLabel>();
+      final Hashtable<Integer, JComponent> sliderLabels = new Hashtable<Integer, JComponent>();
       sliderLabels.put(1, new JLabel(EditorBundle.message("hector.none.slider.label")));
       sliderLabels.put(2, new JLabel(EditorBundle.message("hector.syntax.slider.label")));
       if (notInLibrary) {
@@ -197,7 +198,7 @@ public class HectorComponent extends JPanel {
   private void layoutHorizontal(final JPanel panel) {
     for (JSlider slider : mySliders.values()) {
       slider.setOrientation(SwingConstants.HORIZONTAL);
-      slider.setPreferredSize(new Dimension(200, 40));
+      slider.setPreferredSize(JBUI.size(200, 40));
       panel.add(slider, new GridBagConstraints(0, 1, 1, 1, 1, 0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL,
                                                new Insets(5, 0, 5, 0), 0, 0));
     }
@@ -207,7 +208,7 @@ public class HectorComponent extends JPanel {
     for (Language language : mySliders.keySet()) {
       JSlider slider = mySliders.get(language);
       JPanel borderPanel = new JPanel(new BorderLayout());
-      slider.setPreferredSize(new Dimension(100, 100));
+      slider.setPreferredSize(JBUI.size(100));
       borderPanel.add(new JLabel(language.getID()), BorderLayout.NORTH);
       borderPanel.add(slider, BorderLayout.CENTER);
       panel.add(borderPanel, new GridBagConstraints(GridBagConstraints.RELATIVE, 1, 1, 1, 0, 1, GridBagConstraints.CENTER, GridBagConstraints.VERTICAL,

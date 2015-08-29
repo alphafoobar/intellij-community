@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.ide.presentation.VirtualFilePresentation;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
+import com.intellij.openapi.roots.ui.configuration.ModulesAlphaComparator;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -89,11 +91,7 @@ public class ConfigFilesTreeBuilder {
 
     final HashSet<PsiFile> psiFiles = new HashSet<PsiFile>();
     final List<Module> modules = new ArrayList<Module>(files.keySet());
-    Collections.sort(modules, new Comparator<Module>() {
-      public int compare(final Module o1, final Module o2) {
-        return o1.getName().compareTo(o2.getName());
-      }
-    });
+    Collections.sort(modules, ModulesAlphaComparator.INSTANCE);
     for (Module module : modules) {
       DefaultMutableTreeNode moduleNode = createFileNode(module);
       root.add(moduleNode);
@@ -115,7 +113,15 @@ public class ConfigFilesTreeBuilder {
         }
       }
     }
-    for (VirtualFile file : jars.keySet()) {
+
+    List<VirtualFile> sortedJars = new ArrayList<VirtualFile>(jars.keySet());
+    Collections.sort(sortedJars, new Comparator<VirtualFile>() {
+      @Override
+      public int compare(VirtualFile o1, VirtualFile o2) {
+        return StringUtil.naturalCompare(o1.getName(), o2.getName());
+      }
+    });
+    for (VirtualFile file : sortedJars) {
       final List<PsiFile> list = new ArrayList<PsiFile>(jars.get(file));
       final PsiFile jar = list.get(0).getManager().findFile(file);
       if (jar != null) {
@@ -158,8 +164,9 @@ public class ConfigFilesTreeBuilder {
   }
 
   private static final Comparator<PsiFile> FILE_COMPARATOR = new Comparator<PsiFile>() {
+    @Override
     public int compare(final PsiFile o1, final PsiFile o2) {
-      return o1.getName().compareTo(o2.getName());
+      return StringUtil.naturalCompare(o1.getName(), o2.getName());
     }
   };
 
@@ -210,6 +217,7 @@ public class ConfigFilesTreeBuilder {
 
   public static void installSearch(JTree tree) {
     new TreeSpeedSearch(tree, new Convertor<TreePath, String>() {
+      @Override
       public String convert(final TreePath treePath) {
         final Object object = ((DefaultMutableTreeNode)treePath.getLastPathComponent()).getUserObject();
         if (object instanceof Module) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,13 +46,13 @@ public class ConfirmationDialog extends OptionsMessageDialog {
                                                @Nullable String cancelActionName) {
     if (option.getValue() == VcsShowConfirmationOption.Value.DO_NOTHING_SILENTLY) return false;
     final ConfirmationDialog dialog = new ConfirmationDialog(project, message, title, icon, option, okActionName, cancelActionName);
-    if (! option.isPersistent()) {
+    if (!option.isPersistent()) {
       dialog.setDoNotAskOption(null);
-    } else {
+    }
+    else {
       dialog.setDoNotShowAgainMessage(CommonBundle.message("dialog.options.do.not.ask"));
     }
-    dialog.show();
-    return dialog.isOK();
+    return dialog.showAndGet();
   }
 
   public ConfirmationDialog(Project project, final String message, String title, final Icon icon, final VcsShowConfirmationOption option) {
@@ -73,6 +73,7 @@ public class ConfirmationDialog extends OptionsMessageDialog {
     myCheckBoxDoNotShowDialog.setText(doNotShowAgainMessage);
   }
 
+  @NotNull
   @Override
   protected String getDoNotShowMessage() {
     return myDoNotShowAgainMessage == null ? super.getDoNotShowMessage() : myDoNotShowAgainMessage;

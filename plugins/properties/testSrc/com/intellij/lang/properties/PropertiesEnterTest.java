@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,11 @@
  */
 package com.intellij.lang.properties;
 
-import com.intellij.ide.DataManager;
-import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
-import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.openapi.application.PluginPathManager;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.testFramework.LightPlatformCodeInsightTestCase;
-import com.intellij.testFramework.PlatformTestCase;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.util.ThrowableRunnable;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -31,20 +29,14 @@ import org.jetbrains.annotations.NotNull;
 public class PropertiesEnterTest extends LightPlatformCodeInsightTestCase {
   @NonNls private static final String BASE_PATH = "/propertiesFile/enter/";
 
-  public PropertiesEnterTest() {
-    PlatformTestCase.initPlatformLangPrefix();
-  }
-
   @NotNull
   @Override
   protected String getTestDataPath() {
     return PluginPathManager.getPluginHomePath("properties") + "/testData";
   }
 
-  private static void typeEnter() {
-    EditorActionManager actionManager = EditorActionManager.getInstance();
-    EditorActionHandler actionHandler = actionManager.getActionHandler(IdeActions.ACTION_EDITOR_ENTER);
-    actionHandler.execute(getEditor(), DataManager.getInstance().getDataContext());
+  private void typeEnter() {
+    type('\n');
   }
 
   public void testEndLine() throws Exception { doTest(); }
@@ -53,6 +45,16 @@ public class PropertiesEnterTest extends LightPlatformCodeInsightTestCase {
   public void testValue() throws Exception { doTest(); }
   public void testBackslash() throws Exception { doTest(); }
   public void testBeforeComment() throws Exception { doTest(); }
+  public void testPerformance() throws Exception {
+    configureByFile(BASE_PATH + getTestName(false)+".properties");
+    PlatformTestUtil.startPerformanceTest("Property files editing", 1000, new ThrowableRunnable() {
+      @Override
+      public void run() throws Throwable {
+        type("aaaa=bbb");
+        PsiDocumentManager.getInstance(ourProject).commitAllDocuments();
+      }
+    }).cpuBound().assertTiming();
+  }
 
   private void doTest() throws Exception {
     configureByFile(BASE_PATH + getTestName(false)+".properties");

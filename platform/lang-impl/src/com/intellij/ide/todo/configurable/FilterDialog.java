@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.search.TodoPattern;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.TableUtil;
 import com.intellij.util.ui.Table;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.table.AbstractTableModel;
-import javax.swing.table.TableColumn;
 import java.awt.*;
 import java.util.List;
 
@@ -143,13 +143,7 @@ class FilterDialog extends DialogWrapper {
                       new GridBagConstraints(0, 0, 1, 1, 1, 1, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(0, 0, 0, 0), 0, 0));
 
     // Column "Available"
-
-    int width = new JCheckBox().getPreferredSize().width;
-    TableColumn availableColumn = myTable.getColumnModel().getColumn(0);
-    availableColumn.setPreferredWidth(width);
-    availableColumn.setMaxWidth(width);
-    availableColumn.setMinWidth(width);
-
+    TableUtil.setupCheckboxColumn(myTable, 0);
     //
 
     panel.add(patternsPanel,
@@ -188,7 +182,7 @@ class FilterDialog extends DialogWrapper {
       switch (column) {
         case 0:
           // "Available" column
-          return myFilter.contains(pattern) ? Boolean.TRUE : Boolean.FALSE;
+          return myFilter.contains(pattern);
         case 1:
           // "Pattern" column
           return pattern.getPatternString();
@@ -203,7 +197,9 @@ class FilterDialog extends DialogWrapper {
         case 0:
           TodoPattern pattern = myPatterns.get(row);
           if (((Boolean)value).booleanValue()) {
-            myFilter.addTodoPattern(pattern);
+            if (!myFilter.contains(pattern)) {
+              myFilter.addTodoPattern(pattern);
+            }
           }
           else {
             myFilter.removeTodoPattern(pattern);

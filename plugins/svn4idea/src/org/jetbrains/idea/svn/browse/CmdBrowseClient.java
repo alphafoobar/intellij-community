@@ -16,14 +16,23 @@
 package org.jetbrains.idea.svn.browse;
 
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.util.PathUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.api.BaseSvnClient;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.api.NodeKind;
+import org.jetbrains.idea.svn.checkin.CmdCheckinClient;
+import org.jetbrains.idea.svn.checkin.CommitInfo;
 import org.jetbrains.idea.svn.commandLine.CommandExecutor;
 import org.jetbrains.idea.svn.commandLine.CommandUtil;
 import org.jetbrains.idea.svn.commandLine.SvnBindException;
 import org.jetbrains.idea.svn.commandLine.SvnCommandName;
-import org.tmatesoft.svn.core.*;
+import org.jetbrains.idea.svn.info.Info;
+import org.jetbrains.idea.svn.lock.Lock;
+import org.tmatesoft.svn.core.SVNException;
+import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 
@@ -32,7 +41,6 @@ import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -43,8 +51,8 @@ public class CmdBrowseClient extends BaseSvnClient implements BrowseClient {
   @Override
   public void list(@NotNull SvnTarget target,
                    @Nullable SVNRevision revision,
-                   @Nullable SVNDepth depth,
-                   @Nullable ISVNDirEntryHandler handler) throws VcsException {
+                   @Nullable Depth depth,
+                   @Nullable DirectoryEntryConsumer handler) throws VcsException {
     assertUrl(target);
 
     List<String> parameters = new ArrayList<String>();
@@ -54,17 +62,39 @@ public class CmdBrowseClient extends BaseSvnClient implements BrowseClient {
     CommandUtil.put(parameters, depth);
     parameters.add("--xml");
 
-    CommandExecutor command = CommandUtil.execute(myVcs, target, SvnCommandName.list, parameters, null);
+    CommandExecutor command = execute(myVcs, target, SvnCommandName.list, parameters, null);
+    Info info = myFactory.createInfoClient().doInfo(target, revision);
 
     try {
-      parseOutput(target.getURL(), command, handler);
+      parseOutput(target.getURL(), command, handler, info != null ? info.getRepositoryRootURL() : null);
     }
     catch (SVNException e) {
       throw new SvnBindException(e);
     }
   }
 
-  private static void parseOutput(@NotNull SVNURL url, @NotNull CommandExecutor command, @Nullable ISVNDirEntryHandler handler)
+  @Override
+  public long createDirectory(@NotNull SvnTarget target, @NotNull String message, boolean makeParents) throws VcsException {
+    assertUrl(target);
+
+    List<String> parameters = ContainerUtil.newArrayList();
+
+    CommandUtil.put(parameters, target);
+    CommandUtil.put(parameters, makeParents, "--parents");
+    parameters.add("--message");
+    parameters.add(message);
+
+    CmdCheckinClient.CommandListener listener = new CmdCheckinClient.CommandListener(null);
+
+    execute(myVcs, target, SvnCommandName.mkdir, parameters, listener);
+
+    return listener.getCommittedRevision();
+  }
+
+  private static void parseOutput(@NotNull SVNURL url,
+                                  @NotNull CommandExecutor command,
+                                  @Nullable DirectoryEntryConsumer handler,
+                                  @Nullable SVNURL repositoryUrl)
     throws VcsException, SVNException {
     try {
       TargetLists lists = CommandUtil.parse(command.getOutput(), TargetLists.class);
@@ -72,7 +102,7 @@ public class CmdBrowseClient extends BaseSvnClient implements BrowseClient {
       if (handler != null && lists != null) {
         for (TargetList list : lists.lists) {
           for (Entry entry : list.entries) {
-            handler.handleDirEntry(entry.toDirEntry(url));
+            handler.consume(entry.toDirectoryEntry(url, repositoryUrl));
           }
         }
       }
@@ -101,8 +131,8 @@ public class CmdBrowseClient extends BaseSvnClient implements BrowseClient {
 
   public static class Entry {
 
-    @XmlAttribute(name = "kind")
-    public String kind;
+    @XmlAttribute(name = "kind", required = true)
+    public NodeKind kind;
 
     @XmlElement(name = "name")
     public String name;
@@ -110,68 +140,14 @@ public class CmdBrowseClient extends BaseSvnClient implements BrowseClient {
     @XmlElement(name = "size")
     public long size;
 
-    @XmlElement(name = "commit")
-    public Commit commit;
+    public CommitInfo.Builder commit;
 
-    @XmlElement(name = "lock")
-    public Lock lock;
+    public Lock.Builder lock;
 
-    public long revision() {
-      return commit != null ? commit.revision : 0;
-    }
-
-    public String author() {
-      return commit != null ? commit.author : "";
-    }
-
-    public Date date() {
-      return commit != null ? commit.date : null;
-    }
-
-    public SVNDirEntry toDirEntry(@NotNull SVNURL url) throws SVNException {
-      // TODO: repository root and relative path are not used for now
-      SVNDirEntry entry =
-        new SVNDirEntry(url.appendPath(name, false), null, name, SVNNodeKind.parseKind(kind), size, false, revision(), date(),
-                        author());
-
-      entry.setRelativePath(null);
-      entry.setLock(lock != null ? lock.toLock(entry.getRelativePath()) : null);
-
-      return entry;
-    }
-  }
-
-  public static class Commit {
-
-    @XmlAttribute(name = "revision")
-    public long revision;
-
-    @XmlElement(name = "author")
-    public String author;
-
-    @XmlElement(name = "date")
-    public Date date;
-  }
-
-  public static class Lock {
-
-    @XmlElement(name = "token")
-    public String token;
-
-    @XmlElement(name = "owner")
-    public String owner;
-
-    @XmlElement(name = "comment")
-    public String comment;
-
-    @XmlElement(name = "created")
-    public Date created;
-
-    @XmlElement(name = "expires")
-    public Date expires;
-
-    public SVNLock toLock(@NotNull String path) {
-      return new SVNLock(path, token, owner, comment, created, expires);
+    @NotNull
+    public DirectoryEntry toDirectoryEntry(@NotNull SVNURL url, @Nullable SVNURL repositoryUrl) throws SVNException {
+      return new DirectoryEntry(url.appendPath(name, false), repositoryUrl, PathUtil.getFileName(name), kind,
+                                commit != null ? commit.build() : null, name);
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,15 @@ package com.intellij.ui;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.wm.ex.WindowManagerEx;
+import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.ui.popup.AbstractPopup;
+import com.intellij.ui.popup.MovablePopup;
 import com.intellij.util.Alarm;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,20 +43,84 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   private final Alarm myUpdateAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
   private final CellRendererPane myRendererPane = new CellRendererPane();
-  private final TipComponent myTipComponent;
+  private final JComponent myTipComponent = new JComponent() {
+    @Override
+    protected void paintComponent(Graphics g) {
+      Insets insets = getInsets();
+      UIUtil.drawImage(g, myImage, insets.left, insets.top, null);
+    }
+  };
+
+  public static final String DISABLE_EXPANDABLE_HANDLER = "DisableExpandableHandler";
 
   private boolean myEnabled = Registry.is("ide.expansion.hints.enabled");
-  private Hint myHint;
+  private final MovablePopup myPopup;
   private KeyType myKey;
   private Rectangle myKeyItemBounds;
   private BufferedImage myImage;
+
+  public static void setRelativeBounds(@NotNull Component parent, @NotNull Rectangle bounds,
+                                       @NotNull Component child, @NotNull Container validationParent) {
+    validationParent.add(parent);
+    parent.setBounds(bounds);
+    parent.validate();
+    child.setLocation(SwingUtilities.convertPoint(child, 0, 0, parent));
+    validationParent.remove(parent);
+  }
 
   protected AbstractExpandableItemsHandler(@NotNull final ComponentType component) {
     myComponent = component;
     myComponent.add(myRendererPane);
     myComponent.validate();
+    myPopup = new MovablePopup(myComponent, myTipComponent);
 
-    myTipComponent = new TipComponent();
+    myTipComponent.addMouseWheelListener(new MouseWheelListener() {
+      @Override
+      public void mouseWheelMoved(MouseWheelEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+    });
+
+    myTipComponent.addMouseListener(new MouseListener() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+
+      @Override
+      public void mousePressed(MouseEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+
+      @Override
+      public void mouseReleased(MouseEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+
+      @Override
+      public void mouseEntered(MouseEvent e) {
+      }
+
+      @Override
+      public void mouseExited(MouseEvent e) {
+        // don't hide the hint if mouse exited to owner component
+        if (myComponent.getMousePosition() == null) {
+          hideHint();
+        }
+      }
+    });
+
+    myTipComponent.addMouseMotionListener(new MouseMotionListener() {
+      @Override
+      public void mouseMoved(MouseEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+
+      @Override
+      public void mouseDragged(MouseEvent e) {
+        dispatchEvent(myComponent, e);
+      }
+    });
 
     myComponent.addMouseListener(
       new MouseListener() {
@@ -61,7 +131,10 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
         @Override
         public void mouseExited(MouseEvent e) {
-          hideHint();
+          // don't hide the hint if mouse exited to it
+          if (myTipComponent.getMousePosition() == null) {
+            hideHint();
+          }
         }
 
         @Override
@@ -183,6 +256,11 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     if (forceUpdate || !Comparing.equal(myKey, selected)) {
       handleSelectionChange(selected, true);
     }
+
+    // Temporary workaround
+    if (e.getClickCount() == 2) {
+      hideHint();
+    }
   }
 
   protected void handleSelectionChange(KeyType selected) {
@@ -194,6 +272,13 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
       return;
     }
     myUpdateAlarm.cancelAllRequests();
+    if (selected == null) {
+      hideHint();
+      return;
+    }
+    if (!selected.equals(myKey)) {
+      hideHint();
+    }
     myUpdateAlarm.addRequest(new Runnable() {
       @Override
       public void run() {
@@ -202,20 +287,17 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     }, 10);
   }
 
-  private void doHandleSelectionChange(KeyType selected, boolean processIfUnfocused) {
-    if (!myEnabled) return;
-
-    if (selected == null
+  private void doHandleSelectionChange(@NotNull KeyType selected, boolean processIfUnfocused) {
+    if (!myEnabled
+        || !myComponent.isEnabled()
         || !myComponent.isShowing()
-        || (!myComponent.isFocusOwner() && !processIfUnfocused)
+        || !myComponent.getVisibleRect().intersects(getVisibleRect(selected))
+        || !myComponent.isFocusOwner() && !processIfUnfocused
         || isPopup()) {
       hideHint();
       return;
     }
 
-    if (!Comparing.equal(myKey, selected)) {
-      hideHint();
-    }
     myKey = selected;
 
     Point location = createToolTipImage(myKey);
@@ -223,11 +305,11 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     if (location == null) {
       hideHint();
     }
-    else if (myHint == null) {
-      showHint(location);
-    }
     else {
-      repaintHint(location);
+      Rectangle bounds = new Rectangle(location, myTipComponent.getPreferredSize());
+      myPopup.setBounds(bounds);
+      myPopup.setVisible(noIntersections(bounds));
+      repaintKeyItem();
     }
   }
 
@@ -248,52 +330,36 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     return false;
   }
 
+  private boolean noIntersections(Rectangle bounds) {
+    Window owner = SwingUtilities.getWindowAncestor(myComponent);
+    Window popup = SwingUtilities.getWindowAncestor(myTipComponent);
+    Window focus = WindowManagerEx.getInstanceEx().getMostRecentFocusedWindow();
+    boolean focused = SystemInfo.isWindows || owner.isFocused();
+    for (Window other : owner.getOwnedWindows()) {
+      if (!focused && !SystemInfo.isWindows) {
+        focused = other.isFocused();
+      }
+      if (popup != other && other.isVisible() && bounds.x + 10 >= other.getX() && bounds.intersects(other.getBounds())) {
+        return false;
+      }
+      if (focus == other) {
+        focus = null; // already checked
+      }
+    }
+    return focused && (focus == owner || focus == null || !owner.getBounds().intersects(focus.getBounds()));
+  }
+
   private void hideHint() {
     myUpdateAlarm.cancelAllRequests();
-    if (myHint != null) {
-      myHint.hide();
-      myHint = null;
+    if (myPopup.isVisible()) {
+      myPopup.setVisible(false);
       repaintKeyItem();
     }
     myKey = null;
   }
 
   public boolean isShowing() {
-    return myHint != null && myHint.isVisible();
-  }
-
-  private void showHint(Point location) {
-    assert myHint == null;
-
-    if (!myComponent.isShowing()) {
-      return;
-    }
-
-    JLayeredPane layeredPane = myComponent.getRootPane().getLayeredPane();
-    Point layeredPanePoint = SwingUtilities.convertPoint(myComponent, location.x + myTipComponent.getPreferredSize().width, 0, layeredPane);
-    boolean fitIntoLayeredPane = layeredPanePoint.x < layeredPane.getWidth();
-
-    if (fitIntoLayeredPane) {
-      myHint = new LightweightHint(myTipComponent);
-    }
-    else {
-      MenuElement[] selectedPath = MenuSelectionManager.defaultManager().getSelectedPath();
-      if (selectedPath.length > 0) {
-        // do not show heavyweight hints when menu is shown to avoid their overlapping
-        return;
-      }
-      myHint = new HeavyweightHint(myTipComponent, false);
-    }
-    myHint.show(myComponent, location.x, location.y, myComponent, new HintHint(myComponent, location));
-    repaintKeyItem();
-  }
-
-  private void repaintHint(Point location) {
-    if (myHint != null && myKey != null && myComponent.isShowing()) {
-      myHint.updateBounds(location.x, location.y);
-      myTipComponent.repaint();
-      repaintKeyItem();
-    }
+    return myPopup.isVisible();
   }
 
   private void repaintKeyItem() {
@@ -304,23 +370,46 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   @Nullable
   private Point createToolTipImage(@NotNull KeyType key) {
+    UIUtil.putClientProperty(myComponent, EXPANDED_RENDERER, true);
     Pair<Component, Rectangle> rendererAndBounds = getCellRendererAndBounds(key);
+    UIUtil.putClientProperty(myComponent, EXPANDED_RENDERER, null);
     if (rendererAndBounds == null) return null;
 
-    Component renderer = rendererAndBounds.first;
-    if (!(renderer instanceof JComponent)) return null;
+    JComponent renderer = ObjectUtils.tryCast(rendererAndBounds.first, JComponent.class);
+    if (renderer == null) return null;
+    if (renderer.getClientProperty(DISABLE_EXPANDABLE_HANDLER) != null) return null;
+
+    if (UIUtil.getClientProperty((JComponent)rendererAndBounds.getFirst(), USE_RENDERER_BOUNDS) == Boolean.TRUE) {
+      rendererAndBounds.getSecond().translate(renderer.getX(), renderer.getY());
+      rendererAndBounds.getSecond().setSize(renderer.getSize());
+    }
 
     myKeyItemBounds = rendererAndBounds.second;
 
     Rectangle cellBounds = myKeyItemBounds;
     Rectangle visibleRect = getVisibleRect(key);
 
-    int width = cellBounds.x + cellBounds.width - (visibleRect.x + visibleRect.width);
+    if (cellBounds.y < visibleRect.y) return null;
+
+    int cellMaxY = cellBounds.y + cellBounds.height;
+    int visMaxY = visibleRect.y + visibleRect.height;
+    if (cellMaxY > visMaxY) return null;
+
+    int cellMaxX = cellBounds.x + cellBounds.width;
+    int visMaxX = visibleRect.x + visibleRect.width;
+
+    Point location = new Point(visMaxX, cellBounds.y);
+    SwingUtilities.convertPointToScreen(location, myComponent);
+
+    Rectangle screen = !Registry.is("ide.expansion.hints.on.all.screens")
+                       ? ScreenUtil.getScreenRectangle(location)
+                       : ScreenUtil.getAllScreensRectangle();
+
+    int borderWidth = isPaintBorder() ? 1 : 0;
+    int width = Math.min(screen.width + screen.x - location.x - borderWidth, cellMaxX - visMaxX);
     int height = cellBounds.height;
 
     if (width <= 0 || height <= 0) return null;
-    if (cellBounds.y < visibleRect.y) return null;
-    if (cellBounds.y + cellBounds.height > visibleRect.y + visibleRect.height) return null;
 
     Dimension size = getImageSize(width, height);
     myImage = UIUtil.createImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
@@ -328,24 +417,23 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     Graphics2D g = myImage.createGraphics();
     g.setClip(null);
     doFillBackground(height, width, g);
-    g.translate(-(visibleRect.x + visibleRect.width - cellBounds.x), 0);
-    doPaintTooltipImage(renderer, cellBounds, height, g, key);
+    g.translate(cellBounds.x - visMaxX, 0);
+    doPaintTooltipImage(renderer, cellBounds, g, key);
 
-
-    if (isPaintBorder()) {
-      g.translate((visibleRect.x + visibleRect.width - cellBounds.x), 0);
-      g.setColor(getBorderColor());
-      int rightX = size.width - 1;
-      final int h = size.height;
-      UIUtil.drawLine(g, 0, 0, rightX, 0);
-      UIUtil.drawLine(g, rightX, 0, rightX, h - 1);
-      UIUtil.drawLine(g, 0, h - 1, rightX, h - 1);
+    CustomLineBorder border = null;
+    if (borderWidth > 0) {
+      border = new CustomLineBorder(getBorderColor(), borderWidth, 0, borderWidth, borderWidth);
+      location.y -= borderWidth;
+      size.width += borderWidth;
+      size.height += borderWidth + borderWidth;
     }
 
     g.dispose();
     myRendererPane.remove(renderer);
 
-    return new Point(visibleRect.x + visibleRect.width, cellBounds.y);
+    myTipComponent.setBorder(border);
+    myTipComponent.setPreferredSize(size);
+    return location;
   }
 
   protected boolean isPaintBorder() {
@@ -353,7 +441,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
   }
 
   protected Color getBorderColor() {
-    return Color.GRAY;
+    return JBColor.border();
   }
 
   protected Dimension getImageSize(final int width, final int height) {
@@ -365,8 +453,8 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     g.fillRect(0, 0, width, height);
   }
 
-  protected void doPaintTooltipImage(Component rComponent, Rectangle cellBounds, int height, Graphics2D g, KeyType key) {
-    myRendererPane.paintComponent(g, rComponent, myComponent, 0, 0, cellBounds.width, height, true);
+  protected void doPaintTooltipImage(Component rComponent, Rectangle cellBounds, Graphics2D g, KeyType key) {
+    myRendererPane.paintComponent(g, rComponent, myComponent, 0, 0, cellBounds.width, cellBounds.height, true);
   }
 
   protected Rectangle getVisibleRect(KeyType key) {
@@ -378,25 +466,11 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   protected abstract KeyType getCellKeyForPoint(Point point);
 
-  private class TipComponent extends JComponent {
-    @Override
-    public Dimension getMaximumSize() {
-      return getPreferredSize();
-    }
-
-    @Override
-    public Dimension getMinimumSize() {
-      return getPreferredSize();
-    }
-
-    @Override
-    public Dimension getPreferredSize() {
-      return new Dimension(myImage.getWidth(), myImage.getHeight());
-    }
-
-    @Override
-    public void paint(Graphics g) {
-      UIUtil.drawImage(g, myImage, 0, 0, null);
+  private static void dispatchEvent(JComponent component, MouseEvent event) {
+    if (component != null && event != null) {
+      Point point = event.getLocationOnScreen();
+      SwingUtilities.convertPointFromScreen(point, component);
+      component.dispatchEvent(MouseEventAdapter.convert(event, component, point.x, point.y));
     }
   }
 }

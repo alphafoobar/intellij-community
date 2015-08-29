@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,11 @@ import com.intellij.openapi.vcs.changes.LocalChangeList;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Processor;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.containers.Convertor;
 import junit.framework.Assert;
-import org.tmatesoft.svn.core.wc.SVNInfo;
-import org.tmatesoft.svn.core.wc.SVNStatusType;
+import org.jetbrains.idea.svn.info.Info;
+import org.jetbrains.idea.svn.status.StatusType;
 
 import java.io.File;
 import java.io.IOException;
@@ -84,12 +85,7 @@ public class ConflictCreator {
       Assert.assertEquals(0, applier.getRemainingPatches().size());
     }
 
-    try {
-      Thread.sleep(10);
-    }
-    catch (InterruptedException e) {
-      //
-    }
+    TimeoutUtil.sleep(10);
 
     SvnVcs vcs = SvnVcs.getInstance(myProject);
 
@@ -100,7 +96,7 @@ public class ConflictCreator {
         String subPath = "";
         for (String part : parts) {
           final String path = subPath + part;
-          SVNInfo info = vcs.getInfo(new File(myTheirsDir.getPath(), path));
+          Info info = vcs.getInfo(new File(myTheirsDir.getPath(), path));
           if (info == null || info.getURL() == null) {
             myClientRunner.add(myTheirsDir, path);
           }
@@ -161,15 +157,15 @@ public class ConflictCreator {
     final File target = new File(root.getPath(), fileData.myRelativePath);
 
     // we dont apply properties changes fow now
-    if (SVNStatusType.STATUS_MISSING.equals(fileData.myNodeStatus)) {
+    if (StatusType.STATUS_MISSING.equals(fileData.myNodeStatus)) {
       // delete existing only from fs
       FileUtil.delete(target);
       return;
-    } else if (SVNStatusType.STATUS_UNVERSIONED.equals(fileData.myNodeStatus)) {
+    } else if (StatusType.STATUS_UNVERSIONED.equals(fileData.myNodeStatus)) {
       // create new unversioned
       createFile(root, fileData, target);
       return;
-    } else if (SVNStatusType.STATUS_ADDED.equals(fileData.myNodeStatus)) {
+    } else if (StatusType.STATUS_ADDED.equals(fileData.myNodeStatus)) {
       if (fileData.myCopyFrom != null) {
         myClientRunner.copy(root, fileData.myCopyFrom, fileData.myRelativePath);
         return;
@@ -177,11 +173,11 @@ public class ConflictCreator {
       createFile(root, fileData, target);
       myClientRunner.add(root, fileData.myRelativePath);
       return;
-    } else if (SVNStatusType.STATUS_DELETED.equals(fileData.myNodeStatus)) {
+    } else if (StatusType.STATUS_DELETED.equals(fileData.myNodeStatus)) {
       myClientRunner.delete(root, fileData.myRelativePath);
       return;
-    } else if (SVNStatusType.STATUS_NORMAL.equals(fileData.myNodeStatus)) {
-      if (SVNStatusType.STATUS_MODIFIED.equals(fileData.myContentsStatus)) {
+    } else if (StatusType.STATUS_NORMAL.equals(fileData.myNodeStatus)) {
+      if (StatusType.STATUS_MODIFIED.equals(fileData.myContentsStatus)) {
         createFile(root, fileData, target);
         return;
       }

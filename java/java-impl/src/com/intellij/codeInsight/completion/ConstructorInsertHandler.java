@@ -3,17 +3,20 @@ package com.intellij.codeInsight.completion;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
 import com.intellij.codeInsight.generation.GenerateMembersUtil;
+import com.intellij.codeInsight.generation.OverrideImplementExploreUtil;
 import com.intellij.codeInsight.generation.OverrideImplementUtil;
 import com.intellij.codeInsight.generation.PsiGenerationInfo;
-import com.intellij.codeInsight.lookup.Lookup;
-import com.intellij.codeInsight.lookup.LookupElementDecorator;
-import com.intellij.codeInsight.lookup.LookupItem;
-import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
+import com.intellij.codeInsight.intention.impl.TypeExpression;
+import com.intellij.codeInsight.lookup.*;
+import com.intellij.codeInsight.template.*;
 import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.UndoConfirmationPolicy;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.project.Project;
@@ -22,8 +25,9 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.infos.CandidateInfo;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.IncorrectOperationException;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,7 +38,7 @@ import java.util.List;
 /**
 * @author peter
 */
-public class ConstructorInsertHandler implements InsertHandler<LookupElementDecorator<LookupItem>> {
+public class ConstructorInsertHandler implements InsertHandler<LookupElementDecorator<LookupElement>> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.completion.ConstructorInsertHandler");
   public static final ConstructorInsertHandler SMART_INSTANCE = new ConstructorInsertHandler(true);
   public static final ConstructorInsertHandler BASIC_INSTANCE = new ConstructorInsertHandler(false);
@@ -47,8 +51,8 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
   }
 
   @Override
-  public void handleInsert(InsertionContext context, LookupElementDecorator<LookupItem> item) {
-    @SuppressWarnings({"unchecked"}) final LookupItem<PsiClass> delegate = item.getDelegate();
+  public void handleInsert(InsertionContext context, LookupElementDecorator<LookupElement> item) {
+    @SuppressWarnings({"unchecked"}) final LookupElement delegate = item.getDelegate();
 
     PsiClass psiClass = (PsiClass)item.getObject();
 
@@ -67,6 +71,8 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
     OffsetKey insideRef = context.trackOffset(context.getTailOffset(), false);
 
     final PsiElement position = SmartCompletionDecorator.getPosition(context, delegate);
+    if (position == null) return;
+    
     final PsiExpression enclosing = PsiTreeUtil.getContextOfType(position, PsiExpression.class, true);
     final PsiAnonymousClass anonymousClass = PsiTreeUtil.getParentOfType(position, PsiAnonymousClass.class);
     final boolean inAnonymous = anonymousClass != null && anonymousClass.getParent() == enclosing;
@@ -111,13 +117,19 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
       PostprocessReformattingAspect.getInstance(context.getProject()).doPostponedFormatting(context.getFile().getViewProvider());
 
       final Editor editor = context.getEditor();
+      final Document document = editor.getDocument();
       final int offset = context.getTailOffset();
-      editor.getDocument().insertString(offset, " {}");
+
+      document.insertString(offset, " {}");
       editor.getCaretModel().moveToOffset(offset + 2);
+
+      final PsiFile file = context.getFile();
+      PsiDocumentManager.getInstance(file.getProject()).commitDocument(document);
+      reformatEnclosingExpressionListAtOffset(file, offset);
 
       if (fillTypeArgs && JavaCompletionUtil.promptTypeArgs(context, context.getOffset(insideRef))) return;
 
-      context.setLaterRunnable(generateAnonymousBody(editor, context.getFile()));
+      context.setLaterRunnable(generateAnonymousBody(editor, file));
     }
     else {
       PsiDocumentManager.getInstance(context.getProject()).commitAllDocuments();
@@ -132,8 +144,32 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
       if (mySmart) {
         FeatureUsageTracker.getInstance().triggerFeatureUsed(JavaCompletionFeatures.AFTER_NEW);
       }
-      if (fillTypeArgs && JavaCompletionUtil.promptTypeArgs(context, context.getOffset(insideRef))) return;
+      if (fillTypeArgs) {
+        JavaCompletionUtil.promptTypeArgs(context, context.getOffset(insideRef));
+      }
     }
+  }
+
+  private static void reformatEnclosingExpressionListAtOffset(@NotNull PsiFile file, int offset) {
+    final PsiElement elementAtOffset = PsiUtilCore.getElementAtOffset(file, offset);
+    PsiExpressionList listToReformat = getEnclosingExpressionList(elementAtOffset.getParent());
+    if (listToReformat != null) {
+      CodeStyleManager.getInstance(file.getProject()).reformat(listToReformat);
+    }
+  }
+
+  @Nullable
+  private static PsiExpressionList getEnclosingExpressionList(@NotNull PsiElement element) {
+    if (!(element instanceof PsiAnonymousClass)) {
+      return null;
+    }
+
+    PsiElement e = element.getParent();
+    if (e instanceof PsiNewExpression && e.getParent() instanceof PsiExpressionList) {
+      return (PsiExpressionList)e.getParent();
+    }
+
+    return null;
   }
 
   static boolean isRawTypeExpected(InsertionContext context, PsiTypeLookupItem delegate) {
@@ -142,7 +178,7 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
     if (newExpr != null) {
       for (ExpectedTypeInfo info : ExpectedTypesProvider.getExpectedTypes(newExpr, true)) {
         PsiType expected = info.getDefaultType();
-        if (expected.isAssignableFrom(delegate.getPsiType())) {
+        if (expected.isAssignableFrom(delegate.getType())) {
           if (expected instanceof PsiClassType && ((PsiClassType)expected).isRaw()) {
             return true;
           }
@@ -153,7 +189,7 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
   }
 
   public static boolean insertParentheses(InsertionContext context,
-                                          LookupItem delegate,
+                                          LookupElement delegate,
                                           final PsiClass psiClass,
                                           final boolean forAnonymous) {
     if (context.getCompletionChar() == '[') {
@@ -212,17 +248,28 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
     editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
     editor.getSelectionModel().removeSelection();
 
+    final PsiReferenceParameterList parameterList = parent.getBaseClassReference().getParameterList();
+    final PsiTypeElement[] parameters = parameterList != null ? parameterList.getTypeParameterElements() : null;
+    if (shouldStartTypeTemplate(parameters)) {
+      startTemplate(parent, editor, createOverrideRunnable(editor, file, project), parameters);
+      return null;
+    }
+
+    return createOverrideRunnable(editor, file, project);
+  }
+
+  private static Runnable createOverrideRunnable(final Editor editor, final PsiFile file, final Project project) {
     return new Runnable() {
       @Override
-      public void run(){
+      public void run() {
+        PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
+        final PsiAnonymousClass
+          aClass = PsiTreeUtil.findElementOfClassAtOffset(file, editor.getCaretModel().getOffset(), PsiAnonymousClass.class, false);
+        if (aClass == null) return;
         CommandProcessor.getInstance().executeCommand(project, new Runnable() {
           @Override
           public void run() {
-            PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
-            final PsiAnonymousClass aClass = PsiTreeUtil.findElementOfClassAtOffset(file, editor.getCaretModel().getOffset(), PsiAnonymousClass.class, false);
-            if (aClass == null) return;
-
-            final Collection<CandidateInfo> candidatesToImplement = OverrideImplementUtil.getMethodsToOverrideImplement(aClass, true);
+            final Collection<CandidateInfo> candidatesToImplement = OverrideImplementExploreUtil.getMethodsToOverrideImplement(aClass, true);
             for (Iterator<CandidateInfo> iterator = candidatesToImplement.iterator(); iterator.hasNext(); ) {
               final CandidateInfo candidate = iterator.next();
               final PsiElement element = candidate.getElement();
@@ -231,29 +278,70 @@ public class ConstructorInsertHandler implements InsertHandler<LookupElementDeco
               }
             }
             boolean invokeOverride = candidatesToImplement.isEmpty();
-            if (invokeOverride){
+            if (invokeOverride) {
               OverrideImplementUtil.chooseAndOverrideOrImplementMethods(project, editor, aClass, false);
             }
-            else{
+            else {
               ApplicationManager.getApplication().runWriteAction(new Runnable() {
                 @Override
                 public void run() {
-                  try{
+                  try {
                     List<PsiMethod> methods = OverrideImplementUtil.overrideOrImplementMethodCandidates(aClass, candidatesToImplement, false);
                     List<PsiGenerationInfo<PsiMethod>> prototypes = OverrideImplementUtil.convert2GenerationInfos(methods);
-                    List<PsiGenerationInfo<PsiMethod>> resultMembers = GenerateMembersUtil.insertMembersBeforeAnchor(aClass, null, prototypes);
+                    List<PsiGenerationInfo<PsiMethod>> resultMembers =
+                      GenerateMembersUtil.insertMembersBeforeAnchor(aClass, null, prototypes);
                     resultMembers.get(0).positionCaret(editor, true);
                   }
-                  catch(IncorrectOperationException ioe){
+                  catch (IncorrectOperationException ioe) {
                     LOG.error(ioe);
                   }
                 }
               });
             }
-
           }
-        }, CompletionBundle.message("completion.smart.type.generate.anonymous.body"), null, UndoConfirmationPolicy.DEFAULT, editor.getDocument());
+        }, getCommandName(), getCommandName(), UndoConfirmationPolicy.DEFAULT, editor.getDocument());
       }
     };
+  }
+
+  @Contract("null -> false")
+  private static boolean shouldStartTypeTemplate(PsiTypeElement[] parameters) {
+    if (parameters != null && parameters.length > 0) {
+      for (PsiTypeElement parameter : parameters) {
+        if (parameter.getType().equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static void startTemplate(final PsiAnonymousClass aClass, final Editor editor, final Runnable runnable, @NotNull final PsiTypeElement[] parameters) {
+    final Project project = aClass.getProject();
+    new WriteCommandAction(project, getCommandName(), getCommandName()) {
+      @Override
+      protected void run(@NotNull Result result) throws Throwable {
+        PsiDocumentManager.getInstance(project).doPostponedOperationsAndUnblockDocument(editor.getDocument());
+        editor.getCaretModel().moveToOffset(aClass.getTextOffset());
+        final TemplateBuilderImpl templateBuilder = (TemplateBuilderImpl)TemplateBuilderFactory.getInstance().createTemplateBuilder(aClass);
+        for (int i = 0; i < parameters.length; i++) {
+          PsiTypeElement parameter = parameters[i];
+          templateBuilder.replaceElement(parameter, "param" + i, new TypeExpression(project, new PsiType[]{parameter.getType()}), true);
+        }
+        Template template = templateBuilder.buildInlineTemplate();
+        TemplateManager.getInstance(project).startTemplate(editor, template, false, null, new TemplateEditingAdapter() {
+          @Override
+          public void templateFinished(Template template, boolean brokenOff) {
+            if (!brokenOff) {
+              runnable.run();
+            }
+          }
+        });
+      }
+    }.execute();
+  }
+
+  private static String getCommandName() {
+    return CompletionBundle.message("completion.smart.type.generate.anonymous.body");
   }
 }

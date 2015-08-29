@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,15 @@
 package com.intellij.lang.properties.references;
 
 import com.intellij.codeInsight.CodeInsightBundle;
+import com.intellij.ide.fileTemplates.FileTemplate;
+import com.intellij.ide.fileTemplates.FileTemplateManager;
+import com.intellij.ide.fileTemplates.FileTemplateUtil;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.ide.util.TreeFileChooser;
 import com.intellij.ide.util.TreeFileChooserFactory;
 import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.LastSelectedPropertiesFileStore;
+import com.intellij.lang.properties.PropertiesImplUtil;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -36,7 +40,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -64,7 +68,7 @@ import java.util.regex.Pattern;
 
 public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuickFixModel {
   protected static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.i18n.I18nizeQuickFixDialog");
-  
+
   private static final Pattern PATTERN = Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
 
   private JTextField myValue;
@@ -131,6 +135,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     myPropertiesFile = new TextFieldWithHistory();
     myPropertiesFile.setHistorySize(-1);
     myPropertiesFilePanel.add(GuiUtils.constructFieldWithBrowseButton(myPropertiesFile, new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         TreeFileChooserFactory chooserFactory = TreeFileChooserFactory.getInstance(myProject);
         final PropertiesFile propertiesFile = getPropertiesFile();
@@ -144,6 +149,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     }), BorderLayout.CENTER);
 
     myPropertiesFile.addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         propertiesFileChanged();
         somethingChanged();
@@ -151,12 +157,14 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     });
 
     getKeyTextField().getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         somethingChanged();
       }
     });
 
     myValue.getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         somethingChanged();
       }
@@ -168,6 +176,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       !PropertiesComponent.getInstance().isValueSet(KEY) || PropertiesComponent.getInstance().isTrueValue(KEY);
     myUseResourceBundle.setSelected(useBundleByDefault);
     myUseResourceBundle.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         PropertiesComponent.getInstance().setValue(KEY, Boolean.valueOf(myUseResourceBundle.isSelected()).toString());
       }
@@ -264,13 +273,13 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
   }
 
   protected String defaultSuggestPropertyKey(String value) {
-    return null;  
+    return null;
   }
 
   private void propertiesFileChanged() {
     PropertiesFile propertiesFile = getPropertiesFile();
     boolean hasResourceBundle =
-      propertiesFile != null && propertiesFile.getResourceBundle().getPropertiesFiles(propertiesFile.getProject()).size() > 1;
+      propertiesFile != null && propertiesFile.getResourceBundle().getPropertiesFiles().size() > 1;
     myUseResourceBundle.setEnabled(hasResourceBundle);
   }
 
@@ -300,6 +309,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     final String lastUrl = suggestSelectedFileUrl(paths);
     final String lastPath = lastUrl == null ? null : FileUtil.toSystemDependentName(VfsUtil.urlToPath(lastUrl));
     Collections.sort(paths, new Comparator<String>() {
+      @Override
       public int compare(final String path1, final String path2) {
         if (lastPath != null && lastPath.equals(path1)) return -1;
         if (lastPath != null && lastPath.equals(path2)) return 1;
@@ -353,17 +363,15 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
   }
 
   protected List<String> defaultSuggestPropertiesFiles() {
-    return I18nUtil.defaultGetPropertyFiles(myProject);
+    return I18nUtil.defaultSuggestPropertiesFiles(myProject);
   }
 
   protected PropertiesFile getPropertiesFile() {
     String path = FileUtil.toSystemIndependentName(myPropertiesFile.getText());
     VirtualFile virtualFile = LocalFileSystem.getInstance().findFileByPath(path);
-    if (virtualFile != null) {
-      PsiFile psiFile = PsiManager.getInstance(myProject).findFile(virtualFile);
-      if (psiFile instanceof PropertiesFile) return (PropertiesFile)psiFile;
-    }
-    return null;
+    return virtualFile != null
+           ? PropertiesImplUtil.getPropertiesFile(PsiManager.getInstance(myProject).findFile(virtualFile))
+           : null;
   }
 
   private boolean createPropertiesFileIfNotExists() {
@@ -375,8 +383,8 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       myPropertiesFile.requestFocusInWindow();
       return false;
     }
-    FileType fileType = FileTypeManager.getInstance().getFileTypeByFileName(path);
-    if (fileType != StdFileTypes.PROPERTIES) {
+    final FileType fileType = FileTypeManager.getInstance().getFileTypeByFileName(path);
+    if (fileType != StdFileTypes.PROPERTIES && fileType != StdFileTypes.XML) {
       String message = CodeInsightBundle.message("i18nize.cant.create.properties.file.because.its.name.is.associated",
                                                  myPropertiesFile.getText(), fileType.getDescription());
       Messages.showErrorDialog(myProject, message, CodeInsightBundle.message("i18nize.error.creating.properties.file"));
@@ -384,50 +392,52 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       return false;
     }
 
-    final VirtualFile virtualFile;
     try {
       final File file = new File(path).getCanonicalFile();
       FileUtil.createParentDirs(file);
-      final IOException[] e = new IOException[1];
-      virtualFile = ApplicationManager.getApplication().runWriteAction(new Computable<VirtualFile>() {
-        public VirtualFile compute() {
+      ApplicationManager.getApplication().runWriteAction(new ThrowableComputable<PsiFile, Exception>() {
+        @Override
+        public PsiFile compute() throws Exception {
           VirtualFile dir = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file.getParentFile());
-          try {
-            if (dir == null) {
-              throw new IOException("Error creating directory structure for file '" + path + "'");
-            }
-            return dir.createChildData(this, file.getName());
+          final PsiManager psiManager = PsiManager.getInstance(myProject);
+          if (dir == null) {
+            throw new IOException("Error creating directory structure for file '" + path + "'");
           }
-          catch (IOException e1) {
-            e[0] = e1;
+          if (fileType == StdFileTypes.PROPERTIES) {
+            return psiManager.findFile(dir.createChildData(this, file.getName()));
           }
-          return null;
+          else {
+            FileTemplate template = FileTemplateManager.getInstance(myProject).getInternalTemplate("XML Properties File.xml");
+            LOG.assertTrue(template != null);
+            return (PsiFile)FileTemplateUtil.createFromTemplate(template, file.getName(), null, psiManager.findDirectory(dir));
+          }
         }
       });
-      if (e[0] != null) throw e[0];
     }
-    catch (IOException e) {
+    catch (Exception e) {
       Messages.showErrorDialog(myProject, e.getLocalizedMessage(), CodeInsightBundle.message("i18nize.error.creating.properties.file"));
       return false;
     }
-
-    PsiFile psiFile = PsiManager.getInstance(myProject).findFile(virtualFile);
-    return psiFile instanceof PropertiesFile;
+    return true;
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     return myPanel;
   }
 
+  @Override
   public JComponent getPreferredFocusedComponent() {
     return myCustomization.focusValueComponent ? myValue:myKey;
   }
 
+  @Override
   public void dispose() {
     saveLastSelectedFile();
     super.dispose();
   }
 
+  @Override
   protected void doOKAction() {
     if (!createPropertiesFileIfNotExists()) return;
     Collection<PropertiesFile> propertiesFiles = getAllPropertiesFiles();
@@ -435,21 +445,27 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       IProperty existingProperty = propertiesFile.findPropertyByKey(getKey());
       final String propValue = myValue.getText();
       if (existingProperty != null && !Comparing.strEqual(existingProperty.getValue(), propValue)) {
-        Messages.showErrorDialog(myProject, CodeInsightBundle.message("i18nize.dialog.error.property.already.defined.message", getKey(),
-                                                                      propertiesFile.getName()),
-                                            CodeInsightBundle.message("i18nize.dialog.error.property.already.defined.title"));
-        return;
+        final String messageText = CodeInsightBundle.message("i18nize.dialog.error.property.already.defined.message", getKey(), propertiesFile.getName());
+        final int code = Messages.showOkCancelDialog(myProject,
+                                                     messageText,
+                                                     CodeInsightBundle.message("i18nize.dialog.error.property.already.defined.title"),
+                                                     null);
+        if (code == Messages.CANCEL) {
+          return;
+        }
       }
     }
 
     super.doOKAction();
   }
 
+  @Override
   @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(), getCancelAction(), getHelpAction()};
   }
 
+  @Override
   public void doHelpAction() {
     HelpManager.getInstance().invokeHelp("editing.propertyFile.i18nInspection");
   }
@@ -459,14 +475,17 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     return myValue;
   }
 
+  @Override
   public String getValue() {
     return myValue.getText();
   }
 
+  @Override
   public String getKey() {
     return getKeyTextField().getText();
   }
 
+  @Override
   public boolean hasValidData() {
     assert !ApplicationManager.getApplication().isUnitTestMode();
     show();
@@ -478,16 +497,18 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     return myUseResourceBundle.isEnabled() && myUseResourceBundle.isSelected();
   }
 
+  @Override
   protected String getDimensionServiceKey() {
     return "#com.intellij.codeInsight.i18n.I18nizeQuickFixDialog";
   }
 
+  @Override
   public Collection<PropertiesFile> getAllPropertiesFiles() {
     PropertiesFile propertiesFile = getPropertiesFile();
     if (propertiesFile == null) return Collections.emptySet();
     Collection<PropertiesFile> propertiesFiles;
     if (isUseResourceBundle()) {
-      propertiesFiles = propertiesFile.getResourceBundle().getPropertiesFiles(myProject);
+      propertiesFiles = propertiesFile.getResourceBundle().getPropertiesFiles();
     }
     else {
       propertiesFiles = Collections.singleton(propertiesFile);

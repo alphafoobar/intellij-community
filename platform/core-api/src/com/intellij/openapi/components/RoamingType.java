@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,5 +16,29 @@
 package com.intellij.openapi.components;
 
 public enum RoamingType {
-  DISABLED, PER_PLATFORM, GLOBAL, PER_USER
+  /**
+   * Stored only locally, not shared.
+   */
+  DISABLED,
+  /**
+   * Stored per operating system (Mac OS X, Linux, FreeBSD, Unix, Windows)
+   */
+  PER_OS,
+
+  /**
+   * Default, shared.
+   */
+  DEFAULT,
+
+  @Deprecated
+  /**
+   * Use {@link #DEFAULT} instead
+   */
+  PER_USER,
+
+  @Deprecated
+  /**
+   * Use {@link #PER_OS} instead
+   */
+  PER_PLATFORM,
 }

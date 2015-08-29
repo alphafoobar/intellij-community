@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
 
   @Nullable
   @Override
-  protected RefactoringEventData getAfterData(UsageInfo[] usages) {
+  protected RefactoringEventData getAfterData(@NotNull UsageInfo[] usages) {
     RefactoringEventData data = new RefactoringEventData();
     List<PsiElement> elements = new ArrayList<PsiElement>();
     if (myNameToGetter != null) {
@@ -107,7 +107,7 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     FieldDescriptor[] fields = new FieldDescriptor[myFieldDescriptors.length];
     System.arraycopy(myFieldDescriptors, 0, fields, 0, myFieldDescriptors.length);
     return new EncapsulateFieldsViewDescriptor(fields);
@@ -117,7 +117,7 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
     return RefactoringBundle.message("encapsulate.fields.command.name", DescriptiveNameUtil.getDescriptiveName(myClass));
   }
 
-  protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull Ref<UsageInfo[]> refUsages) {
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
 
     checkExistingMethods(conflicts, true);
@@ -143,30 +143,43 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
         final PsiField field = fieldDescriptor.getField();
         for (PsiReference reference : ReferencesSearch.search(field)) {
           final PsiElement place = reference.getElement();
-          LOG.assertTrue(place instanceof PsiReferenceExpression);
-          final PsiExpression qualifierExpression = ((PsiReferenceExpression)place).getQualifierExpression();
-          final PsiClass ancestor;
-          if (qualifierExpression == null) {
-            ancestor = PsiTreeUtil.getParentOfType(place, PsiClass.class, false);
-          }
-          else {
-            ancestor = PsiUtil.resolveClassInType(qualifierExpression.getType());
-          }
+          if (place instanceof PsiReferenceExpression) {
+            final PsiExpression qualifierExpression = ((PsiReferenceExpression)place).getQualifierExpression();
+            final PsiClass ancestor;
+            if (qualifierExpression == null) {
+              ancestor = PsiTreeUtil.getParentOfType(place, PsiClass.class, false);
+            }
+            else {
+              ancestor = PsiUtil.resolveClassInType(qualifierExpression.getType());
+            }
 
-          final boolean isGetter = !PsiUtil.isAccessedForWriting((PsiExpression)place);
-          for (PsiMethod overridden : isGetter ? getters : setters) {
-            if (InheritanceUtil.isInheritorOrSelf(myClass, ancestor, true)) {
-              conflicts.putValue(overridden, "There is already a " +
-                                             RefactoringUIUtil.getDescription(overridden, true) +
-                                             " which would hide generated " +
-                                             (isGetter ? "getter" : "setter") + " for " + place.getText());
-              break;
+            final boolean isGetter = !PsiUtil.isAccessedForWriting((PsiExpression)place);
+            for (PsiMethod overridden : isGetter ? getters : setters) {
+              if (InheritanceUtil.isInheritorOrSelf(myClass, ancestor, true)) {
+                conflicts.putValue(overridden, "There is already a " +
+                                               RefactoringUIUtil.getDescription(overridden, true) +
+                                               " which would hide generated " +
+                                               (isGetter ? "getter" : "setter") + " for " + place.getText());
+                break;
+              }
             }
           }
         }
       }
     }
-    return showConflicts(conflicts, refUsages.get());
+
+    UsageInfo[] infos = refUsages.get();
+    for (UsageInfo info : infos) {
+      PsiElement element = info.getElement();
+      if (element != null) {
+        PsiElement parent = element.getParent();
+        if (RefactoringUtil.isPlusPlusOrMinusMinus(parent) && !(parent.getParent() instanceof PsiExpressionStatement)) {
+          conflicts.putValue(parent, "Unable to proceed with postfix/prefix expression when it's result type is used");
+        }
+      }
+    }
+
+    return showConflicts(conflicts, infos);
   }
 
   private void checkExistingMethods(MultiMap<PsiElement, String> conflicts, boolean isGetter) {
@@ -206,18 +219,19 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
           if (existing != null) {
             for (PsiReference reference : ReferencesSearch.search(existing)) {
               final PsiElement place = reference.getElement();
-              LOG.assertTrue(place instanceof PsiReferenceExpression);
-              final PsiExpression qualifierExpression = ((PsiReferenceExpression)place).getQualifierExpression();
-              final PsiClass inheritor;
-              if (qualifierExpression == null) {
-                inheritor = PsiTreeUtil.getParentOfType(place, PsiClass.class, false);
-              } else {
-                inheritor = PsiUtil.resolveClassInType(qualifierExpression.getType());
-              }
+              if (place instanceof PsiReferenceExpression) {
+                final PsiExpression qualifierExpression = ((PsiReferenceExpression)place).getQualifierExpression();
+                final PsiClass inheritor;
+                if (qualifierExpression == null) {
+                  inheritor = PsiTreeUtil.getParentOfType(place, PsiClass.class, false);
+                } else {
+                  inheritor = PsiUtil.resolveClassInType(qualifierExpression.getType());
+                }
 
-              if (InheritanceUtil.isInheritorOrSelf(inheritor, myClass, true)) {
-                conflicts.putValue(existing, "There is already a " + RefactoringUIUtil.getDescription(existing, true) + " which would be hidden by generated " + (isGetter ? "getter" : "setter"));
-                break;
+                if (InheritanceUtil.isInheritorOrSelf(inheritor, myClass, true)) {
+                  conflicts.putValue(existing, "There is already a " + RefactoringUIUtil.getDescription(existing, true) + " which would be hidden by generated " + (isGetter ? "getter" : "setter"));
+                  break;
+                }
               }
             }
           }
@@ -235,9 +249,11 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
         if (element == null) continue;
 
         final EncapsulateFieldHelper helper = EncapsulateFieldHelper.getHelper(element.getLanguage());
-        EncapsulateFieldUsageInfo usageInfo = helper.createUsage(myDescriptor, fieldDescriptor, reference);
-        if (usageInfo != null) {
-          array.add(usageInfo);
+        if (helper != null) {
+          EncapsulateFieldUsageInfo usageInfo = helper.createUsage(myDescriptor, fieldDescriptor, reference);
+          if (usageInfo != null) {
+            array.add(usageInfo);
+          }
         }
       }
     }
@@ -245,7 +261,7 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
     return UsageViewUtil.removeDuplicatedUsages(usageInfos);
   }
 
-  protected void refreshElements(PsiElement[] elements) {
+  protected void refreshElements(@NotNull PsiElement[] elements) {
     LOG.assertTrue(elements.length == myFieldDescriptors.length);
 
     for (int idx = 0; idx < elements.length; idx++) {
@@ -259,7 +275,7 @@ public class EncapsulateFieldsProcessor extends BaseRefactoringProcessor {
     myClass = myFieldDescriptors[0].getField().getContainingClass();
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     updateFieldVisibility();
     generateAccessors();
     processUsagesPerFile(usages);

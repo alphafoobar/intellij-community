@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,12 @@ import com.jetbrains.python.codeInsight.dataflow.scope.Scope;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
-import com.intellij.psi.util.QualifiedName;
-import com.jetbrains.python.psi.impl.PyQualifiedNameFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -62,7 +62,7 @@ public class PyResolveUtil {
    * @return previous statement, or null.
    */
   @Nullable
-  public static PsiElement getPrevNodeOf(PsiElement elt, TokenSet elementTypes) {
+  private static PsiElement getPrevNodeOf(PsiElement elt, TokenSet elementTypes) {
     ASTNode seeker = elt.getNode();
     while (seeker != null) {
       ASTNode feeler = seeker.getTreePrev();
@@ -89,7 +89,7 @@ public class PyResolveUtil {
   }
 
   @Nullable
-  public static PsiElement getPrevNodeOf(PsiElement elt) {
+  private static PsiElement getPrevNodeOf(PsiElement elt) {
     if (elt instanceof PsiFile) return null;  // no sense to get the previous node of a file
     return getPrevNodeOf(elt, PythonDialectsTokenSetProvider.INSTANCE.getNameDefinerTokens());
   }
@@ -101,7 +101,13 @@ public class PyResolveUtil {
                                   @Nullable PsiElement roof) {
     // Use real context here to enable correct completion and resolve in case of PyExpressionCodeFragment!!!
     final PsiElement realContext = PyPsiUtils.getRealContext(element);
-    final ScopeOwner originalOwner = ScopeUtil.getScopeOwner(realContext);
+    final ScopeOwner originalOwner;
+    if (realContext != element && realContext instanceof PyFile) {
+      originalOwner = (PyFile)realContext;
+    }
+    else {
+      originalOwner = ScopeUtil.getScopeOwner(realContext);
+    }
     final PsiElement parent = element.getParent();
     final boolean isGlobalOrNonlocal = parent instanceof PyGlobalStatement || parent instanceof PyNonlocalStatement;
     ScopeOwner owner = originalOwner;
@@ -111,22 +117,24 @@ public class PyResolveUtil {
         owner = outerScopeOwner;
       }
     }
-    scopeCrawlUp(processor, owner, originalOwner, name, roof);
+    scopeCrawlUp(processor, owner, originalOwner, name, roof, realContext);
   }
 
   public static void scopeCrawlUp(@NotNull PsiScopeProcessor processor, @NotNull ScopeOwner scopeOwner, @Nullable String name,
                                   @Nullable PsiElement roof) {
-    scopeCrawlUp(processor, scopeOwner, scopeOwner, name, roof);
+    scopeCrawlUp(processor, scopeOwner, scopeOwner, name, roof, null);
   }
 
   public static void scopeCrawlUp(@NotNull PsiScopeProcessor processor, @Nullable ScopeOwner scopeOwner,
-                                  @Nullable ScopeOwner originalScopeOwner, @Nullable String name, @Nullable PsiElement roof) {
+                                  @Nullable ScopeOwner originalScopeOwner, @Nullable String name, @Nullable PsiElement roof,
+                                  @Nullable final PsiElement anchor) {
     while (scopeOwner != null) {
       if (!(scopeOwner instanceof PyClass) || scopeOwner == originalScopeOwner) {
         final Scope scope = ControlFlowCache.getScope(scopeOwner);
         boolean found = false;
         if (name != null) {
-          final PsiElement resolved = scope.getNamedElement(name);
+          final boolean includeNestedGlobals = scopeOwner instanceof PyFile;
+          final PsiElement resolved = scope.getNamedElement(name, includeNestedGlobals);
           if (resolved != null) {
             if (!processor.execute(resolved, ResolveState.initial())) {
               found = true;
@@ -141,7 +149,31 @@ public class PyResolveUtil {
             }
           }
         }
-        for (NameDefiner definer : scope.getImportedNameDefiners()) {
+        List<NameDefiner> definers = new ArrayList<NameDefiner>(scope.getImportedNameDefiners());
+        if (anchor != null && ScopeUtil.getScopeOwner(anchor) == scopeOwner) {
+          final Comparator<NameDefiner> nearestDefinerComparator = new Comparator<NameDefiner>() {
+            @Override
+            public int compare(NameDefiner a, NameDefiner b) {
+              final boolean aIsBefore = PyPsiUtils.isBefore(a, anchor);
+              final boolean bIsBefore = PyPsiUtils.isBefore(b, anchor);
+              final int diff = a.getTextOffset() - b.getTextOffset();
+              if (aIsBefore && bIsBefore) {
+                return -diff;
+              }
+              else if (aIsBefore) {
+                return -1;
+              }
+              else if (bIsBefore) {
+                return 1;
+              }
+              else {
+                return diff;
+              }
+            }
+          };
+          Collections.sort(definers, nearestDefinerComparator);
+        }
+        for (NameDefiner definer : definers) {
           if (!processor.execute(definer, ResolveState.initial())) {
             found = true;
             break;
@@ -164,7 +196,10 @@ public class PyResolveUtil {
    * @param processor a visitor that says when the crawl is done and collects info.
    * @param elt       element from which we start (not checked by processor); if null, the search immediately returns null.
    * @return first element that the processor accepted.
+   *
+   * @deprecated Use {@link #scopeCrawlUp} instead.
    */
+  @Deprecated
   @Nullable
   public static PsiElement treeCrawlUp(PsiScopeProcessor processor, PsiElement elt) {
     if (elt == null || !elt.isValid()) return null; // can't find anyway.
@@ -231,7 +266,7 @@ public class PyResolveUtil {
    * @return true if an outer element is in a class context, while the inner is a method or function inside it.
    * @see com.jetbrains.python.psi.PyUtil#getConcealingParent(com.intellij.psi.PsiElement)
    */
-  protected static boolean refersFromMethodToClass(final PyFunction innerFunction, final PsiElement outer) {
+  private static boolean refersFromMethodToClass(final PyFunction innerFunction, final PsiElement outer) {
     if (innerFunction == null) {
       return false;
     }
@@ -241,49 +276,6 @@ public class PyResolveUtil {
       return true;
     }
     return false;
-  }
-
-  /**
-   * Unwinds a multi-level qualified expression into a path, as seen in source text, i.e. outermost qualifier first.
-   *
-   * @param expr an expression to unwind.
-   * @return path as a list of ref expressions.
-   */
-  @NotNull
-  public static List<PyExpression> unwindQualifiers(@NotNull final PyQualifiedExpression expr) {
-    final List<PyExpression> path = new LinkedList<PyExpression>();
-    PyQualifiedExpression e = expr;
-    while (e != null) {
-      path.add(0, e);
-      final PyExpression q = e.getQualifier();
-      e = q instanceof PyQualifiedExpression ? (PyQualifiedExpression)q : null;
-    }
-    return path;
-  }
-
-  public static List<String> unwindQualifiersAsStrList(final PyQualifiedExpression expr) {
-    final List<String> path = new LinkedList<String>();
-    PyQualifiedExpression e = expr;
-    while (e != null) {
-      path.add(0, e.getText());
-      final PyExpression q = e.getQualifier();
-      e = q instanceof PyQualifiedExpression ? (PyQualifiedExpression)q : null;
-    }
-    return path;
-  }
-
-  public static String toPath(PyQualifiedExpression expr) {
-    if (expr == null) return "";
-    List<PyExpression> path = unwindQualifiers(expr);
-    final QualifiedName qName = PyQualifiedNameFactory.fromReferenceChain(path);
-    if (qName != null) {
-      return qName.toString();
-    }
-    String name = expr.getName();
-    if (name != null) {
-      return name;
-    }
-    return "";
   }
 
   /**

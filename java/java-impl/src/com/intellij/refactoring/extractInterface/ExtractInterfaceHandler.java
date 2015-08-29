@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.extractSuperclass.ExtractSuperClassUtil;
 import com.intellij.refactoring.lang.ElementsHandler;
+import com.intellij.refactoring.listeners.RefactoringEventListener;
 import com.intellij.refactoring.memberPullUp.PullUpProcessor;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.DocCommentPolicy;
@@ -84,8 +85,9 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
     if (!CommonRefactoringUtil.checkReadOnlyStatus(project, myClass)) return;
 
     final ExtractInterfaceDialog dialog = new ExtractInterfaceDialog(myProject, myClass);
-    dialog.show();
-    if (!dialog.isOK() || !dialog.isExtractSuperclass()) return;
+    if (!dialog.showAndGet() || !dialog.isExtractSuperclass()) {
+      return;
+    }
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
     ExtractSuperClassUtil.checkSuperAccessible(dialog.getTargetDirectory(), conflicts, myClass);
     if (!ExtractSuperClassUtil.showConflicts(dialog, conflicts, myProject)) return;
@@ -107,7 +109,6 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
         });
       }
     }, REFACTORING_NAME, null);
-
   }
 
 
@@ -139,14 +140,22 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
                                    String interfaceName,
                                    MemberInfo[] selectedMembers,
                                    DocCommentPolicy javaDocPolicy) throws IncorrectOperationException {
-    PsiClass anInterface = JavaDirectoryService.getInstance().createInterface(targetDir, interfaceName);
-    PsiJavaCodeReferenceElement ref = ExtractSuperClassUtil.createExtendingReference(anInterface, aClass, selectedMembers);
-    final PsiReferenceList referenceList = aClass.isInterface() ? aClass.getExtendsList() : aClass.getImplementsList();
-    assert referenceList != null;
-    referenceList.add(ref);
-    PullUpProcessor pullUpHelper = new PullUpProcessor(aClass, anInterface, selectedMembers, javaDocPolicy);
-    pullUpHelper.moveMembersToBase();
-    return anInterface;
+    aClass.getProject().getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
+      .refactoringStarted(ExtractSuperClassUtil.REFACTORING_EXTRACT_SUPER_ID, ExtractSuperClassUtil.createBeforeData(aClass, selectedMembers));
+    final PsiClass anInterface = JavaDirectoryService.getInstance().createInterface(targetDir, interfaceName);
+    try {
+      PsiJavaCodeReferenceElement ref = ExtractSuperClassUtil.createExtendingReference(anInterface, aClass, selectedMembers);
+      final PsiReferenceList referenceList = aClass.isInterface() ? aClass.getExtendsList() : aClass.getImplementsList();
+      assert referenceList != null;
+      referenceList.add(ref);
+      PullUpProcessor pullUpHelper = new PullUpProcessor(aClass, anInterface, selectedMembers, javaDocPolicy);
+      pullUpHelper.moveMembersToBase();
+      return anInterface;
+    }
+    finally {
+      aClass.getProject().getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
+        .refactoringDone(ExtractSuperClassUtil.REFACTORING_EXTRACT_SUPER_ID, ExtractSuperClassUtil.createAfterData(anInterface));
+    }
   }
 
   private String getCommandName() {

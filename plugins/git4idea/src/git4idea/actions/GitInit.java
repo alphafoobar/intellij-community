@@ -15,7 +15,6 @@
  */
 package git4idea.actions;
 
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.components.ServiceManager;
@@ -30,21 +29,18 @@ import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.VcsDirectoryMapping;
+import com.intellij.openapi.vcs.VcsNotifier;
+import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
-import com.intellij.vcsUtil.VcsFileUtil;
+import com.intellij.vcsUtil.VcsUtil;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
 import git4idea.commands.Git;
 import git4idea.commands.GitCommandResult;
 import git4idea.i18n.GitBundle;
-import git4idea.util.GitUIUtil;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Initialize git repository action
@@ -85,8 +81,7 @@ public class GitInit extends DumbAwareAction {
         if (!result.success()) {
           GitVcs vcs = GitVcs.getInstance(project);
           if (vcs != null && vcs.getExecutableValidator().checkExecutableAndNotifyIfNeeded()) {
-            GitUIUtil.notify(GitVcs.IMPORTANT_ERROR_NOTIFICATION, project, "Git init failed", result.getErrorOutputAsHtmlString(),
-                             NotificationType.ERROR, null);
+            VcsNotifier.getInstance(project).notifyError("Git init failed", result.getErrorOutputAsHtmlString());
           }
           return;
         }
@@ -106,30 +101,11 @@ public class GitInit extends DumbAwareAction {
   }
 
   public static void refreshAndConfigureVcsMappings(final Project project, final VirtualFile root, final String path) {
-    root.refresh(false, false);
-    ProjectLevelVcsManager vcs = ProjectLevelVcsManager.getInstance(project);
-    final List<VcsDirectoryMapping> vcsDirectoryMappings = new ArrayList<VcsDirectoryMapping>(vcs.getDirectoryMappings());
-    VcsDirectoryMapping mapping = new VcsDirectoryMapping(path, GitVcs.getInstance(project).getName());
-    for (int i = 0; i < vcsDirectoryMappings.size(); i++) {
-      final VcsDirectoryMapping m = vcsDirectoryMappings.get(i);
-      if (m.getDirectory().equals(path)) {
-        if (m.getVcs().length() == 0) {
-          vcsDirectoryMappings.set(i, mapping);
-          mapping = null;
-          break;
-        }
-        else if (m.getVcs().equals(mapping.getVcs())) {
-          mapping = null;
-          break;
-        }
-      }
-    }
-    if (mapping != null) {
-      vcsDirectoryMappings.add(mapping);
-    }
-    vcs.setDirectoryMappings(vcsDirectoryMappings);
-    vcs.updateActiveVcss();
-    VcsFileUtil.refreshFiles(project, Collections.singleton(root));
+    VfsUtil.markDirtyAndRefresh(false, true, false, root);
+    ProjectLevelVcsManager manager = ProjectLevelVcsManager.getInstance(project);
+    manager.setDirectoryMappings(VcsUtil.addMapping(manager.getDirectoryMappings(), path, GitVcs.NAME));
+    manager.updateActiveVcss();
+    VcsDirtyScopeManager.getInstance(project).dirDirtyRecursively(root);
   }
 
 }

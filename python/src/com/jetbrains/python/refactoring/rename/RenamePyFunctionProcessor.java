@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -128,8 +128,8 @@ public class RenamePyFunctionProcessor extends RenamePyElementProcessor {
     }
   }
 
-  private static void addRename(Map<PsiElement, String> renames, String newName, Maybe<Callable> accessor) {
-    final Callable callable = accessor.valueOrNull();
+  private static void addRename(Map<PsiElement, String> renames, String newName, Maybe<PyCallable> accessor) {
+    final PyCallable callable = accessor.valueOrNull();
     if (callable instanceof PyFunction) {
       renames.put(callable, newName);
     }

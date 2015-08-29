@@ -15,6 +15,8 @@
  */
 package org.jetbrains.idea.maven.project;
 
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
@@ -128,13 +130,21 @@ public class MavenProjectsProcessor {
         indicator.setFraction(counter / (double)(counter + remained));
 
         try {
-          task.perform(myProject, myEmbeddersManager, new SoutMavenConsole(), indicator);
+          final MavenGeneralSettings mavenGeneralSettings = MavenProjectsManager.getInstance(myProject).getGeneralSettings();
+          task.perform(myProject, myEmbeddersManager,
+                       new SoutMavenConsole(mavenGeneralSettings.getOutputLevel(), mavenGeneralSettings.isPrintErrorStackTraces()),
+                       indicator);
         }
         catch (MavenProcessCanceledException e) {
           throw e;
         }
         catch (Throwable e) {
           MavenLog.LOG.error(e);
+          new Notification(MavenUtil.MAVEN_NOTIFICATION_GROUP,
+                           "Unable to import maven project",
+                           "See logs for details",
+                           NotificationType.ERROR
+                           ).notify(myProject);
         }
 
         synchronized (myQueue) {

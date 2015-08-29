@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import java.util.List;
 public class ProjectAndLibrariesScope extends GlobalSearchScope {
   protected final ProjectFileIndex myProjectFileIndex;
   protected final boolean mySearchOutsideRootModel;
+  private String myDisplayName = PsiBundle.message("psi.search.scope.project.and.libraries");
 
   public ProjectAndLibrariesScope(Project project) {
     this(project, false);
@@ -86,8 +87,13 @@ public class ProjectAndLibrariesScope extends GlobalSearchScope {
     return true;
   }
 
+  @NotNull
   public String getDisplayName() {
-    return PsiBundle.message("psi.search.scope.project.and.libraries");
+    return myDisplayName;
+  }
+
+  public void setDisplayName(@NotNull String displayName) {
+    myDisplayName = displayName;
   }
 
   @NotNull
@@ -95,7 +101,6 @@ public class ProjectAndLibrariesScope extends GlobalSearchScope {
     if (scope.isSearchOutsideRootModel()) {
       return super.intersectWith(scope);
     }
-
 
     return scope;
   }

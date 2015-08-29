@@ -1,10 +1,8 @@
 package com.siyeh.igtest.abstraction.weaken_type;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.ArrayList;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.util.*;
 
 public class TypeMayBeWeakened {
 
@@ -52,7 +50,7 @@ public class TypeMayBeWeakened {
         foo(new WeakBoolean());
     }
 
-    void foo(WeakBoolean b) {
+    void foo(WeakBoolean <warning descr="Type of parameter 'b' may be weakened to 'java.lang.Object'">b</warning>) {
         System.out.println("b: " + b);
     }
 
@@ -65,7 +63,7 @@ public class TypeMayBeWeakened {
             FileInputStream fis=new FileInputStream("/etc/modules");
         }
         catch(FileNotFoundException fnfex) {
-            IllegalArgumentException iaex=new IllegalArgumentException("Exception Message");
+            IllegalArgumentException <warning descr="Type of variable 'iaex' may be weakened to 'java.lang.RuntimeException'">iaex</warning>=new IllegalArgumentException("Exception Message");
             iaex.initCause(fnfex);
             throw iaex;
         }
@@ -82,7 +80,7 @@ public class TypeMayBeWeakened {
         void foo() { Test f = new Test(); f.x++; }
     }
 
-    void listy(ArrayList list) {
+    void listy(ArrayList <warning descr="Type of parameter 'list' may be weakened to 'java.lang.Iterable'">list</warning>) {
         for (Object o : list) {
 
         }
@@ -130,7 +128,7 @@ class MyClass  {
 
   public MyClass(java.util.Date date, String[] classNames) {}
 
-  static MyClass readMyClass(final ObjectInputStream objectInput) {
+  static MyClass readMyClass(final ObjectInputStream <warning descr="Type of parameter 'objectInput' may be weakened to 'com.siyeh.igtest.abstraction.weaken_type.DataInput'">objectInput</warning>) {
     final long time = objectInput.readLong();
     final int size = objectInput.readInt();
     final String[] classNames = new String[size];
@@ -149,5 +147,49 @@ abstract class ObjectInputStream implements DataInput {
 
   public String readUTF() {
     return null;
+  }
+}
+class Test implements Foo2 {
+  void test(Test <warning descr="Type of parameter 't' may be weakened to 'com.siyeh.igtest.abstraction.weaken_type.Foo2'">t</warning>) {
+    t.bar();
+  }
+  public void bar() {
+  }
+}
+@Deprecated
+interface Foo {
+  void bar();
+}
+interface Foo2 extends Foo {}
+class Helper {
+
+  void foo() {
+    class A<T> {
+      void foo() {}
+    }
+    class B<T> extends A<T> {}
+    B<String> <warning descr="Type of variable 'b' may be weakened to 'A'">b</warning> = new B();
+    b.foo();
+  }
+}
+class MethodReference1 {
+  public void m(Set<Integer> list) {
+    f(MethodReference1::myTransform);
+  }
+
+  void f(java.util.function.Function<Integer, String> function) {}
+
+  private static String myTransform(int in) {
+    return Integer.toString(in);
+  }
+}
+class MethodReference2 {
+  public void main(String[] args) {
+    Runnable r = MethodReference2::myTransform;
+    Object o = myTransform();
+  }
+
+  private static String <warning descr="Return type of method 'myTransform()' may be weakened to 'java.lang.Object'">myTransform</warning>() {
+    return "Integer.toString(in)";
   }
 }

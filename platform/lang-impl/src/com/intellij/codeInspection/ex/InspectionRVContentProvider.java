@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 package com.intellij.codeInspection.ex;
 
 import com.intellij.codeInspection.CommonProblemDescriptor;
+import com.intellij.codeInspection.QuickFix;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.ui.*;
 import com.intellij.openapi.application.ApplicationManager;
@@ -37,6 +38,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.MutableTreeNode;
 import javax.swing.tree.TreeNode;
+import javax.swing.tree.TreePath;
 import java.util.*;
 
 public abstract class InspectionRVContentProvider {
@@ -67,6 +69,28 @@ public abstract class InspectionRVContentProvider {
 
   public abstract boolean checkReportedProblems(@NotNull GlobalInspectionContextImpl context, @NotNull InspectionToolWrapper toolWrapper);
 
+  public boolean hasQuickFixes(InspectionTree tree) {
+    final TreePath[] treePaths = tree.getSelectionPaths();
+    if (treePaths == null) return false;
+    for (TreePath selectionPath : treePaths) {
+      if (!TreeUtil.traverseDepth((TreeNode)selectionPath.getLastPathComponent(), new TreeUtil.Traverse() {
+        @Override
+        public boolean accept(final Object node) {
+          if (!((InspectionTreeNode)node).isValid()) return true;
+          if (node instanceof ProblemDescriptionNode) {
+            final CommonProblemDescriptor descriptor = ((ProblemDescriptionNode)node).getDescriptor();
+            final QuickFix[] fixes = descriptor != null ? descriptor.getFixes() : null;
+            return fixes == null || fixes.length == 0;
+          }
+          return true;
+        }
+      })) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @Nullable
   public abstract QuickFixAction[] getQuickFixes(@NotNull InspectionToolWrapper toolWrapper, @NotNull InspectionTree tree);
 
@@ -79,8 +103,7 @@ public abstract class InspectionRVContentProvider {
     InspectionToolPresentation presentation = context.getPresentation(wrapper);
     Map<String, Set<RefEntity>> content = presentation.getContent();
     Map<RefEntity, CommonProblemDescriptor[]> problems = presentation.getProblemElements();
-    Map<String, Set<RefEntity>> contents = content == null ? new HashMap<String, Set<RefEntity>>() : content;
-    appendToolNodeContent(context, toolNode, parentNode, showStructure, contents, problems, null);
+    appendToolNodeContent(context, toolNode, parentNode, showStructure, content, problems, null);
   }
 
   public abstract void appendToolNodeContent(@NotNull GlobalInspectionContextImpl context,
@@ -235,7 +258,9 @@ public abstract class InspectionRVContentProvider {
         public boolean accept(Object node) {
           if (node instanceof RefElementNode) {
             final RefElementNode refElementNode = (RefElementNode)node;
-            if (finalContainer.areEqual(refElementNode.getUserObject(), finalContainer.getUserObject())) {
+            final Object userObject = finalContainer.getUserObject();
+            final Object object = refElementNode.getUserObject();
+            if ((object == null || userObject.getClass().equals(object.getClass())) && finalContainer.areEqual(object, userObject)) {
               if (firstLevel.get()) {
                 result.set(refElementNode);
                 return false;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 
-public class PyDictLiteralExpressionImpl extends PyElementImpl implements PyDictLiteralExpression {
+public class PyDictLiteralExpressionImpl extends PySequenceExpressionImpl implements PyDictLiteralExpression {
   private static final TokenSet KEY_VALUE_EXPRESSIONS = TokenSet.create(PyElementTypes.KEY_VALUE_EXPRESSION);
 
   public PyDictLiteralExpressionImpl(ASTNode astNode) {
@@ -38,7 +38,7 @@ public class PyDictLiteralExpressionImpl extends PyElementImpl implements PyDict
   }
 
   public PyType getType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key) {
-    return PyBuiltinCache.createLiteralCollectionType(this, "dict");
+    return PyBuiltinCache.getInstance(this).createLiteralCollectionType(this, "dict", context);
   }
 
   @Override

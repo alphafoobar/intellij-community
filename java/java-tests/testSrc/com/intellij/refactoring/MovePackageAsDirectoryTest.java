@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,10 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.move.moveClassesOrPackages.MoveDirectoryWithClassesProcessor;
+import com.intellij.refactoring.rename.RenamePsiPackageProcessor;
 import com.intellij.testFramework.PsiTestUtil;
 import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -39,6 +41,7 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
     return JavaTestUtil.getJavaTestDataPath();
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/movePackageAsDir/";
@@ -46,6 +49,18 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
 
   public void testMovePackage() throws Exception {
     doTest(createAction("pack1", "target"));
+  }
+
+  public void testRenamePackage() throws Exception {
+    final PerformAction action = (rootDir, rootAfter) -> {
+      final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(myProject);
+      final PsiPackage sourcePackage = psiFacade.findPackage("pack1");
+      assertNotNull(sourcePackage);
+
+      RenamePsiPackageProcessor.createRenameMoveProcessor("pack1.pack2", sourcePackage, false, false).run();
+      FileDocumentManager.getInstance().saveAllDocuments();
+    };
+    doTest(action);
   }
 
   public void testMovePackageWithTxtFilesInside() throws Exception {
@@ -56,7 +71,7 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
     final boolean [] fileWasDeleted = new boolean[]{false};
     final VirtualFileAdapter fileAdapter = new VirtualFileAdapter() {
       @Override
-      public void fileDeleted(VirtualFileEvent event) {
+      public void fileDeleted(@NotNull VirtualFileEvent event) {
         fileWasDeleted[0] = !event.getFile().isDirectory();
       }
     };
@@ -87,21 +102,15 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
       protected void preprocessSrcDir(PsiDirectory srcDirectory) {
         final PsiFile empty = srcDirectory.findFile(EMPTY_TXT);
         assert empty != null;
-        WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-          public void run() {
-            empty.delete();
-          }
-        });
+        WriteCommandAction.runWriteCommandAction(null, empty::delete);
       }
 
       @Override
       protected void postProcessTargetDir(PsiDirectory targetDirectory) {
         final PsiDirectory subdirectory = targetDirectory.findSubdirectory(packageName);
         assert subdirectory != null;
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            subdirectory.createFile(EMPTY_TXT);
-          }
+        ApplicationManager.getApplication().runWriteAction(() -> {
+          subdirectory.createFile(EMPTY_TXT);
         });
       }
     });
@@ -115,11 +124,7 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
       protected void preprocessSrcDir(PsiDirectory srcDirectory) {
         final PsiClass empty = JavaPsiFacade.getInstance(getProject()).findClass(FOO, GlobalSearchScope.projectScope(getProject()));
         assert empty != null;
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            empty.delete();
-          }
-        });
+        ApplicationManager.getApplication().runWriteAction(empty::delete);
       }
 
       @Override
@@ -128,16 +133,14 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
         assert subdirectory != null;
         final PsiDirectory emptyDir = subdirectory.findSubdirectory("subPack");
         assert emptyDir != null;
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            emptyDir.createFile(EMPTY_TXT);
-          }
+        ApplicationManager.getApplication().runWriteAction(() -> {
+          emptyDir.createFile(EMPTY_TXT);
         });
       }
     });
   }
 
-  private PerformAction createAction(final String packageName, final String targetPackageName) {
+  private MyPerformAction createAction(final String packageName, final String targetPackageName) {
     return new MyPerformAction(packageName, targetPackageName);
   }
 
@@ -164,12 +167,8 @@ public class MovePackageAsDirectoryTest extends MultiFileTestCase {
     @Override
     public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
       final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(myProject);
-      final Comparator<PsiDirectory> directoryComparator = new Comparator<PsiDirectory>() {
-        @Override
-        public int compare(PsiDirectory o1, PsiDirectory o2) {
-          return o1.getVirtualFile().getPresentableUrl().compareTo(o2.getVirtualFile().getPresentableUrl());
-        }
-      };
+      final Comparator<PsiDirectory> directoryComparator =
+        (o1, o2) -> o1.getVirtualFile().getPresentableUrl().compareTo(o2.getVirtualFile().getPresentableUrl());
 
       final PsiPackage sourcePackage = psiFacade.findPackage(myPackageName);
       assertNotNull(sourcePackage);

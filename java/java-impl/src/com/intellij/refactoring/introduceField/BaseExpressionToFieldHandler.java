@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ package com.intellij.refactoring.introduceField;
 import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.codeInsight.TestFrameworks;
+import com.intellij.codeInsight.daemon.impl.quickfix.AnonymousTargetClassPreselectionUtil;
 import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.codeInsight.lookup.LookupManager;
 import com.intellij.codeInsight.navigation.NavigationUtil;
@@ -52,6 +53,7 @@ import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.impl.source.codeStyle.CodeEditUtil;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiElementProcessor;
+import com.intellij.psi.util.FileTypeUtils;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.PsiUtilCore;
@@ -67,7 +69,6 @@ import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.refactoring.util.occurrences.OccurrenceManager;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
-import com.intellij.psi.util.FileTypeUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -132,18 +133,13 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
       return !convertExpressionToField(selectedExpr, editor, file, project, tempType);
     }
     else {
-      PsiClass selection = null;
-      for (PsiClass psiClass : classes) {
-        if (!(psiClass instanceof PsiAnonymousClass)) {
-          selection = psiClass;
-          break;
-        }
-      }
+      PsiClass selection = AnonymousTargetClassPreselectionUtil.getPreselection(classes, myParentClass);
       NavigationUtil.getPsiElementPopup(classes.toArray(new PsiClass[classes.size()]), new PsiClassListCellRenderer(),
                                         "Choose class to introduce " + (myIsConstant ? "constant" : "field"),
                                         new PsiElementProcessor<PsiClass>() {
                                           @Override
                                           public boolean execute(@NotNull PsiClass aClass) {
+                                            AnonymousTargetClassPreselectionUtil.rememberSelection(aClass, myParentClass);
                                             myParentClass = aClass;
                                             convertExpressionToField(selectedExpr, editor, file, project, tempType);
                                             return false;
@@ -216,7 +212,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
 
     new WriteCommandAction(project, getRefactoringName()){
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         runnable.run();
       }
     }.execute();
@@ -408,7 +404,8 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
     PsiElementFactory factory = JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory();
     try {
       PsiField field = factory.createFieldFromText(pattern.toString(), null);
-      field.getTypeElement().replace(factory.createTypeElement(type));
+      final PsiTypeElement typeElement = factory.createTypeElement(type);
+      field.getTypeElement().replace(typeElement);
       field = (PsiField)CodeStyleManager.getInstance(psiManager.getProject()).reformat(field);
       if (includeInitializer) {
         field.getInitializer().replace(initializerExpr);
@@ -458,7 +455,14 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
 
       @Override
       public void pass(final ElementToWorkOn elementToWorkOn) {
-        if (elementToWorkOn == null) return;
+        if (elementToWorkOn == null) {
+          return;
+        }
+
+        if (elementToWorkOn.getExpression() == null && elementToWorkOn.getLocalVariable() == null) {
+          ElementToWorkOn.showNothingSelectedErrorMessage(editor, getRefactoringName(), getHelpID(), project);
+          return;
+        }
 
         final boolean hasRunTemplate = LookupManager.getActiveLookup(editor) == null;
         if (elementToWorkOn.getExpression() == null) {
@@ -715,9 +719,8 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
 
         if (!CommonRefactoringUtil.checkReadOnlyStatus(myProject, destClass.getContainingFile())) return;
 
-        if (initializer != null) {
-          ChangeContextUtil.encodeContextInfo(initializer, true);
-        }
+        ChangeContextUtil.encodeContextInfo(destClass, true);
+
         myField = mySettings.isIntroduceEnumConstant() ? EnumConstantsUtil.createEnumConstant(destClass, myFieldName, initializer) :
                          createField(myFieldName, myType, initializer, initializerPlace == InitializationPlace.IN_FIELD_DECLARATION && initializer != null,
                                      myParentClass);
@@ -847,9 +850,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
           }
         }
 
-        if (initializer != null) {
-          ChangeContextUtil.clearContextInfo(initializer);
-        }
+        ChangeContextUtil.decodeContextInfo(destClass, destClass, null);
       }
       catch (IncorrectOperationException e) {
         LOG.error(e);

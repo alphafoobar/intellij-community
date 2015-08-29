@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,8 +52,12 @@ public class AddExceptionToCatchFix extends BaseIntentionAction {
     PsiDocumentManager.getInstance(project).commitAllDocuments();
 
     PsiElement element = findElement(file, offset);
-    PsiTryStatement tryStatement = (PsiTryStatement) element.getParent();
+    if (element == null) return;
+
+    PsiTryStatement tryStatement = (PsiTryStatement)element.getParent();
     List<PsiClassType> unhandledExceptions = new ArrayList<PsiClassType>(ExceptionUtil.collectUnhandledExceptions(element, null));
+    if (unhandledExceptions.isEmpty()) return;
+
     ExceptionUtil.sortExceptionsByHierarchy(unhandledExceptions);
 
     IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
@@ -86,7 +90,9 @@ public class AddExceptionToCatchFix extends BaseIntentionAction {
     }
   }
 
-  private static PsiCodeBlock addCatchStatement(PsiTryStatement tryStatement, PsiClassType exceptionType, PsiFile file) throws IncorrectOperationException {
+  private static PsiCodeBlock addCatchStatement(PsiTryStatement tryStatement,
+                                                PsiClassType exceptionType,
+                                                PsiFile file) throws IncorrectOperationException {
     PsiElementFactory factory = JavaPsiFacade.getInstance(tryStatement.getProject()).getElementFactory();
 
     if (tryStatement.getTryBlock() == null) {
@@ -108,9 +114,12 @@ public class AddExceptionToCatchFix extends BaseIntentionAction {
     }
 
     PsiParameter[] parameters = tryStatement.getCatchBlockParameters();
-    parameters[parameters.length - 1].getTypeElement().replace(factory.createTypeElement(exceptionType));
-    PsiCodeBlock[] catchBlocks = tryStatement.getCatchBlocks();
+    PsiTypeElement typeElement = parameters[parameters.length - 1].getTypeElement();
+    if (typeElement != null) {
+      JavaCodeStyleManager.getInstance(file.getProject()).shortenClassReferences(typeElement);
+    }
 
+    PsiCodeBlock[] catchBlocks = tryStatement.getCatchBlocks();
     return catchBlocks[catchBlocks.length - 1];
   }
 
@@ -164,8 +173,8 @@ public class AddExceptionToCatchFix extends BaseIntentionAction {
     if (element == null) return null;
 
     @SuppressWarnings({"unchecked"})
-    final PsiElement parent = PsiTreeUtil.getParentOfType(element, PsiTryStatement.class, PsiMethod.class);
-    if (parent == null || parent instanceof PsiMethod) return null;
+    final PsiElement parent = PsiTreeUtil.getParentOfType(element, PsiTryStatement.class, PsiMethod.class, PsiFunctionalExpression.class);
+    if (parent == null || parent instanceof PsiMethod || parent instanceof PsiFunctionalExpression) return null;
     final PsiTryStatement statement = (PsiTryStatement) parent;
 
     final PsiCodeBlock tryBlock = statement.getTryBlock();

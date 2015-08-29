@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2013 Bas Leijdekkers
+ * Copyright 2006-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -30,6 +30,9 @@ import com.siyeh.ig.psiutils.*;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class SimplifiableIfStatementInspection extends BaseInspection {
 
@@ -116,12 +119,12 @@ public class SimplifiableIfStatementInspection extends BaseInspection {
     }
     else if (BoolUtils.isFalse(thenRhs)) {
       return lhs.getText() + ' ' + token.getText() + ' ' +
-             buildNegatedExpressionText(condition, ParenthesesUtils.AND_PRECEDENCE) + " && " +
+             BoolUtils.getNegatedExpressionText(condition, ParenthesesUtils.AND_PRECEDENCE) + " && " +
              buildExpressionText(elseRhs, ParenthesesUtils.AND_PRECEDENCE) + ';';
     }
     if (BoolUtils.isTrue(elseRhs)) {
       return lhs.getText() + ' ' + token.getText() + ' ' +
-             buildNegatedExpressionText(condition, ParenthesesUtils.OR_PRECEDENCE) + " || " +
+             BoolUtils.getNegatedExpressionText(condition, ParenthesesUtils.OR_PRECEDENCE) + " || " +
              buildExpressionText(thenRhs, ParenthesesUtils.OR_PRECEDENCE) + ';';
     }
     else {
@@ -148,11 +151,11 @@ public class SimplifiableIfStatementInspection extends BaseInspection {
              buildExpressionText(elseReturnValue, ParenthesesUtils.OR_PRECEDENCE) + ';';
     }
     else if (BoolUtils.isFalse(thenReturnValue)) {
-      return "return " + buildNegatedExpressionText(condition, ParenthesesUtils.AND_PRECEDENCE) + " && " +
+      return "return " + BoolUtils.getNegatedExpressionText(condition, ParenthesesUtils.AND_PRECEDENCE) + " && " +
              buildExpressionText(elseReturnValue, ParenthesesUtils.AND_PRECEDENCE) + ';';
     }
     if (BoolUtils.isTrue(elseReturnValue)) {
-      return "return " + buildNegatedExpressionText(condition, ParenthesesUtils.OR_PRECEDENCE) + " || " +
+      return "return " + BoolUtils.getNegatedExpressionText(condition, ParenthesesUtils.OR_PRECEDENCE) + " || " +
              buildExpressionText(thenReturnValue, ParenthesesUtils.OR_PRECEDENCE) + ';';
     }
     else {
@@ -201,65 +204,6 @@ public class SimplifiableIfStatementInspection extends BaseInspection {
     }
   }
 
-
-  public static String buildNegatedExpressionText(@Nullable PsiExpression expression, int precedence) {
-    while (expression instanceof PsiParenthesizedExpression) {
-      final PsiParenthesizedExpression parenthesizedExpression = (PsiParenthesizedExpression)expression;
-      expression = parenthesizedExpression.getExpression();
-    }
-    if (expression == null) {
-      return "";
-    }
-    final StringBuilder result = new StringBuilder();
-    if (BoolUtils.isNegation(expression)) {
-      final PsiPrefixExpression prefixExpression = (PsiPrefixExpression)expression;
-      final PsiExpression operand = prefixExpression.getOperand();
-      final PsiExpression negated = ParenthesesUtils.stripParentheses(operand);
-      if (negated == null) {
-        return "";
-      }
-      if (ParenthesesUtils.getPrecedence(negated) > precedence) {
-        result.append('(');
-        appendPresentableText(negated, result);
-        result.append(')');
-      }
-      else {
-        appendPresentableText(negated, result);
-      }
-    }
-    else if (ComparisonUtils.isComparison(expression)) {
-      final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
-      final String negatedComparison = ComparisonUtils.getNegatedComparison(polyadicExpression.getOperationTokenType());
-      final PsiExpression[] operands = polyadicExpression.getOperands();
-      final boolean isEven = (operands.length & 1) != 1;
-      for (int i = 0, length = operands.length; i < length; i++) {
-        final PsiExpression operand = operands[i];
-        if (i > 0) {
-          if (isEven && (i & 1) != 1) {
-            final PsiJavaToken token = polyadicExpression.getTokenBeforeOperand(operand);
-            if (token != null) {
-              result.append(token.getText());
-            }
-          }
-          else {
-            result.append(negatedComparison);
-          }
-        }
-        appendPresentableText(operand, result);
-      }
-    }
-    else if (ParenthesesUtils.getPrecedence(expression) > ParenthesesUtils.PREFIX_PRECEDENCE) {
-      result.append("!(");
-      appendPresentableText(expression, result);
-      result.append(')');
-    }
-    else {
-      result.append('!');
-      appendPresentableText(expression, result);
-    }
-    return result.toString();
-  }
-
   @Override
   public InspectionGadgetsFix buildFix(Object... infos) {
     return new SimplifiableIfStatementFix();
@@ -279,21 +223,68 @@ public class SimplifiableIfStatementInspection extends BaseInspection {
     }
 
     @Override
-    public void doFix(Project project, ProblemDescriptor descriptor)
-      throws IncorrectOperationException {
+    public void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
       final PsiIfStatement ifStatement = (PsiIfStatement)element.getParent();
-      final String newStatement = calculateReplacementStatement(ifStatement);
-      if (newStatement == null) {
+      List<PsiComment> before = new ArrayList<PsiComment>();
+      List<PsiComment> after = new ArrayList<PsiComment>();
+      collectComments(ifStatement, true, before, after);
+      final String newStatementText = calculateReplacementStatement(ifStatement);
+      if (newStatementText == null) {
         return;
       }
+      final StringBuilder codeBlockText = new StringBuilder("{\n");
+      for (PsiComment comment : before) {
+        codeBlockText.append(comment.getText()).append('\n');
+      }
+      codeBlockText.append(newStatementText).append('\n');
+      for (PsiComment comment : after) {
+        codeBlockText.append(comment.getText()).append('\n');
+      }
+      codeBlockText.append('}');
       if (ifStatement.getElseBranch() == null) {
         final PsiElement nextStatement = PsiTreeUtil.skipSiblingsForward(ifStatement, PsiWhiteSpace.class);
         if (nextStatement != null) {
           nextStatement.delete();
         }
       }
-      replaceStatement(ifStatement, newStatement);
+      final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+      final PsiCodeBlock codeBlock = psiFacade.getElementFactory().createCodeBlockFromText(codeBlockText.toString(), ifStatement);
+      final PsiElement parent = ifStatement.getParent();
+      PsiElement child = codeBlock.getFirstBodyElement();
+      final PsiElement end = codeBlock.getLastBodyElement();
+      while (true) {
+        parent.addBefore(child, ifStatement);
+        if (child == end) {
+          break;
+        }
+        child = child.getNextSibling();
+      }
+      ifStatement.delete();
+      CodeStyleManager.getInstance(project).reformat(parent);
+    }
+
+    private static void collectComments(PsiElement element, boolean first, List<PsiComment> before, List<PsiComment> after) {
+      if (element instanceof PsiComment) {
+        if (first) {
+          before.add((PsiComment)element);
+        }
+        else {
+          after.add((PsiComment)element);
+        }
+        return;
+      }
+      for (PsiElement child : element.getChildren()) {
+        if (child instanceof PsiKeyword) {
+          final PsiKeyword keyword = (PsiKeyword)child;
+          if (keyword.getTokenType() == JavaTokenType.ELSE_KEYWORD) {
+            first = false;
+          }
+        }
+        else {
+          collectComments(child, first, before, after);
+        }
+      }
     }
   }
 

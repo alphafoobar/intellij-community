@@ -15,13 +15,14 @@
  */
 package com.intellij.openapi.vcs.changes.shelf;
 
-import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
+import com.intellij.openapi.vcs.VcsDataKeys;
+import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchDefaultExecutor;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchDifferentiatedDialog;
 import com.intellij.openapi.vcs.changes.patch.ApplyPatchExecutor;
@@ -29,16 +30,21 @@ import com.intellij.openapi.vcs.changes.patch.ApplyPatchMode;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * @author irengrig
  *         Date: 2/25/11
  *         Time: 5:50 PM
  */
-public class UnshelveWithDialogAction extends AnAction {
+public class UnshelveWithDialogAction extends DumbAwareAction {
   @Override
   public void actionPerformed(AnActionEvent e) {
     final Project project = e.getData(CommonDataKeys.PROJECT);
@@ -47,20 +53,34 @@ public class UnshelveWithDialogAction extends AnAction {
 
     FileDocumentManager.getInstance().saveAllDocuments();
 
-    final VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(changeLists[0].PATH));
+    ShelvedChangeList changeList = changeLists[0];
+    final VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(changeList.PATH));
     if (virtualFile == null) {
       VcsBalloonProblemNotifier.showOverChangesView(project, "Can not find path file", MessageType.ERROR);
       return;
     }
-    if (! changeLists[0].getBinaryFiles().isEmpty()) {
-      VcsBalloonProblemNotifier.showOverChangesView(project, "Binary file(s) would be skipped.", MessageType.WARNING);
-    }
+    Change[] preselectedChanges = e.getData(VcsDataKeys.CHANGES);
+    List<ShelveChangesManager.ShelvedBinaryFilePatch> binaryShelvedPatches =
+      ContainerUtil.map(changeList.getBinaryFiles(), new Function<ShelvedBinaryFile, ShelveChangesManager.ShelvedBinaryFilePatch>() {
+        @Override
+        public ShelveChangesManager.ShelvedBinaryFilePatch fun(ShelvedBinaryFile file) {
+          return new ShelveChangesManager.ShelvedBinaryFilePatch(file);
+        }
+      });
     final ApplyPatchDifferentiatedDialog dialog =
       new ApplyPatchDifferentiatedDialog(project, new ApplyPatchDefaultExecutor(project), Collections.<ApplyPatchExecutor>emptyList(),
-                                         ApplyPatchMode.UNSHELVE, virtualFile);
+                                         ApplyPatchMode.UNSHELVE, virtualFile, binaryShelvedPatches,
+                                         hasNotAllSelectedChanges(project, changeList, preselectedChanges)
+                                         ? ContainerUtil.newArrayList(preselectedChanges)
+                                         : null);
     dialog.setHelpId("reference.dialogs.vcs.unshelve");
     dialog.show();
   }
+
+  private static boolean hasNotAllSelectedChanges(@NotNull Project project, @NotNull ShelvedChangeList list, @Nullable Change[] changes) {
+    return changes != null && (list.getChanges(project).size() + list.getBinaryFiles().size()) != changes.length;
+  }
+
 
   @Override
   public void update(AnActionEvent e) {

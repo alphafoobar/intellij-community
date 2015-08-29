@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -42,9 +41,9 @@ import com.sun.jdi.ReferenceType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.service.GradleInstallationManager;
-import org.jetbrains.plugins.groovy.extensions.GroovyScriptTypeDetector;
 import org.jetbrains.plugins.groovy.extensions.debugger.ScriptPositionManagerHelper;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
+import org.jetbrains.plugins.groovy.runner.GroovyScriptUtil;
 
 import java.io.File;
 import java.net.URL;
@@ -76,7 +75,7 @@ public class GradlePositionManager extends ScriptPositionManagerHelper {
 
   public boolean isAppropriateScriptFile(@NotNull final PsiFile scriptFile) {
     return scriptFile instanceof GroovyFile &&
-           GroovyScriptTypeDetector.isSpecificScriptFile((GroovyFile)scriptFile, GradleScriptType.INSTANCE);
+           GroovyScriptUtil.isSpecificScriptFile((GroovyFile)scriptFile, GradleScriptType.INSTANCE);
   }
 
   @NotNull
@@ -144,7 +143,7 @@ public class GradlePositionManager extends ScriptPositionManagerHelper {
     assert libDir != null;
     for (final VirtualFile child : libDir.getChildren()) {
       if ("jar".equals(child.getExtension())) {
-        urls.add(VfsUtil.convertToURL(child.getUrl()));
+        urls.add(VfsUtilCore.convertToURL(child.getUrl()));
       }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 package com.intellij.tools;
 
 import com.intellij.execution.ExecutionException;
-import com.intellij.execution.RunnerRegistry;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil;
 import com.intellij.execution.executors.DefaultRunExecutor;
@@ -34,25 +33,27 @@ import com.intellij.ide.macro.MacroManager;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.options.SchemeElement;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 
 public class Tool implements SchemeElement {
-  @NonNls public final static String ACTION_ID_PREFIX = "Tool_";
+  @NonNls public static final String ACTION_ID_PREFIX = "Tool_";
 
+  public static final String DEFAULT_GROUP_NAME = "External Tools";
   private String myName;
   private String myDescription;
-  private String myGroup;
+  @NotNull private String myGroup = DEFAULT_GROUP_NAME;
   private boolean myShownInMainMenu;
   private boolean myShownInEditor;
   private boolean myShownInProjectViews;
@@ -81,6 +82,7 @@ public class Tool implements SchemeElement {
     return myDescription;
   }
 
+  @NotNull
   public String getGroup() {
     return myGroup;
   }
@@ -133,8 +135,8 @@ public class Tool implements SchemeElement {
     myDescription = description;
   }
 
-  void setGroup(String group) {
-    myGroup = group;
+  void setGroup(@NotNull String group) {
+    myGroup = StringUtil.isEmpty(group)?DEFAULT_GROUP_NAME:group;
   }
 
   void setShownInMainMenu(boolean shownInMainMenu) {
@@ -200,9 +202,7 @@ public class Tool implements SchemeElement {
   public void setOutputFilters(FilterInfo[] filters) {
     myOutputFilters = new ArrayList<FilterInfo>();
     if (filters != null) {
-      for (int i = 0; i < filters.length; i++) {
-        myOutputFilters.add(filters[i]);
-      }
+      Collections.addAll(myOutputFilters, filters);
     }
   }
 
@@ -230,11 +230,11 @@ public class Tool implements SchemeElement {
   }
 
   public boolean equals(Object obj) {
-    if (!(obj instanceof Tool)) return false;
-    Tool secondTool = (Tool)obj;
+    if (!(obj instanceof Tool)) {
+      return false;
+    }
 
-    Tool source = secondTool;
-
+    Tool source = (Tool)obj;
     return
       Comparing.equal(myName, source.myName) &&
       Comparing.equal(myDescription, source.myDescription) &&
@@ -254,38 +254,31 @@ public class Tool implements SchemeElement {
       Comparing.equal(myOutputFilters, source.myOutputFilters);
   }
 
+  @NotNull
   public String getActionId() {
     StringBuilder name = new StringBuilder(getActionIdPrefix());
-    if (myGroup != null) {
-      name.append(myGroup);
-      name.append('_');
-    }
+    name.append(myGroup);
+    name.append('_');
     if (myName != null) {
       name.append(myName);
     }
     return name.toString();
   }
 
-  /**
-   * @return <code>true</code> if task has been started successfully
-   */
-  public boolean execute(AnActionEvent event, DataContext dataContext, long executionId, @Nullable final ProcessListener processListener) {
+  public void execute(AnActionEvent event, DataContext dataContext, long executionId, @Nullable final ProcessListener processListener) {
     final Project project = CommonDataKeys.PROJECT.getData(dataContext);
     if (project == null) {
-      return false;
+      return;
     }
+
     FileDocumentManager.getInstance().saveAllDocuments();
     try {
       if (isUseConsole()) {
-        final ToolRunProfile profile = new ToolRunProfile(this, dataContext);
-        final ProgramRunner runner = RunnerRegistry.getInstance().getRunner(DefaultRunExecutor.EXECUTOR_ID, profile);
-        assert runner != null;
-
-        ExecutionEnvironment executionEnvironment = new ExecutionEnvironmentBuilder(project, DefaultRunExecutor.getRunExecutorInstance())
-          .setRunProfile(profile)
-          .build();
-        executionEnvironment.setExecutionId(executionId);
-        runner.execute(executionEnvironment, new ProgramRunner.Callback() {
+        ExecutionEnvironment environment = ExecutionEnvironmentBuilder.create(project,
+                                                                              DefaultRunExecutor.getRunExecutorInstance(),
+                                                                              new ToolRunProfile(this, dataContext)).build();
+        environment.setExecutionId(executionId);
+        environment.getRunner().execute(environment, new ProgramRunner.Callback() {
           @Override
           public void processStarted(RunContentDescriptor descriptor) {
             ProcessHandler processHandler = descriptor.getProcessHandler();
@@ -294,12 +287,11 @@ public class Tool implements SchemeElement {
             }
           }
         });
-        return true;
       }
       else {
         GeneralCommandLine commandLine = createCommandLine(dataContext);
         if (commandLine == null) {
-          return false;
+          return;
         }
         OSProcessHandler handler = new OSProcessHandler(commandLine.createProcess(), commandLine.getCommandLineString());
         handler.addProcessListener(new ToolProcessAdapter(project, synchronizeAfterExecution(), getName()));
@@ -307,13 +299,11 @@ public class Tool implements SchemeElement {
           handler.addProcessListener(processListener);
         }
         handler.startNotify();
-        return true;
       }
     }
     catch (ExecutionException ex) {
       ExecutionErrorDialog.show(ex, ToolsBundle.message("tools.process.start.error"), project);
     }
-    return false;
   }
 
   @Nullable
@@ -347,14 +337,14 @@ public class Tool implements SchemeElement {
         commandLine.setExePath(exePath);
       }
     }
-    catch (Macro.ExecutionCancelledException e) {
+    catch (Macro.ExecutionCancelledException ignored) {
       return null;
     }
     return commandLine;
   }
 
   @Override
-  public void setGroupName(final String name) {
+  public void setGroupName(@NotNull final String name) {
     setGroup(name);
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,19 +19,24 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.ParamsGroup;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.PatternUtil;
 import com.jetbrains.python.run.PythonCommandLineState;
 import icons.PythonIcons;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.io.File;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * @author yole
  */
 public class JythonSdkFlavor extends PythonSdkFlavor {
+  private static final Pattern VERSION_RE = Pattern.compile("(Jython \\S+)( on .*)?");
   private static final String JYTHONPATH = "JYTHONPATH";
   private static final String PYTHON_PATH_PREFIX = "-Dpython.path=";
 
@@ -44,9 +49,10 @@ public class JythonSdkFlavor extends PythonSdkFlavor {
     return FileUtil.getNameWithoutExtension(file).toLowerCase().startsWith("jython");
   }
 
+  @Nullable
   @Override
-  public String getVersionRegexp() {
-    return "(Jython \\S+)( on .*)?";
+  public String getVersionStringFromOutput(@NotNull String output) {
+    return PatternUtil.getFirstMatch(Arrays.asList(StringUtil.splitByLines(output)), VERSION_RE);
   }
 
   @Override

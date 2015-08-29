@@ -40,15 +40,15 @@ public final class OpenUrlHyperlinkInfo implements HyperlinkWithPopupMenuInfo {
     this(url, Conditions.<WebBrowser>alwaysTrue(), null);
   }
 
-  public OpenUrlHyperlinkInfo(@NotNull String url, @NotNull WebBrowser browser) {
-    this(url, null, browser);
+  public OpenUrlHyperlinkInfo(@NotNull String url, @Nullable final WebBrowser browser) {
+    this(url, browser == null ? Conditions.<WebBrowser>alwaysTrue() : Conditions.is(browser));
   }
 
   public OpenUrlHyperlinkInfo(@NotNull String url, @NotNull Condition<WebBrowser> browserCondition) {
     this(url, browserCondition, null);
   }
 
-  private OpenUrlHyperlinkInfo(@NotNull String url, @Nullable Condition<WebBrowser> browserCondition, @Nullable WebBrowser browser) {
+  private OpenUrlHyperlinkInfo(@NotNull String url, @NotNull Condition<WebBrowser> browserCondition, @Nullable WebBrowser browser) {
     this.url = url;
     this.browserCondition = browserCondition;
     this.browser = browser;
@@ -57,13 +57,12 @@ public final class OpenUrlHyperlinkInfo implements HyperlinkWithPopupMenuInfo {
   @Override
   public ActionGroup getPopupMenuGroup(@NotNull MouseEvent event) {
     DefaultActionGroup group = new DefaultActionGroup();
-    for (BrowsersConfiguration.BrowserFamily browserFamily : BrowsersConfiguration.getInstance().getActiveBrowsers()) {
-      final WebBrowser browser = WebBrowser.getStandardBrowser(browserFamily);
-      if (browserCondition == null ? browser.equals(this.browser) : browserCondition.value(browser)) {
+    for (final WebBrowser browser : WebBrowserManager.getInstance().getActiveBrowsers()) {
+      if (browserCondition.value(browser)) {
         group.add(new AnAction("Open in " + browser.getName(), "Open URL in " + browser.getName(), browser.getIcon()) {
           @Override
           public void actionPerformed(AnActionEvent e) {
-            UrlOpener.launchBrowser(url, browser);
+            BrowserLauncher.getInstance().browse(url, browser, e.getProject());
           }
         });
       }
@@ -80,6 +79,6 @@ public final class OpenUrlHyperlinkInfo implements HyperlinkWithPopupMenuInfo {
 
   @Override
   public void navigate(Project project) {
-    UrlOpener.launchBrowser(url, browser);
+    BrowserLauncher.getInstance().browse(url, browser, project);
   }
 }

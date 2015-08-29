@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,23 @@
 package com.intellij.debugger.actions;
 
 import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.JavaValue;
 import com.intellij.debugger.engine.events.DebuggerContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.settings.NodeRendererSettings;
-import com.intellij.debugger.ui.impl.watch.DebuggerTreeNodeImpl;
-import com.intellij.debugger.ui.impl.watch.NodeDescriptorImpl;
 import com.intellij.debugger.ui.impl.watch.ValueDescriptorImpl;
 import com.intellij.debugger.ui.tree.render.NodeRenderer;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.xdebugger.frame.XValue;
+import com.intellij.xdebugger.impl.ui.tree.actions.XDebuggerTreeActionBase;
+import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -40,7 +43,7 @@ import java.util.List;
 public class ViewAsGroup extends ActionGroup implements DumbAware {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.actions.ViewAsGroup");
 
-  private AnAction[] myChildren = AnAction.EMPTY_ARRAY;
+  private volatile AnAction[] myChildren = AnAction.EMPTY_ARRAY;
 
   public ViewAsGroup() {
     super(null, true);
@@ -55,39 +58,43 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
     }
 
     public boolean isSelected(AnActionEvent e) {
-      DebuggerTreeNodeImpl[] nodes = DebuggerAction.getSelectedNodes(e.getDataContext());
-      if (nodes == null) {
+      List<JavaValue> values = getSelectedValues(e);
+      if (values.isEmpty()) {
         return false;
       }
-      for (DebuggerTreeNodeImpl node : nodes) {
-        if (node.getDescriptor() instanceof ValueDescriptorImpl) {
-          if (((ValueDescriptorImpl)node.getDescriptor()).getLastRenderer() != myNodeRenderer) {
-            return false;
-          }
+      for (JavaValue value : values) {
+        if (value.getDescriptor().getLastRenderer() != myNodeRenderer) {
+          return false;
         }
       }
       return true;
     }
 
     public void setSelected(final AnActionEvent e, final boolean state) {
+      if (!state) return;
+
       final DebuggerContextImpl debuggerContext = DebuggerAction.getDebuggerContext(e.getDataContext());
-      final DebuggerTreeNodeImpl[] nodes = DebuggerAction.getSelectedNodes(e.getDataContext());
+      final List<JavaValue> values = getSelectedValues(e);
+      final List<XValueNodeImpl> selectedNodes = XDebuggerTreeActionBase.getSelectedNodes(e.getDataContext());
 
-      LOG.assertTrue(debuggerContext != null && nodes != null);
+      LOG.assertTrue(debuggerContext != null && !values.isEmpty());
 
-      debuggerContext.getDebugProcess().getManagerThread().schedule(new DebuggerContextCommandImpl(debuggerContext) {
+      DebugProcessImpl process = debuggerContext.getDebugProcess();
+      if (process == null) {
+        return;
+      }
+
+      process.getManagerThread().schedule(new DebuggerContextCommandImpl(debuggerContext) {
           public void threadAction() {
-            for (final DebuggerTreeNodeImpl node : nodes) {
-              if (node.getDescriptor() instanceof ValueDescriptorImpl) {
-                final ValueDescriptorImpl valueDescriptor = (ValueDescriptorImpl)node.getDescriptor();
-                if (state) {
-                  valueDescriptor.setRenderer(myNodeRenderer);
-                  node.calcRepresentation();
-                }
+            for (final XValueNodeImpl node : selectedNodes) {
+              final XValue container = node.getValueContainer();
+              if (container instanceof JavaValue) {
+                ((JavaValue)container).setRenderer(myNodeRenderer, node);
               }
             }
           }
-        });
+        }
+      );
     }
   }
 
@@ -96,7 +103,7 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
     return myChildren;
   }
 
-  private static AnAction [] calcChildren(DebuggerTreeNodeImpl[] nodes) {
+  private static AnAction [] calcChildren(List<JavaValue> values) {
     List<AnAction> renderers = new ArrayList<AnAction>();
 
     List<NodeRenderer> allRenderers = NodeRendererSettings.getInstance().getAllRenderers();
@@ -106,15 +113,15 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
     for (NodeRenderer nodeRenderer : allRenderers) {
       boolean allApp = true;
 
-      for (DebuggerTreeNodeImpl node : nodes) {
-        NodeDescriptorImpl descriptor = node.getDescriptor();
-        if (descriptor instanceof ValueDescriptorImpl) {
-          anyValueDescriptor = true;
-          ValueDescriptorImpl valueDescriptor = (ValueDescriptorImpl)descriptor;
-          if (valueDescriptor.isValueValid() && !nodeRenderer.isApplicable(valueDescriptor.getType())) {
-            allApp = false;
-            break;
-          }
+      for (JavaValue value : values) {
+        if (value instanceof JavaReferringObjectsValue) { // disable for any referrers at all
+          return AnAction.EMPTY_ARRAY;
+        }
+        ValueDescriptorImpl valueDescriptor = value.getDescriptor();
+        anyValueDescriptor = true;
+        if (!valueDescriptor.isValueValid() || !nodeRenderer.isApplicable(valueDescriptor.getType())) {
+          allApp = false;
+          break;
         }
       }
 
@@ -141,7 +148,9 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
       }
     }
 
-    children.add(Separator.getInstance());
+    if (!children.isEmpty()) {
+      children.add(Separator.getInstance());
+    }
     children.addAll(renderers);
 
     return children.toArray(new AnAction[children.size()]);
@@ -152,8 +161,13 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
       return;
     }
 
+    myChildren = AnAction.EMPTY_ARRAY;
     final DebuggerContextImpl debuggerContext = DebuggerAction.getDebuggerContext(event.getDataContext());
-    final DebuggerTreeNodeImpl[] selectedNodes = DebuggerAction.getSelectedNodes(event.getDataContext());
+    final List<JavaValue> values = getSelectedValues(event);
+    if (values.isEmpty()) {
+      event.getPresentation().setEnabledAndVisible(false);
+      return;
+    }
 
     final DebugProcessImpl process = debuggerContext.getDebugProcess();
     if (process == null) {
@@ -163,9 +177,23 @@ public class ViewAsGroup extends ActionGroup implements DumbAware {
     
     process.getManagerThread().schedule(new DebuggerContextCommandImpl(debuggerContext) {
       public void threadAction() {
-        myChildren = calcChildren(selectedNodes);
+        myChildren = calcChildren(values);
         DebuggerAction.enableAction(event, myChildren.length > 0);
       }
     });
+  }
+
+  public static List<JavaValue> getSelectedValues(AnActionEvent event) {
+    List<XValueNodeImpl> selectedNodes = XDebuggerTreeActionBase.getSelectedNodes(event.getDataContext());
+    if (selectedNodes.isEmpty()) return Collections.emptyList();
+
+    List<JavaValue> res = new ArrayList<JavaValue>(selectedNodes.size());
+    for (XValueNodeImpl node : selectedNodes) {
+      XValue container = node.getValueContainer();
+      if (container instanceof JavaValue) {
+        res.add((JavaValue)container);
+      }
+    }
+    return res;
   }
 }

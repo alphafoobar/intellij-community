@@ -38,14 +38,17 @@ public class ElementStubSerializer implements ObjectStubSerializer<ElementStub, 
   public void serialize(@NotNull ElementStub stub, @NotNull StubOutputStream dataStream) throws IOException {
     dataStream.writeName(stub.getName());
     dataStream.writeName(stub.getNamespaceKey());
-    dataStream.writeInt(stub.getIndex());
+    dataStream.writeVarInt(stub.getIndex());
     dataStream.writeBoolean(stub.isCustom());
+    dataStream.writeName(stub.getElementClass());
+    dataStream.writeUTFFast(stub.getValue());
   }
 
   @NotNull
   @Override
   public ElementStub deserialize(@NotNull StubInputStream dataStream, ElementStub parentStub) throws IOException {
-    return new ElementStub(parentStub, dataStream.readName(), dataStream.readName(), dataStream.readInt(), dataStream.readBoolean());
+    return new ElementStub(parentStub, dataStream.readName(), dataStream.readName(),
+                           dataStream.readVarInt(), dataStream.readBoolean(), dataStream.readName(), dataStream.readUTFFast());
   }
 
   @Override
@@ -55,9 +58,9 @@ public class ElementStubSerializer implements ObjectStubSerializer<ElementStub, 
       sink.occurrence(DomNamespaceKeyIndex.KEY, namespaceKey);
     }
 
-    final Class elementClass = stub.getElementClass();
+    final String elementClass = stub.getElementClass();
     if (elementClass != null) {
-      sink.occurrence(DomElementClassIndex.KEY, elementClass.getName());
+      sink.occurrence(DomElementClassIndex.KEY, elementClass);
     }
   }
 

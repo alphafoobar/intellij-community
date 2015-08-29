@@ -17,15 +17,14 @@ package com.intellij.openapi.vfs.impl.http;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.ex.http.HttpVirtualFileListener;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.Url;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +34,10 @@ import java.util.Map;
  */
 public class RemoteFileManagerImpl extends RemoteFileManager implements Disposable {
   private final LocalFileStorage myStorage;
-  private final Map<Pair<Boolean, Url>, VirtualFileImpl> myRemoteFiles = new THashMap<Pair<Boolean, Url>, VirtualFileImpl>();
+
+  private final Map<Url, HttpVirtualFileImpl> remoteFiles = new THashMap<Url, HttpVirtualFileImpl>();
+  private final Map<Url, HttpVirtualFileImpl> remoteDirectories = new THashMap<Url, HttpVirtualFileImpl>();
+
   private final EventDispatcher<HttpVirtualFileListener> myDispatcher = EventDispatcher.create(HttpVirtualFileListener.class);
   private final List<RemoteContentProvider> myProviders = new ArrayList<RemoteContentProvider>();
   private final DefaultRemoteContentProvider myDefaultRemoteContentProvider;
@@ -55,19 +57,19 @@ public class RemoteFileManagerImpl extends RemoteFileManager implements Disposab
     return myDefaultRemoteContentProvider;
   }
 
-  public synchronized VirtualFileImpl getOrCreateFile(final @NotNull Url url, final @NotNull String path, final boolean directory) throws IOException {
-    Pair<Boolean, Url> key = Pair.create(directory, url);
-    VirtualFileImpl file = myRemoteFiles.get(key);
+  public synchronized HttpVirtualFileImpl getOrCreateFile(@Nullable HttpVirtualFileImpl parent, @NotNull Url url, @NotNull String path, final boolean directory) {
+    Map<Url, HttpVirtualFileImpl> cache = directory ? remoteDirectories : remoteFiles;
+    HttpVirtualFileImpl file = cache.get(url);
     if (file == null) {
-      if (!directory) {
-        RemoteFileInfoImpl fileInfo = new RemoteFileInfoImpl(url, this);
-        file = new VirtualFileImpl(getHttpFileSystem(url), path, fileInfo);
-        fileInfo.addDownloadingListener(new MyDownloadingListener(file));
+      if (directory) {
+        file = new HttpVirtualFileImpl(getHttpFileSystem(url), parent, path, null);
       }
       else {
-        file = new VirtualFileImpl(getHttpFileSystem(url), path, null);
+        RemoteFileInfoImpl fileInfo = new RemoteFileInfoImpl(url, this);
+        file = new HttpVirtualFileImpl(getHttpFileSystem(url), parent, path, fileInfo);
+        fileInfo.addDownloadingListener(new MyDownloadingListener(file));
       }
-      myRemoteFiles.put(key, file);
+      cache.put(url, file);
     }
     return file;
   }
@@ -104,14 +106,8 @@ public class RemoteFileManagerImpl extends RemoteFileManager implements Disposab
   }
 
   @Override
-  public void addFileListener(@NotNull final HttpVirtualFileListener listener, @NotNull final Disposable parentDisposable) {
-    addFileListener(listener);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        removeFileListener(listener);
-      }
-    });
+  public void addFileListener(@NotNull HttpVirtualFileListener listener, @NotNull Disposable parentDisposable) {
+    myDispatcher.addListener(listener, parentDisposable);
   }
 
   @Override
@@ -133,9 +129,9 @@ public class RemoteFileManagerImpl extends RemoteFileManager implements Disposab
   }
 
   private class MyDownloadingListener extends FileDownloadingAdapter {
-    private final VirtualFileImpl myFile;
+    private final HttpVirtualFileImpl myFile;
 
-    public MyDownloadingListener(final VirtualFileImpl file) {
+    public MyDownloadingListener(final HttpVirtualFileImpl file) {
       myFile = file;
     }
 

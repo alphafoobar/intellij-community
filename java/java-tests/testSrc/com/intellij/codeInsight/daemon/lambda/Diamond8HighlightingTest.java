@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,10 @@ import org.jetbrains.annotations.NonNls;
 public class Diamond8HighlightingTest extends LightDaemonAnalyzerTestCase {
   @NonNls static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/lambda/diamond";
 
+  public void testAvoidClassRefCachingDuringInference() throws Exception {
+    doTest();
+  }
+
   public void testIDEA97294() throws Exception {
     doTest();
   }
@@ -31,8 +35,16 @@ public class Diamond8HighlightingTest extends LightDaemonAnalyzerTestCase {
     doTest();
   }
 
+  public void testVarargs() throws Exception {
+    doTest();
+  }
+
+  public void testOverloadOuterCall() throws Exception {
+    doTest();
+  }
+
   private void doTest() throws Exception {
-    doTestNewInference(BASE_PATH + "/" + getTestName(false) + ".java", false, false);
+    doTest(BASE_PATH + "/" + getTestName(false) + ".java", false, false);
   }
 
   @Override

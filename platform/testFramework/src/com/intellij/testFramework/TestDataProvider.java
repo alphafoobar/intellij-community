@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 package com.intellij.testFramework;
 
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.impl.EditorComponentImpl;
-import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
+import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl;
+import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -32,7 +34,7 @@ import javax.swing.*;
 /**
  * @author peter
  */
-public class TestDataProvider implements DataProvider {
+public class TestDataProvider implements DataProvider, DataContext {
   private final Project myProject;
 
   public TestDataProvider(@NotNull Project project) {
@@ -49,14 +51,21 @@ public class TestDataProvider implements DataProvider {
     if (CommonDataKeys.PROJECT.is(dataId)) {
       return myProject;
     }
-    else if (CommonDataKeys.EDITOR.is(dataId) || OpenFileDescriptor.NAVIGATE_IN_EDITOR.is(dataId)) {
-      return FileEditorManager.getInstance(myProject).getSelectedTextEditor();
+    FileEditorManagerEx manager = FileEditorManagerEx.getInstanceEx(myProject);
+    if (manager == null) {
+      return null;
+    }
+    if (CommonDataKeys.EDITOR.is(dataId) || OpenFileDescriptor.NAVIGATE_IN_EDITOR.is(dataId)) {
+      return manager instanceof FileEditorManagerImpl ? ((FileEditorManagerImpl)manager).getSelectedTextEditor(true) : manager.getSelectedTextEditor();
+    }
+    else if (PlatformDataKeys.FILE_EDITOR.is(dataId)) {
+      Editor editor = manager.getSelectedTextEditor();
+      return editor == null ? null : TextEditorProvider.getInstance().getTextEditor(editor);
     }
     else {
       Editor editor = (Editor)getData(CommonDataKeys.EDITOR.getName());
       if (editor != null) {
-        FileEditorManagerEx manager = FileEditorManagerEx.getInstanceEx(myProject);
-        Object managerData = manager.getData(dataId, editor, manager.getSelectedFiles()[0]);
+        Object managerData = manager.getData(dataId, editor, editor.getCaretModel().getCurrentCaret());
         if (managerData != null) {
           return managerData;
         }

@@ -38,7 +38,7 @@ PsiJavaFile:RefParamsAfterError.java
         PsiJavaToken:LT('<')
         PsiTypeParameter:error
           PsiIdentifier:error('error')
-          PsiElement(EXTENDS_BOUND_LIST)
+          PsiReferenceList
             <empty list>
         PsiErrorElement:'>' expected.
           <empty list>
@@ -63,7 +63,7 @@ PsiJavaFile:RefParamsAfterError.java
           PsiJavaToken:LT('<')
           PsiErrorElement:Identifier expected
             <empty list>
-          PsiErrorElement:'>' or ',' expected.
+          PsiErrorElement:'>' or ',' expected
             <empty list>
     PsiErrorElement:Identifier expected
       <empty list>

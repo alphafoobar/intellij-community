@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,12 +34,13 @@ import java.util.HashSet;
 import java.util.List;
 
 public class KeywordArgumentCompletionUtil {
-  public static void collectFunctionArgNames(PyElement element, List<LookupElement> ret) {
+  public static void collectFunctionArgNames(PyElement element, List<LookupElement> ret,  final @NotNull TypeEvalContext context) {
     PyCallExpression callExpr = PsiTreeUtil.getParentOfType(element, PyCallExpression.class);
     if (callExpr != null) {
       PyExpression callee = callExpr.getCallee();
       if (callee instanceof PyReferenceExpression && element.getParent() == callExpr.getArgumentList()) {
-        final QualifiedResolveResult result = ((PyReferenceExpression)callee).followAssignmentsChain(PyResolveContext.defaultContext());
+        final PyResolveContext resolveContext = PyResolveContext.defaultContext().withTypeEvalContext(context);
+        final QualifiedResolveResult result = ((PyReferenceExpression)callee).followAssignmentsChain(resolveContext);
         PsiElement def = result.getElement();
         if (def instanceof PyFunction) {
           addKeywordArgumentVariants((PyFunction)def, callExpr, ret);
@@ -66,7 +67,7 @@ public class KeywordArgumentCompletionUtil {
     visited.add(def);
     boolean needSelf = def.getContainingClass() != null && def.getModifier() != PyFunction.Modifier.STATICMETHOD;
     final KwArgParameterCollector collector = new KwArgParameterCollector(needSelf, ret);
-    final TypeEvalContext context = TypeEvalContext.userInitiated(def.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.codeCompletion(def.getProject(), def.getContainingFile());
     final List<PyParameter> parameters = PyUtil.getParameters(def, context);
     for (PyParameter parameter : parameters) {
       parameter.accept(collector);
@@ -75,7 +76,7 @@ public class KeywordArgumentCompletionUtil {
       for (PyKeywordArgumentProvider provider : Extensions.getExtensions(PyKeywordArgumentProvider.EP_NAME)) {
         final List<String> arguments = provider.getKeywordArguments(def, callExpr);
         for (String argument : arguments) {
-          ret.add(PyUtil.createNamedParameterLookup(argument));
+          ret.add(PyUtil.createNamedParameterLookup(argument, callExpr.getProject()));
         }
       }
       KwArgFromStatementCallCollector fromStatementCallCollector = new KwArgFromStatementCallCollector(ret, collector.getKwArgs());
@@ -119,7 +120,7 @@ public class KeywordArgumentCompletionUtil {
       PyNamedParameter namedParam = par.getAsNamed();
       if (namedParam != null) {
         if (!namedParam.isKeywordContainer() && !namedParam.isPositionalContainer()) {
-          final LookupElement item = PyUtil.createNamedParameterLookup(namedParam.getName());
+          final LookupElement item = PyUtil.createNamedParameterLookup(namedParam.getName(), par.getProject());
           myRet.add(item);
         }
         else if (namedParam.isKeywordContainer()) {
@@ -202,7 +203,7 @@ public class KeywordArgumentCompletionUtil {
           argument instanceof PyStringLiteralExpression) {
         String name = ((PyStringLiteralExpression)argument).getStringValue();
         if (PyUtil.isPythonIdentifier(name)) {
-          myRet.add(PyUtil.createNamedParameterLookup(name));
+          myRet.add(PyUtil.createNamedParameterLookup(name, argument.getProject()));
         }
       }
     }

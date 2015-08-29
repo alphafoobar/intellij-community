@@ -3,7 +3,7 @@
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/resources" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/testSrc" isTestSource="true" />
     </content>
@@ -16,9 +16,10 @@
     <orderEntry type="module" module-name="vcs-impl" />
     <orderEntry type="module" module-name="platform-impl" />
     <orderEntry type="library" name="Guava" level="project" />
-    <orderEntry type="module" module-name="dvcs" />
+    <orderEntry type="module" module-name="dvcs-impl" />
     <orderEntry type="module" module-name="vcs-log-api" />
     <orderEntry type="module" module-name="vcs-log-impl" />
+    <orderEntry type="module" module-name="dvcs-api" />
+    <orderEntry type="module" module-name="lang-impl" />
   </component>
 </module>
-

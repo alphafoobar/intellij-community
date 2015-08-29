@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypes;
-import com.intellij.openapi.fileTypes.LanguageFileType;
+import com.intellij.openapi.options.ex.ConfigurableWrapper;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.MessageType;
+import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.BalloonBuilder;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -36,12 +36,13 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
-import com.intellij.psi.codeStyle.DisplayPriority;
-import com.intellij.psi.codeStyle.FileTypeIndentOptionsProvider;
-import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
+import com.intellij.psi.codeStyle.FileIndentOptionsProvider;
 import com.intellij.ui.IdeBorderFactory;
+import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.components.GradientViewport;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -49,9 +50,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -64,13 +62,12 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
   private static final String UNIX_STRING = ApplicationBundle.message("combobox.crlf.unix");
   private static final String WINDOWS_STRING = ApplicationBundle.message("combobox.crlf.windows");
   private static final String MACINTOSH_STRING = ApplicationBundle.message("combobox.crlf.mac");
-
+  private final List<GeneralCodeStyleOptionsProvider> myAdditionalOptions;
 
   private JSpinner myRightMarginSpinner;
   private JComboBox myLineSeparatorCombo;
   private JPanel myPanel;
   private JCheckBox myCbWrapWhenTypingReachesRightMargin;
-  private JPanel myDefaultIndentOptionsPanel;
   private JCheckBox myEnableFormatterTags;
   private JTextField myFormatterOnTagField;
   private JTextField myFormatterOffTagField;
@@ -79,29 +76,16 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
   private JBLabel myFormatterOffLabel;
   private JBLabel myFormatterOnLabel;
   private JPanel myMarkerOptionsPanel;
-  private final SmartIndentOptionsEditor myIndentOptionsEditor;
+  private JPanel myAdditionalSettingsPanel;
+  private JCheckBox myAutodetectIndentsBox;
+  private JCheckBox myShowDetectedIndentNotification;
+  private JPanel myDefaultOptionsPanel;
+  private JPanel myIndentsDetectionPanel;
+  private final JScrollPane myScrollPane;
 
 
   public GeneralCodeStylePanel(CodeStyleSettings settings) {
     super(settings);
-
-    final List<FileTypeIndentOptionsProvider> indentOptionsProviders =
-      Arrays.asList(Extensions.getExtensions(FileTypeIndentOptionsProvider.EP_NAME));
-    Collections.sort(indentOptionsProviders, new Comparator<FileTypeIndentOptionsProvider>() {
-      @Override
-      public int compare(FileTypeIndentOptionsProvider p1, FileTypeIndentOptionsProvider p2) {
-        Language lang1 = getLanguage(p1.getFileType());
-        if (lang1 == null) return -1;
-        Language lang2 = getLanguage(p2.getFileType());
-        if (lang2 == null) return 1;
-        DisplayPriority priority1 = LanguageCodeStyleSettingsProvider.getDisplayPriority(lang1);
-        DisplayPriority priority2 = LanguageCodeStyleSettingsProvider.getDisplayPriority(lang2);
-        if (priority1.equals(priority2)) {
-          return lang1.getDisplayName().compareTo(lang2.getDisplayName());
-        }
-        return priority1.compareTo(priority2);
-      }
-    });
 
     myLineSeparatorCombo.addItem(SYSTEM_DEPENDANT_STRING);
     myLineSeparatorCombo.addItem(UNIX_STRING);
@@ -109,10 +93,7 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
     myLineSeparatorCombo.addItem(MACINTOSH_STRING);
     addPanelToWatch(myPanel);
 
-    myRightMarginSpinner.setModel(new SpinnerNumberModel(settings.RIGHT_MARGIN, 1, 1000000, 1));
-
-    myIndentOptionsEditor = new SmartIndentOptionsEditor();
-    myDefaultIndentOptionsPanel.add(myIndentOptionsEditor.createPanel(), BorderLayout.CENTER);
+    myRightMarginSpinner.setModel(new SpinnerNumberModel(settings.getDefaultRightMargin(), 1, 1000000, 1));
 
     myEnableFormatterTags.addActionListener(new ActionListener() {
       @Override
@@ -122,17 +103,35 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
       }
     });
 
+    myAutodetectIndentsBox.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        boolean isDetectIndent = myAutodetectIndentsBox.isSelected();
+        myShowDetectedIndentNotification.setEnabled(isDetectIndent);
+      }
+    });
+
+    myDefaultOptionsPanel
+      .setBorder(IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.code.style.general.default.options")));
+    myIndentsDetectionPanel
+      .setBorder(IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.code.style.general.indents.detection")));
+
     myMarkersPanel.setBorder(IdeBorderFactory.createTitledBorder(
       ApplicationBundle.message("settings.code.style.general.formatter.marker.title"), true));
     myMarkerOptionsPanel.setBorder(
       IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.code.style.general.formatter.marker.options.title"), true));
-  }
+    myPanel.setBorder(JBUI.Borders.empty(10, 10));
+    myScrollPane = ScrollPaneFactory.createScrollPane(null, true);
+    myScrollPane.setViewport(new GradientViewport(myPanel, JBUI.insetsTop(5), true));
+    myScrollPane.getVerticalScrollBar().setUnitIncrement(JBUI.scale(10));
 
-  @Nullable
-  private static Language getLanguage(FileType fileType) {
-    return (fileType instanceof LanguageFileType) ? ((LanguageFileType)fileType).getLanguage() : null;
+    myAdditionalSettingsPanel.setLayout(new VerticalFlowLayout(true, true));
+    myAdditionalSettingsPanel.removeAll();
+    myAdditionalOptions = ConfigurableWrapper.createConfigurables(GeneralCodeStyleOptionsProviderEP.EP_NAME);
+    for (GeneralCodeStyleOptionsProvider provider : myAdditionalOptions) {
+      myAdditionalSettingsPanel.add(provider.createComponent());
+    }
   }
-
 
   @Override
   protected void somethingChanged() {
@@ -161,10 +160,8 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
   public void apply(CodeStyleSettings settings) {
     settings.LINE_SEPARATOR = getSelectedLineSeparator();
 
-    settings.RIGHT_MARGIN = ((Number) myRightMarginSpinner.getValue()).intValue();
+    settings.setDefaultRightMargin(((Number)myRightMarginSpinner.getValue()).intValue());
     settings.WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN = myCbWrapWhenTypingReachesRightMargin.isSelected();
-    myIndentOptionsEditor.setEnabled(true);
-    myIndentOptionsEditor.apply(settings, settings.OTHER_INDENT_OPTIONS);
 
     settings.FORMATTER_TAGS_ENABLED = myEnableFormatterTags.isSelected();
     settings.FORMATTER_TAGS_ACCEPT_REGEXP = myAcceptRegularExpressionsCheckBox.isSelected();
@@ -174,6 +171,15 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
 
     settings.FORMATTER_ON_TAG = getTagText(myFormatterOnTagField, settings.FORMATTER_ON_TAG);
     settings.setFormatterOnPattern(compilePattern(settings, myFormatterOnTagField, settings.FORMATTER_ON_TAG));
+
+    settings.AUTODETECT_INDENTS = myAutodetectIndentsBox.isSelected();
+    if (myShowDetectedIndentNotification.isEnabled()) {
+      FileIndentOptionsProvider.setShowNotification(myShowDetectedIndentNotification.isSelected());
+    }
+
+    for (GeneralCodeStyleOptionsProvider option : myAdditionalOptions) {
+      option.apply(settings);
+    }
   }
 
   @Nullable
@@ -188,11 +194,11 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
     }
   }
 
-  private static String getTagText(JTextField field, String defualtValue) {
+  private static String getTagText(JTextField field, String defaultValue) {
     String fieldText = field.getText();
     if (StringUtil.isEmpty(field.getText())) {
-      field.setText(defualtValue);
-      return defualtValue;
+      field.setText(defaultValue);
+      return defaultValue;
     }
     return fieldText;
   }
@@ -222,8 +228,7 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
       return true;
     }
 
-    if (!Comparing.equal(myRightMarginSpinner.getValue(), settings.RIGHT_MARGIN)) return true;
-    myIndentOptionsEditor.setEnabled(true);
+    if (!Comparing.equal(myRightMarginSpinner.getValue(), settings.getDefaultRightMargin())) return true;
 
     if (myEnableFormatterTags.isSelected()) {
       if (
@@ -236,12 +241,24 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
       if (settings.FORMATTER_TAGS_ENABLED) return true;
     }
 
-    return myIndentOptionsEditor.isModified(settings, settings.OTHER_INDENT_OPTIONS);
+    for (GeneralCodeStyleOptionsProvider option : myAdditionalOptions) {
+      if (option.isModified(settings)) return true;
+    }
+
+    if (settings.AUTODETECT_INDENTS != myAutodetectIndentsBox.isSelected()) return true;
+
+    if (myShowDetectedIndentNotification.isEnabled()
+        && FileIndentOptionsProvider.isShowNotification() != myShowDetectedIndentNotification.isSelected())
+    {
+      return true;
+    }
+
+    return false;
   }
 
   @Override
   public JComponent getPanel() {
-    return myPanel;
+    return myScrollPane;
   }
 
   @Override
@@ -261,10 +278,8 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
       myLineSeparatorCombo.setSelectedItem(SYSTEM_DEPENDANT_STRING);
     }
 
-    myRightMarginSpinner.setValue(settings.RIGHT_MARGIN);
+    myRightMarginSpinner.setValue(settings.getDefaultRightMargin());
     myCbWrapWhenTypingReachesRightMargin.setSelected(settings.WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN);
-    myIndentOptionsEditor.reset(settings, settings.OTHER_INDENT_OPTIONS);
-    myIndentOptionsEditor.setEnabled(true);
 
     myAcceptRegularExpressionsCheckBox.setSelected(settings.FORMATTER_TAGS_ACCEPT_REGEXP);
     myEnableFormatterTags.setSelected(settings.FORMATTER_TAGS_ENABLED);
@@ -273,6 +288,14 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
     myFormatterOffTagField.setText(settings.FORMATTER_OFF_TAG);
 
     setFormatterTagControlsEnabled(settings.FORMATTER_TAGS_ENABLED);
+
+    myAutodetectIndentsBox.setSelected(settings.AUTODETECT_INDENTS);
+    myShowDetectedIndentNotification.setEnabled(myAutodetectIndentsBox.isSelected());
+    myShowDetectedIndentNotification.setSelected(FileIndentOptionsProvider.isShowNotification());
+
+    for (GeneralCodeStyleOptionsProvider option : myAdditionalOptions) {
+      option.reset(settings);
+    }
   }
 
   private void setFormatterTagControlsEnabled(boolean isEnabled) {

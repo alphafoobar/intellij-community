@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.execution.configurations.ParamsGroup;
-import com.intellij.execution.filters.Filter;
 import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
@@ -33,7 +32,6 @@ import com.jetbrains.python.run.PythonProcessRunner;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.Collections;
 
 /**
  * User : catherine
@@ -43,7 +41,7 @@ public abstract class RestCommandLineState extends PythonCommandLineState {
 
   public RestCommandLineState(RestRunConfiguration configuration,
                               ExecutionEnvironment env) {
-    super(configuration, env, Collections.<Filter>emptyList());
+    super(configuration, env);
     myConfiguration = configuration;
   }
 

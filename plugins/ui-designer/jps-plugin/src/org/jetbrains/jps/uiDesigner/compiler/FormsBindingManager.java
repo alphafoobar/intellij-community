@@ -17,6 +17,7 @@ package org.jetbrains.jps.uiDesigner.compiler;
 
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.io.FileFilters;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import gnu.trove.THashMap;
@@ -29,6 +30,7 @@ import org.jetbrains.jps.builders.FileProcessor;
 import org.jetbrains.jps.builders.java.JavaBuilderUtil;
 import org.jetbrains.jps.builders.java.JavaSourceRootDescriptor;
 import org.jetbrains.jps.incremental.*;
+import org.jetbrains.jps.incremental.fs.CompilationRound;
 import org.jetbrains.jps.incremental.java.CopyResourcesUtil;
 import org.jetbrains.jps.incremental.java.FormsParsing;
 import org.jetbrains.jps.incremental.storage.OneToManyPathsMapping;
@@ -40,7 +42,6 @@ import org.jetbrains.jps.uiDesigner.model.JpsUiDesignerConfiguration;
 import org.jetbrains.jps.uiDesigner.model.JpsUiDesignerExtensionService;
 
 import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.*;
 
@@ -49,6 +50,7 @@ import java.util.*;
  *         Date: 11/20/12
  */
 public class FormsBindingManager extends FormsBuilder {
+  private static final String JAVA_EXTENSION = ".java";
   private static final Key<Boolean> FORCE_FORMS_REBUILD_FLAG = Key.create("_forms_rebuild_flag_");
   private static final Key<Boolean> FORMS_REBUILD_FORCED = Key.create("_forms_rebuild_forced_flag_");
   public FormsBindingManager() {
@@ -89,7 +91,7 @@ public class FormsBindingManager extends FormsBuilder {
 
   @Override
   public List<String> getCompilableFileExtensions() {
-    return Arrays.asList(FORM_EXTENSION);
+    return Collections.singletonList(FORM_EXTENSION);
   }
 
   @Override
@@ -110,7 +112,7 @@ public class FormsBindingManager extends FormsBuilder {
       // force compilation of all forms, but only once per chunk
       if (!FORMS_REBUILD_FORCED.get(context, Boolean.FALSE)) {
         FORMS_REBUILD_FORCED.set(context, Boolean.TRUE);
-        FSOperations.markDirty(context, chunk, FORM_SOURCES_FILTER);
+        FSOperations.markDirty(context, CompilationRound.CURRENT, chunk, FORM_SOURCES_FILTER);
       }
     }
 
@@ -138,7 +140,7 @@ public class FormsBindingManager extends FormsBuilder {
         for (File boundSource : sources) {
           if (!excludes.isExcluded(boundSource)) {
             addBinding(boundSource, form, srcToForms);
-            FSOperations.markDirty(context, boundSource);
+            FSOperations.markDirty(context, CompilationRound.CURRENT, boundSource);
             filesToCompile.put(boundSource, target);
             exitCode = ExitCode.OK;
           }
@@ -156,7 +158,7 @@ public class FormsBindingManager extends FormsBuilder {
             final File formFile = new File(formPath);
             if (!excludes.isExcluded(formFile) && formFile.exists()) {
               addBinding(srcFile, formFile, srcToForms);
-              FSOperations.markDirty(context, formFile);
+              FSOperations.markDirty(context, CompilationRound.CURRENT, formFile);
               formsToCompile.put(formFile, target);
               exitCode = ExitCode.OK;
             }
@@ -245,7 +247,7 @@ public class FormsBindingManager extends FormsBuilder {
     }
   }
 
-  @Nullable
+  @NotNull
   private static Collection<File> findPossibleSourcesForClass(JavaSourceRootDescriptor rd, final @Nullable String boundClassName) throws IOException {
     if (boundClassName == null) {
       return Collections.emptyList();
@@ -255,12 +257,7 @@ public class FormsBindingManager extends FormsBuilder {
     if (containingDirectory == null) {
       return Collections.emptyList();
     }
-    final File[] files = containingDirectory.listFiles(new FilenameFilter() {
-      @Override
-      public boolean accept(File dir, String name) {
-        return name.endsWith(JAVA_EXTENSION);
-      }
-    });
+    final File[] files = containingDirectory.listFiles(FileFilters.withExtension("java"));
     if (files == null || files.length == 0) {
       return Collections.emptyList();
     }

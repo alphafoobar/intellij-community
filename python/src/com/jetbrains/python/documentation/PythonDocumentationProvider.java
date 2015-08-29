@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.jetbrains.python.documentation;
 
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.ide.actions.ShowSettingsUtilImpl;
 import com.intellij.lang.documentation.AbstractDocumentationProvider;
 import com.intellij.lang.documentation.ExternalDocumentationProvider;
@@ -34,6 +34,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.Function;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
@@ -44,13 +45,16 @@ import com.jetbrains.python.debugger.PySignatureCacheManager;
 import com.jetbrains.python.debugger.PySignatureUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
-import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeParser;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.toolbox.ChainIterable;
 import com.jetbrains.python.toolbox.FP;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.HeadMethod;
+import org.apache.commons.httpclient.params.HttpConnectionManagerParams;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -77,7 +81,16 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
   @NonNls private static final String EPYDOC_PREFIX = "@";
 
   // provides ctrl+hover info
-  public String getQuickNavigateInfo(final PsiElement element, PsiElement originalElement) {
+  @Override
+  @Nullable
+  public String getQuickNavigateInfo(final PsiElement element, final PsiElement originalElement) {
+    for (final PythonDocumentationQuickInfoProvider point : PythonDocumentationQuickInfoProvider.EP_NAME.getExtensions()) {
+      String info = point.getQuickInfo(originalElement);
+      if (info != null) {
+        return info;
+      }
+    }
+
     if (element instanceof PyFunction) {
       PyFunction func = (PyFunction)element;
       StringBuilder cat = new StringBuilder();
@@ -103,7 +116,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
       String summary = "";
       PyStringLiteralExpression docStringExpression = cls.getDocStringExpression();
       if (docStringExpression == null) {
-        final PyFunction initOrNew = cls.findInitOrNew(false);
+        final PyFunction initOrNew = cls.findInitOrNew(false, null);
         if (initOrNew != null) {
           docStringExpression = initOrNew.getDocStringExpression();
         }
@@ -139,7 +152,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
     ChainIterable<String> cat = new ChainIterable<String>();
     final String name = fun.getName();
     cat.addItem("def ").addWith(func_name_wrapper, $(name));
-    final TypeEvalContext context = TypeEvalContext.userInitiated(fun.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(fun.getProject(), fun.getContainingFile());
     final List<PyParameter> parameters = PyUtil.getParameters(fun, context);
     final String paramStr = "(" +
                             StringUtil.join(parameters,
@@ -182,12 +195,12 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
   }
 
   static String describeType(@NotNull PyTypedElement element) {
-    final TypeEvalContext context = TypeEvalContext.userInitiated(element.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(element.getProject(), element.getContainingFile());
     return String.format("Inferred type: %s", getTypeName(context.getType(element), context));
   }
 
   public static void getTypeDescription(@NotNull PyFunction fun, ChainIterable<String> body) {
-    final TypeEvalContext context = TypeEvalContext.userInitiated(fun.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(fun.getProject(), fun.getContainingFile());
     PyTypeModelBuilder builder = new PyTypeModelBuilder(context);
     builder.build(context.getType(fun), true).toBodyWithLinks(body, fun);
   }
@@ -324,7 +337,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
     if (document == null) {
       return element;
     }
-    int newOffset = TargetElementUtilBase.adjustOffset(file, document, element.getTextOffset());
+    int newOffset = TargetElementUtil.adjustOffset(file, document, element.getTextOffset());
     PsiElement newElement = file.findElementAt(newOffset);
     return newElement != null ? newElement : element;
   }
@@ -341,7 +354,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
       PyClass cls = inferContainingClassOf(context);
       if (cls != null) {
         String desired_name = link.substring(LINK_TYPE_PARENT.length());
-        for (PyClass parent : cls.getAncestorClasses()) {
+        for (PyClass parent : cls.getAncestorClasses(null)) {
           final String parent_name = parent.getName();
           if (parent_name != null && parent_name.equals(desired_name)) return parent;
         }
@@ -414,8 +427,10 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
       return true;
     }
     HttpClient client = new HttpClient();
-    client.setTimeout(5 * 1000);
-    client.setConnectionTimeout(5 * 1000);
+    HttpConnectionManagerParams params = client.getHttpConnectionManager().getParams();
+    params.setSoTimeout(5 * 1000);
+    params.setConnectionTimeout(5 * 1000);
+
     try {
       HeadMethod method = new HeadMethod(url);
       int rc = client.executeMethod(method);
@@ -509,7 +524,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
   @Nullable
   private static PyClass inferClassOfParameter(PsiElement context) {
     if (context instanceof PyNamedParameter) {
-      final PyType type = TypeEvalContext.userInitiated(context.getContainingFile()).getType((PyNamedParameter)context);
+      final PyType type = TypeEvalContext.userInitiated(context.getProject(), context.getContainingFile()).getType((PyNamedParameter)context);
       if (type instanceof PyClassType) {
         return ((PyClassType)type).getPyClass();
       }
@@ -579,7 +594,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
     //TODO: this code duplicates PyDocstringGenerator in some parts
 
     final StringBuilder builder = new StringBuilder(offset);
-    final TypeEvalContext context = TypeEvalContext.userInitiated(function.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(function.getProject(), function.getContainingFile());
     PySignature signature = PySignatureCacheManager.getInstance(function.getProject()).findSignature(function);
     final PyDecoratorList decoratorList = function.getDecoratorList();
     final PyDecorator classMethod = decoratorList == null ? null : decoratorList.findDecorator(PyNames.CLASSMETHOD);
@@ -618,9 +633,7 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
     if (checkReturn) {
       RaiseVisitor visitor = new RaiseVisitor();
       PyStatementList statementList = element.getStatementList();
-      if (statementList != null) {
-        statementList.accept(visitor);
-      }
+      statementList.accept(visitor);
       if (visitor.myHasReturn) {
         builder.append(prefix).append("return:").append(offset);
         if (PyCodeInsightSettings.getInstance().INSERT_TYPE_DOCSTUB) {
@@ -633,8 +646,9 @@ public class PythonDocumentationProvider extends AbstractDocumentationProvider i
           String raiseTarget = visitor.myRaiseTarget.getText();
           if (visitor.myRaiseTarget instanceof PyCallExpression) {
             final PyExpression callee = ((PyCallExpression)visitor.myRaiseTarget).getCallee();
-            if (callee != null)
+            if (callee != null) {
               raiseTarget = callee.getText();
+            }
           }
           builder.append(" ").append(raiseTarget);
         }

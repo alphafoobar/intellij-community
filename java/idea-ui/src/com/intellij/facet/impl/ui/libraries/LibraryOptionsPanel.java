@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ import com.intellij.openapi.roots.ui.configuration.libraryEditor.NewLibraryEdito
 import com.intellij.openapi.roots.ui.configuration.projectRoot.LibrariesContainer;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NotNullComputable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -107,7 +108,22 @@ public class LibraryOptionsPanel implements Disposable {
   private RadioButtonEnumModel<Choice> myButtonEnumModel;
 
   public LibraryOptionsPanel(@NotNull final CustomLibraryDescription libraryDescription,
-                             @NotNull final String baseDirectoryPath,
+                             @NotNull final String path,
+                             @NotNull final FrameworkLibraryVersionFilter versionFilter,
+                             @NotNull final LibrariesContainer librariesContainer,
+                             final boolean showDoNotCreateOption) {
+
+    this(libraryDescription, new NotNullComputable<String>() {
+      @NotNull
+      @Override
+      public String compute() {
+        return path;
+      }
+    }, versionFilter, librariesContainer, showDoNotCreateOption);
+  }
+
+  public LibraryOptionsPanel(@NotNull final CustomLibraryDescription libraryDescription,
+                             @NotNull final NotNullComputable<String> pathProvider,
                              @NotNull final FrameworkLibraryVersionFilter versionFilter,
                              @NotNull final LibrariesContainer librariesContainer,
                              final boolean showDoNotCreateOption) {
@@ -124,7 +140,7 @@ public class LibraryOptionsPanel implements Disposable {
             @Override
             public void run() {
               if (!myDisposed) {
-                showSettingsPanel(libraryDescription, baseDirectoryPath, versionFilter, showDoNotCreateOption, versions);
+                showSettingsPanel(libraryDescription, pathProvider, versionFilter, showDoNotCreateOption, versions);
                 onVersionChanged(getPresentableVersion());
               }
             }
@@ -133,7 +149,7 @@ public class LibraryOptionsPanel implements Disposable {
       });
     }
     else {
-      showSettingsPanel(libraryDescription, baseDirectoryPath, versionFilter, showDoNotCreateOption,
+      showSettingsPanel(libraryDescription, pathProvider, versionFilter, showDoNotCreateOption,
                         new ArrayList<FrameworkLibraryVersion>());
     }
   }
@@ -181,11 +197,11 @@ public class LibraryOptionsPanel implements Disposable {
   }
 
   private void showSettingsPanel(CustomLibraryDescription libraryDescription,
-                                 String baseDirectoryPath,
+                                 NotNullComputable<String> pathProvider,
                                  FrameworkLibraryVersionFilter versionFilter,
                                  boolean showDoNotCreateOption, final List<? extends FrameworkLibraryVersion> versions) {
     //todo[nik] create mySettings only in apply() method
-    mySettings = new LibraryCompositionSettings(libraryDescription, baseDirectoryPath, versionFilter, versions);
+    mySettings = new LibraryCompositionSettings(libraryDescription, pathProvider, versionFilter, versions);
     Disposer.register(this, mySettings);
     List<Library> libraries = calculateSuitableLibraries();
 
@@ -230,7 +246,7 @@ public class LibraryOptionsPanel implements Disposable {
         onVersionChanged(getPresentableVersion());
       }
     });
-    myExistingLibraryComboBox.setRenderer(new ColoredListCellRenderer() {
+    myExistingLibraryComboBox.setRenderer(new ColoredListCellRenderer(myExistingLibraryComboBox) {
       @Override
       protected void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
         if (value == null) {
@@ -318,7 +334,7 @@ public class LibraryOptionsPanel implements Disposable {
           dialog.show();
           if (item instanceof ExistingLibraryEditor) {
             new WriteAction() {
-              protected void run(final Result result) {
+              protected void run(@NotNull final Result result) {
                 ((ExistingLibraryEditor)item).commit();
               }
             }.execute();
@@ -348,13 +364,6 @@ public class LibraryOptionsPanel implements Disposable {
         myUseFromProviderRadioButton.setVisible(provider != null);
         updateState();
       }
-    }
-  }
-
-  public void changeBaseDirectoryPath(@NotNull String directoryForLibrariesPath) {
-    if (mySettings != null) {
-      mySettings.changeBaseDirectoryPath(directoryForLibrariesPath);
-      updateState();
     }
   }
 
@@ -481,7 +490,7 @@ public class LibraryOptionsPanel implements Disposable {
     else {
       path = PathUtil.getFileName(downloadPath);
     }
-    return MessageFormat.format("{0} {0, choice, 1#jar|2#jars} will be downloaded into <b>{1}</b> directory<br>" +
+    return MessageFormat.format("{0} {0, choice, 1#JAR|2#JARs} will be downloaded into <b>{1}</b> directory<br>" +
                                    "{2} library <b>{3}</b> will be created",
                                    downloadSettings.getSelectedDownloads().size(),
                                    path,

@@ -70,7 +70,8 @@ public class JavaUsageTypeProvider implements UsageTypeProviderEx {
             return UsageType.RECURSION;
           }
           if (qualifier != null && !(qualifier instanceof PsiThisExpression) && calledMethod != null) {
-            if (haveCommonSuperMethod(containerMethod, calledMethod)) {
+            if (Comparing.equal(containerMethod.getName(), calledMethod.getName()) &&
+                haveCommonSuperMethod(containerMethod, calledMethod)) {
               boolean parametersDelegated = parametersDelegated(containerMethod, callExpression);
 
               if (qualifier instanceof PsiSuperExpression) {
@@ -255,7 +256,7 @@ public class JavaUsageTypeProvider implements UsageTypeProviderEx {
   private static boolean isNestedClassOf(PsiJavaCodeReferenceElement classReference, @NotNull UsageTarget[] targets) {
     final PsiElement qualifier = classReference.getQualifier();
     if (qualifier instanceof PsiJavaCodeReferenceElement) {
-      return qualifiesToTargetClasses((PsiJavaCodeReferenceElement)qualifier, targets);
+      return qualifiesToTargetClasses((PsiJavaCodeReferenceElement)qualifier, targets) && classReference.resolve() instanceof PsiClass;
     }
     return false;
   }

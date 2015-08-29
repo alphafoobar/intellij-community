@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,7 @@ import com.intellij.ide.SelectInTarget;
 import com.intellij.ide.impl.PackagesPaneSelectInTarget;
 import com.intellij.ide.projectView.ProjectView;
 import com.intellij.ide.projectView.ViewSettings;
-import com.intellij.ide.projectView.impl.nodes.PackageElement;
-import com.intellij.ide.projectView.impl.nodes.PackageUtil;
-import com.intellij.ide.projectView.impl.nodes.PackageViewProjectNode;
+import com.intellij.ide.projectView.impl.nodes.*;
 import com.intellij.ide.util.DeleteHandler;
 import com.intellij.ide.util.treeView.AbstractTreeBuilder;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
@@ -42,14 +40,15 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaDirectoryService;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPackage;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -138,16 +137,35 @@ public final class PackageViewPane extends AbstractProjectViewPSIPane {
     return result;
   }
 
+  @NotNull
   @Override
   public PsiDirectory[] getSelectedDirectories() {
-    final PackageElement packageElement = getSelectedPackageElement();
-    if (packageElement != null) {
-      final Module module = packageElement.getModule();
-      final PsiPackage aPackage = packageElement.getPackage();
-      if (module != null && aPackage != null) {
-        return aPackage.getDirectories(GlobalSearchScope.moduleScope(module));
+    List<PsiDirectory> directories = ContainerUtil.newArrayList();
+    for (PackageElementNode node : getSelectedNodes(PackageElementNode.class)) {
+      PackageElement packageElement = node.getValue();
+      PsiPackage aPackage = packageElement != null ? packageElement.getPackage() : null;
+      final Module module = packageElement != null ? packageElement.getModule() : null;
+      if (aPackage != null && module != null) {
+        GlobalSearchScope scope = GlobalSearchScope.moduleScope(module);
+        Collections.addAll(directories, aPackage.getDirectories(scope));
+
+        if (Registry.is("projectView.choose.directory.on.compacted.middle.packages")) {
+          Object parentValue = node.getParent().getValue();
+          PsiPackage parentNodePackage = parentValue instanceof PackageElement ? ((PackageElement)parentValue).getPackage() : null;
+          while (true) {
+            aPackage = aPackage.getParentPackage();
+            if (aPackage == null || aPackage.getQualifiedName().isEmpty() || aPackage.equals(parentNodePackage)) {
+              break;
+            }
+            Collections.addAll(directories, aPackage.getDirectories(scope));
+          }
+        }
       }
     }
+    if (!directories.isEmpty()) {
+      return directories.toArray(new PsiDirectory[directories.size()]);
+    }
+
     return super.getSelectedDirectories();
   }
 
@@ -180,6 +198,7 @@ public final class PackageViewPane extends AbstractProjectViewPSIPane {
   @Override
   public void addToolbarActions(DefaultActionGroup actionGroup) {
     actionGroup.addAction(new ShowModulesAction(myProject){
+      @NotNull
       @Override
       protected String getId() {
         return PackageViewPane.this.getId();

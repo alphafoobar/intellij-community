@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,12 +28,14 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiClassUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 
@@ -49,10 +51,14 @@ public class JUnitUtil {
   @NonNls public static final String SUITE_METHOD_NAME = "suite";
   public static final String BEFORE_ANNOTATION_NAME = "org.junit.Before";
   public static final String AFTER_ANNOTATION_NAME = "org.junit.After";
-  private static final String PARAMETRIZED_PARAMETERS_ANNOTATION_NAME = "org.junit.runners.Parameterized.Parameters";
+  public static final String PARAMETRIZED_PARAMETERS_ANNOTATION_NAME = "org.junit.runners.Parameterized.Parameters";
   private static final String AFTER_CLASS_ANNOTATION_NAME = "org.junit.AfterClass";
   private static final String BEFORE_CLASS_ANNOTATION_NAME = "org.junit.BeforeClass";
-  private static final String PARAMETERIZED_CLASS_NAME = "org.junit.runners.Parameterized";
+  private static final Collection<String> CONFIGURATIONS_ANNOTATION_NAME = Collections.unmodifiableList(
+    Arrays.asList(DATA_POINT, AFTER_ANNOTATION_NAME, BEFORE_ANNOTATION_NAME, AFTER_CLASS_ANNOTATION_NAME, BEFORE_CLASS_ANNOTATION_NAME));
+  
+  @NonNls public static final String PARAMETERIZED_CLASS_NAME = "org.junit.runners.Parameterized";
+  @NonNls public static final String SUITE_CLASS_NAME = "org.junit.runners.Suite";
 
   public static boolean isSuiteMethod(@NotNull PsiMethod psiMethod) {
     if (!psiMethod.hasModifierProperty(PsiModifier.PUBLIC)) return false;
@@ -78,7 +84,7 @@ public class JUnitUtil {
     if (psiMethod.isConstructor()) return false;
     if (!psiMethod.hasModifierProperty(PsiModifier.PUBLIC)) return false;
     if (psiMethod.hasModifierProperty(PsiModifier.ABSTRACT)) return false;
-    if (AnnotationUtil.isAnnotated(psiMethod, DATA_POINT, false)) return false;
+    if (AnnotationUtil.isAnnotated(psiMethod, CONFIGURATIONS_ANNOTATION_NAME, false)) return false;
     if (AnnotationUtil.isAnnotated(aClass, RUN_WITH, true)) return true;
     if (psiMethod.getParameterList().getParametersCount() > 0) return false;
     if (psiMethod.hasModifierProperty(PsiModifier.STATIC) && SUITE_METHOD_NAME.equals(psiMethod.getName())) return false;
@@ -87,7 +93,7 @@ public class JUnitUtil {
     return testCaseClass != null && psiMethod.getContainingClass().isInheritor(testCaseClass, true);
   }
 
-  private static boolean isTestCaseInheritor(final PsiClass aClass) {
+  public static boolean isTestCaseInheritor(final PsiClass aClass) {
     if (!aClass.isValid()) return false;
     Location<PsiClass> location = PsiLocation.fromPsiElement(aClass);
     PsiClass testCaseClass = getTestCaseClassOrNull(location);
@@ -100,6 +106,19 @@ public class JUnitUtil {
 
   public static boolean isTestClass(@NotNull PsiClass psiClass, boolean checkAbstract, boolean checkForTestCaseInheritance) {
     if (psiClass.getQualifiedName() == null) return false;
+    final PsiClass topLevelClass = PsiTreeUtil.getTopmostParentOfType(psiClass, PsiClass.class);
+    if (topLevelClass != null) {
+      final PsiAnnotation annotation = AnnotationUtil.findAnnotationInHierarchy(topLevelClass, Collections.singleton(RUN_WITH));
+      if (annotation != null) {
+        final PsiAnnotationMemberValue attributeValue = annotation.findAttributeValue("value");
+        if (attributeValue instanceof PsiClassObjectAccessExpression) {
+          final String runnerName = ((PsiClassObjectAccessExpression)attributeValue).getOperand().getType().getCanonicalText();
+          if (!(PARAMETERIZED_CLASS_NAME.equals(runnerName) || SUITE_CLASS_NAME.equals(runnerName))) {
+            return true;
+          }
+        }
+      }
+    }
     if (!PsiClassUtil.isRunnableClass(psiClass, true, checkAbstract)) return false;
     if (checkForTestCaseInheritance && isTestCaseInheritor(psiClass)) return true;
     final PsiModifierList modifierList = psiClass.getModifierList();
@@ -269,8 +288,9 @@ public class JUnitUtil {
     return JavaPsiFacade.getInstance(project).findClass(qualifiedName, scope);
   }
 
-  public static PsiPackage getContainingPackage(final PsiClass psiClass) {
-    return JavaDirectoryService.getInstance().getPackage(psiClass.getContainingFile().getContainingDirectory());
+  public static PsiPackage getContainingPackage(@NotNull PsiClass psiClass) {
+    PsiDirectory directory = psiClass.getContainingFile().getContainingDirectory();
+    return directory == null ? null : JavaDirectoryService.getInstance().getPackage(directory);
   }
 
   public static PsiClass getTestClass(final PsiElement element) {

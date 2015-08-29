@@ -16,14 +16,15 @@
 package com.intellij.ide.actions;
 
 import com.intellij.ide.ui.UISettings;
-import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
-import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.util.Trinity;
 import com.intellij.ui.ComboboxSpeedSearch;
 import com.intellij.ui.ComboboxWithBrowseButton;
 import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.ui.SpeedSearchComparator;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -31,9 +32,9 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 
 public class TemplateKindCombo extends ComboboxWithBrowseButton {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.ide.actions.TemplateKindCombo");
 
   public TemplateKindCombo() {
+    //noinspection unchecked
     getComboBox().setRenderer(new ListCellRendererWrapper() {
       @Override
       public void customize(final JList list, final Object value, final int index, final boolean selected, final boolean cellHasFocus) {
@@ -52,20 +53,22 @@ public class TemplateKindCombo extends ComboboxWithBrowseButton {
         }
         return null;
       }
-    };
+    }.setComparator(new SpeedSearchComparator(true));
     setButtonListener(null);
   }
 
-  public void addItem(String presentableName, Icon icon, String templateName) {
+  public void addItem(@NotNull String presentableName, @Nullable Icon icon, @NotNull String templateName) {
+    //noinspection unchecked
     getComboBox().addItem(new Trinity<String, Icon, String>(presentableName, icon, templateName));
   }
 
+  @NotNull
   public String getSelectedName() {
     //noinspection unchecked
     final Trinity<String, Icon, String> trinity = (Trinity<String, Icon, String>)getComboBox().getSelectedItem();
     if (trinity == null) {
       // design time
-      return null;
+      return "yet_unknown";
     }
     return trinity.third;
   }
@@ -74,6 +77,7 @@ public class TemplateKindCombo extends ComboboxWithBrowseButton {
     if (name == null) return;
     ComboBoxModel model = getComboBox().getModel();
     for (int i = 0, n = model.getSize(); i < n; i++) {
+      //noinspection unchecked
       Trinity<String, Icon, String> trinity = (Trinity<String, Icon, String>)model.getElementAt(i);
       if (name.equals(trinity.third)) {
         getComboBox().setSelectedItem(trinity);
@@ -83,7 +87,7 @@ public class TemplateKindCombo extends ComboboxWithBrowseButton {
   }
 
   public void registerUpDownHint(JComponent component) {
-    new AnAction() {
+    new DumbAwareAction() {
       @Override
       public void actionPerformed(AnActionEvent e) {
         if (e.getInputEvent() instanceof KeyEvent) {
@@ -95,8 +99,8 @@ public class TemplateKindCombo extends ComboboxWithBrowseButton {
   }
 
   private void scrollBy(int delta) {
-    if (delta == 0) return;
     final int size = getComboBox().getModel().getSize();
+    if (delta == 0 || size == 0) return;
     int next = getComboBox().getSelectedIndex() + delta;
     if (next < 0 || next >= size) {
       if (!UISettings.getInstance().CYCLE_SCROLLING) {

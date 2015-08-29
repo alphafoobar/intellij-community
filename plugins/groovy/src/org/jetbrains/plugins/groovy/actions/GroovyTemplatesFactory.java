@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@ public class GroovyTemplatesFactory implements FileTemplateGroupDescriptorFactor
   static final String NAME_TEMPLATE_PROPERTY = "NAME";
   static final String LOW_CASE_NAME_TEMPLATE_PROPERTY = "lowCaseName";
 
+  @Override
   public FileTemplateGroupDescriptor getFileTemplatesDescriptor() {
     final FileTemplateGroupDescriptor group = new FileTemplateGroupDescriptor(GroovyBundle.message("file.template.group.title.groovy"), JetgroovyIcons.Groovy.Groovy_16x16);
     final FileTypeManager fileTypeManager = FileTypeManager.getInstance();
@@ -81,11 +82,11 @@ public class GroovyTemplatesFactory implements FileTemplateGroupDescriptorFactor
                                            @NotNull String templateName,
                                            boolean allowReformatting,
                                            @NonNls String... parameters) throws IncorrectOperationException {
-    final FileTemplate template = FileTemplateManager.getInstance().getInternalTemplate(templateName);
+    final FileTemplate template = FileTemplateManager.getInstance(directory.getProject()).getInternalTemplate(templateName);
 
     Project project = directory.getProject();
 
-    Properties properties = new Properties(FileTemplateManager.getInstance().getDefaultProperties(project));
+    Properties properties = new Properties(FileTemplateManager.getInstance(project).getDefaultProperties());
     JavaTemplateUtil.setPackageNameAttribute(properties, directory);
     properties.setProperty(NAME_TEMPLATE_PROPERTY, name);
     properties.setProperty(LOW_CASE_NAME_TEMPLATE_PROPERTY, name.substring(0, 1).toLowerCase() + name.substring(1));
@@ -97,7 +98,7 @@ public class GroovyTemplatesFactory implements FileTemplateGroupDescriptorFactor
       text = template.getText(properties);
     }
     catch (Exception e) {
-      throw new RuntimeException("Unable to load template for " + FileTemplateManager.getInstance().internalTemplateToSubject(templateName), e);
+      throw new RuntimeException("Unable to load template for " + FileTemplateManager.getInstance(project).internalTemplateToSubject(templateName), e);
     }
 
     final PsiFileFactory factory = PsiFileFactory.getInstance(project);

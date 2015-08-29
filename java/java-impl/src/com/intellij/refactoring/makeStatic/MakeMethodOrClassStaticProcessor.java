@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,9 +51,7 @@ import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 
 public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParameterListOwner> extends BaseRefactoringProcessor {
   private static final Logger LOG = Logger.getInstance("#com.intellij.refactoring.makeMethodStatic.MakeMethodStaticProcessor");
@@ -70,7 +68,7 @@ public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParamete
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new MakeMethodOrClassStaticViewDescriptor(myMember);
   }
 
@@ -90,20 +88,19 @@ public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParamete
 
   @Nullable
   @Override
-  protected RefactoringEventData getAfterData(UsageInfo[] usages) {
+  protected RefactoringEventData getAfterData(@NotNull UsageInfo[] usages) {
     RefactoringEventData data = new RefactoringEventData();
     data.addElement(myMember);
     return data;
   }
 
-  protected final boolean preprocessUsages(final Ref<UsageInfo[]> refUsages) {
+  protected final boolean preprocessUsages(@NotNull final Ref<UsageInfo[]> refUsages) {
     UsageInfo[] usagesIn = refUsages.get();
     if (myPrepareSuccessfulSwingThreadCallback != null) {
       MultiMap<PsiElement, String> conflicts = getConflictDescriptions(usagesIn);
       if (conflicts.size() > 0) {
         ConflictsDialog conflictsDialog = prepareConflictsDialog(conflicts, refUsages.get());
-        conflictsDialog.show();
-        if (!conflictsDialog.isOK()) {
+        if (!conflictsDialog.showAndGet()) {
           if (conflictsDialog.isShowConflicts()) prepareSuccessful();
           return false;
         }
@@ -112,16 +109,21 @@ public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParamete
         refUsages.set(filterInternalUsages(usagesIn));
       }
     }
-    refUsages.set(filterOverriding(usagesIn));
-
+    final Set<UsageInfo> toMakeStatic = new LinkedHashSet<UsageInfo>();
+    refUsages.set(filterOverriding(usagesIn, toMakeStatic));
+    if (!findAdditionalMembers(toMakeStatic)) return false;
     prepareSuccessful();
     return true;
   }
 
-  private static UsageInfo[] filterOverriding(UsageInfo[] usages) {
+  protected boolean findAdditionalMembers(Set<UsageInfo> toMakeStatic) {return true;}
+
+  private static UsageInfo[] filterOverriding(UsageInfo[] usages, Set<UsageInfo> suggestToMakeStatic) {
     ArrayList<UsageInfo> result = new ArrayList<UsageInfo>();
     for (UsageInfo usage : usages) {
-      if (!(usage instanceof OverridingMethodUsageInfo)) {
+      if (usage instanceof ChainedCallUsageInfo) {
+        suggestToMakeStatic.add(usage);
+      } else if (!(usage instanceof OverridingMethodUsageInfo)) {
         result.add(usage);
       }
     }
@@ -254,14 +256,18 @@ public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParamete
       if (!PsiTreeUtil.isAncestor(myMember, element, true) || qualifier != null) {
         result.add(new UsageInfo(element));
       }
+
+      processExternalReference(element, method, result);
     }
   }
 
+  protected void processExternalReference(PsiElement element, PsiMethod method, ArrayList<UsageInfo> result) {}
+
   //should be called before setting static modifier
-  protected void setupTypeParameterList() throws IncorrectOperationException {
-    final PsiTypeParameterList list = myMember.getTypeParameterList();
+  protected void setupTypeParameterList(T member) throws IncorrectOperationException {
+    final PsiTypeParameterList list = member.getTypeParameterList();
     assert list != null;
-    final PsiTypeParameterList newList = RefactoringUtil.createTypeParameterListWithUsedTypeParameters(myMember);
+    final PsiTypeParameterList newList = RefactoringUtil.createTypeParameterListWithUsedTypeParameters(member);
     if (newList != null) {
       list.replace(newList);
     }
@@ -310,7 +316,7 @@ public abstract class MakeMethodOrClassStaticProcessor<T extends PsiTypeParamete
     return mySettings;
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     PsiManager manager = myMember.getManager();
     PsiElementFactory factory = JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
 

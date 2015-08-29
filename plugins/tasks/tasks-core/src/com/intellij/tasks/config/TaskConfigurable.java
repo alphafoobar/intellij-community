@@ -2,7 +2,6 @@ package com.intellij.tasks.config;
 
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.NonDefaultProjectConfigurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.options.binding.BindControl;
 import com.intellij.openapi.options.binding.BindableConfigurable;
@@ -24,8 +23,7 @@ import java.awt.event.ActionListener;
  * @author Dmitry Avdeev
  */
 @SuppressWarnings({"UnusedDeclaration"})
-public class TaskConfigurable extends BindableConfigurable implements SearchableConfigurable.Parent,
-                                                                      NonDefaultProjectConfigurable, Configurable.NoScroll {
+public class TaskConfigurable extends BindableConfigurable implements SearchableConfigurable.Parent, Configurable.NoScroll {
   
   private JPanel myPanel;
 
@@ -47,8 +45,12 @@ public class TaskConfigurable extends BindableConfigurable implements Searchable
 
   @BindControl("changelistNameFormat")
   private JTextField myChangelistNameFormat;
+
   private JBCheckBox myAlwaysDisplayTaskCombo;
   private JTextField myConnectionTimeout;
+
+  @BindControl("branchNameFormat")
+  private JTextField myBranchNameFormat;
 
   private final Project myProject;
   private Configurable[] myConfigurables;
@@ -95,11 +97,18 @@ public class TaskConfigurable extends BindableConfigurable implements Searchable
   public void apply() throws ConfigurationException {
     boolean oldUpdateEnabled = getConfig().updateEnabled;
     super.apply();
+    TaskManager manager = TaskManager.getManager(myProject);
     if (getConfig().updateEnabled && !oldUpdateEnabled) {
-      TaskManager.getManager(myProject).updateIssues(null);
+      manager.updateIssues(null);
     }
     TaskSettings.getInstance().ALWAYS_DISPLAY_COMBO = myAlwaysDisplayTaskCombo.isSelected();
-    TaskSettings.getInstance().CONNECTION_TIMEOUT = Integer.valueOf(myConnectionTimeout.getText());
+    int oldConnectionTimeout = TaskSettings.getInstance().CONNECTION_TIMEOUT;
+    Integer connectionTimeout = Integer.valueOf(myConnectionTimeout.getText());
+    TaskSettings.getInstance().CONNECTION_TIMEOUT = connectionTimeout;
+
+    if (manager instanceof TaskManagerImpl && connectionTimeout != oldConnectionTimeout) {
+      ((TaskManagerImpl)manager).reconfigureRepositoryClients();
+    }
   }
 
   @Override

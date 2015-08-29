@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.jetbrains.python.parsing;
 
 import com.intellij.lang.PsiBuilder;
+import com.intellij.lang.WhitespacesBinders;
 import com.intellij.psi.tree.IElementType;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyTokenTypes;
@@ -44,7 +45,7 @@ public class FunctionParsing extends Parsing {
 
   protected void parseFunctionInnards(PsiBuilder.Marker functionMarker) {
     myBuilder.advanceLexer();
-    checkMatchesOrSkip(PyTokenTypes.IDENTIFIER, message("PARSE.expected.func.name"));
+    parseIdentifierOrSkip(PyTokenTypes.LPAR);
     parseParameterList();
     parseReturnTypeAnnotation();
     checkMatches(PyTokenTypes.COLON, message("PARSE.expected.colon"));
@@ -52,18 +53,13 @@ public class FunctionParsing extends Parsing {
   }
 
   public void parseReturnTypeAnnotation() {
-    if (myContext.getLanguageLevel().isPy3K() && myBuilder.getTokenType() == PyTokenTypes.MINUS) {
+    if (myContext.getLanguageLevel().isPy3K() && myBuilder.getTokenType() == PyTokenTypes.RARROW) {
       PsiBuilder.Marker maybeReturnAnnotation = myBuilder.mark();
       nextToken();
-      if (matchToken(PyTokenTypes.GT)) {
-        if (!myContext.getExpressionParser().parseSingleExpression(false)) {
-          myBuilder.error(message("PARSE.expected.expression"));
-        }
-        maybeReturnAnnotation.done(PyElementTypes.ANNOTATION);
+      if (!myContext.getExpressionParser().parseSingleExpression(false)) {
+        myBuilder.error(message("PARSE.expected.expression"));
       }
-      else {
-        maybeReturnAnnotation.rollbackTo();
-      }
+      maybeReturnAnnotation.done(PyElementTypes.ANNOTATION);
     }
   }
 
@@ -81,7 +77,7 @@ public class FunctionParsing extends Parsing {
       }
       else { // empty arglist node, so we always have it
         PsiBuilder.Marker argListMarker = myBuilder.mark();
-        argListMarker.setCustomEdgeTokenBinders(LeftBiasedWhitespaceBinder.INSTANCE, null);
+        argListMarker.setCustomEdgeTokenBinders(WhitespacesBinders.GREEDY_LEFT_BINDER, null);
         argListMarker.done(PyElementTypes.ARGUMENT_LIST);
       }
       if (atToken(PyTokenTypes.STATEMENT_BREAK)) {
@@ -110,6 +106,7 @@ public class FunctionParsing extends Parsing {
       myBuilder.error(message("PARSE.expected.@.or.def"));
       PsiBuilder.Marker parameterList = myBuilder.mark(); // To have non-empty parameters list at all the time.
       parameterList.done(PyElementTypes.PARAMETER_LIST);
+      myBuilder.mark().done(PyElementTypes.STATEMENT_LIST); // To have non-empty empty statement list
       endMarker.done(getFunctionType());
     }
   }
@@ -216,7 +213,7 @@ public class FunctionParsing extends Parsing {
         return false;
       }
       PsiBuilder.Marker invalidElements = myBuilder.mark();
-      while (!atToken(endToken) && !atToken(PyTokenTypes.LINE_BREAK) && !atToken(PyTokenTypes.COMMA) && !atToken(null)) {
+      while (!atToken(endToken) && !atAnyOfTokens(PyTokenTypes.LINE_BREAK, PyTokenTypes.COMMA, null)) {
         nextToken();
       }
       invalidElements.error(message("PARSE.expected.formal.param.name"));

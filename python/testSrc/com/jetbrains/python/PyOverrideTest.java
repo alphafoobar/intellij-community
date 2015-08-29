@@ -15,6 +15,8 @@
  */
 package com.jetbrains.python;
 
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.codeInsight.override.PyMethodMember;
 import com.jetbrains.python.codeInsight.override.PyOverrideImplementUtil;
 import com.jetbrains.python.fixtures.PyTestCase;
@@ -22,7 +24,6 @@ import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.PyFunction;
-import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
 
 import java.util.Collections;
@@ -33,20 +34,19 @@ import java.util.Collections;
 public class PyOverrideTest extends PyTestCase {
   private void doTest() {
     myFixture.configureByFile("override/" + getTestName(true) + ".py");
-    PyFunction toOverride = getTopLevelClass(0).getMethods() [0];
+    PyFunction toOverride = getTopLevelClass(0).getMethods(false) [0];
     PyOverrideImplementUtil.overrideMethods(myFixture.getEditor(), getTopLevelClass(1),
                                             Collections.singletonList(new PyMethodMember(toOverride)), false);
     myFixture.checkResultByFile("override/" + getTestName(true) + "_after.py", true);
   }
 
   private void doTest3k() {
-    PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), LanguageLevel.PYTHON32);
-    try {
-      doTest();
-    }
-    finally {
-      PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), null);
-    }
+    runWithLanguageLevel(LanguageLevel.PYTHON32, new Runnable() {
+      @Override
+      public void run() {
+        doTest();
+      }
+    });
   }
 
   private PyClass getTopLevelClass(int index) {
@@ -59,6 +59,10 @@ public class PyOverrideTest extends PyTestCase {
   }
 
   public void testClassmethod() {
+    doTest();
+  }
+
+  public void testStaticMethod() {
     doTest();
   }
 
@@ -80,9 +84,18 @@ public class PyOverrideTest extends PyTestCase {
 
   public void testInnerClass() {  // PY-10976
     myFixture.configureByFile("override/" + getTestName(true) + ".py");
-    PyFunction toOverride = getTopLevelClass(0).getMethods()[0];
+    PyFunction toOverride = getTopLevelClass(0).getMethods(false)[0];
     PyClass pyClass = getTopLevelClass(1).getNestedClasses()[0];
     PyOverrideImplementUtil.overrideMethods(myFixture.getEditor(), pyClass,
+                                            Collections.singletonList(new PyMethodMember(toOverride)), false);
+    myFixture.checkResultByFile("override/" + getTestName(true) + "_after.py", true);
+  }
+
+  public void testInnerFunctionClass() {
+    myFixture.configureByFile("override/" + getTestName(true) + ".py");
+    PyFunction toOverride = getTopLevelClass(0).getMethods(false)[0];
+    final PsiElement element = myFixture.getElementAtCaret();
+    PyOverrideImplementUtil.overrideMethods(myFixture.getEditor(), PsiTreeUtil.getParentOfType(element, PyClass.class, false),
                                             Collections.singletonList(new PyMethodMember(toOverride)), false);
     myFixture.checkResultByFile("override/" + getTestName(true) + "_after.py", true);
   }
@@ -100,14 +113,39 @@ public class PyOverrideTest extends PyTestCase {
 
   public void testImplement() {
     myFixture.configureByFile("override/" + getTestName(true) + ".py");
-    PyFunction toImplement = getTopLevelClass(0).getMethods()[1];
+    PyFunction toImplement = getTopLevelClass(0).getMethods(false)[1];
     PyOverrideImplementUtil.overrideMethods(myFixture.getEditor(), getTopLevelClass(1),
                                             Collections.singletonList(new PyMethodMember(toImplement)), true);
     myFixture.checkResultByFile("override/" + getTestName(true) + "_after.py", true);
   }
 
+  // PY-11127
+  public void testOverriddenMethodRaisesNotImplementedError() {
+    doTest();
+  }
+
+  // PY-11127
+  public void testOverriddenMethodRaisesNotImplementedErrorNoInstance() {
+    doTest();
+  }
+
   public void testPy3k() {
     doTest3k();
+  }
+
+  // PY-15629
+  public void testStaticMethodPy3k() {
+    doTest3k();
+  }
+
+  // PY-15629
+  public void testDunderNewPy3k() {
+    doTest3k();
+  }
+
+  // PY-15629
+  public void testDunderNew() {
+    doTest();
   }
 
   public void testTypeAnnotations() {  // PY-2547
@@ -128,6 +166,10 @@ public class PyOverrideTest extends PyTestCase {
 
   public void testKwargs() {  // PY-7401
     doTest3k();
+  }
+
+  public void testDocstring() {
+    doTest();
   }
 
   // PY-10229

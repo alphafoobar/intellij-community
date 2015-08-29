@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.wm.FocusWatcher;
 import com.intellij.ui.ClickListener;
 import com.intellij.ui.UIBundle;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -31,7 +32,7 @@ import java.awt.event.MouseEvent;
 /**
  * @author Vladimir Kondratyev
  */
-public class Splitter extends JPanel {
+public class Splitter extends JPanel implements Splittable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.ui.Splitter");
   @NonNls public static final String PROP_PROPORTION = "proportion";
   @NonNls public static final String PROP_ORIENTATION = "orientation";
@@ -56,9 +57,9 @@ public class Splitter extends JPanel {
   private final float myMaxProp;
 
 
-  protected float myProportion;// first size divided by total size
+  protected float myProportion;// first size divided by (first + second)
 
-  private final Divider myDivider;
+  protected final Divider myDivider;
   private JComponent mySecondComponent;
   private JComponent myFirstComponent;
   private final FocusWatcher myFocusWatcher;
@@ -176,7 +177,7 @@ public class Splitter extends JPanel {
   }
 
   protected Divider createDivider() {
-    return new Divider();
+    return new DividerImpl();
   }
 
   @Override
@@ -260,7 +261,7 @@ public class Splitter extends JPanel {
         d = total;
       }
       else {
-        size1 = myProportion * total;
+        size1 = myProportion * (total - d);
         double size2 = total - size1 - d;
 
         if (isHonorMinimumSize()) {
@@ -285,7 +286,7 @@ public class Splitter extends JPanel {
       }
 
       int iSize1 = (int)Math.round(Math.floor(size1));
-      int iSize2 = (int)Math.round(total - size1 - d);
+      int iSize2 = total - iSize1 - d;
 
       if (isVertical()) {
         firstRect.setBounds(0, 0, width, iSize1);
@@ -413,10 +414,10 @@ public class Splitter extends JPanel {
    * @param verticalSplit <code>true</code> means that splitter will have vertical split
    */
   public void setOrientation(boolean verticalSplit) {
-    if (myVerticalSplit == verticalSplit) return;
+    boolean changed = myVerticalSplit != verticalSplit;
     myVerticalSplit = verticalSplit;
     myDivider.setOrientation(verticalSplit);
-    firePropertyChange(PROP_ORIENTATION, !myVerticalSplit, myVerticalSplit);
+    if (changed) firePropertyChange(PROP_ORIENTATION, !myVerticalSplit, myVerticalSplit);
     revalidate();
     repaint();
   }
@@ -476,16 +477,43 @@ public class Splitter extends JPanel {
     }
   }
 
+  public float getMinProportion(boolean first) {
+    JComponent component = first? myFirstComponent : mySecondComponent;
+    if (isHonorMinimumSize()) {
+      if (component != null && myFirstComponent != null && myFirstComponent.isVisible() && mySecondComponent != null &&
+          mySecondComponent.isVisible()) {
+        if (isVertical()) {
+          return (float)component.getMinimumSize().height / (float)(getHeight() - getDividerWidth());
+        }
+        else {
+          return (float)component.getMinimumSize().width / (float)(getWidth() - getDividerWidth());
+        }
+      }
+    }
+    return 0.0f;
+  }
+
+  @NotNull
+  @Override
+  public Component asComponent() {
+    return this;
+  }
+
+  @Override
+  public void setDragging(boolean dragging) {
+    //ignore
+  }
+
   public JPanel getDivider() {
     return myDivider;
   }
 
-  public class Divider extends JPanel {
+  public class DividerImpl extends Divider {
     private boolean myResizeEnabled;
     private boolean mySwitchOrientationEnabled;
     protected Point myPoint;
 
-    public Divider() {
+    public DividerImpl() {
       super(new GridBagLayout());
       myResizeEnabled = true;
       mySwitchOrientationEnabled = false;
@@ -495,7 +523,7 @@ public class Splitter extends JPanel {
       setOrientation(myVerticalSplit);
     }
 
-    private void setOrientation(boolean isVerticalSplit) {
+    public void setOrientation(boolean isVerticalSplit) {
       removeAll();
 
       setCursor(isVertical() ?
@@ -523,8 +551,8 @@ public class Splitter extends JPanel {
           .message("splitter.right.tooltip.text"));
         new ClickListener() {
           @Override
-          public boolean onClick(MouseEvent e, int clickCount) {
-            setProportion(1.0f - getMinProportion(mySecondComponent));
+          public boolean onClick(@NotNull MouseEvent e, int clickCount) {
+            setProportion(1.0f - getMinProportion(false));
             return true;
           }
         }.installOn(splitDownlabel);
@@ -541,7 +569,7 @@ public class Splitter extends JPanel {
         splitCenterlabel.setToolTipText(UIBundle.message("splitter.center.tooltip.text"));
         new ClickListener() {
           @Override
-          public boolean onClick(MouseEvent e, int clickCount) {
+          public boolean onClick(@NotNull MouseEvent e, int clickCount) {
             setProportion(.5f);
             return true;
           }
@@ -559,8 +587,8 @@ public class Splitter extends JPanel {
           .message("splitter.left.tooltip.text"));
         new ClickListener() {
           @Override
-          public boolean onClick(MouseEvent e, int clickCount) {
-            setProportion(getMinProportion(myFirstComponent));
+          public boolean onClick(@NotNull MouseEvent e, int clickCount) {
+            setProportion(getMinProportion(true));
             return true;
           }
         }.installOn(splitUpLabel);
@@ -586,35 +614,20 @@ public class Splitter extends JPanel {
         if (isVertical()) {
           if (getHeight() > 0) {
             proportion = Math.min(1.0f, Math.max(.0f, Math
-              .min(Math.max(getMinProportion(myFirstComponent), (float)myPoint.y / (float)Splitter.this.getHeight()),
-                   1 - getMinProportion(mySecondComponent))));
+              .min(Math.max(getMinProportion(true), (float)myPoint.y / (float)Splitter.this.getHeight()),
+                   1 - getMinProportion(false))));
             setProportion(proportion);
           }
         }
         else {
           if (getWidth() > 0) {
             proportion = Math.min(1.0f, Math.max(.0f, Math
-              .min(Math.max(getMinProportion(myFirstComponent), (float)myPoint.x / (float)Splitter.this.getWidth()),
-                   1 - getMinProportion(mySecondComponent))));
+              .min(Math.max(getMinProportion(true), (float)myPoint.x / (float)Splitter.this.getWidth()),
+                   1 - getMinProportion(false))));
             setProportion(proportion);
           }
         }
       }
-    }
-
-    private float getMinProportion(JComponent component) {
-      if (isHonorMinimumSize()) {
-        if (component != null && myFirstComponent != null && myFirstComponent.isVisible() && mySecondComponent != null &&
-            mySecondComponent.isVisible()) {
-          if (isVertical()) {
-            return (float)component.getMinimumSize().height / (float)(Splitter.this.getHeight() - getDividerWidth());
-          }
-          else {
-            return (float)component.getMinimumSize().width / (float)(Splitter.this.getWidth() - getDividerWidth());
-          }
-        }
-      }
-      return 0.0f;
     }
 
     @Override

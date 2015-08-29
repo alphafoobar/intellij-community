@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 
 package com.intellij.codeInsight.editorActions.moveUpDown;
 
+import com.intellij.codeInsight.folding.CodeFoldingManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
@@ -29,6 +32,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 class MoverWrapper {
+  private static final Logger LOGGER = Logger.getInstance(MoverWrapper.class);
+  
   protected final boolean myIsDown;
   private final StatementUpDownMover myMover;
   private final StatementUpDownMover.MoveInfo myInfo;
@@ -44,14 +49,13 @@ class MoverWrapper {
     return myInfo;
   }
 
-  public final void move(Editor editor, final PsiFile file) {
+  public final void move(final Editor editor, final PsiFile file) {
     assert myInfo.toMove2 != null;
     myMover.beforeMove(editor, myInfo, myIsDown);
     final Document document = editor.getDocument();
+
     final int start = StatementUpDownMover.getLineStartSafeOffset(document, myInfo.toMove.startLine);
     final int end = StatementUpDownMover.getLineStartSafeOffset(document, myInfo.toMove.endLine);
-    myInfo.range1 = document.createRangeMarker(start, end);
-
     String textToInsert = document.getCharsSequence().subSequence(start, end).toString();
     if (!StringUtil.endsWithChar(textToInsert,'\n')) textToInsert += '\n';
 
@@ -59,6 +63,16 @@ class MoverWrapper {
     final int end2 = StatementUpDownMover.getLineStartSafeOffset(document,myInfo.toMove2.endLine);
     String textToInsert2 = document.getCharsSequence().subSequence(start2, end2).toString();
     if (!StringUtil.endsWithChar(textToInsert2,'\n')) textToInsert2 += '\n';
+
+    TextRange range = new TextRange(start, end);
+    TextRange range2 = new TextRange(start2, end2);
+    if (range.intersectsStrict(range2) && !range.equals(range2)) {
+      LOGGER.error("Wrong move ranges: " + 
+                   start + ":" + end + "(" + textToInsert + "), " + start2 + ":" + end2 + "(" + textToInsert2 + "), mover: " + myMover);
+      return;
+    }
+    
+    myInfo.range1 = document.createRangeMarker(start, end);
     myInfo.range2 = document.createRangeMarker(start2, end2);
     if (myInfo.range1.getStartOffset() < myInfo.range2.getStartOffset()) {
       myInfo.range1.setGreedyToLeft(true);
@@ -91,19 +105,8 @@ class MoverWrapper {
     // Pointer for the fold region from method1 points to 'method2()' now and vice versa (check range markers processing on
     // document change for further information). I.e. information about fold regions statuses holds the data swapped for
     // 'method1' and 'method2'. Hence, we want to apply correct 'collapsed' status.
-    FoldRegion topRegion = null;
-    FoldRegion bottomRegion = null;
-    for (FoldRegion foldRegion : editor.getFoldingModel().getAllFoldRegions()) {
-      if (!foldRegion.isValid() || (!contains(myInfo.range1, foldRegion) && !contains(myInfo.range2, foldRegion))) {
-        continue;
-      }
-      if (contains(myInfo.range1, foldRegion) && !contains(topRegion, foldRegion)) {
-        topRegion = foldRegion;
-      }
-      else if (contains(myInfo.range2, foldRegion) && !contains(bottomRegion, foldRegion)) {
-        bottomRegion = foldRegion;
-      }
-    }
+    final FoldRegion topRegion = findTopLevelRegionInRange(editor, myInfo.range1);
+    final FoldRegion bottomRegion = findTopLevelRegionInRange(editor, myInfo.range2);
 
     document.insertString(myInfo.range1.getStartOffset(), textToInsert2);
     document.deleteString(myInfo.range1.getStartOffset()+textToInsert2.length(), myInfo.range1.getEndOffset());
@@ -120,14 +123,19 @@ class MoverWrapper {
 
     // Swap fold regions status if necessary.
     if (topRegion != null && bottomRegion != null) {
-      final FoldRegion finalTopRegion = topRegion;
-      final FoldRegion finalBottomRegion = bottomRegion;
+      CodeFoldingManager.getInstance(project).updateFoldRegions(editor);
       editor.getFoldingModel().runBatchFoldingOperation(new Runnable() {
         @Override
         public void run() {
-          boolean topExpanded = finalTopRegion.isExpanded();
-          finalTopRegion.setExpanded(finalBottomRegion.isExpanded());
-          finalBottomRegion.setExpanded(topExpanded);
+          FoldRegion newTopRegion = findTopLevelRegionInRange(editor, myInfo.range1);
+          if (newTopRegion != null) {
+            newTopRegion.setExpanded(bottomRegion.isExpanded());
+          }
+
+          FoldRegion newBottomRegion = findTopLevelRegionInRange(editor, myInfo.range2);
+          if (newBottomRegion != null) {
+            newBottomRegion.setExpanded(topRegion.isExpanded());
+          }
         }
       });
     }
@@ -137,6 +145,8 @@ class MoverWrapper {
     }
 
     caretModel.moveToOffset(myInfo.range2.getStartOffset() + caretRelativePos);
+    myMover.afterMove(editor, file, myInfo, myIsDown);
+    PsiDocumentManager.getInstance(project).commitDocument(document);
     if (myInfo.indentTarget) {
       indentLinesIn(editor, file, document, project, myInfo.range2);
     }
@@ -144,8 +154,17 @@ class MoverWrapper {
       indentLinesIn(editor, file, document, project, myInfo.range1);
     }
 
-    myMover.afterMove(editor, file, myInfo, myIsDown);
     editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  }
+
+  private static FoldRegion findTopLevelRegionInRange(Editor editor, RangeMarker range) {
+    FoldRegion result = null;
+    for (FoldRegion foldRegion : editor.getFoldingModel().getAllFoldRegions()) {
+      if (foldRegion.isValid() && contains(range, foldRegion) && !contains(result, foldRegion)) {
+        result = foldRegion;
+      }
+    }
+    return result;
   }
 
   /**
@@ -201,6 +220,6 @@ class MoverWrapper {
     final int selectionRelativeOffset = selectionStart - moveOffset;
     int newSelectionStart = insOffset + selectionRelativeOffset;
     int newSelectionEnd = newSelectionStart + selectionEnd - selectionStart;
-    editor.getSelectionModel().setSelection(newSelectionStart, newSelectionEnd);
+    EditorUtil.setSelectionExpandingFoldedRegionsIfNeeded(editor, newSelectionStart, newSelectionEnd);
   }
 }

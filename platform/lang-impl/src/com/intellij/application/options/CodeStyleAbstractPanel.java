@@ -16,7 +16,6 @@
 package com.intellij.application.options;
 
 import com.intellij.application.options.codeStyle.CodeStyleSchemesModel;
-import com.intellij.application.options.codeStyle.LanguageSelector;
 import com.intellij.codeStyle.CodeStyleFacade;
 import com.intellij.lang.Language;
 import com.intellij.openapi.Disposable;
@@ -35,6 +34,7 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
+import com.intellij.openapi.ui.OnePixelDivider;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
@@ -53,6 +53,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.border.AbstractBorder;
 import java.awt.*;
 import java.io.IOException;
 import java.io.InputStream;
@@ -86,8 +87,6 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
   private boolean mySomethingChanged = false;
   private long myEndHighlightPreviewChangesTimeMillis = -1;
   private boolean myShowsPreviewHighlighters;
-  private boolean mySkipPreviewHighlighting;
-  private LanguageSelector myLanguageSelector;
   private final CodeStyleSettings myCurrentSettings;
   private final Language myDefaultLanguage;
   
@@ -201,7 +200,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
 
   private int getAdjustedRightMargin() {
     int result = getRightMargin();
-    return result > 0 ? result : CodeStyleFacade.getInstance(ProjectUtil.guessCurrentProject(getPanel())).getRightMargin();
+    return result > 0 ? result : CodeStyleFacade.getInstance(ProjectUtil.guessCurrentProject(getPanel())).getRightMargin(getDefaultLanguage());
   }
 
   protected abstract int getRightMargin();
@@ -212,9 +211,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
       public void run() {
         try {
           Document beforeReformat = null;
-          if (!mySkipPreviewHighlighting) {
-            beforeReformat = collectChangesBeforeCurrentSettingsAppliance(project);
-          }
+          beforeReformat = collectChangesBeforeCurrentSettingsAppliance(project);
 
           //important not mark as generated not to get the classes before setting language level
           PsiFile psiFile = createFileFromText(project, myTextToReformat);
@@ -226,7 +223,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
           catch (ConfigurationException ignore) {
           }
           CodeStyleSettings clone = mySettings.clone();
-          clone.RIGHT_MARGIN = getAdjustedRightMargin();
+          clone.setRightMargin(getDefaultLanguage(), getAdjustedRightMargin());
           CodeStyleSettingsManager.getInstance(project).setTemporarySettings(clone);
           PsiFile formatted;
           try {
@@ -267,7 +264,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
       Document document = documentManager.getDocument(psiFile);
       if (document != null) {
         CodeStyleSettings clone = mySettings.clone();
-        clone.RIGHT_MARGIN = getAdjustedRightMargin();
+        clone.setRightMargin(getDefaultLanguage(), getAdjustedRightMargin());
         CodeStyleSettingsManager.getInstance(project).setTemporarySettings(clone);
         try {
           CodeStyleManager.getInstance(project).reformat(psiFile);
@@ -279,10 +276,6 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
       }
     }
     return null;
-  }
-
-  public void setSkipPreviewHighlighting(boolean skipPreviewHighlighting) {
-    mySkipPreviewHighlighting = skipPreviewHighlighting;
   }
 
   protected void prepareForReformat(PsiFile psiFile) {
@@ -304,9 +297,6 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
   }
 
   private void highlightChanges(Document beforeReformat) {
-    if (mySkipPreviewHighlighting) {
-      return;
-    }
 
     myPreviewRangesToHighlight.clear();
     MarkupModel markupModel = myEditor.getMarkupModel();
@@ -383,7 +373,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
 
   private void updatePreviewHighlighter(final EditorEx editor) {
     EditorColorsScheme scheme = editor.getColorsScheme();
-    scheme.setColor(EditorColors.CARET_ROW_COLOR, null);
+    editor.getSettings().setCaretRowShown(false);
     editor.setHighlighter(createHighlighter(scheme));
   }
 
@@ -467,7 +457,27 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
 
   protected void installPreviewPanel(final JPanel previewPanel) {
     previewPanel.setLayout(new BorderLayout());
-    previewPanel.add(myEditor.getComponent(), BorderLayout.CENTER);
+    previewPanel.add(getEditor().getComponent(), BorderLayout.CENTER);
+    previewPanel.setBorder(new AbstractBorder() {
+      private static final int LEFT_WHITE_SPACE = 2;
+
+      @Override
+      public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
+        Editor editor = getEditor();
+        if (editor instanceof EditorEx) {
+          g.setColor(((EditorEx)editor).getBackgroundColor());
+          g.fillRect(x + 1, y, LEFT_WHITE_SPACE, height);
+        }
+        g.setColor(OnePixelDivider.BACKGROUND);
+        g.fillRect(x, y, 1, height);
+      }
+
+      @Override
+      public Insets getBorderInsets(Component c, Insets insets) {
+        insets.set(0, 1 + LEFT_WHITE_SPACE, 0, 0);
+        return insets;
+      }
+    });
   }
 
   @NonNls
@@ -612,23 +622,9 @@ public abstract class CodeStyleAbstractPanel implements Disposable {
   public Language getDefaultLanguage()  {
     return myDefaultLanguage;
   }
-  
-  public void setLanguageSelector(LanguageSelector langSelector) {
-    if (myLanguageSelector == null) {
-      myLanguageSelector = langSelector;
-    }
-  }
-  
-  public LanguageSelector getLanguageSelector() {
-    return myLanguageSelector;
-  }
 
   protected String getTabTitle() {
     return "Other";
-  }
-
-  public boolean setPanelLanguage(Language language) {
-    return false;
   }
   
   protected CodeStyleSettings getCurrentSettings() {

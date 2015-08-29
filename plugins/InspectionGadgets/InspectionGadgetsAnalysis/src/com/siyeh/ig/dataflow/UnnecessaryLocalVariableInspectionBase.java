@@ -15,16 +15,18 @@
  */
 package com.siyeh.ig.dataflow;
 
+import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
 import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
-import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.psi.*;
+import com.intellij.psi.search.LocalSearchScope;
+import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
-import com.intellij.util.xmlb.XmlSerializer;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -95,11 +97,6 @@ public class UnnecessaryLocalVariableInspectionBase extends BaseInspection {
   }
 
   @Override
-  protected boolean buildQuickFixesOnlyForOnTheFlyErrors() {
-    return true;
-  }
-
-  @Override
   public BaseInspectionVisitor buildVisitor() {
     return new UnnecessaryLocalVariableVisitor();
   }
@@ -162,11 +159,30 @@ public class UnnecessaryLocalVariableInspectionBase extends BaseInspection {
           VariableAccessUtils.variableIsAssigned(initialization, containingScope, false)) {
         return false;
       }
-      if (!initialization.hasModifierProperty(PsiModifier.FINAL) && variable.hasModifierProperty(PsiModifier.FINAL)) {
-        if (VariableAccessUtils.variableIsUsedInInnerClass(variable, containingScope)) {
+
+      final PsiResolveHelper resolveHelper = JavaPsiFacade.getInstance(containingScope.getProject()).getResolveHelper();
+      final String initializationName = initialization.getName();
+
+      final boolean finalVariableIntroduction = 
+        !initialization.hasModifierProperty(PsiModifier.FINAL) && variable.hasModifierProperty(PsiModifier.FINAL) ||
+        PsiUtil.isLanguageLevel8OrHigher(initialization) &&
+        !HighlightControlFlowUtil.isEffectivelyFinal(initialization, containingScope, null) && 
+        HighlightControlFlowUtil.isEffectivelyFinal(variable, containingScope, null);
+
+      for (PsiReference ref : ReferencesSearch.search(variable, new LocalSearchScope(containingScope))) {
+        final PsiElement refElement = ref.getElement();
+        if (finalVariableIntroduction) {
+          final PsiElement element = PsiTreeUtil.getParentOfType(refElement, PsiClass.class, PsiLambdaExpression.class);
+          if (element != null && PsiTreeUtil.isAncestor(containingScope, element, true)) {
+            return false;
+          }
+        }
+
+        if (resolveHelper.resolveReferencedVariable(initializationName, refElement) != initialization) {
           return false;
         }
       }
+
       return !TypeConversionUtil.boxingConversionApplicable(variable.getType(), initialization.getType());
     }
 
@@ -346,18 +362,20 @@ public class UnnecessaryLocalVariableInspectionBase extends BaseInspection {
           return false;
         }
         boolean referenceFound = false;
-        for (PsiResourceVariable resourceVariable : resourceList.getResourceVariables()) {
-          final PsiExpression initializer = resourceVariable.getInitializer();
-          if (!referenceFound && initializer instanceof PsiReferenceExpression) {
-            final PsiReferenceExpression referenceExpression = (PsiReferenceExpression)initializer;
-            final PsiElement referent = referenceExpression.resolve();
-            if (variable.equals(referent)) {
-              referenceFound = true;
-              continue;
+        for (PsiResourceListElement resource : resourceList) {
+          if (resource instanceof PsiResourceVariable) {
+            final PsiExpression initializer = ((PsiResourceVariable)resource).getInitializer();
+            if (!referenceFound && initializer instanceof PsiReferenceExpression) {
+              final PsiReferenceExpression referenceExpression = (PsiReferenceExpression)initializer;
+              final PsiElement referent = referenceExpression.resolve();
+              if (variable.equals(referent)) {
+                referenceFound = true;
+                continue;
+              }
             }
-          }
-          if (VariableAccessUtils.variableIsUsed(variable, initializer)) {
-            return false;
+            if (VariableAccessUtils.variableIsUsed(variable, initializer)) {
+              return false;
+            }
           }
         }
         if (!referenceFound) {

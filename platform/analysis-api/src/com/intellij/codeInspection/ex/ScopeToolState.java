@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ public class ScopeToolState {
   private boolean myEnabled;
   private HighlightDisplayLevel myLevel;
 
+  private boolean myAdditionalConfigPanelCreated = false;
   private JComponent myAdditionalConfigPanel;
   private static final Logger LOG = Logger.getInstance("#" + ScopeToolState.class.getName());
 
@@ -57,12 +58,15 @@ public class ScopeToolState {
     myLevel = level;
   }
 
+  @NotNull
+  public ScopeToolState copy() {
+    return new ScopeToolState(myScopeName, myToolWrapper, myEnabled, myLevel);
+  }
+
   @Nullable
   public NamedScope getScope(Project project) {
-    if (myScope == null) {
-      if (project != null) {
-        myScope = NamedScopesHolder.getScope(project, myScopeName);
-      }
+    if (myScope == null && project != null) {
+      myScope = NamedScopesHolder.getScope(project, myScopeName);
     }
     return myScope;
   }
@@ -94,18 +98,17 @@ public class ScopeToolState {
     myLevel = level;
   }
 
-  @NotNull
+  @Nullable
   public JComponent getAdditionalConfigPanel() {
-    if (myAdditionalConfigPanel == null) {
+    if (!myAdditionalConfigPanelCreated) {
       myAdditionalConfigPanel = myToolWrapper.getTool().createOptionsPanel();
-      if (myAdditionalConfigPanel == null){
-        myAdditionalConfigPanel = new JPanel();
-      }
+      myAdditionalConfigPanelCreated = true;
     }
     return myAdditionalConfigPanel;
   }
 
   public void resetConfigPanel(){
+    myAdditionalConfigPanelCreated = false;
     myAdditionalConfigPanel = null;
   }
 

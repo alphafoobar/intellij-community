@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.openapi.components.CompositePathMacroFilter;
 import com.intellij.openapi.components.ExpandMacroToPathMap;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.components.TrackingPathMacroSubstitutor;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
@@ -31,7 +32,10 @@ import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.VirtualFileSystem;
-import com.intellij.util.containers.FactoryMap;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.MultiMap;
+import com.intellij.util.containers.SmartHashSet;
+import gnu.trove.THashSet;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -40,7 +44,11 @@ import org.jetbrains.jps.model.serialization.PathMacroUtil;
 import java.util.*;
 
 public class BasePathMacroManager extends PathMacroManager {
-  private static final CompositePathMacroFilter ourFilter = new CompositePathMacroFilter(Extensions.getExtensions(PathMacrosCollector.MACRO_FILTER_EXTENSION_POINT_NAME));
+  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.components.impl.BasePathMacroManager");
+
+  private static class Holder {
+    private static final CompositePathMacroFilter FILTER = new CompositePathMacroFilter(Extensions.getExtensions(PathMacrosCollector.MACRO_FILTER_EXTENSION_POINT_NAME));
+  }
 
   private PathMacrosImpl myPathMacros;
 
@@ -48,21 +56,27 @@ public class BasePathMacroManager extends PathMacroManager {
     myPathMacros = (PathMacrosImpl)pathMacros;
   }
 
-  protected static void addFileHierarchyReplacements(ExpandMacroToPathMap result, String macroName, @Nullable String path) {
-    if (path == null) return;
-    addFileHierarchyReplacements(result, getLocalFileSystem().findFileByPath(path), "$" + macroName + "$");
+  protected static void addFileHierarchyReplacements(@NotNull ExpandMacroToPathMap result, @NotNull String macroName, @Nullable String path) {
+    if (path != null) {
+      addFileHierarchyReplacements(result, getLocalFileSystem().findFileByPath(path), '$' + macroName + '$');
+    }
   }
 
-  private static void addFileHierarchyReplacements(ExpandMacroToPathMap result, @Nullable VirtualFile f, String macro) {
-    if (f == null) return;
+  private static void addFileHierarchyReplacements(@NotNull ExpandMacroToPathMap result, @Nullable VirtualFile f, @NotNull String macro) {
+    if (f == null) {
+      return;
+    }
+
     addFileHierarchyReplacements(result, f.getParent(), macro + "/..");
     result.put(macro, StringUtil.trimEnd(f.getPath(), "/"));
   }
 
   protected static void addFileHierarchyReplacements(ReplacePathToMacroMap result, String macroName, @Nullable String path, @Nullable String stopAt) {
-    if (path == null) return;
+    if (path == null) {
+      return;
+    }
 
-    String macro = "$" + macroName + "$";
+    String macro = '$' + macroName + '$';
     path = StringUtil.trimEnd(FileUtil.toSystemIndependentName(path), "/");
     boolean overwrite = true;
     while (StringUtil.isNotEmpty(path) && path.contains("/")) {
@@ -78,11 +92,13 @@ public class BasePathMacroManager extends PathMacroManager {
     }
   }
 
+  @NotNull
   private static VirtualFileSystem getLocalFileSystem() {
     // Use VFM directly because of mocks in tests.
     return VirtualFileManager.getInstance().getFileSystem(StandardFileSystems.FILE_PROTOCOL);
   }
 
+  @NotNull
   public ExpandMacroToPathMap getExpandMacroMap() {
     ExpandMacroToPathMap result = new ExpandMacroToPathMap();
     for (Map.Entry<String, String> entry : PathMacroUtil.getGlobalSystemMacros().entrySet()) {
@@ -92,6 +108,7 @@ public class BasePathMacroManager extends PathMacroManager {
     return result;
   }
 
+  @NotNull
   protected ReplacePathToMacroMap getReplacePathMap() {
     ReplacePathToMacroMap result = new ReplacePathToMacroMap();
     for (Map.Entry<String, String> entry : PathMacroUtil.getGlobalSystemMacros().entrySet()) {
@@ -101,6 +118,7 @@ public class BasePathMacroManager extends PathMacroManager {
     return result;
   }
 
+  @NotNull
   @Override
   public TrackingPathMacroSubstitutor createTrackingSubstitutor() {
     return new MyTrackingPathMacroSubstitutor();
@@ -112,7 +130,7 @@ public class BasePathMacroManager extends PathMacroManager {
   }
 
   @Override
-  public String collapsePath(final String path) {
+  public String collapsePath(@Nullable String path) {
     return getReplacePathMap().substitute(path, SystemInfo.isFileSystemCaseSensitive);
   }
 
@@ -121,6 +139,7 @@ public class BasePathMacroManager extends PathMacroManager {
     getReplacePathMap().substitute(element, SystemInfo.isFileSystemCaseSensitive, true);
   }
 
+  @NotNull
   @Override
   public String collapsePathsRecursively(@NotNull final String text) {
     return getReplacePathMap().substituteRecursively(text, SystemInfo.isFileSystemCaseSensitive);
@@ -136,32 +155,19 @@ public class BasePathMacroManager extends PathMacroManager {
     getReplacePathMap().substitute(element, SystemInfo.isFileSystemCaseSensitive);
   }
 
-  public PathMacrosImpl getPathMacros() {
+  @NotNull
+  private PathMacrosImpl getPathMacros() {
     if (myPathMacros == null) {
       myPathMacros = PathMacrosImpl.getInstanceEx();
     }
-
     return myPathMacros;
   }
 
   private class MyTrackingPathMacroSubstitutor implements TrackingPathMacroSubstitutor {
     private final String myLock = new String("MyTrackingPathMacroSubstitutor.lock");
-    private final Map<String, Set<String>> myMacroToComponentNames = new FactoryMap<String, Set<String>>() {
-      @Override
-      protected Set<String> create(String key) {
-        return new HashSet<String>();
-      }
-    };
 
-    private final Map<String, Set<String>> myComponentNameToMacros = new FactoryMap<String, Set<String>>() {
-      @Override
-      protected Set<String> create(String key) {
-        return new HashSet<String>();
-      }
-    };
-
-    public MyTrackingPathMacroSubstitutor() {
-    }
+    private final MultiMap<String, String> myMacroToComponentNames = MultiMap.createSet();
+    private final MultiMap<String, String> myComponentNameToMacros = MultiMap.createSet();
 
     @Override
     public void reset() {
@@ -177,18 +183,18 @@ public class BasePathMacroManager extends PathMacroManager {
     }
 
     @Override
-    public String collapsePath(final String path) {
+    public String collapsePath(@Nullable String path) {
       return getReplacePathMap().substitute(path, SystemInfo.isFileSystemCaseSensitive);
     }
 
     @Override
-    public void expandPaths(final Element element) {
+    public void expandPaths(@NotNull final Element element) {
       getExpandMacroMap().substitute(element, SystemInfo.isFileSystemCaseSensitive);
     }
 
     @Override
-    public void collapsePaths(final Element element) {
-      getReplacePathMap().substitute(element, SystemInfo.isFileSystemCaseSensitive, false, ourFilter);
+    public void collapsePaths(@NotNull final Element element) {
+      getReplacePathMap().substitute(element, SystemInfo.isFileSystemCaseSensitive, false, Holder.FILTER);
     }
 
     public int hashCode() {
@@ -196,52 +202,54 @@ public class BasePathMacroManager extends PathMacroManager {
     }
 
     @Override
-    public void invalidateUnknownMacros(final Set<String> macros) {
+    public void invalidateUnknownMacros(@NotNull Set<String> macros) {
       synchronized (myLock) {
-        for (final String macro : macros) {
-          final Set<String> components = myMacroToComponentNames.get(macro);
-          for (final String component : components) {
-            myComponentNameToMacros.remove(component);
+        for (String macro : macros) {
+          Collection<String> componentNames = myMacroToComponentNames.remove(macro);
+          if (!ContainerUtil.isEmpty(componentNames)) {
+            for (String component : componentNames) {
+              myComponentNameToMacros.remove(component);
+            }
           }
-
-          myMacroToComponentNames.remove(macro);
         }
       }
     }
 
+    @NotNull
     @Override
-    public Collection<String> getComponents(final Collection<String> macros) {
+    public Collection<String> getComponents(@NotNull Collection<String> macros) {
       synchronized (myLock) {
-        final Set<String> result = new HashSet<String>();
-        for (String macro : myMacroToComponentNames.keySet()) {
-          if (macros.contains(macro)) {
-            result.addAll(myMacroToComponentNames.get(macro));
-          }
+        Set<String> result = new SmartHashSet<String>();
+        for (String macro : macros) {
+          result.addAll(myMacroToComponentNames.get(macro));
         }
-
         return result;
       }
     }
 
+    @NotNull
     @Override
-    public Collection<String> getUnknownMacros(final String componentName) {
+    public Collection<String> getUnknownMacros(@Nullable String componentName) {
       synchronized (myLock) {
-        final Set<String> result = new HashSet<String>();
-        result.addAll(componentName == null ? myMacroToComponentNames.keySet() : myComponentNameToMacros.get(componentName));
-        return Collections.unmodifiableCollection(result);
+        Collection<String> list = componentName == null ? myMacroToComponentNames.keySet() : myComponentNameToMacros.get(componentName);
+        return ContainerUtil.isEmpty(list) ? Collections.<String>emptyList() : new THashSet<String>(list);
       }
     }
 
     @Override
-    public void addUnknownMacros(final String componentName, final Collection<String> unknownMacros) {
-      if (unknownMacros.isEmpty()) return;
+    public void addUnknownMacros(@NotNull String componentName, @NotNull Collection<String> unknownMacros) {
+      if (unknownMacros.isEmpty()) {
+        return;
+      }
+      
+      LOG.debug("Registering unknown macros " + new ArrayList<String>(unknownMacros) + " in component " + componentName);
 
       synchronized (myLock) {
         for (String unknownMacro : unknownMacros) {
-          myMacroToComponentNames.get(unknownMacro).add(componentName);
+          myMacroToComponentNames.putValue(unknownMacro, componentName);
         }
 
-        myComponentNameToMacros.get(componentName).addAll(unknownMacros);
+        myComponentNameToMacros.putValues(componentName, unknownMacros);
       }
     }
   }

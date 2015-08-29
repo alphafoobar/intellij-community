@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,21 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.execution.junit2;
 
 import com.intellij.execution.Location;
 import com.intellij.execution.junit2.events.*;
+import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.execution.junit2.info.TestInfo;
+import com.intellij.execution.junit2.states.ComparisonFailureState;
 import com.intellij.execution.junit2.states.IgnoredState;
 import com.intellij.execution.junit2.states.Statistics;
 import com.intellij.execution.junit2.states.TestState;
 import com.intellij.execution.testframework.AbstractTestProxy;
 import com.intellij.execution.testframework.Filter;
 import com.intellij.execution.testframework.TestConsoleProperties;
+import com.intellij.execution.testframework.stacktrace.DiffHyperlink;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.Navigatable;
+import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.execution.junit.states.PoolOfTestStates;
 import org.jetbrains.annotations.NotNull;
@@ -106,12 +109,17 @@ public class TestProxy extends AbstractTestProxy {
     return myParent;
   }
 
-  public Navigatable getDescriptor(final Location location, final TestConsoleProperties testConsoleProperties) {
+  public Navigatable getDescriptor(@Nullable Location location, @NotNull TestConsoleProperties properties) {
     return getState().getDescriptor(location);
   }
 
   public String getName() {
     return getInfo().getName();
+  }
+
+  @Override
+  public boolean isConfig() {
+    return false;
   }
 
   public boolean isInProgress() {
@@ -130,8 +138,34 @@ public class TestProxy extends AbstractTestProxy {
     return getState().getMagnitude();
   }
 
-  public Location getLocation(final Project project, GlobalSearchScope searchScope) {
-    return getInfo().getLocation(project, searchScope);
+  public Location getLocation(@NotNull final Project project, @NotNull GlobalSearchScope searchScope) {
+    final Location location = getInfo().getLocation(project, searchScope);
+    if (location == null) {
+      return checkParentParameterized(project, searchScope);
+    } else {
+      Location parentLocation = getParent().getLocation(project, searchScope);
+      if (parentLocation instanceof PsiMemberParameterizedLocation) {
+        return new PsiMemberParameterizedLocation(project, 
+                                                  location.getPsiElement(),
+                                                  location instanceof MethodLocation ? ((MethodLocation)location).getContainingClass() : null,
+                                                  ((PsiMemberParameterizedLocation)parentLocation).getParamSetName());
+      }
+    }
+    return location;
+  }
+
+  private Location checkParentParameterized(Project project, GlobalSearchScope searchScope) {
+    final TestProxy parent = getParent();
+    if (parent != null) {
+      final Location parentLocation = parent.getLocation(project, searchScope);
+      if (parentLocation != null) {
+        final PsiElement parentElement = parentLocation.getPsiElement();
+        if (parentElement instanceof PsiClass) {
+          return PsiMemberParameterizedLocation.getParameterizedLocation((PsiClass)parentElement, getInfo().getName());
+        }
+      }
+    }
+    return null;
   }
 
   public boolean isLeaf() {
@@ -144,6 +178,11 @@ public class TestProxy extends AbstractTestProxy {
   }
 
   @Override
+  public boolean hasPassedTests() {
+    return isPassed();
+  }
+
+  @Override
   public boolean isIgnored() {
     return myState instanceof IgnoredState;
   }
@@ -153,17 +192,34 @@ public class TestProxy extends AbstractTestProxy {
   }
 
   public void addChild(final TestProxy child) {
+    addChild(child, -1);
+  }
+
+  public void addChild(final TestProxy child, final int idx) {
     if (myChildren.contains(child))
       return;
     if (child.getParent() != null)
       return;//todo throw new RuntimeException("Test: "+child + " already has parent: " + child.getParent());
-    myChildren.add(child);
+    myChildren.insert(child, idx);
     child.myParent = this;
     addLast(child);
     child.setPrinter(myPrinter);
     pullEvent(new NewChildEvent(this, child));
     getState().changeStateAfterAddingChildTo(this, child);
     myNotifier.onChildAdded(this, child);
+  }
+
+  public void insertNextRunningChild(final TestProxy child) {
+    int idx = -1;
+    List<TestProxy> list = myChildren.getList();
+    for (int i = 0; i < list.size(); i++) {
+      TestProxy proxy = list.get(i);
+      if (!proxy.getState().isFinal()) {
+        idx = i;
+        break;
+      }
+    }
+    addChild(child, idx);
   }
 
 
@@ -280,10 +336,19 @@ public class TestProxy extends AbstractTestProxy {
 
   @Override
   @Nullable
-  public AssertEqualsDiffViewerProvider getDiffViewerProvider() {
-    if (myState instanceof AssertEqualsDiffViewerProvider) {
-      return (AssertEqualsDiffViewerProvider)myState;
+  public DiffHyperlink getDiffViewerProvider() {
+    if (myState instanceof ComparisonFailureState) {
+      return ((ComparisonFailureState)myState).getHyperlink();
     }
+
+    for (TestProxy proxy : getChildren()) {
+      if (!proxy.isDefect()) continue;
+      final DiffHyperlink provider = proxy.getDiffViewerProvider();
+      if (provider != null) {
+        return provider;
+      }
+    }
+
     return null;
   }
 }

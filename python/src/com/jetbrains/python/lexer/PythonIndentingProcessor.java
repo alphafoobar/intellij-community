@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -143,6 +143,9 @@ public class PythonIndentingProcessor extends MergingLexerAdapter {
         if (text.charAt(i) == ' ') {
           spaces++;
         }
+        else if (text.charAt(i) == '\t') {
+          spaces += 8;
+        }
       }
       myCurrentNewLineIndent = spaces;
     }
@@ -193,9 +196,6 @@ public class PythonIndentingProcessor extends MergingLexerAdapter {
   protected void checkStartState(int startOffset, int initialState) {
     if (DUMP_TOKENS) {
       System.out.println("\n--- LEXER START---");
-    }
-    if (startOffset != 0 || initialState != 0) {
-      throw new RuntimeException("Indenting lexer does not support incremental lexing");
     }
   }
 
@@ -320,7 +320,8 @@ public class PythonIndentingProcessor extends MergingLexerAdapter {
     // line break token
     int end = getBaseTokenEnd();
     advanceBase();
-    while (getBaseTokenType() == PyTokenTypes.SPACE || (!breakStatementOnLineBreak && getBaseTokenType() == PyTokenTypes.LINE_BREAK)) {
+    while (getBaseTokenType() == PyTokenTypes.SPACE || getBaseTokenType() == PyTokenTypes.TAB ||
+           (!breakStatementOnLineBreak && getBaseTokenType() == PyTokenTypes.LINE_BREAK)) {
       end = getBaseTokenEnd();
       advanceBase();
     }

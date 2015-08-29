@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,15 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.util.Iconable;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.xml.XmlDocument;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ConstantFunction;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.SmartList;
-import com.intellij.util.containers.ConcurrentHashMap;
 import com.intellij.util.containers.ConcurrentInstanceMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.highlighting.DomElementsAnnotator;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -53,7 +54,8 @@ public class DomFileDescription<T> {
   private final Map<Class<? extends DomElement>,Class<? extends DomElement>> myImplementations = new HashMap<Class<? extends DomElement>, Class<? extends DomElement>>();
   private final TypeChooserManager myTypeChooserManager = new TypeChooserManager();
   private final List<DomReferenceInjector> myInjectors = new SmartList<DomReferenceInjector>();
-  private final Map<String, NotNullFunction<XmlTag,List<String>>> myNamespacePolicies = new ConcurrentHashMap<String, NotNullFunction<XmlTag, List<String>>>();
+  private final Map<String, NotNullFunction<XmlTag, List<String>>> myNamespacePolicies =
+    ContainerUtil.newConcurrentMap();
 
   public DomFileDescription(final Class<T> rootElementClass, @NonNls final String rootTagName, @NonNls final String... allPossibleRootTagNamespaces) {
     myRootElementClass = rootElementClass;
@@ -126,7 +128,8 @@ public class DomFileDescription<T> {
   /**
    * @return some version. Override and change (e.g. <code>super.getVersion()+1</code>) when after some changes some files stopped being
    * described by this description or vice versa, so that the
-   * {@link com.intellij.util.xml.DomService#getDomFileCandidates(Class, com.intellij.openapi.project.Project)} index is rebuilt correctly.
+   * {@link com.intellij.util.xml.DomService#getDomFileCandidates(Class, com.intellij.openapi.project.Project, com.intellij.psi.search.GlobalSearchScope)}
+   * index is rebuilt correctly.
    */
   public int getVersion() {
     return myRootTagName.hashCode();
@@ -159,8 +162,11 @@ public class DomFileDescription<T> {
 
   /**
    * The right place to call
-   * {@link #registerNamespacePolicy(String, String...)}
-   * and {@link #registerTypeChooser(java.lang.reflect.Type, TypeChooser)}.
+   * <ul>
+   * <li>{@link #registerNamespacePolicy(String, String...)}</li>
+   * <li>{@link #registerTypeChooser(java.lang.reflect.Type, TypeChooser)}</li>
+   * <li>{@link #registerReferenceInjector(DomReferenceInjector)}</li>
+   * </ul>
    */
   protected void initializeFileDescription() {}
 
@@ -220,7 +226,7 @@ public class DomFileDescription<T> {
    * @return dependency item set 
    */
   @NotNull
-  public Set<? extends Object> getDependencyItems(XmlFile file) {
+  public Set<?> getDependencyItems(XmlFile file) {
     return Collections.emptySet();
   }
 
@@ -267,5 +273,10 @@ public class DomFileDescription<T> {
 
   public int getStubVersion() {
     return 0;
+  }
+
+  @Override
+  public String toString() {
+    return getRootElementClass() + " <" + getRootTagName() + "> \n" + StringUtil.join(getAllPossibleRootTagNamespaces());
   }
 }

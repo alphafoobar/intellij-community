@@ -192,11 +192,11 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
 
     final PsiMethodStub stub = getStub();
     if (stub != null) {
-      final String typeText = TypeInfo.createTypeText(stub.getReturnTypeText(true));
-      if (typeText == null) return null;
-
       PsiType type = SoftReference.dereference(myCachedType);
       if (type != null) return type;
+
+      final String typeText = TypeInfo.createTypeText(stub.getReturnTypeText(true));
+      if (typeText == null) return null;
 
       try {
         type = JavaPsiFacade.getInstance(getProject()).getElementFactory().createTypeFromText(typeText, this);
@@ -262,6 +262,9 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
 
   @Override
   public PsiDocComment getDocComment() {
+    final PsiMethodStub stub = getStub();
+    if (stub != null && !stub.hasDocComment()) return null;
+
     return (PsiDocComment)getNode().findChildByRoleAsPsiElement(ChildRole.DOC_COMMENT);
   }
 
@@ -325,9 +328,12 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
   public PsiElement getOriginalElement() {
     final PsiClass containingClass = getContainingClass();
     if (containingClass != null) {
-      final PsiMethod originalMethod = ((PsiClass)containingClass.getOriginalElement()).findMethodBySignature(this, false);
-      if (originalMethod != null) {
-        return originalMethod;
+      PsiElement original = containingClass.getOriginalElement();
+      if (original != containingClass) {
+        final PsiMethod originalMethod = ((PsiClass)original).findMethodBySignature(this, false);
+        if (originalMethod != null) {
+          return originalMethod;
+        }
       }
     }
     return this;

@@ -16,11 +16,13 @@
 
 package com.intellij.refactoring.move.moveFilesOrDirectories;
 
+import com.intellij.ide.scratch.ScratchFileService;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.move.MoveCallback;
@@ -50,11 +52,6 @@ public class MoveFilesOrDirectoriesHandler extends MoveHandlerDelegate {
       }
     }
 
-    PsiElement[] filteredElements = PsiTreeUtil.filterAncestors(elements);
-    if (filteredElements.length != elements.length) {
-      // there are nested dirs
-      return false;
-    }
     return super.canMove(elements, targetContainer);
   }
 
@@ -64,12 +61,26 @@ public class MoveFilesOrDirectoriesHandler extends MoveHandlerDelegate {
   }
 
   public static boolean isValidTarget(PsiElement psiElement) {
-    return (psiElement instanceof PsiDirectory || psiElement instanceof PsiDirectoryContainer) && psiElement.getManager().isInProject(psiElement);
+    if (!(psiElement instanceof PsiDirectory || psiElement instanceof PsiDirectoryContainer)) return false;
+    return psiElement.getManager().isInProject(psiElement) || isInScratches(psiElement);
+  }
+
+  protected static boolean isInScratches(PsiElement psiElement) {
+    VirtualFile virtualFile = psiElement instanceof PsiFileSystemItem ? ((PsiFileSystemItem)psiElement).getVirtualFile() : null;
+    if (virtualFile != null && ScratchFileService.getInstance().getRootType(virtualFile) != null) return true;
+    return false;
   }
 
   public void doMove(final PsiElement[] elements, final PsiElement targetContainer) {
     final Project project = targetContainer != null ? targetContainer.getProject() : elements[0].getProject();
     doMove(project, elements, targetContainer, null);
+  }
+
+
+  @Nullable
+  @Override
+  public PsiElement[] adjustForMove(Project project, PsiElement[] sourceElements, PsiElement targetElement) {
+    return PsiTreeUtil.filterAncestors(sourceElements);
   }
 
   @Override
@@ -78,7 +89,10 @@ public class MoveFilesOrDirectoriesHandler extends MoveHandlerDelegate {
                         "container: " + targetContainer + "; elements: " + Arrays.toString(elements) + "; working handler: " + toString())) {
       return;
     }
-    MoveFilesOrDirectoriesUtil.doMove(project, adjustForMove(project, elements, targetContainer), new PsiElement[] {targetContainer}, callback);
+    final PsiElement[] adjustedElements = adjustForMove(project, elements, targetContainer);
+    if (adjustedElements != null) {
+      MoveFilesOrDirectoriesUtil.doMove(project, adjustedElements, new PsiElement[] {targetContainer}, callback);
+    }
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.jetbrains.python.console;
 
-import com.intellij.execution.console.LanguageConsoleImpl;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ui.UIUtil;
@@ -24,7 +23,7 @@ import com.jetbrains.python.run.PythonProcessHandler;
 import java.nio.charset.Charset;
 
 /**
- * @author oleg
+ * @author traff
  */
 public class PyConsoleProcessHandler extends PythonProcessHandler {
   private final PythonConsoleView myConsoleView;
@@ -41,9 +40,11 @@ public class PyConsoleProcessHandler extends PythonProcessHandler {
 
   @Override
   public void coloredTextAvailable(final String text, final Key attributes) {
-    final String string = PyConsoleUtil.processPrompts(getConsole(), StringUtil.convertLineSeparators(text));
+    String string = PyConsoleUtil.processPrompts(myConsoleView, StringUtil.convertLineSeparators(text));
 
     myConsoleView.print(string, attributes);
+
+    notifyColoredListeners(text, attributes);
   }
 
   @Override
@@ -55,6 +56,11 @@ public class PyConsoleProcessHandler extends PythonProcessHandler {
   @Override
   public boolean isSilentlyDestroyOnClose() {
     return !myPydevConsoleCommunication.isExecuting();
+  }
+
+  @Override
+  protected boolean shouldKillProcessSoftly() {
+    return false;
   }
 
   private void doCloseCommunication() {
@@ -75,10 +81,6 @@ public class PyConsoleProcessHandler extends PythonProcessHandler {
 
       // waiting for REPL communication before destroying process handler
     }
-  }
-
-  private LanguageConsoleImpl getConsole() {
-    return myConsoleView.getConsole();
   }
 }
 

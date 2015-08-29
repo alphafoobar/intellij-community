@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,9 +31,13 @@ import com.intellij.util.IconUtil;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.idea.svn.*;
+import org.jetbrains.idea.svn.SvnBundle;
+import org.jetbrains.idea.svn.SvnConfiguration;
+import org.jetbrains.idea.svn.SvnUtil;
+import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.branchConfig.SvnBranchMapperManager;
+import org.jetbrains.idea.svn.info.Info;
 import org.tmatesoft.svn.core.SVNURL;
-import org.tmatesoft.svn.core.wc.SVNInfo;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -97,8 +101,8 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
     }
 
     SvnConfiguration svnConfig = SvnConfiguration.getInstance(myVcs.getProject());
-    myDryRunCheckbox.setSelected(svnConfig.MERGE_DRY_RUN);
-    myIgnoreWhitespacesCheckBox.setSelected(svnConfig.IGNORE_SPACES_IN_MERGE);
+    myDryRunCheckbox.setSelected(svnConfig.isMergeDryRun());
+    myIgnoreWhitespacesCheckBox.setSelected(svnConfig.isIgnoreSpacesInMerge());
 
     mySourceInfoLabel.setText(SvnBundle.message("action.Subversion.integrate.changes.branch.info.source.label.text", currentBranch));
     myTargetInfoLabel.setText(SvnBundle.message("action.Subversion.integrate.changes.branch.info.target.label.text", selectedBranchUrl));
@@ -139,7 +143,7 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
     final String removeText = SvnBundle.message("action.Subversion.integrate.changes.dialog.remove.wc.text");
     myGroup.add(new AnAction(removeText, removeText, PlatformIcons.DELETE_ICON) {
       {
-        registerCustomShortcutSet(CommonShortcuts.DELETE, myWorkingCopiesList);
+        registerCustomShortcutSet(CommonShortcuts.getDelete(), myWorkingCopiesList);
       }
 
       public void update(final AnActionEvent e) {
@@ -223,8 +227,8 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
 
   public void saveOptions() {
     SvnConfiguration svnConfig = SvnConfiguration.getInstance(myVcs.getProject());
-    svnConfig.MERGE_DRY_RUN = myDryRunCheckbox.isSelected();
-    svnConfig.IGNORE_SPACES_IN_MERGE = myIgnoreWhitespacesCheckBox.isSelected();
+    svnConfig.setMergeDryRun(myDryRunCheckbox.isSelected());
+    svnConfig.setIgnoreSpacesInMerge(myIgnoreWhitespacesCheckBox.isSelected());
   }
 
   protected JComponent createCenterPanel() {
@@ -248,7 +252,7 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
 
   @Nullable
   private static SVNURL realTargetUrl(final SvnVcs vcs, final WorkingCopyInfo info, final String targetBranchUrl) {
-    final SVNInfo svnInfo = vcs.getInfo(info.getLocalPath());
+    final Info svnInfo = vcs.getInfo(info.getLocalPath());
     final SVNURL svnurl = svnInfo != null ? svnInfo.getURL() : null;
 
     return (svnurl != null) && (svnurl.toString().startsWith(targetBranchUrl)) ? svnurl : null;
@@ -259,7 +263,7 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
                                                                 final boolean showIntegrationParameters,
                                                                 final String selectedLocalBranchPath, final String dialogTitle) {
     final IntegratedSelectedOptionsDialog dialog = new IntegratedSelectedOptionsDialog(project, currentBranch, targetBranch);
-    if (! showIntegrationParameters) {
+    if (!showIntegrationParameters) {
       dialog.selectWcopyRootOnly();
     }
     if (selectedLocalBranchPath != null) {
@@ -268,16 +272,14 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
     if (dialogTitle != null) {
       dialog.setTitle(dialogTitle);
     }
-    dialog.show();
-
-    if (dialog.isOK()) {
+    if (dialog.showAndGet()) {
       ApplicationManager.getApplication().saveAll();
       dialog.saveOptions();
 
       final WorkingCopyInfo info = dialog.getSelectedWc();
       if (info != null) {
         final File file = new File(info.getLocalPath());
-        if ((! file.exists()) || (! file.isDirectory())) {
+        if ((!file.exists()) || (!file.isDirectory())) {
           Messages.showErrorDialog(SvnBundle.message("action.Subversion.integrate.changes.error.target.not.dir.text"),
                                    SvnBundle.message("action.Subversion.integrate.changes.messages.title"));
           return null;
@@ -290,7 +292,7 @@ public class IntegratedSelectedOptionsDialog extends DialogWrapper {
                                    SvnBundle.message("action.Subversion.integrate.changes.messages.title"));
           return null;
         }
-        return new Pair<WorkingCopyInfo, SVNURL>(info, targetUrl);
+        return Pair.create(info, targetUrl);
       }
     }
     return null;

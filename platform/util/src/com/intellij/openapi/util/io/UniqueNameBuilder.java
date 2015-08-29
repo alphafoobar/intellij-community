@@ -21,6 +21,10 @@ public class UniqueNameBuilder<T> {
     myMaxLength = maxLength;
   }
 
+  public boolean contains(T file) {
+    return myPaths.containsKey(file);
+  }
+
   private static class Node {
     final char myChar;
     final TIntObjectHashMap<Node> myChildren;
@@ -98,5 +102,9 @@ public class UniqueNameBuilder<T> {
       n = n.myParentNode;
     }
     return b.toString();
+  }
+
+  public String getSeparator() {
+    return mySeparator;
   }
 }

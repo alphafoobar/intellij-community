@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
  */
 package com.intellij.ui;
 
+import com.intellij.ide.ui.UISettings;
 import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import java.awt.*;
 
-import static javax.swing.SwingConstants.*;
+import static javax.swing.SwingConstants.CENTER;
+import static javax.swing.SwingConstants.LEFT;
 
 public class SeparatorWithText extends JComponent {
 
@@ -34,11 +36,11 @@ public class SeparatorWithText extends JComponent {
     setFont(getFont().deriveFont(Font.BOLD));
   }
 
-  private static int getVgap() {
+  protected static int getVgap() {
     return UIUtil.isUnderNativeMacLookAndFeel() ? 1 : 3;
   }
 
-  private static int getHgap() {
+  protected static int getHgap() {
     return 3;
   }
 
@@ -100,13 +102,17 @@ public class SeparatorWithText extends JComponent {
         }
         g.drawLine(textR.x + textR.width + getHgap(), lineY, getWidth() - 1, lineY);
       }
-      UIUtil.applyRenderingHints(g);
+      UISettings.setupAntialiasing(g);
       g.setColor(GroupedElementsRenderer.POPUP_SEPARATOR_TEXT_FOREGROUND);
       g.drawString(s, textR.x, textR.y + g.getFontMetrics().getAscent());
     }
     else {
       g.drawLine(0, getVgap(), getWidth() - 1, getVgap());
     }
+  }
+
+  protected String getCaption() {
+    return myCaption;
   }
 
   public void setCaption(String captionAboveOf) {

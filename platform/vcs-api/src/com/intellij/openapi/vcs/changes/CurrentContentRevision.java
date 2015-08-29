@@ -39,16 +39,13 @@ public class CurrentContentRevision implements ContentRevision {
 
   @Nullable
   public String getContent() {
-    VirtualFile vFile = getVirtualFile();
+    final VirtualFile vFile = getVirtualFile();
     if (vFile == null) {
-      myFile.refresh();
-      vFile = getVirtualFile();
-      if (vFile == null) return null;
+      return null;
     }
-    final VirtualFile finalVFile = vFile;
     final Document doc = ApplicationManager.getApplication().runReadAction(new Computable<Document>() {
       public Document compute() {
-        return FileDocumentManager.getInstance().getDocument(finalVFile);
+        return FileDocumentManager.getInstance().getDocument(vFile);
     }});
     if (doc == null) return null;
     return doc.getText();
@@ -71,7 +68,8 @@ public class CurrentContentRevision implements ContentRevision {
     return VcsRevisionNumber.NULL;
   }
 
-  public static ContentRevision create(FilePath file) {
+  @NotNull
+  public static ContentRevision create(@NotNull FilePath file) {
     if (file.getFileType().isBinary()) {
       return new CurrentBinaryContentRevision(file);
     }

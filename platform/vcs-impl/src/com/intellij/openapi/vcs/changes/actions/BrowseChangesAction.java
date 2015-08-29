@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,18 +41,25 @@ public class BrowseChangesAction extends AnAction implements DumbAware {
     assert vcs != null;
     final CommittedChangesProvider provider = vcs.getCommittedChangesProvider();
     assert provider != null;
-    ChangeBrowserSettings settings = provider.createDefaultSettings();
+    final VcsConfiguration vcsConfiguration = VcsConfiguration.getInstance(project);
+    ChangeBrowserSettings settings = vcsConfiguration.CHANGE_BROWSER_SETTINGS.get(vcs.getName());
+    if (settings == null) {
+      settings = provider.createDefaultSettings();
+      vcsConfiguration.CHANGE_BROWSER_SETTINGS.put(vcs.getName(), settings);
+    }
     CommittedChangesFilterDialog dlg = new CommittedChangesFilterDialog(project, provider.createFilterUI(true), settings);
-    dlg.show();
-    if (!dlg.isOK()) return;
+    if (!dlg.showAndGet()) {
+      return;
+    }
 
     int maxCount = 0;
     if (!settings.isAnyFilterSpecified()) {
-      int rc = Messages.showYesNoCancelDialog(project, VcsBundle.message("browse.changes.no.filter.prompt"), VcsBundle.message("browse.changes.title"),
-                                     VcsBundle.message("browse.changes.show.recent.button"),
-                                     VcsBundle.message("browse.changes.show.all.button"),
-                                     CommonBundle.getCancelButtonText(),
-                                    Messages.getQuestionIcon());
+      int rc = Messages
+        .showYesNoCancelDialog(project, VcsBundle.message("browse.changes.no.filter.prompt"), VcsBundle.message("browse.changes.title"),
+                               VcsBundle.message("browse.changes.show.recent.button"),
+                               VcsBundle.message("browse.changes.show.all.button"),
+                               CommonBundle.getCancelButtonText(),
+                               Messages.getQuestionIcon());
       if (rc == Messages.CANCEL) {
         return;
       }

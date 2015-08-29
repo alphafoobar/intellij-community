@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.openapi.actionSystem;
 
 import com.intellij.ui.switcher.QuickActionProvider;
 import com.intellij.ui.switcher.SwitchProvider;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -47,9 +48,9 @@ public interface ActionToolbar extends SwitchProvider, QuickActionProvider {
   int AUTO_LAYOUT_POLICY = 2;
 
   /** This is default minimum size of the toolbar button */
-  Dimension DEFAULT_MINIMUM_BUTTON_SIZE = new Dimension(25, 25);
+  Dimension DEFAULT_MINIMUM_BUTTON_SIZE = JBUI.size(25, 25);
 
-  Dimension NAVBAR_MINIMUM_BUTTON_SIZE = new Dimension(20, 20);
+  Dimension NAVBAR_MINIMUM_BUTTON_SIZE = JBUI.size(20, 20);
 
   /**
    * @return component which represents the tool bar on UI
@@ -71,7 +72,7 @@ public interface ActionToolbar extends SwitchProvider, QuickActionProvider {
   void setLayoutPolicy(int layoutPolicy);
 
   /**
-   * If the valus is <code>true</code> then the all button on toolbar are
+   * If the value is <code>true</code> then the all button on toolbar are
    * the same size. It very useful when you create "Outlook" like toolbar.
    * Currently this method can be considered as hot fix.
    */
@@ -101,7 +102,7 @@ public interface ActionToolbar extends SwitchProvider, QuickActionProvider {
   int getMaxButtonHeight();
 
   /**
-   * Forces update of the all actions in the toolbars. Actions, however, normally updated automatially every 500msec.
+   * Forces update of the all actions in the toolbars. Actions, however, normally updated automatically every 500 ms.
    */
   void updateActionsImmediately();
 

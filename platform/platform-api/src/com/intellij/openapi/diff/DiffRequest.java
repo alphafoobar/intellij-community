@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Factory;
 import com.intellij.openapi.util.Pair;
+import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -45,7 +46,7 @@ public abstract class DiffRequest {
   protected DiffRequest(@Nullable Project project) {
     myProject = project;
     myGenericData = new HashMap<String, Object>(2);
-    myAdditional = new ArrayList<Pair<String, DiffRequest>>(0);
+    myAdditional = new SmartList<Pair<String, DiffRequest>>();
   }
 
   public void setToolbarAddons(@NotNull ToolbarAddons toolbarAddons) {
@@ -91,7 +92,7 @@ public abstract class DiffRequest {
   }
 
   public void addOtherLayer(final String name, DiffRequest request) {
-    myAdditional.add(new Pair<String, DiffRequest>(name, request));
+    myAdditional.add(Pair.create(name, request));
   }
 
   public List<Pair<String, DiffRequest>> getOtherLayers() {

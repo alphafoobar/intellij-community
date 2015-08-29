@@ -15,20 +15,18 @@
  */
 package org.jetbrains.jps.incremental.instrumentation;
 
+import com.intellij.compiler.instrumentation.FailSafeClassReader;
 import com.intellij.compiler.instrumentation.InstrumentationClassFinder;
 import com.intellij.compiler.instrumentation.InstrumenterClassWriter;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.asm4.ClassReader;
-import org.jetbrains.asm4.ClassWriter;
 import org.jetbrains.jps.ModuleChunk;
-import org.jetbrains.jps.incremental.BinaryContent;
-import org.jetbrains.jps.incremental.BuilderCategory;
-import org.jetbrains.jps.incremental.CompileContext;
-import org.jetbrains.jps.incremental.CompiledClass;
+import org.jetbrains.jps.incremental.*;
 import org.jetbrains.jps.incremental.messages.BuildMessage;
 import org.jetbrains.jps.incremental.messages.CompilerMessage;
+import org.jetbrains.org.objectweb.asm.ClassReader;
+import org.jetbrains.org.objectweb.asm.ClassWriter;
 
 /**
  * @author Eugene Zhuravlev
@@ -47,8 +45,11 @@ public abstract class BaseInstrumentingBuilder extends ClassProcessingBuilder {
   protected final ExitCode performBuild(CompileContext context, ModuleChunk chunk, InstrumentationClassFinder finder, OutputConsumer outputConsumer) {
     ExitCode exitCode = ExitCode.NOTHING_DONE;
     for (CompiledClass compiledClass : outputConsumer.getCompiledClasses().values()) {
+      if (Utils.IS_TEST_MODE || LOG.isDebugEnabled()) {
+        LOG.info("checking " + compiledClass + " by " + getClass());
+      }
       final BinaryContent originalContent = compiledClass.getContent();
-      final ClassReader reader = new ClassReader(originalContent.getBuffer(), originalContent.getOffset(), originalContent.getLength());
+      final ClassReader reader = new FailSafeClassReader(originalContent.getBuffer(), originalContent.getOffset(), originalContent.getLength());
       final int version = getClassFileVersion(reader);
       if (IS_INSTRUMENTED_KEY.get(compiledClass, Boolean.FALSE) || !canInstrument(compiledClass, version)) {
         // do not instrument the same content twice
@@ -56,6 +57,9 @@ public abstract class BaseInstrumentingBuilder extends ClassProcessingBuilder {
       }
       final ClassWriter writer = new InstrumenterClassWriter(getAsmClassWriterFlags(version), finder);
       try {
+        if (Utils.IS_TEST_MODE || LOG.isDebugEnabled()) {
+          LOG.info("instrumenting " + compiledClass + " by " + getClass());
+        }
         final BinaryContent instrumented = instrument(context, compiledClass, reader, writer, finder);
         if (instrumented != null) {
           compiledClass.setContent(instrumented);

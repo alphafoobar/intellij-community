@@ -19,7 +19,8 @@ import com.intellij.execution.actions.ChooseDebugConfigurationPopupAction;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.xdebugger.AbstractDebuggerSession;
 import com.intellij.xdebugger.impl.DebuggerSupport;
@@ -28,7 +29,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * @author nik
  */
-public class ResumeAction extends XDebuggerActionBase {
+public class ResumeAction extends XDebuggerActionBase implements DumbAware {
   @Override
   protected boolean isEnabled(AnActionEvent e) {
     Project project = e.getData(CommonDataKeys.PROJECT);
@@ -50,7 +51,10 @@ public class ResumeAction extends XDebuggerActionBase {
   @Override
   public void actionPerformed(AnActionEvent e) {
     if (!performWithHandler(e)) {
-      new ChooseDebugConfigurationPopupAction().actionPerformed(e);
+      Project project = getEventProject(e);
+      if (project != null && !DumbService.isDumb(project)) {
+        new ChooseDebugConfigurationPopupAction().actionPerformed(e);
+      }
     }
   }
 

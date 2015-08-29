@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,5 +30,10 @@ public class PyFileTypeDetector implements FileTypeRegistry.FileTypeDetector {
   @Override
   public FileType detect(@NotNull VirtualFile file, @NotNull ByteSequence firstBytes, @Nullable CharSequence firstCharsIfText) {
     return FileUtil.isHashBangLine(firstCharsIfText, "python") ? PythonFileType.INSTANCE : null;
+  }
+
+  @Override
+  public int getVersion() {
+    return 1;
   }
 }

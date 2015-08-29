@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,26 +45,6 @@ public class IdTableBuilding {
 
   public interface ScanWordProcessor {
     void run(CharSequence chars, @Nullable char[] charsArray, int start, int end);
-  }
-
-  public static class PlainTextIndexer extends FileTypeIdIndexer {
-    @Override
-    @NotNull
-    public Map<IdIndexEntry, Integer> map(final FileContent inputData) {
-      final IdDataConsumer consumer = new IdDataConsumer();
-      final CharSequence chars = inputData.getContentAsText();
-      scanWords(new ScanWordProcessor() {
-        @Override
-        public void run(final CharSequence chars11, @Nullable char[] charsArray, final int start, final int end) {
-          if (charsArray != null) {
-            consumer.addOccurrence(charsArray, start, end, (int)UsageSearchContext.IN_PLAIN_TEXT);
-          } else {
-            consumer.addOccurrence(chars11, start, end, (int)UsageSearchContext.IN_PLAIN_TEXT);
-          }
-        }
-      }, chars, 0, chars.length());
-      return consumer.getResult();
-    }
   }
 
   private static final Map<FileType, FileTypeIdIndexer> ourIdIndexers = new HashMap<FileType, FileTypeIdIndexer>();
@@ -132,7 +112,7 @@ public class IdTableBuilding {
 
     @Override
     @NotNull
-    public Map<IdIndexEntry, Integer> map(final FileContent inputData) {
+    public Map<IdIndexEntry, Integer> map(@NotNull final FileContent inputData) {
       final CharSequence chars = inputData.getContentAsText();
       final char[] charsArray = CharArrayUtil.fromSequenceWithoutCopying(chars);
       final IdDataConsumer consumer = new IdDataConsumer();
@@ -149,7 +129,9 @@ public class IdTableBuilding {
         }
 
         private int convertToMask(final WordOccurrence.Kind kind) {
-          if (kind == null) return UsageSearchContext.ANY;
+          if (kind == null) {
+            return UsageSearchContext.ANY;
+          }
           if (kind == WordOccurrence.Kind.CODE) return UsageSearchContext.IN_CODE;
           if (kind == WordOccurrence.Kind.COMMENTS) return UsageSearchContext.IN_COMMENTS;
           if (kind == WordOccurrence.Kind.LITERALS) return UsageSearchContext.IN_STRINGS;
@@ -158,6 +140,11 @@ public class IdTableBuilding {
         }
       });
       return consumer.getResult();
+    }
+
+    @Override
+    public int getVersion() {
+      return myScanner instanceof VersionedWordsScanner ? ((VersionedWordsScanner)myScanner).getVersion() : -1;
     }
   }
 

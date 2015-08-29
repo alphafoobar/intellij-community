@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ public class GroovyGeneratePropertyMissingHandler extends GenerateMembersHandler
     throws IncorrectOperationException {
 
     final String templName = JavaTemplateUtil.TEMPLATE_FROM_USAGE_METHOD_BODY;
-    final FileTemplate template = FileTemplateManager.getInstance().getCodeTemplate(templName);
+    final FileTemplate template = FileTemplateManager.getInstance(aClass.getProject()).getCodeTemplate(templName);
 
     final GrMethod getter = genGetter(aClass, template);
     final GrMethod setter = genSetter(aClass, template);
@@ -80,7 +80,7 @@ public class GroovyGeneratePropertyMissingHandler extends GenerateMembersHandler
 
   @Nullable
   private static GrMethod genGetter(PsiClass aClass, FileTemplate template) {
-    Properties properties = FileTemplateManager.getInstance().getDefaultProperties(aClass.getProject());
+    Properties properties = FileTemplateManager.getInstance(aClass.getProject()).getDefaultProperties();
     properties.setProperty(FileTemplate.ATTRIBUTE_RETURN_TYPE, "java.lang.Object");
     properties.setProperty(FileTemplate.ATTRIBUTE_DEFAULT_RETURN_VALUE, "null");
     properties.setProperty(FileTemplate.ATTRIBUTE_CALL_SUPER, "");
@@ -101,7 +101,7 @@ public class GroovyGeneratePropertyMissingHandler extends GenerateMembersHandler
 
   @Nullable
   private static GrMethod genSetter(PsiClass aClass, FileTemplate template) {
-    Properties properties = FileTemplateManager.getInstance().getDefaultProperties(aClass.getProject());
+    Properties properties = FileTemplateManager.getInstance(aClass.getProject()).getDefaultProperties();
     properties.setProperty(FileTemplate.ATTRIBUTE_RETURN_TYPE, "void");
     properties.setProperty(FileTemplate.ATTRIBUTE_DEFAULT_RETURN_VALUE, "");
     properties.setProperty(FileTemplate.ATTRIBUTE_CALL_SUPER, "");
@@ -161,6 +161,7 @@ public class GroovyGeneratePropertyMissingHandler extends GenerateMembersHandler
         final PsiMethod finalGetter = getter;
         final PsiMethod finalSetter = setter;
         if (!ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>() {
+          @Override
           public Boolean compute() {
             try {
               finalSetter.delete();

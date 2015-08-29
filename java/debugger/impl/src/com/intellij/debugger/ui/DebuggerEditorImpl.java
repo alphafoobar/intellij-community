@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@
 package com.intellij.debugger.ui;
 
 import com.intellij.debugger.DebuggerManagerEx;
-import com.intellij.debugger.engine.evaluation.CodeFragmentFactory;
-import com.intellij.debugger.engine.evaluation.CodeFragmentFactoryContextWrapper;
-import com.intellij.debugger.engine.evaluation.DefaultCodeFragmentFactory;
-import com.intellij.debugger.engine.evaluation.TextWithImports;
-import com.intellij.debugger.impl.DebuggerContextImpl;
+import com.intellij.debugger.engine.evaluation.*;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.impl.PositionUtil;
 import com.intellij.ide.DataManager;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
@@ -44,6 +41,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.reference.SoftReference;
 import com.intellij.ui.ClickListener;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.xdebugger.impl.XDebuggerHistoryManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,13 +55,14 @@ import java.util.List;
 /**
  * @author lex
  */
-public abstract class DebuggerEditorImpl extends CompletionEditor{
+public abstract class DebuggerEditorImpl extends CompletionEditor {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.DebuggerEditorImpl");
 
   public static final char SEPARATOR = 13;
 
   private final Project myProject;
   private PsiElement myContext;
+  private PsiType myThisType;
 
   private final String myRecentsId;
 
@@ -72,37 +71,40 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
   private final JLabel myChooseFactory = new JLabel();
   private WeakReference<ListPopup> myPopup;
 
-  private final PsiTreeChangeListener myPsiListener = new PsiTreeChangeAdapter() {
-    public void childRemoved(@NotNull PsiTreeChangeEvent event) {
-      checkContext();
-    }
-    public void childReplaced(@NotNull PsiTreeChangeEvent event) {
-      checkContext();
-    }
-    public void childMoved(@NotNull PsiTreeChangeEvent event) {
-      checkContext();
-    }
-    private void checkContext() {
-      final PsiElement contextElement = getContext();
-      if(contextElement == null || !contextElement.isValid()) {
-        final DebuggerManagerEx manager = DebuggerManagerEx.getInstanceEx(myProject);
-        if (manager == null) {
-          LOG.error("Cannot obtain debugger manager for project " + myProject);
-        }
-        final DebuggerContextImpl context = manager.getContextManager().getContext();
-        final PsiElement newContextElement = PositionUtil.getContextElement(context);
-        setContext(newContextElement != null && newContextElement.isValid()? newContextElement : null);
-      }
-    }
-  };
   private CodeFragmentFactory myFactory;
   protected boolean myInitialFactory;
 
-  public DebuggerEditorImpl(Project project, PsiElement context, String recentsId, final CodeFragmentFactory factory) {
+  public DebuggerEditorImpl(@NotNull Project project, @NotNull CodeFragmentFactory factory, @NotNull Disposable parentDisposable, @Nullable PsiElement context, @Nullable String recentsId) {
     myProject = project;
     myContext = context;
     myRecentsId = recentsId;
-    PsiManager.getInstance(project).addPsiTreeChangeListener(myPsiListener);
+    PsiManager.getInstance(project).addPsiTreeChangeListener(new PsiTreeChangeAdapter() {
+      @Override
+      public void childRemoved(@NotNull PsiTreeChangeEvent event) {
+        checkContext();
+      }
+      @Override
+      public void childReplaced(@NotNull PsiTreeChangeEvent event) {
+        checkContext();
+      }
+      @Override
+      public void childMoved(@NotNull PsiTreeChangeEvent event) {
+        checkContext();
+      }
+      private void checkContext() {
+        PsiElement contextElement = getContext();
+        if (contextElement == null || !contextElement.isValid()) {
+          DebuggerManagerEx manager = DebuggerManagerEx.getInstanceEx(myProject);
+          if (manager == null) {
+            LOG.error("Cannot obtain debugger manager for project " + myProject);
+            return;
+          }
+
+          PsiElement newContextElement = PositionUtil.getContextElement(manager.getContextManager().getContext());
+          setContext(newContextElement != null && newContextElement.isValid() ? newContextElement : null);
+        }
+      }
+    }, parentDisposable);
     setFactory(factory);
     myInitialFactory = true;
 
@@ -112,7 +114,7 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     myChooseFactory.setBorder(new EmptyBorder(0, 3, 0, 3));
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         ListPopup oldPopup = SoftReference.dereference(myPopup);
         if (oldPopup != null && !oldPopup.isDisposed()) {
           oldPopup.cancel();
@@ -146,9 +148,9 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     }
 
     DataContext dataContext = DataManager.getInstance().getDataContext(this);
-    return JBPopupFactory.getInstance().createActionGroupPopup("Choose language", actions, dataContext,
-                                                                          JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,
-                                                                          false);
+    return JBPopupFactory.getInstance().createActionGroupPopup("Choose Language", actions, dataContext,
+                                                               JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,
+                                                               false);
   }
 
   @Override
@@ -177,6 +179,7 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
 
   public abstract JComponent getPreferredFocusedComponent();
 
+  @Override
   public void setContext(@Nullable PsiElement context) {
     myContext = context;
 
@@ -203,6 +206,7 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
 
   protected abstract void updateEditorUi();
 
+  @Override
   public PsiElement getContext() {
     return myContext;
   }
@@ -211,8 +215,13 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     return myProject;
   }
 
+  @Override
   public void requestFocus() {
     getPreferredFocusedComponent().requestFocus();
+  }
+
+  public void setThisType(PsiType thisType) {
+    myThisType = thisType;
   }
 
   @Nullable
@@ -224,7 +233,10 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     }
     JavaCodeFragment codeFragment = getCurrentFactory().createPresentationCodeFragment(item, myContext, getProject());
     codeFragment.forceResolveScope(GlobalSearchScope.allScope(myProject));
-    if (myContext != null) {
+    if (myThisType != null) {
+      codeFragment.setThisType(myThisType);
+    }
+    else if (myContext != null) {
       final PsiClass contextClass = PsiTreeUtil.getNonStrictParentOfType(myContext, PsiClass.class);
       if (contextClass != null) {
         final PsiClassType contextType = JavaPsiFacade.getInstance(codeFragment.getProject()).getElementFactory().createType(contextClass);
@@ -250,13 +262,14 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     return myCurrentDocument;
   }
 
+  @Override
   public String getRecentsId() {
     return myRecentsId;
   }
 
   public void addRecent(TextWithImports text) {
-    if(getRecentsId() != null && text != null && !"".equals(text.getText())){
-      DebuggerRecents.getInstance(getProject()).addRecent(getRecentsId(), text);
+    if(getRecentsId() != null && text != null && !text.isEmpty()){
+      XDebuggerHistoryManager.getInstance(getProject()).addRecentExpression(getRecentsId(), TextWithImportsImpl.toXExpression(text));
     }
   }
 
@@ -274,13 +287,8 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     }
   }
 
-  public void dispose() {
-    PsiManager.getInstance(myProject).removePsiTreeChangeListener(myPsiListener);
-    myCurrentDocument = null;
-  }
-
   @NotNull
-  public static CodeFragmentFactory findAppropriateFactory(@NotNull TextWithImports text, @NotNull PsiElement context) {
+  private static CodeFragmentFactory findAppropriateFactory(@NotNull TextWithImports text, @Nullable PsiElement context) {
     for (CodeFragmentFactory factory : DebuggerUtilsEx.getCodeFragmentFactories(context)) {
       if (factory.getFileType().equals(text.getFileType())) {
         return factory;
@@ -297,7 +305,7 @@ public abstract class DebuggerEditorImpl extends CompletionEditor{
     setFactory(findAppropriateFactory(text, myContext));
   }
 
-  private void setFactory(@NotNull final CodeFragmentFactory factory) {
+  private void setFactory(@NotNull CodeFragmentFactory factory) {
     myFactory = factory;
     Icon icon = getCurrentFactory().getFileType().getIcon();
     myChooseFactory.setIcon(icon);

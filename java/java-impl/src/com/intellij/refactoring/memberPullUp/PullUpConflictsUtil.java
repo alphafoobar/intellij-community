@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,12 @@
  */
 package com.intellij.refactoring.memberPullUp;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
+import com.intellij.psi.search.searches.FunctionalExpressionSearch;
 import com.intellij.psi.util.*;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.classMembers.MemberInfoBase;
@@ -101,6 +103,18 @@ public class PullUpConflictsUtil {
         if (!movedMembers.contains(method) && !method.hasModifierProperty(PsiModifier.PRIVATE)) {
           if (method.findSuperMethods(superClass).length > 0) {
             abstrMethods.add(method);
+          }
+        }
+      }
+
+      if (newAbstractMethodInSuper(infos)) {
+        final PsiAnnotation annotation = AnnotationUtil.findAnnotation(superClass, CommonClassNames.JAVA_LANG_FUNCTIONAL_INTERFACE);
+        if (annotation != null) {
+          conflicts.putValue(annotation, RefactoringBundle.message("functional.interface.broken"));
+        } else {
+          final PsiFunctionalExpression functionalExpression = FunctionalExpressionSearch.search(superClass).findFirst();
+          if (functionalExpression != null) {
+            conflicts.putValue(functionalExpression, RefactoringBundle.message("functional.interface.broken"));
           }
         }
       }
@@ -191,6 +205,16 @@ public class PullUpConflictsUtil {
     return conflicts;
   }
 
+  private static boolean newAbstractMethodInSuper(MemberInfoBase<? extends PsiMember>[] infos) {
+    boolean toAbstract = false;
+    for (MemberInfoBase<? extends PsiMember> info : infos) {
+      if (info.isToAbstract()) {
+        toAbstract = true;
+      }
+    }
+    return toAbstract;
+  }
+
   private static void checkInterfaceTarget(MemberInfoBase<? extends PsiMember>[] infos, MultiMap<PsiElement, String> conflictsList) {
     for (MemberInfoBase<? extends PsiMember> info : infos) {
       PsiElement member = info.getMember();
@@ -271,11 +295,11 @@ public class PullUpConflictsUtil {
 
   private static class ConflictingUsagesOfSuperClassMembers extends ClassMemberReferencesVisitor {
 
-    private PsiMember myMember;
-    private PsiClass mySubClass;
-    private PsiPackage myTargetPackage;
-    private Set<PsiMember> myMovedMembers;
-    private MultiMap<PsiElement, String> myConflicts;
+    private final PsiMember myMember;
+    private final PsiClass mySubClass;
+    private final PsiPackage myTargetPackage;
+    private final Set<PsiMember> myMovedMembers;
+    private final MultiMap<PsiElement, String> myConflicts;
 
     public ConflictingUsagesOfSuperClassMembers(PsiMember member, PsiClass aClass,
                                                 PsiPackage targetPackage,

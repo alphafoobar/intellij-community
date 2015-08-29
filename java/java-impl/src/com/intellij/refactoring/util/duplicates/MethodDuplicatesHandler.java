@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.analysis.AnalysisUIOptions;
 import com.intellij.analysis.BaseAnalysisActionDialog;
 import com.intellij.history.LocalHistory;
 import com.intellij.history.LocalHistoryAction;
+import com.intellij.lang.ContextAwareActionHandler;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
@@ -28,13 +29,14 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.psi.*;
@@ -54,9 +56,15 @@ import java.util.*;
 /**
  * @author dsl
  */
-public class MethodDuplicatesHandler implements RefactoringActionHandler {
+public class MethodDuplicatesHandler implements RefactoringActionHandler, ContextAwareActionHandler {
   public static final String REFACTORING_NAME = RefactoringBundle.message("replace.method.code.duplicates.title");
   private static final Logger LOG = Logger.getInstance("#" + MethodDuplicatesHandler.class.getName());
+
+  @Override
+  public boolean isAvailableForQuickList(@NotNull Editor editor, @NotNull PsiFile file, @NotNull DataContext dataContext) {
+    final PsiElement element = file.findElementAt(editor.getCaretModel().getOffset());
+    return getCannotRefactorMessage(PsiTreeUtil.getParentOfType(element, PsiMember.class)) == null;
+  }
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, PsiFile file, DataContext dataContext) {
@@ -71,13 +79,13 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
     }
 
     final AnalysisScope scope = new AnalysisScope(file);
-    final Module module = ModuleUtil.findModuleForPsiElement(file);
-    final BaseAnalysisActionDialog dlg = new BaseAnalysisActionDialog(RefactoringBundle.message("replace.method.duplicates.scope.chooser.title", REFACTORING_NAME),
-                                                                RefactoringBundle.message("replace.method.duplicates.scope.chooser.message"),
-                                                                project, scope, module != null ? module.getName() : null, false,
-                                                                AnalysisUIOptions.getInstance(project), element);
-    dlg.show();
-    if (dlg.isOK()) {
+    final Module module = ModuleUtilCore.findModuleForPsiElement(file);
+    final BaseAnalysisActionDialog dlg =
+      new BaseAnalysisActionDialog(RefactoringBundle.message("replace.method.duplicates.scope.chooser.title", REFACTORING_NAME),
+                                   RefactoringBundle.message("replace.method.duplicates.scope.chooser.message"),
+                                   project, scope, module != null ? module.getName() : null, false,
+                                   AnalysisUIOptions.getInstance(project), element);
+    if (dlg.showAndGet()) {
       ProgressManager.getInstance().run(new Task.Backgroundable(project, "Locate duplicates", true) {
         @Override
         public void run(@NotNull ProgressIndicator indicator) {
@@ -107,7 +115,7 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
       }
     } else if (member instanceof PsiField) {
       final PsiField field = (PsiField)member;
-      if (!field.hasInitializer()) {
+      if (field.getInitializer() == null) {
         return "Field " + member.getName() + " doesn't have initializer";
       }
       final PsiClass containingClass = field.getContainingClass();
@@ -134,13 +142,18 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
     }
 
     final Map<PsiMember, Set<Module>> memberWithModulesMap = new HashMap<PsiMember, Set<Module>>();
-    for (PsiMember member : members) {
-      final Module module = ModuleUtil.findModuleForPsiElement(member);
+    for (final PsiMember member : members) {
+      final Module module = ApplicationManager.getApplication().runReadAction(new Computable<Module>() {
+        @Override
+        public Module compute() {
+          return ModuleUtilCore.findModuleForPsiElement(member);
+        }
+      });
       if (module != null) {
         final HashSet<Module> dependencies = new HashSet<Module>();
         ApplicationManager.getApplication().runReadAction(new Runnable() {
           public void run() {
-            ModuleUtil.collectModulesDependsOn(module, dependencies);
+            ModuleUtilCore.collectModulesDependsOn(module, dependencies);
           }
         });
         memberWithModulesMap.put(member, dependencies);
@@ -158,7 +171,7 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
             progressIndicator.setText2(ProjectUtil.calcRelativeToProjectPath(virtualFile, project));
           }
         }
-        final Module targetModule = ModuleUtil.findModuleForPsiElement(file);
+        final Module targetModule = ModuleUtilCore.findModuleForPsiElement(file);
         if (targetModule == null) return;
         for (Map.Entry<PsiMember, Set<Module>> entry : memberWithModulesMap.entrySet()) {
           final Set<Module> dependencies = entry.getValue();
@@ -189,23 +202,24 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
         }
       }
     });
-    replaceDuplicate(project, duplicates, members);
-    if (!silent) {
-      final Runnable nothingFoundRunnable = new Runnable() {
-        @Override
-        public void run() {
-          if (duplicates.isEmpty()) {
+    if (duplicates.isEmpty()) {
+      if (!silent) {
+        final Runnable nothingFoundRunnable = new Runnable() {
+          @Override
+          public void run() {
             final String message = RefactoringBundle.message("idea.has.not.found.any.code.that.can.be.replaced.with.method.call",
                                                              ApplicationNamesInfo.getInstance().getProductName());
             Messages.showInfoMessage(project, message, REFACTORING_NAME);
           }
+        };
+        if (ApplicationManager.getApplication().isUnitTestMode()) {
+          nothingFoundRunnable.run();
+        } else {
+          ApplicationManager.getApplication().invokeLater(nothingFoundRunnable, ModalityState.NON_MODAL);
         }
-      };
-      if (ApplicationManager.getApplication().isUnitTestMode()) {
-        nothingFoundRunnable.run();
-      } else {
-        ApplicationManager.getApplication().invokeLater(nothingFoundRunnable, ModalityState.NON_MODAL);
       }
+    } else {
+      replaceDuplicate(project, duplicates, members);
     }
   }
 
@@ -250,6 +264,16 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
   }
 
   public static List<Match> hasDuplicates(final PsiFile file, final PsiMember member) {
+    final DuplicatesFinder duplicatesFinder = createDuplicatesFinder(member);
+    if (duplicatesFinder == null) {
+      return Collections.emptyList();
+    }
+
+    return duplicatesFinder.findDuplicates(file);
+  }
+
+  @Nullable
+  public static DuplicatesFinder createDuplicatesFinder(PsiMember member) {
     PsiElement[] pattern;
     ReturnValue matchedReturnValue = null;
     if (member instanceof PsiMethod) {
@@ -281,17 +305,14 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler {
       pattern = new PsiElement[]{((PsiField)member).getInitializer()};
     }
     if (pattern.length == 0) {
-      return Collections.emptyList();
+      return null;
     }
     final List<? extends PsiVariable> inputVariables = 
       member instanceof PsiMethod ? Arrays.asList(((PsiMethod)member).getParameterList().getParameters()) : new ArrayList<PsiVariable>();
-    final DuplicatesFinder duplicatesFinder =
-      new DuplicatesFinder(pattern, 
-                           new InputVariables(inputVariables, member.getProject(), new LocalSearchScope(pattern), false), 
-                           matchedReturnValue,
-                           new ArrayList<PsiVariable>());
-
-    return duplicatesFinder.findDuplicates(file);
+    return new DuplicatesFinder(pattern,
+                                new InputVariables(inputVariables, member.getProject(), new LocalSearchScope(pattern), false),
+                                matchedReturnValue,
+                                new ArrayList<PsiVariable>());
   }
 
   static String getStatusMessage(final int duplicatesNo) {

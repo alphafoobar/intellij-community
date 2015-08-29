@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,33 @@
 
 package com.intellij.psi.impl.source.tree;
 
-import com.intellij.lang.ASTNode;
-import com.intellij.lang.FileASTNode;
+import com.intellij.lang.*;
+import com.intellij.openapi.util.Getter;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.source.CharTableImpl;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.IFileElementType;
+import com.intellij.psi.tree.ILightStubFileElementType;
 import com.intellij.util.CharTable;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-public class FileElement extends LazyParseableElement implements FileASTNode {
+public class FileElement extends LazyParseableElement implements FileASTNode, Getter<FileElement> {
+  public static final FileElement[] EMPTY_ARRAY = new FileElement[0];
   private volatile CharTable myCharTable = new CharTableImpl();
+  private volatile boolean myDetached;
+
+  @Override
+  protected PsiElement createPsiNoLock() {
+    return myDetached ? null : super.createPsiNoLock();
+  }
+
+  public void detachFromFile() {
+    myDetached = true;
+    clearPsi();
+  }
 
   @Override
   @NotNull
@@ -34,7 +50,19 @@ public class FileElement extends LazyParseableElement implements FileASTNode {
     return myCharTable;
   }
 
-  public FileElement(IElementType type, CharSequence text) {
+  @Nullable
+  @Override
+  public LighterAST getLighterAST() {
+    final IFileElementType contentType = (IFileElementType)getElementType();
+    assert contentType instanceof ILightStubFileElementType:contentType;
+
+    if (!isParsed()) {
+      return new FCTSBackedLighterAST(getCharTable(), ((ILightStubFileElementType<?>)contentType).parseContentsLight(this));
+    }
+    return new TreeBackedLighterAST(this);
+  }
+
+  public FileElement(@NotNull IElementType type, CharSequence text) {
     super(type, text);
   }
 
@@ -57,7 +85,12 @@ public class FileElement extends LazyParseableElement implements FileASTNode {
     return psiElementCopy.getTreeElement();
   }
 
-  public void setCharTable(CharTable table) {
+  public void setCharTable(@NotNull CharTable table) {
     myCharTable = table;
+  }
+
+  @Override
+  public FileElement get() {
+    return this;
   }
 }

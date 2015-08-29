@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,8 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
+import com.intellij.openapi.projectRoots.JdkUtil;
+import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.ex.PathUtilEx;
 import com.intellij.openapi.roots.*;
@@ -35,6 +37,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiFile;
 import org.intellij.lang.annotations.MagicConstant;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -56,16 +60,15 @@ public class JavaParametersUtil {
     if (vmParameters != null) {
       vmParameters = ProgramParametersUtil.expandPath(vmParameters, module, project);
 
-      if (parameters.getEnv() != null) {
-        for (Map.Entry<String, String> each : parameters.getEnv().entrySet()) {
-          vmParameters = StringUtil.replace(vmParameters, "$" + each.getKey() + "$", each.getValue(), false); //replace env usages
-        }
+      for (Map.Entry<String, String> each : parameters.getEnv().entrySet()) {
+        vmParameters = StringUtil.replace(vmParameters, "$" + each.getKey() + "$", each.getValue(), false); //replace env usages
       }
     }
 
     parameters.getVMParametersList().addParametersString(vmParameters);
   }
 
+  @MagicConstant(valuesFromClass = JavaParameters.class)
   public static int getClasspathType(final RunConfigurationModule configurationModule, final String mainClassName,
                                      final boolean classMustHaveSource) throws CantRunException {
     final Module module = configurationModule.getModule();
@@ -88,7 +91,9 @@ public class JavaParametersUtil {
     }
     final List<OrderEntry> entriesForFile = fileIndex.getOrderEntriesForFile(virtualFile);
     for (OrderEntry entry : entriesForFile) {
-      if (entry instanceof ExportableOrderEntry && ((ExportableOrderEntry)entry).getScope() == DependencyScope.TEST) return JavaParameters.JDK_AND_CLASSES_AND_TESTS;
+      if (entry instanceof ExportableOrderEntry && ((ExportableOrderEntry)entry).getScope() == DependencyScope.TEST) {
+        return JavaParameters.JDK_AND_CLASSES_AND_TESTS;
+      }
     }
     return JavaParameters.JDK_AND_CLASSES;
   }
@@ -96,7 +101,7 @@ public class JavaParametersUtil {
   public static void configureModule(final RunConfigurationModule runConfigurationModule,
                                      final JavaParameters parameters,
                                      @MagicConstant(valuesFromClass = JavaParameters.class) final int classPathType,
-                                     final String jreHome) throws CantRunException {
+                                     @Nullable String jreHome) throws CantRunException {
     Module module = runConfigurationModule.getModule();
     if (module == null) {
       throw CantRunException.noModuleConfigured(runConfigurationModule.getModuleName());
@@ -104,20 +109,25 @@ public class JavaParametersUtil {
     configureModule(module, parameters, classPathType, jreHome);
   }
 
-  public static void configureModule(Module module, JavaParameters parameters, @MagicConstant(valuesFromClass = JavaParameters.class) int classPathType, String jreHome) throws CantRunException {
+  public static void configureModule(Module module,
+                                     JavaParameters parameters,
+                                     @MagicConstant(valuesFromClass = JavaParameters.class) int classPathType,
+                                     @Nullable String jreHome) throws CantRunException {
     parameters.configureByModule(module, classPathType, createModuleJdk(module, jreHome));
   }
 
-  public static void configureProject(Project project, final JavaParameters parameters, @MagicConstant(valuesFromClass = JavaParameters.class) final int classPathType, final String jreHome)
-    throws CantRunException {
+  public static void configureProject(Project project,
+                                      final JavaParameters parameters,
+                                      @MagicConstant(valuesFromClass = JavaParameters.class) final int classPathType,
+                                      @Nullable String jreHome) throws CantRunException {
     parameters.configureByProject(project, classPathType, createProjectJdk(project, jreHome));
   }
 
-  private static Sdk createModuleJdk(final Module module, final String jreHome) throws CantRunException {
+  private static Sdk createModuleJdk(final Module module, @Nullable String jreHome) throws CantRunException {
     return jreHome == null ? JavaParameters.getModuleJdk(module) : createAlternativeJdk(jreHome);
   }
 
-  private static Sdk createProjectJdk(final Project project, final String jreHome) throws CantRunException {
+  public static Sdk createProjectJdk(final Project project, @Nullable String jreHome) throws CantRunException {
     return jreHome == null ? createProjectJdk(project) : createAlternativeJdk(jreHome);
   }
 
@@ -129,20 +139,34 @@ public class JavaParametersUtil {
     return jdk;
   }
 
-  private static Sdk createAlternativeJdk(final String jreHome) throws CantRunException {
+  private static Sdk createAlternativeJdk(@NotNull String jreHome) throws CantRunException {
+    final Sdk configuredJdk = ProjectJdkTable.getInstance().findJdk(jreHome);
+    if (configuredJdk != null) {
+      return configuredJdk;
+    }
+
+    if (JdkUtil.checkForJdk(jreHome)) {
+      throw new CantRunException(ExecutionBundle.message("jre.path.is.jdk.error.message"));
+    }
+    if (!JdkUtil.checkForJre(jreHome)) {
+      throw new CantRunException(ExecutionBundle.message("jre.path.is.not.valid.jre.home.error.message", jreHome));
+    }
+
     final Sdk jdk = JavaSdk.getInstance().createJdk("", jreHome);
     if (jdk == null) throw CantRunException.noJdkConfigured();
     return jdk;
   }
 
-  public static void checkAlternativeJRE(CommonJavaRunConfigurationParameters configuration) throws RuntimeConfigurationWarning {
+  public static void checkAlternativeJRE(@NotNull CommonJavaRunConfigurationParameters configuration) throws RuntimeConfigurationWarning {
     if (configuration.isAlternativeJrePathEnabled()) {
-      if (configuration.getAlternativeJrePath() == null ||
-          configuration.getAlternativeJrePath().length() == 0 ||
-          !JavaSdk.checkForJre(configuration.getAlternativeJrePath())) {
-        throw new RuntimeConfigurationWarning(
-          ExecutionBundle.message("jre.path.is.not.valid.jre.home.error.mesage", configuration.getAlternativeJrePath()));
-      }
+      checkAlternativeJRE(configuration.getAlternativeJrePath());
+    }
+  }
+
+  public static void checkAlternativeJRE(@Nullable String jrePath) throws RuntimeConfigurationWarning {
+    if (StringUtil.isEmpty(jrePath) ||
+        ProjectJdkTable.getInstance().findJdk(jrePath) == null && !JavaSdk.checkForJre(jrePath)) {
+      throw new RuntimeConfigurationWarning(ExecutionBundle.message("jre.path.is.not.valid.jre.home.error.message", jrePath));
     }
   }
 }

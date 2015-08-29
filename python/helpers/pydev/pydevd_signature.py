@@ -1,11 +1,17 @@
 import inspect
-import trace
 import os
 
-trace._warn = lambda *args: None   # workaround for http://bugs.python.org/issue17143 (PY-8706)
+try:
+    import trace
+except ImportError:
+    pass
+else:
+    trace._warn = lambda *args: None   # workaround for http://bugs.python.org/issue17143 (PY-8706)
+
 import gc
 from pydevd_comm import CMD_SIGNATURE_CALL_TRACE, NetCommand
 import pydevd_vars
+from pydevd_constants import xrange
 
 class Signature(object):
     def __init__(self, file, name):
@@ -25,17 +31,9 @@ class Signature(object):
 class SignatureFactory(object):
     def __init__(self):
         self._caller_cache = {}
-        self.project_roots =  os.getenv('PYCHARM_PROJECT_ROOTS', '').split(os.pathsep)
 
     def is_in_scope(self, filename):
-        filename = os.path.normcase(filename)
-        for root in self.project_roots:
-            root = os.path.normcase(root)
-            if filename.startswith(root):
-                return True
-        return False
-
-
+        return pydevd_utils.is_in_project_roots(filename)
 
     def create_signature(self, frame):
         try:
@@ -43,11 +41,11 @@ class SignatureFactory(object):
             locals = frame.f_locals
             filename, modulename, funcname = self.file_module_function_of(frame)
             res = Signature(filename, funcname)
-            for i in range(0, code.co_argcount):
+            for i in xrange(0, code.co_argcount):
                 name = code.co_varnames[i]
                 tp = type(locals[name])
                 class_name = tp.__name__
-                if class_name == 'instance':
+                if class_name == 'instance':  # old-style classes
                     tp = locals[name].__class__
                     class_name = tp.__name__
 
@@ -123,9 +121,8 @@ def create_signature_message(signature):
     return NetCommand(CMD_SIGNATURE_CALL_TRACE, 0, cmdText)
 
 def sendSignatureCallTrace(dbg, frame, filename):
-    if dbg.signature_factory:
-        if dbg.signature_factory.is_in_scope(filename):
-            dbg.writer.addCommand(create_signature_message(dbg.signature_factory.create_signature(frame)))
+    if dbg.signature_factory.is_in_scope(filename):
+        dbg.writer.addCommand(create_signature_message(dbg.signature_factory.create_signature(frame)))
 
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.impl.ActionManagerImpl;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ApplicationStarter;
+import com.intellij.openapi.application.ApplicationStarterEx;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.keymap.impl.ui.KeymapPanel;
 import com.intellij.openapi.options.SearchableConfigurable;
@@ -50,8 +50,7 @@ import java.util.TreeSet;
  * Pass corresponding -Didea.platform.prefix=YOUR_IDE_PREFIX to vm options and choose main_YOUR_IDE module
  */
 @SuppressWarnings({"CallToPrintStackTrace", "SynchronizeOnThis"})
-public class TraverseUIStarter implements ApplicationStarter {
-  private String OUTPUT_PATH;
+public class TraverseUIStarter extends ApplicationStarterEx {
   @NonNls private static final String OPTIONS = "options";
   @NonNls private static final String CONFIGURABLE = "configurable";
   @NonNls private static final String ID = "id";
@@ -61,12 +60,18 @@ public class TraverseUIStarter implements ApplicationStarter {
   @NonNls private static final String PATH = "path";
   @NonNls private static final String HIT = "hit";
 
+  private String OUTPUT_PATH;
+
+  @Override
+  public boolean isHeadless() {
+    return true;
+  }
+
   @Override
   @NonNls
   public String getCommandName() {
     return "traverseUI";
   }
-
 
   @Override
   public void premain(String[] args) {
@@ -77,7 +82,8 @@ public class TraverseUIStarter implements ApplicationStarter {
   public void main(String[] args){
     System.out.println("Starting searchable options index builder");
     try {
-      startup();
+      startup(OUTPUT_PATH);
+      ((ApplicationEx)ApplicationManager.getApplication()).exit(true, true);
     }
     catch (Throwable e) {
       System.out.println("Searchable options index builder failed");
@@ -86,7 +92,7 @@ public class TraverseUIStarter implements ApplicationStarter {
     }
   }
 
-  public void startup() throws IOException {
+  public static void startup(String outputPath) throws IOException {
     final HashMap<SearchableConfigurable, TreeSet<OptionDescription>> options =
       new HashMap<SearchableConfigurable, TreeSet<OptionDescription>>();
     SearchUtil.processProjectConfigurables(ProjectManager.getInstance().getDefaultProject(), options);
@@ -120,26 +126,25 @@ public class TraverseUIStarter implements ApplicationStarter {
       root.addContent(configurableElement);
       configurable.disposeUIResources();
     }
-    final File file = new File(OUTPUT_PATH);
+    final File file = new File(outputPath);
     if (!file.isFile()) {
       file.getParentFile().mkdirs();
       file.createNewFile();
     }
-    JDOMUtil.writeDocument(new Document(root), OUTPUT_PATH, "\n");
+    JDOMUtil.writeDocument(new Document(root), outputPath, "\n");
 
     System.out.println("Searchable options index builder completed");
-
-    ((ApplicationEx)ApplicationManager.getApplication()).exit(true);
   }
 
   private static void processFileTemplates(Element configurableElement) {
     final SearchableOptionsRegistrar optionsRegistrar = SearchableOptionsRegistrar.getInstance();
     TreeSet<OptionDescription> options = new TreeSet<OptionDescription>();
 
-    processTemplates(optionsRegistrar, options, FileTemplateManager.getInstance().getAllTemplates());
-    processTemplates(optionsRegistrar, options, FileTemplateManager.getInstance().getAllPatterns());
-    processTemplates(optionsRegistrar, options, FileTemplateManager.getInstance().getAllCodeTemplates());
-    processTemplates(optionsRegistrar, options, FileTemplateManager.getInstance().getAllJ2eeTemplates());
+    FileTemplateManager fileTemplateManager = FileTemplateManager.getDefaultInstance();
+    processTemplates(optionsRegistrar, options, fileTemplateManager.getAllTemplates());
+    processTemplates(optionsRegistrar, options, fileTemplateManager.getAllPatterns());
+    processTemplates(optionsRegistrar, options, fileTemplateManager.getAllCodeTemplates());
+    processTemplates(optionsRegistrar, options, fileTemplateManager.getAllJ2eeTemplates());
 
     writeOptions(configurableElement, options);
   }

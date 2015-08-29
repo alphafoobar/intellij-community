@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ComparisonUtils;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import com.siyeh.ig.psiutils.MethodCallUtils;
@@ -83,11 +84,6 @@ public class UnnecessaryUnboxingInspection extends BaseInspection {
   }
 
   @Override
-  public BaseInspectionVisitor buildVisitor() {
-    return new UnnecessaryUnboxingVisitor();
-  }
-
-  @Override
   public InspectionGadgetsFix buildFix(Object... infos) {
     return new UnnecessaryUnboxingFix();
   }
@@ -129,29 +125,35 @@ public class UnnecessaryUnboxingInspection extends BaseInspection {
           if (CommonClassNames.JAVA_LANG_BOOLEAN.equals(classname)) {
             @NonNls final String name = field.getName();
             if ("TRUE".equals(name)) {
-              replaceExpression(methodCall, "true");
+              PsiReplacementUtil.replaceExpression(methodCall, "true");
               return;
             }
             else if ("FALSE".equals(name)) {
-              replaceExpression(methodCall, "false");
+              PsiReplacementUtil.replaceExpression(methodCall, "false");
               return;
             }
           }
         }
       }
       final String strippedQualifierText = strippedQualifier.getText();
-      replaceExpression(methodCall, strippedQualifierText);
+      PsiReplacementUtil.replaceExpression(methodCall, strippedQualifierText);
     }
   }
 
-  private class UnnecessaryUnboxingVisitor extends BaseInspectionVisitor {
+  @Override
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
+  }
 
+  @Override
+  public BaseInspectionVisitor buildVisitor() {
+    return new UnnecessaryUnboxingVisitor();
+  }
+
+  private class UnnecessaryUnboxingVisitor extends BaseInspectionVisitor {
     @Override
     public void visitMethodCallExpression(@NotNull PsiMethodCallExpression expression) {
       super.visitMethodCallExpression(expression);
-      if (!PsiUtil.isLanguageLevel5OrHigher(expression)) {
-        return;
-      }
       if (!isUnboxingExpression(expression)) {
         return;
       }
@@ -242,12 +244,9 @@ public class UnnecessaryUnboxingInspection extends BaseInspection {
       if (!(expression instanceof PsiMethodCallExpression)) {
         return false;
       }
-      final PsiMethodCallExpression methodCallExpression =
-        (PsiMethodCallExpression)expression;
-      final PsiReferenceExpression methodExpression =
-        methodCallExpression.getMethodExpression();
-      final PsiExpression qualifier =
-        methodExpression.getQualifierExpression();
+      final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)expression;
+      final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
+      final PsiExpression qualifier = methodExpression.getQualifierExpression();
       if (qualifier == null) {
         return false;
       }
@@ -260,58 +259,23 @@ public class UnnecessaryUnboxingInspection extends BaseInspection {
         return false;
       }
       final String methodName = methodExpression.getReferenceName();
-      final String unboxingMethod =
-        s_unboxingMethods.get(qualifierTypeName);
+      final String unboxingMethod = s_unboxingMethods.get(qualifierTypeName);
       return unboxingMethod.equals(methodName);
     }
 
-    private boolean isSameMethodCalledWithoutUnboxing(
-      @NotNull PsiCallExpression callExpression,
-      @NotNull PsiMethodCallExpression unboxingExpression) {
-      final PsiExpressionList argumentList =
-        callExpression.getArgumentList();
-      if (argumentList == null) {
+    private boolean isSameMethodCalledWithoutUnboxing(@NotNull PsiCallExpression callExpression,
+                                                      @NotNull PsiMethodCallExpression unboxingExpression) {
+      final PsiReferenceExpression methodExpression = unboxingExpression.getMethodExpression();
+      final PsiExpression qualifier = methodExpression.getQualifierExpression();
+      if (qualifier == null) {
         return false;
       }
-      final PsiExpression[] expressions = argumentList.getExpressions();
-      final PsiMethod originalMethod =
-        callExpression.resolveMethod();
+      final PsiMethod originalMethod = callExpression.resolveMethod();
       if (originalMethod == null) {
         return false;
       }
-      final String name = originalMethod.getName();
-      final PsiClass containingClass =
-        originalMethod.getContainingClass();
-      if (containingClass == null) {
-        return false;
-      }
-      final PsiType[] types = new PsiType[expressions.length];
-      for (int i = 0; i < expressions.length; i++) {
-        final PsiExpression expression = expressions[i];
-        final PsiType type = expression.getType();
-        if (unboxingExpression.equals(expression)) {
-          if (!(type instanceof PsiPrimitiveType)) {
-            return false;
-          }
-          final PsiPrimitiveType primitiveType =
-            (PsiPrimitiveType)type;
-          types[i] = primitiveType.getBoxedType(unboxingExpression);
-        }
-        else {
-          types[i] = type;
-        }
-      }
-      final PsiMethod[] methods =
-        containingClass.findMethodsByName(name, true);
-      for (final PsiMethod method : methods) {
-        if (!originalMethod.equals(method)) {
-          if (MethodCallUtils.isApplicable(method,
-                                           PsiSubstitutor.EMPTY, types)) {
-            return false;
-          }
-        }
-      }
-      return true;
+      final PsiMethod method = MethodCallUtils.findMethodWithReplacedArgument(callExpression, unboxingExpression, qualifier);
+      return originalMethod == method;
     }
 
     @Nullable

@@ -15,7 +15,6 @@
  */
 package com.intellij.xdebugger.impl.frame;
 
-import com.intellij.openapi.project.Project;
 import com.intellij.ui.AppUIUtil;
 import com.intellij.xdebugger.XDebugSessionAdapter;
 import org.jetbrains.annotations.NotNull;
@@ -24,16 +23,14 @@ import org.jetbrains.annotations.NotNull;
 * @author nik
 */
 public class XDebugViewSessionListener extends XDebugSessionAdapter {
-  private XDebugView myDebugView;
-  private final Project myProject;
+  private final XDebugView myDebugView;
 
-  public XDebugViewSessionListener(@NotNull XDebugView debugView, @NotNull Project project) {
+  public XDebugViewSessionListener(@NotNull XDebugView debugView) {
     myDebugView = debugView;
-    myProject = project;
   }
 
   private void onSessionEvent(final @NotNull XDebugView.SessionEvent event) {
-    AppUIUtil.invokeLaterIfProjectAlive(myProject, new Runnable() {
+    AppUIUtil.invokeOnEdt(new Runnable() {
       @Override
       public void run() {
         myDebugView.processSessionEvent(event);

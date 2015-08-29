@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,16 +39,19 @@ public class SyntheticBlock extends AbstractSyntheticBlock implements Block, Rea
     myChildIndent = childIndent;
   }
 
+  @Override
   @NotNull
   public TextRange getTextRange() {
     return calculateTextRange(mySubBlocks);
   }
 
+  @Override
   @NotNull
   public List<Block> getSubBlocks() {
     return mySubBlocks;
   }
 
+  @Override
   public Spacing getSpacing(Block child1, @NotNull Block child2) {
     if (child1 instanceof ReadOnlyBlock || child2 instanceof ReadOnlyBlock) {
       return Spacing.getReadOnlySpacing();
@@ -56,11 +59,23 @@ public class SyntheticBlock extends AbstractSyntheticBlock implements Block, Rea
     if (!(child1 instanceof AbstractXmlBlock) || !(child2 instanceof AbstractXmlBlock)) {
       return null;
     }
-    final ASTNode node1 = ((AbstractBlock)child1).getNode();
-    final ASTNode node2 = ((AbstractBlock)child2).getNode();
+    ASTNode node1 = ((AbstractBlock)child1).getNode();
+    ASTNode node2 = ((AbstractBlock)child2).getNode();
 
-    final IElementType type1 = node1.getElementType();
-    final IElementType type2 = node2.getElementType();
+    IElementType type1 = node1.getElementType();
+    IElementType type2 = node2.getElementType();
+
+    if (type2 == XmlElementType.XML_COMMENT) {
+      // Do not remove any spaces except extra blank lines
+      return Spacing.createSpacing(0, Integer.MAX_VALUE, 0, true, myXmlFormattingPolicy.getKeepBlankLines());
+    }
+    if (type1 == XmlElementType.XML_COMMENT) {
+      ASTNode prev = node1.getTreePrev();
+      if (prev != null) {
+        node1 = prev;
+        type1 = prev.getElementType();
+      }
+    }
 
     boolean firstIsText = isTextFragment(node1);
     boolean secondIsText = isTextFragment(node2);
@@ -213,6 +228,7 @@ public class SyntheticBlock extends AbstractSyntheticBlock implements Block, Rea
       ;
   }
 
+  @Override
   @NotNull
   public ChildAttributes getChildAttributes(final int newChildIndex) {
     if (isOuterLanguageBlock()) return ChildAttributes.DELEGATE_TO_NEXT_CHILD;
@@ -234,6 +250,7 @@ public class SyntheticBlock extends AbstractSyntheticBlock implements Block, Rea
     return false;
   }
 
+  @Override
   public boolean isIncomplete() {
     return getSubBlocks().get(getSubBlocks().size() - 1).isIncomplete();
   }

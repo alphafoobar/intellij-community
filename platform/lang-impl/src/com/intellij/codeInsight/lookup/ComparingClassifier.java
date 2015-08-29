@@ -28,7 +28,6 @@ import java.util.*;
  * @author peter
  */
 public abstract class ComparingClassifier<T> extends Classifier<T> {
-  protected final Classifier<T> myNext;
   protected final String myName;
   private final boolean myNegated;
 
@@ -37,25 +36,20 @@ public abstract class ComparingClassifier<T> extends Classifier<T> {
   }
 
   protected ComparingClassifier(Classifier<T> next, String name, boolean negated) {
-    myNext = next;
+    super(next);
     myName = name;
     myNegated = negated;
   }
 
   @Nullable
-  public abstract Comparable getWeight(T t);
-
-  @Override
-  public void addElement(T t) {
-    myNext.addElement(t);
-  }
+  public abstract Comparable getWeight(T t, ProcessingContext context);
 
   @Override
   public Iterable<T> classify(final Iterable<T> source, final ProcessingContext context) {
     List<T> nulls = null;
     TreeMap<Comparable, List<T>> map = new TreeMap<Comparable, List<T>>();
     for (T t : source) {
-      final Comparable weight = getWeight(t);
+      final Comparable weight = getWeight(t, context);
       if (weight == null) {
         if (nulls == null) nulls = new SmartList<T>();
         nulls.add(t);
@@ -89,7 +83,7 @@ public abstract class ComparingClassifier<T> extends Classifier<T> {
   public void describeItems(LinkedHashMap<T, StringBuilder> map, ProcessingContext context) {
     Map<T, String> weights = new IdentityHashMap<T, String>();
     for (T t : map.keySet()) {
-      weights.put(t, String.valueOf(getWeight(t)));
+      weights.put(t, String.valueOf(getWeight(t, context)));
     }
     if (new HashSet<String>(weights.values()).size() > 1 || ApplicationManager.getApplication().isUnitTestMode()) {
       for (T t : map.keySet()) {
@@ -100,6 +94,6 @@ public abstract class ComparingClassifier<T> extends Classifier<T> {
         builder.append(myName).append("=").append(weights.get(t));
       }
     }
-    myNext.describeItems(map, context);
+    super.describeItems(map, context);
   }
 }

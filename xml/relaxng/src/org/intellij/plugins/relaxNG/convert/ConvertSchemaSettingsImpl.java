@@ -28,7 +28,7 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.encoding.EncodingManager;
+import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.ui.DocumentAdapter;
@@ -120,18 +120,14 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     }
 
     myEncoding.setModel(new DefaultComboBoxModel(suggestions.toArray()));
-    final Charset charset = EncodingManager.getInstance().getDefaultCharset();
-    if (charset == null) {
-      myEncoding.setSelectedItem(System.getProperty("file.encoding", "UTF-8"));
-    } else {
-      myEncoding.setSelectedItem(charset.name());
-    }
+    final Charset charset = EncodingProjectManager.getInstance(project).getDefaultCharset();
+    myEncoding.setSelectedItem(charset.name());
 
     final CodeStyleSettings styleSettings = CodeStyleSettingsManager.getSettings(project);
     final int indent = styleSettings.getIndentSize(type);
     myIndent.setText(String.valueOf(indent));
 
-    myLineLength.setText(String.valueOf(styleSettings.RIGHT_MARGIN));
+    myLineLength.setText(String.valueOf(styleSettings.getDefaultRightMargin()));
     final SchemaType outputType = getOutputType();
     myLineLength.setEnabled(outputType == SchemaType.DTD || outputType == SchemaType.RNC);
 
@@ -144,6 +140,7 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
 
     final JTextField tf = myOutputDestination.getTextField();
     tf.getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         myPropertyChangeSupport.firePropertyChange(OUTPUT_PATH, null, getOutputDestination());
       }
@@ -151,6 +148,7 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     tf.setText(firstFile.getParent().getPath().replace('/', File.separatorChar));
 
     final ItemListener listener = new ItemListener() {
+      @Override
       public void itemStateChanged(ItemEvent e) {
         if (e.getStateChange() == ItemEvent.SELECTED) {
           final SchemaType type = getOutputType();
@@ -169,6 +167,7 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     }
   }
 
+  @Override
   @NotNull
   public SchemaType getOutputType() {
     if (myOutputRng.isSelected()) {
@@ -183,10 +182,12 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     }
   }
 
+  @Override
   public String getOutputEncoding() {
     return (String)myEncoding.getSelectedItem();
   }
 
+  @Override
   public int getIndent() {
     return parseInt(myIndent.getText().trim());
   }
@@ -199,14 +200,17 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     }
   }
 
+  @Override
   public int getLineLength() {
     return parseInt(myLineLength.getText());
   }
   
+  @Override
   public String getOutputDestination() {
     return myOutputDestination.getText();
   }
 
+  @Override
   public void addAdvancedSettings(List<String> inputParams, List<String> outputParams) {
     setParams(myInputOptions, inputParams);
 
@@ -245,8 +249,7 @@ public class ConvertSchemaSettingsImpl implements ConvertSchemaSettings {
     final AdvancedOptionsDialog dialog = new AdvancedOptionsDialog(myProject, myInputType, getOutputType());
     dialog.setOptions(myInputOptions, myOutputOptions);
 
-    dialog.show();
-    if (dialog.isOK()) {
+    if (dialog.showAndGet()) {
       myInputOptions = dialog.getInputOptions();
       myOutputOptions = dialog.getOutputOptions();
     }

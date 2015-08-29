@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 package com.intellij.psi.impl.source.xml;
 
 import com.intellij.ide.highlighter.DTDFileType;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.RecursionManager;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry;
 import com.intellij.psi.search.PsiElementProcessor;
@@ -49,8 +52,7 @@ public class XmlEntityRefImpl extends XmlElementImpl implements XmlEntityRef {
     super(XmlElementType.XML_ENTITY_REF);
   }
 
-  private static final Key<String> EVALUATION_IN_PROCESS = Key.create("EvalKey");
-
+  @Override
   public XmlEntityDecl resolve(PsiFile targetFile) {
     String text = getText();
     if (text.equals(GT_ENTITY) || text.equals(QUOT_ENTITY)) return null;
@@ -76,11 +78,12 @@ public class XmlEntityRefImpl extends XmlElementImpl implements XmlEntityRef {
       if (value == null) {
         final PsiManager manager = element.getManager();
         if(manager == null){
-          return resolveEntity(targetElement, entityName, containingFile).getValue();
+          return doResolveEntity(targetElement, entityName, containingFile).getValue();
         }
         value = CachedValuesManager.getManager(manager.getProject()).createCachedValue(new CachedValueProvider<XmlEntityDecl>() {
+          @Override
           public Result<XmlEntityDecl> compute() {
-            return resolveEntity(targetElement, entityName, containingFile);
+            return doResolveEntity(targetElement, entityName, containingFile);
           }
         });
 
@@ -93,122 +96,128 @@ public class XmlEntityRefImpl extends XmlElementImpl implements XmlEntityRef {
 
   private static final Key<Boolean> DISABLE_ENTITY_EXPAND = Key.create("disable.entity.expand");
 
-  private static CachedValueProvider.Result<XmlEntityDecl> resolveEntity(final PsiElement targetElement, final String entityName, PsiFile contextFile) {
-    if (targetElement.getUserData(EVALUATION_IN_PROCESS) != null) {
-      return new CachedValueProvider.Result<XmlEntityDecl>(null,targetElement);
-    }
-    try {
-      targetElement.putUserData(EVALUATION_IN_PROCESS, "");
-      final List<PsiElement> deps = new ArrayList<PsiElement>();
-      final XmlEntityDecl[] result = {null};
+  private static CachedValueProvider.Result<XmlEntityDecl> doResolveEntity(final PsiElement targetElement,
+                                                                           final String entityName,
+                                                                           final PsiFile contextFile) {
+    return RecursionManager.doPreventingRecursion(targetElement, true, new Computable<CachedValueProvider.Result<XmlEntityDecl>>() {
+      @Override
+      public CachedValueProvider.Result<XmlEntityDecl> compute() {
+        final List<PsiElement> deps = new ArrayList<PsiElement>();
+        final XmlEntityDecl[] result = {null};
 
-      PsiElementProcessor processor = new PsiElementProcessor() {
-        public boolean execute(@NotNull PsiElement element) {
-          if (element instanceof XmlDoctype) {
-            XmlDoctype xmlDoctype = (XmlDoctype)element;
-            final String dtdUri = getDtdForEntity(xmlDoctype);
-            if (dtdUri != null) {
-              XmlFile file = XmlUtil.getContainingFile(element);
-              if (file == null) return true;
-              final XmlFile xmlFile = XmlUtil.findNamespace(file, dtdUri);
-              if (xmlFile != null) {
-                if (xmlFile != targetElement) {
-                  deps.add(xmlFile);
-                  if(!XmlUtil.processXmlElements(xmlFile, this,true)) return false;
+        PsiElementProcessor processor = new PsiElementProcessor() {
+          @Override
+          public boolean execute(@NotNull PsiElement element) {
+            if (element instanceof XmlDoctype) {
+              XmlDoctype xmlDoctype = (XmlDoctype)element;
+              final String dtdUri = getDtdForEntity(xmlDoctype);
+              if (dtdUri != null) {
+                XmlFile file = XmlUtil.getContainingFile(element);
+                if (file == null) return true;
+                final XmlFile xmlFile = XmlUtil.findNamespace(file, dtdUri);
+                if (xmlFile != null) {
+                  if (xmlFile != targetElement) {
+                    deps.add(xmlFile);
+                    if (!XmlUtil.processXmlElements(xmlFile, this, true)) return false;
+                  }
                 }
               }
-            }
-            final XmlMarkupDecl markupDecl = xmlDoctype.getMarkupDecl();
-            if (markupDecl != null) {
-              if (!XmlUtil.processXmlElements(markupDecl, this, true)) return false;
-            }
-          }
-          else if (element instanceof XmlEntityDecl) {
-            XmlEntityDecl entityDecl = (XmlEntityDecl)element;
-            final String declName = entityDecl.getName();
-            if (declName.equals(entityName)) {
-              result[0] = entityDecl;
-              return false;
-            }
-          }
-
-          return true;
-        }
-      };
-      FileViewProvider provider = targetElement.getContainingFile().getViewProvider();
-      deps.add(provider.getPsi(provider.getBaseLanguage()));
-
-      boolean notfound = PsiTreeUtil.processElements(targetElement, processor);
-      if (notfound) {
-        if (contextFile != targetElement && contextFile != null && contextFile.isValid()) {
-          notfound = PsiTreeUtil.processElements(contextFile, processor);
-        }
-      }
-
-      if (notfound &&       // no dtd ref at all
-          targetElement instanceof XmlFile &&
-          deps.size() == 1 &&
-          ((XmlFile)targetElement).getFileType() != DTDFileType.INSTANCE
-         ) {
-        XmlDocument document = ((XmlFile)targetElement).getDocument();
-        final XmlTag rootTag = document.getRootTag();
-
-        if (rootTag != null && document.getUserData(DISABLE_ENTITY_EXPAND) == null) {
-          final XmlElementDescriptor descriptor = rootTag.getDescriptor();
-
-            if (descriptor != null && !(descriptor instanceof AnyXmlElementDescriptor)) {
-              PsiElement element = !HtmlUtil.isHtml5Context(rootTag) ? descriptor.getDeclaration() :
-                                   XmlUtil.findXmlFile((XmlFile)targetElement, Html5SchemaProvider.getCharsDtdLocation());
-              final PsiFile containingFile = element != null ? element.getContainingFile():null;
-              final XmlFile descriptorFile = containingFile instanceof XmlFile ? (XmlFile)containingFile:null;
-
-              if (descriptorFile != null &&
-                  !descriptorFile.getName().equals(((XmlFile)targetElement).getName()+".dtd")) {
-                deps.add(descriptorFile);
-                XmlUtil.processXmlElements(
-                  descriptorFile,
-                  processor,
-                  true
-                );
+              final XmlMarkupDecl markupDecl = xmlDoctype.getMarkupDecl();
+              if (markupDecl != null) {
+                if (!XmlUtil.processXmlElements(markupDecl, this, true)) return false;
               }
             }
-        }
-      }
+            else if (element instanceof XmlEntityDecl) {
+              XmlEntityDecl entityDecl = (XmlEntityDecl)element;
+              final String declName = entityDecl.getName();
+              if (StringUtil.equals(declName, entityName)) {
+                result[0] = entityDecl;
+                return false;
+              }
+            }
 
-      return new CachedValueProvider.Result<XmlEntityDecl>(result[0], ArrayUtil.toObjectArray(deps));
-    }
-    finally {
-      targetElement.putUserData(EVALUATION_IN_PROCESS, null);
-    }
+            return true;
+          }
+        };
+        FileViewProvider provider = targetElement.getContainingFile().getViewProvider();
+        deps.add(provider.getPsi(provider.getBaseLanguage()));
+
+        boolean notfound = PsiTreeUtil.processElements(targetElement, processor);
+        if (notfound) {
+          if (contextFile != targetElement && contextFile != null && contextFile.isValid()) {
+            notfound = PsiTreeUtil.processElements(contextFile, processor);
+          }
+        }
+
+        if (notfound &&       // no dtd ref at all
+            targetElement instanceof XmlFile &&
+            deps.size() == 1 &&
+            ((XmlFile)targetElement).getFileType() != DTDFileType.INSTANCE
+          ) {
+          XmlDocument document = ((XmlFile)targetElement).getDocument();
+          final XmlTag rootTag = document != null ? document.getRootTag() : null;
+          XmlFile descriptorFile = null;
+
+          if (HtmlUtil.isHtml5Document(document)) {
+            descriptorFile = XmlUtil.findXmlFile((XmlFile)targetElement, Html5SchemaProvider.getCharsDtdLocation());
+          }
+          else if (rootTag != null && document.getUserData(DISABLE_ENTITY_EXPAND) == null) {
+            final XmlElementDescriptor descriptor = rootTag.getDescriptor();
+
+            if (descriptor != null && !(descriptor instanceof AnyXmlElementDescriptor)) {
+              PsiElement element = descriptor.getDeclaration();
+              final PsiFile containingFile = element != null ? element.getContainingFile() : null;
+              descriptorFile = containingFile instanceof XmlFile ? (XmlFile)containingFile : null;
+            }
+          }
+          if (descriptorFile != null &&
+              !descriptorFile.getName().equals(((XmlFile)targetElement).getName() + ".dtd")) {
+            deps.add(descriptorFile);
+            XmlUtil.processXmlElements(
+              descriptorFile,
+              processor,
+              true
+            );
+          }
+        }
+
+        return new CachedValueProvider.Result<XmlEntityDecl>(result[0], ArrayUtil.toObjectArray(deps));
+      }
+    });
   }
 
   private static String getDtdForEntity(XmlDoctype xmlDoctype) {
     return HtmlUtil.isHtml5Doctype(xmlDoctype) ? Html5SchemaProvider.getCharsDtdLocation() : XmlUtil.getDtdUri(xmlDoctype);
   }
 
+  @Override
   public XmlTag getParentTag() {
     final XmlElement parent = (XmlElement)getParent();
     if(parent instanceof XmlTag) return (XmlTag)parent;
     return null;
   }
 
+  @Override
   public XmlTagChild getNextSiblingInTag() {
     PsiElement nextSibling = getNextSibling();
     if(nextSibling instanceof XmlTagChild) return (XmlTagChild)nextSibling;
     return null;
   }
 
+  @Override
   public XmlTagChild getPrevSiblingInTag() {
     final PsiElement prevSibling = getPrevSibling();
     if(prevSibling instanceof XmlTagChild) return (XmlTagChild)prevSibling;
     return null;
   }
 
+  @Override
   @NotNull
   public PsiReference[] getReferences() {
-    return ReferenceProvidersRegistry.getReferencesFromProviders(this,XmlEntityRef.class);
+    return ReferenceProvidersRegistry.getReferencesFromProviders(this);
   }
 
+  @Override
   public void accept(@NotNull PsiElementVisitor visitor) {
     if (visitor instanceof XmlElementVisitor) {
       ((XmlElementVisitor)visitor).visitXmlElement(this);

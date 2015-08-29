@@ -21,9 +21,9 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Allows an action to retrieve information about the context in which it was invoked.
  *
- * @see com.intellij.openapi.actionSystem.AnActionEvent#getDataContext()
+ * @see AnActionEvent#getDataContext()
  * @see com.intellij.openapi.actionSystem.PlatformDataKeys
- * @see com.intellij.openapi.actionSystem.DataKey
+ * @see DataKey
  * @see com.intellij.ide.DataManager
  * @see DataProvider
  */
@@ -35,5 +35,14 @@ public interface DataContext {
    * @param dataId the data identifier for which the value is requested.
    * @return the value, or null if no value is available in the current context for this identifier.
    */
-  @Nullable Object getData(@NonNls String dataId);
+  @Nullable
+  Object getData(@NonNls String dataId);
+
+  DataContext EMPTY_CONTEXT = new DataContext() {
+    @Nullable
+    @Override
+    public Object getData(@NonNls String dataId) {
+      return null;
+    }
+  };
 }

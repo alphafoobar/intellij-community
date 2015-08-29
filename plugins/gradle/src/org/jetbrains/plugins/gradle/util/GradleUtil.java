@@ -1,26 +1,43 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.plugins.gradle.util;
 
-import com.intellij.ide.actions.OpenProjectFileChooserDescriptor;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.externalSystem.model.ExternalSystemException;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileTypeDescriptor;
+import com.intellij.openapi.util.io.FileFilters;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.containers.Stack;
 import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.gradle.GradleScript;
 import org.gradle.wrapper.WrapperConfiguration;
 import org.gradle.wrapper.WrapperExecutor;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Properties;
@@ -32,12 +49,9 @@ import java.util.Properties;
  * @since 8/25/11 1:19 PM
  */
 public class GradleUtil {
+  private static final String LAST_USED_GRADLE_HOME_KEY = "last.used.gradle.home";
 
-  private static final String LAST_USED_GRADLE_HOME_KEY    = "last.used.gradle.home";
-  @NonNls private static final String JVM_ARG_FORMAT = "-D%1$s=%2$s";
-
-  private GradleUtil() {
-  }
+  private GradleUtil() { }
 
   /**
    * Allows to retrieve file chooser descriptor that filters gradle scripts.
@@ -49,12 +63,12 @@ public class GradleUtil {
    */
   @NotNull
   public static FileChooserDescriptor getGradleProjectFileChooserDescriptor() {
-    return DescriptorHolder.GRADLE_BUILD_FILE_CHOOSER_DESCRIPTOR;
+    return FileChooserDescriptorFactory.createSingleFileDescriptor(GradleConstants.EXTENSION);
   }
 
   @NotNull
   public static FileChooserDescriptor getGradleHomeFileChooserDescriptor() {
-    return DescriptorHolder.GRADLE_HOME_FILE_CHOOSER_DESCRIPTOR;
+    return FileChooserDescriptorFactory.createSingleFolderDescriptor();
   }
 
   @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
@@ -65,7 +79,7 @@ public class GradleUtil {
   /**
    * Tries to retrieve what settings should be used with gradle wrapper for the gradle project located at the given path.
    *
-   * @param gradleProjectPath  target gradle project config's (*.gradle) path or config file's directory path.
+   * @param gradleProjectPath  target gradle project config (*.gradle) path or config file's directory path.
    * @return                   gradle wrapper settings should be used with gradle wrapper for the gradle project located at the given path
    *                           if any; <code>null</code> otherwise
    */
@@ -111,30 +125,6 @@ public class GradleUtil {
       }
     }
     return null;
-  }
-
-  /**
-   * We use this class in order to avoid static initialisation of the wrapped object - it loads number of pico container-based
-   * dependencies that are unavailable to the slave gradle project, so, we don't want to get unexpected NPE there.
-   */
-  private static class DescriptorHolder {
-    public static final FileChooserDescriptor GRADLE_BUILD_FILE_CHOOSER_DESCRIPTOR = new OpenProjectFileChooserDescriptor(true) {
-      @Override
-      public boolean isFileSelectable(VirtualFile file) {
-        return file.getName().endsWith(GradleConstants.EXTENSION);
-      }
-
-      @Override
-      public boolean isFileVisible(VirtualFile file, boolean showHiddenFiles) {
-        if (!super.isFileVisible(file, showHiddenFiles)) {
-          return false;
-        }
-        return file.isDirectory() || file.getName().endsWith(GradleConstants.EXTENSION);
-      }
-    };
-
-    public static final FileChooserDescriptor GRADLE_HOME_FILE_CHOOSER_DESCRIPTOR
-      = new FileChooserDescriptor(false, true, false, false, false, false);
   }
 
   /**
@@ -188,9 +178,7 @@ public class GradleUtil {
   }
 
   public static void storeLastUsedGradleHome(@Nullable String gradleHomePath) {
-    if (gradleHomePath != null) {
-      PropertiesComponent.getInstance().setValue(LAST_USED_GRADLE_HOME_KEY, gradleHomePath);
-    }
+    PropertiesComponent.getInstance().setValue(LAST_USED_GRADLE_HOME_KEY, gradleHomePath, null);
   }
 
   @Nullable
@@ -218,12 +206,7 @@ public class GradleUtil {
       return null;
     }
 
-    File[] candidates = wrapperDir.listFiles(new FileFilter() {
-      @Override
-      public boolean accept(File candidate) {
-        return candidate.isFile() && candidate.getName().endsWith(".properties");
-      }
-    });
+    File[] candidates = wrapperDir.listFiles(FileFilters.filesWithExtension("properties"));
     if (candidates == null) {
       GradleLog.LOG.warn("No *.properties file is found at the gradle wrapper directory " + wrapperDir.getAbsolutePath());
       return null;
@@ -237,10 +220,5 @@ public class GradleUtil {
     }
 
     return candidates[0];
-  }
-
-  @NotNull
-  public static String createJvmArg(@NotNull String name, @NotNull String value) {
-    return String.format(JVM_ARG_FORMAT, name, value);
   }
 }

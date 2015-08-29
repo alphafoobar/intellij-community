@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,6 @@ import com.jetbrains.python.testing.PythonUnitTestUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.Collection;
 
 /**
  * User: ktisha
@@ -66,10 +64,10 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
       final PyClass containingClass = node.getContainingClass();
       if (containingClass == null) return;
       if (PythonUnitTestUtil.isUnitTestCaseClass(containingClass)) return;
-      final Collection<PsiElement> supers = PySuperMethodsSearch.search(node).findAll();
-      if (!supers.isEmpty()) return;
-      final Collection<PyFunction> overrides = PyOverridingMethodsSearch.search(node, true).findAll();
-      if (!overrides.isEmpty()) return;
+      final PsiElement firstSuper = PySuperMethodsSearch.search(node).findFirst();
+      if (firstSuper != null) return;
+      final PyFunction firstOverride = PyOverridingMethodsSearch.search(node, true).findFirst();
+      if (firstOverride != null) return;
       final PyDecoratorList decoratorList = node.getDecoratorList();
       if (decoratorList != null) return;
       if (node.getModifier() != null) return;
@@ -77,8 +75,6 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
       if (property != null) return;
 
       final PyStatementList statementList = node.getStatementList();
-      if (statementList == null) return;
-
       final PyStatement[] statements = statementList.getStatements();
 
       if (statements.length == 1 && statements[0] instanceof PyPassStatement) return;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,6 @@ import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.BalloonBuilder;
@@ -218,9 +217,18 @@ public abstract class InplaceRefactoring {
   }
 
   protected SearchScope getReferencesSearchScope(VirtualFile file) {
-    return file == null || ProjectRootManager.getInstance(myProject).getFileIndex().isInContent(file)
-           ? ProjectScope.getProjectScope(myElementToRename.getProject())
-           : new LocalSearchScope(myElementToRename.getContainingFile());
+    if (file == null) {
+      return ProjectScope.getProjectScope(myElementToRename.getProject());
+    }
+    else {
+      final PsiFile containingFile = myElementToRename.getContainingFile();
+      if (!file.equals(containingFile.getVirtualFile())) {
+        final PsiFile topLevelFile = PsiManager.getInstance(myProject).findFile(file);
+        return topLevelFile == null ? ProjectScope.getProjectScope(myElementToRename.getProject()) 
+                                    : new LocalSearchScope(topLevelFile);
+      }
+      return new LocalSearchScope(containingFile);
+    }
   }
 
   @Nullable
@@ -327,7 +335,7 @@ public abstract class InplaceRefactoring {
 
     new WriteCommandAction(myProject, getCommandName()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         startTemplate(builder);
       }
     }.execute();
@@ -368,14 +376,16 @@ public abstract class InplaceRefactoring {
 
     final int offset = myEditor.getCaretModel().getOffset();
 
+    Editor topLevelEditor = InjectedLanguageUtil.getTopLevelEditor(myEditor);
+    TextRange range = myScope.getTextRange();
+    assert range != null;
+    RangeMarker rangeMarker = topLevelEditor.getDocument().createRangeMarker(range);
+
     Template template = builder.buildInlineTemplate();
     template.setToShortenLongNames(false);
     template.setToReformat(false);
-    TextRange range = myScope.getTextRange();
-    assert range != null;
     myHighlighters = new ArrayList<RangeHighlighter>();
-    Editor topLevelEditor = InjectedLanguageUtil.getTopLevelEditor(myEditor);
-    topLevelEditor.getCaretModel().moveToOffset(range.getStartOffset());
+    topLevelEditor.getCaretModel().moveToOffset(rangeMarker.getStartOffset());
 
     TemplateManager.getInstance(myProject).startTemplate(topLevelEditor, template, templateListener);
     restoreOldCaretPositionAndSelection(offset);
@@ -639,6 +649,11 @@ public abstract class InplaceRefactoring {
 
   protected abstract boolean performRefactoring();
 
+  /**
+   * if brokenOff but not canceled
+   */
+  protected void performCleanup() {}
+
   private void addVariable(final PsiReference reference,
                            final PsiElement selectedElement,
                            final TemplateBuilderImpl builder,
@@ -735,7 +750,7 @@ public abstract class InplaceRefactoring {
       if (initialInjectedHost != null && initialInjectedHost != injectionHost) {
         return false;
       }
-      return injectedLanguageManager.injectedToHost(element, textRange).shiftRight(shiftOffset).contains(offset);
+      return injectedLanguageManager.injectedToHost(element, textRange).shiftRight(shiftOffset).containsOffset(offset);
     }
     return textRange.shiftRight(shiftOffset).containsOffset(offset);
   }
@@ -773,32 +788,31 @@ public abstract class InplaceRefactoring {
     if (ApplicationManager.getApplication().isHeadlessEnvironment()) return;
     final BalloonBuilder balloonBuilder = JBPopupFactory.getInstance().createDialogBalloonBuilder(component, null).setSmallVariant(true);
     myBalloon = balloonBuilder.createBalloon();
-    final Editor topLevelEditor = InjectedLanguageUtil.getTopLevelEditor(myEditor);
     Disposer.register(myProject, myBalloon);
     Disposer.register(myBalloon, new Disposable() {
       @Override
       public void dispose() {
         releaseIfNotRestart();
-        topLevelEditor.putUserData(PopupFactoryImpl.ANCHOR_POPUP_POSITION, null);
+        myEditor.putUserData(PopupFactoryImpl.ANCHOR_POPUP_POSITION, null);
       }
     });
-    topLevelEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
+    myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
     final JBPopupFactory popupFactory = JBPopupFactory.getInstance();
-    myBalloon.show(new PositionTracker<Balloon>(topLevelEditor.getContentComponent()) {
+    myBalloon.show(new PositionTracker<Balloon>(myEditor.getContentComponent()) {
       @Override
       public RelativePoint recalculateLocation(Balloon object) {
-        if (myTarget != null && !popupFactory.isBestPopupLocationVisible(topLevelEditor)) {
+        if (myTarget != null && !popupFactory.isBestPopupLocationVisible(myEditor)) {
           return myTarget;
         }
         if (myCaretRangeMarker != null && myCaretRangeMarker.isValid()) {
-          topLevelEditor.putUserData(PopupFactoryImpl.ANCHOR_POPUP_POSITION,
-                                     topLevelEditor.offsetToVisualPosition(myCaretRangeMarker.getStartOffset()));
+          myEditor.putUserData(PopupFactoryImpl.ANCHOR_POPUP_POSITION,
+                               myEditor.offsetToVisualPosition(myCaretRangeMarker.getStartOffset()));
         }
-        final RelativePoint target = popupFactory.guessBestPopupLocation(topLevelEditor);
+        final RelativePoint target = popupFactory.guessBestPopupLocation(myEditor);
         final Point screenPoint = target.getScreenPoint();
         int y = screenPoint.y;
-        if (target.getPoint().getY() > topLevelEditor.getLineHeight() + myBalloon.getPreferredSize().getHeight()) {
-          y -= topLevelEditor.getLineHeight();
+        if (target.getPoint().getY() > myEditor.getLineHeight() + myBalloon.getPreferredSize().getHeight()) {
+          y -= myEditor.getLineHeight();
         }
         myTarget = new RelativePoint(new Point(screenPoint.x, y));
         return myTarget;
@@ -848,6 +862,8 @@ public abstract class InplaceRefactoring {
         super.templateFinished(template, brokenOff);
         if (!brokenOff) {
           bind = performRefactoring();
+        } else {
+          performCleanup();
         }
         moveOffsetAfter(!brokenOff);
       }

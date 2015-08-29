@@ -24,39 +24,16 @@ import com.intellij.ide.passwordSafe.impl.providers.memory.MemoryPasswordSafe;
 import com.intellij.ide.passwordSafe.impl.providers.nil.NilProvider;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * The implementation of password safe service
- */
 public class PasswordSafeImpl extends PasswordSafe {
-  /**
-   * The logger instance
-   */
   private static final Logger LOG = Logger.getInstance(PasswordSafeImpl.class.getName());
-  /**
-   * The current settings
-   */
   private final PasswordSafeSettings mySettings;
-  /**
-   * The master key provider
-   */
   private final MasterKeyPasswordSafe myMasterKeyProvider;
-  /**
-   * The nil provider
-   */
   private final NilProvider myNilProvider;
-  /**
-   * The memory provider
-   */
   private final MemoryPasswordSafe myMemoryProvider;
 
-  /**
-   * The constructor
-   *
-   * @param settings the settings for the password safe
-   * @param database the password database
-   */
   public PasswordSafeImpl(PasswordSafeSettings settings, PasswordDatabase database) {
     mySettings = settings;
     myMasterKeyProvider = new MasterKeyPasswordSafe(database);
@@ -88,17 +65,12 @@ public class PasswordSafeImpl extends PasswordSafe {
     return p;
   }
 
-
-  /**
-   * @return settings for the passwords safe
-   */
   public PasswordSafeSettings getSettings() {
     return mySettings;
   }
 
-
   @Nullable
-  public String getPassword(@Nullable Project project, Class requester, String key) throws PasswordSafeException {
+  public String getPassword(@Nullable Project project, @NotNull Class requester, String key) throws PasswordSafeException {
     if (mySettings.getProviderType().equals(PasswordSafeSettings.ProviderType.MASTER_PASSWORD)) {
       String password = getMemoryProvider().getPassword(project, requester, key);
       if (password == null) {
@@ -113,20 +85,14 @@ public class PasswordSafeImpl extends PasswordSafe {
     return provider().getPassword(project, requester, key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
-  public void removePassword(@Nullable Project project, Class requester, String key) throws PasswordSafeException {
+  public void removePassword(@Nullable Project project, @NotNull Class requester, String key) throws PasswordSafeException {
     if (mySettings.getProviderType().equals(PasswordSafeSettings.ProviderType.MASTER_PASSWORD)) {
       getMemoryProvider().removePassword(project, requester, key);
     }
     provider().removePassword(project, requester, key);
   }
 
-  /**
-   * {@inheritDoc}
-   */
-  public void storePassword(@Nullable Project project, Class requester, String key, String value) throws PasswordSafeException {
+  public void storePassword(@Nullable Project project, @NotNull Class requester, String key, String value) throws PasswordSafeException {
     if (mySettings.getProviderType().equals(PasswordSafeSettings.ProviderType.MASTER_PASSWORD)) {
       getMemoryProvider().storePassword(project, requester, key, value);
     }

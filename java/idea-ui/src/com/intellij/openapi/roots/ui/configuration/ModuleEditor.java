@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.facet.impl.ProjectFacetsConfigurator;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.components.ComponentsPackage;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
@@ -37,6 +38,7 @@ import com.intellij.openapi.roots.impl.libraries.LibraryEx;
 import com.intellij.openapi.roots.impl.libraries.LibraryTableBase;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.navigation.History;
 import com.intellij.ui.navigation.Place;
 import com.intellij.util.EventDispatcher;
@@ -201,17 +203,19 @@ public abstract class ModuleEditor implements Place.Navigator, Disposable {
       }
     }
 
-    for (final Configurable moduleConfigurable : myModule.getComponents(Configurable.class)) {
+    for (Configurable moduleConfigurable : ComponentsPackage.getComponents(myModule, Configurable.class)) {
       myEditors.add(new ModuleConfigurableWrapper(moduleConfigurable));
     }
     for(ModuleConfigurableEP extension : myModule.getExtensions(MODULE_CONFIGURABLES)) {
-      myEditors.add(new ModuleConfigurableWrapper(extension.createConfigurable()));
+      if (extension.canCreateConfigurable()) {
+        myEditors.add(new ModuleConfigurableWrapper(extension.createConfigurable()));
+      }
     }
   }
 
   private static ModuleConfigurationEditorProvider[] collectProviders(final Module module) {
     List<ModuleConfigurationEditorProvider> result = new ArrayList<ModuleConfigurationEditorProvider>();
-    ContainerUtil.addAll(result, module.getComponents(ModuleConfigurationEditorProvider.class));
+    result.addAll(ComponentsPackage.getComponents(module, ModuleConfigurationEditorProvider.class));
     ContainerUtil.addAll(result, Extensions.getExtensions(ModuleConfigurationEditorProvider.EP_NAME, module));
     return result.toArray(new ModuleConfigurationEditorProvider[result.size()]);
   }
@@ -238,9 +242,10 @@ public abstract class ModuleEditor implements Place.Navigator, Disposable {
 
     createEditors(getModule());
 
-    JPanel northPanel = new JPanel(new GridBagLayout());
-
-    myGenericSettingsPanel.add(northPanel, BorderLayout.NORTH);
+    if (!Registry.is("ide.new.project.settings")) {
+      JPanel northPanel = new JPanel(new GridBagLayout());
+      myGenericSettingsPanel.add(northPanel, BorderLayout.NORTH);
+    }
 
     final JComponent component = createCenterPanel();
     myGenericSettingsPanel.add(component, BorderLayout.CENTER);
@@ -328,11 +333,11 @@ public abstract class ModuleEditor implements Place.Navigator, Disposable {
     return myName;
   }
 
-  private class ModifiableRootModelInvocationHandler implements InvocationHandler {
+  private class ModifiableRootModelInvocationHandler implements InvocationHandler, ProxyDelegateAccessor {
     private final ModifiableRootModel myDelegateModel;
     @NonNls private final Set<String> myCheckedNames = new HashSet<String>(
       Arrays.asList("addOrderEntry", "addLibraryEntry", "addInvalidLibrary", "addModuleOrderEntry", "addInvalidModuleEntry",
-                    "removeOrderEntry", "setSdk", "inheritSdk", "inheritCompilerOutputPath", "setExcludeOutput", "replaceEntryOfType"));
+                    "removeOrderEntry", "setSdk", "inheritSdk", "inheritCompilerOutputPath", "setExcludeOutput", "replaceEntryOfType", "rearrangeOrderEntries"));
 
     ModifiableRootModelInvocationHandler(ModifiableRootModel model) {
       myDelegateModel = model;
@@ -357,6 +362,11 @@ public abstract class ModuleEditor implements Place.Navigator, Disposable {
           updateOrderEntriesInEditors();
         }
       }
+    }
+
+    @Override
+    public Object getDelegate() {
+      return myDelegateModel;
     }
   }
 

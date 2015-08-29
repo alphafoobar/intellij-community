@@ -22,6 +22,8 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.util.Function;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
+import org.jetbrains.idea.maven.server.MavenServerManager;
 import org.jetbrains.idea.maven.server.NativeMavenProjectHolder;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
@@ -1539,7 +1541,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
     MyLoggingListener l = new MyLoggingListener();
     myTree.addListener(l);
 
-    myTree.addManagedFilesWithProfiles(Collections.singletonList(myProjectPom), Collections.<String>emptyList());
+    myTree.addManagedFilesWithProfiles(Collections.singletonList(myProjectPom), MavenExplicitProfiles.NONE);
     myTree.updateAll(false, getMavenGeneralSettings(), EMPTY_MAVEN_PROCESS);
 
     assertEquals("updated: parent m1 m2 deleted: <none> ", l.log);
@@ -1943,6 +1945,8 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
   }
 
   public void testCollectingProfilesFromParentsAfterResolve() throws Exception {
+    MavenServerManager.getInstance().setUseMaven2(true);
+
     createModulePom("parent1",
                     "<groupId>test</groupId>" +
                     "<artifactId>parent1</artifactId>" +
@@ -2022,7 +2026,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
               myProjectPom);
 
     MavenProject project = myTree.findProject(myProjectPom);
-    assertUnorderedElementsAreEqual(project.getActivatedProfilesIds(),
+    assertUnorderedElementsAreEqual(project.getActivatedProfilesIds().getEnabledProfiles(),
                                     "projectProfileXml",
                                     "projectProfile",
                                     "parent1Profile",
@@ -2044,7 +2048,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
       embeddersManager.releaseInTests();
     }
 
-    assertUnorderedElementsAreEqual(project.getActivatedProfilesIds(),
+    assertUnorderedElementsAreEqual(project.getActivatedProfilesIds().getEnabledProfiles(),
                                     "projectProfileXml",
                                     "projectProfile",
                                     "parent1Profile",
@@ -2069,24 +2073,24 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
                       "</profile>");
 
     updateAll(Arrays.asList("one", "two"), myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one", "two");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one", "two");
 
     deleteProfilesXml();
     update(myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one");
 
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
                      "<version>1</version>");
 
     update(myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles());
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles());
 
     createProfilesXml("<profile>" +
                       "  <id>two</id>" +
                       "</profile>");
     update(myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "two");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "two");
 
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
@@ -2097,7 +2101,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
                      "  </profile>" +
                      "</profiles>");
     update(myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one", "two");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one", "two");
   }
 
   public void testDeletingAndRestoringActiveProfilesWhenProjectDeletes() throws Exception {
@@ -2128,7 +2132,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
                                     "</profiles>");
 
     updateAll(Arrays.asList("one", "two"), myProjectPom);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one", "two");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one", "two");
 
     final VirtualFile finalM = m;
     new WriteCommandAction.Simple(myProject) {
@@ -2139,7 +2143,7 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
       }
     }.execute().throwException();
 
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one");
 
     m = createModulePom("m",
                         "<groupId>test</groupId>" +
@@ -2152,7 +2156,55 @@ public class MavenProjectsTreeReadingTest extends MavenProjectsTreeTestCase {
                         "  </profile>" +
                         "</profiles>");
     update(m);
-    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles(), "one", "two");
+    assertUnorderedElementsAreEqual(myTree.getExplicitProfiles().getEnabledProfiles(), "one", "two");
+  }
+
+  public void testFindRootWithMultiLevelAggregator() throws Exception {
+    VirtualFile p1 = createModulePom("project1", "<groupId>test</groupId>" +
+                                                 "<artifactId>project1</artifactId>" +
+                                                 "<version>1</version>" +
+                                                 "<packaging>pom</packaging>" +
+
+                                                 "<modules>" +
+                                                 "  <module>../project2</module>" +
+                                                 "</modules>"
+    );
+
+    VirtualFile p2 = createModulePom("project2", "<groupId>test</groupId>" +
+                                                 "<artifactId>project2</artifactId>" +
+                                                 "<version>1</version>" +
+                                                 "<packaging>pom</packaging>" +
+
+                                                 "<modules>" +
+                                                 "  <module>../module</module>" +
+                                                 "</modules>"
+    );
+
+    VirtualFile m = createModulePom("module", "<groupId>test</groupId>" +
+                                              "<artifactId>module</artifactId>" +
+                                              "<version>1</version>"
+    );
+
+    updateAll(p1, p2, m);
+
+    List<MavenProject> roots = myTree.getRootProjects();
+
+    assertEquals(1, roots.size());
+    MavenProject p1Project = roots.get(0);
+    assertEquals(p1, p1Project.getFile());
+    assertEquals(p1Project, myTree.findRootProject(p1Project));
+
+    assertEquals(1, myTree.getModules(p1Project).size());
+    MavenProject p2Project = myTree.getModules(p1Project).get(0);
+    assertEquals(p2, p2Project.getFile());
+    assertEquals(p1Project, myTree.findRootProject(p2Project));
+
+    assertEquals(1, myTree.getModules(p2Project).size());
+    MavenProject mProject = myTree.getModules(p2Project).get(0);
+    assertEquals(m, mProject.getFile());
+    assertEquals(p1Project, myTree.findRootProject(mProject));
+
+    assertEquals(0, myTree.getModules(mProject).size());
   }
 
   public void testOutputPathsAreBasedOnTargetPathWhenResolving() throws Exception {

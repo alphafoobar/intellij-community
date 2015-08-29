@@ -2,52 +2,34 @@ package com.intellij.vcs.log.impl;
 
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.vcs.log.Hash;
-import com.intellij.vcs.log.TimedVcsCommit;
 import com.intellij.vcs.log.VcsShortCommitDetails;
 import com.intellij.vcs.log.VcsUser;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
-/**
- * @author Kirill Likhodedov
- */
-public class VcsShortCommitDetailsImpl implements VcsShortCommitDetails {
+public class VcsShortCommitDetailsImpl extends TimedVcsCommitImpl implements VcsShortCommitDetails {
 
-  @NotNull private final TimedVcsCommit myTimeCommitParents;
   @NotNull private final String mySubject;
   @NotNull private final VcsUser myAuthor;
   @NotNull private final VirtualFile myRoot;
+  @NotNull private final VcsUser myCommitter;
+  private final long myAuthorTime;
 
-  public VcsShortCommitDetailsImpl(@NotNull Hash hash, @NotNull List<Hash> parents, long timeStamp, @NotNull VirtualFile root,
-                                   @NotNull String subject, @NotNull VcsUser author) {
-    myTimeCommitParents = new TimedVcsCommitImpl(hash, parents, timeStamp);
+  public VcsShortCommitDetailsImpl(@NotNull Hash hash, @NotNull List<Hash> parents, long commitTime, @NotNull VirtualFile root,
+                                   @NotNull String subject, @NotNull VcsUser author, @NotNull VcsUser committer, long authorTime) {
+    super(hash, parents, commitTime);
     myRoot = root;
     mySubject = subject;
     myAuthor = author;
-  }
-
-  @NotNull
-  @Override
-  public Hash getHash() {
-    return myTimeCommitParents.getHash();
+    myCommitter = committer;
+    myAuthorTime = authorTime;
   }
 
   @NotNull
   @Override
   public VirtualFile getRoot() {
     return myRoot;
-  }
-
-  @NotNull
-  @Override
-  public List<Hash> getParents() {
-    return myTimeCommitParents.getParents();
-  }
-
-  @Override
-  public long getTime() {
-    return myTimeCommitParents.getTime();
   }
 
   @Override
@@ -62,9 +44,25 @@ public class VcsShortCommitDetailsImpl implements VcsShortCommitDetails {
     return myAuthor;
   }
 
+  @NotNull
+  @Override
+  public VcsUser getCommitter() {
+    return myCommitter;
+  }
+
+  @Override
+  public long getAuthorTime() {
+    return myAuthorTime;
+  }
+
+  @Override
+  public long getCommitTime() {
+    return getTimestamp();
+  }
+
   @Override
   public String toString() {
-    return getHash().toShortString() + "(" + getSubject() + ")";
+    return getId().toShortString() + "(" + getSubject() + ")";
   }
 
 }

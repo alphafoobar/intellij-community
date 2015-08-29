@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -139,7 +139,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     }
     myClass = new WriteCommandAction<PsiClass>(myProject, getCommandName()){
       @Override
-      protected void run(Result<PsiClass> result) throws Throwable {
+      protected void run(@NotNull Result<PsiClass> result) throws Throwable {
         result.setResult(buildClass());
       }
     }.execute().getResultObject();
@@ -151,7 +151,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   }
 
   @Override
-  protected boolean preprocessUsages(final Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull final Ref<UsageInfo[]> refUsages) {
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
     myExtractEnumProcessor.findEnumConstantConflicts(refUsages);
     if (!DestinationFolderComboBox.isAccessible(myProject, sourceClass.getContainingFile().getVirtualFile(),
@@ -229,13 +229,13 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
 
     final String baseName = settings.FIELD_NAME_PREFIX.length() == 0 ? StringUtil.decapitalize(newClassName) : newClassName;
     String name = settings.FIELD_NAME_PREFIX + baseName + settings.FIELD_NAME_SUFFIX;
-    if (!existsFieldWithName(name) && !JavaPsiFacade.getInstance(project).getNameHelper().isKeyword(name)) {
+    if (!existsFieldWithName(name) && !PsiNameHelper.getInstance(project).isKeyword(name)) {
       return name;
     }
     int counter = 1;
     while (true) {
       name = settings.FIELD_NAME_PREFIX + baseName + counter + settings.FIELD_NAME_SUFFIX;
-      if (!existsFieldWithName(name) && !JavaPsiFacade.getInstance(project).getNameHelper().isKeyword(name)) {
+      if (!existsFieldWithName(name) && !PsiNameHelper.getInstance(project).isKeyword(name)) {
         return name;
       }
       counter++;
@@ -258,11 +258,11 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usageInfos) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usageInfos) {
     return new ExtractClassUsageViewDescriptor(sourceClass);
   }
 
-  protected void performRefactoring(UsageInfo[] usageInfos) {
+  protected void performRefactoring(@NotNull UsageInfo[] usageInfos) {
     final PsiClass psiClass = buildClass();
     if (psiClass == null) return;
     if (delegationRequired) {
@@ -597,7 +597,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     final String qualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
     @NonNls String getter = null;
     if (myGenerateAccessors) {
-      getter = PropertyUtil.suggestGetterName(field);
+      getter = GenerateMembersUtil.suggestGetterName(field);
     } else {
       final PsiMethod fieldGetter = PropertyUtil.findPropertyGetter(sourceClass, field.getName(), false, false);
       if (fieldGetter != null && isInMovedElement(fieldGetter)) {
@@ -607,7 +607,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
 
     @NonNls String setter = null;
     if (myGenerateAccessors) {
-      setter = PropertyUtil.suggestSetterName(field);
+      setter = GenerateMembersUtil.suggestSetterName(field);
     } else {
       final PsiMethod fieldSetter = PropertyUtil.findPropertySetter(sourceClass, field.getName(), false, false);
       if (fieldSetter != null && isInMovedElement(fieldSetter)) {
@@ -871,11 +871,11 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     }
 
     private boolean hasGetter(final PsiField field) {
-      return hasGetterOrSetter(sourceClass.findMethodsBySignature(PropertyUtil.generateGetterPrototype(field), false));
+      return hasGetterOrSetter(sourceClass.findMethodsBySignature(GenerateMembersUtil.generateGetterPrototype(field), false));
     }
 
     private boolean hasSetter(final PsiField field) {
-      return hasGetterOrSetter(sourceClass.findMethodsBySignature(PropertyUtil.generateSetterPrototype(field), false));
+      return hasGetterOrSetter(sourceClass.findMethodsBySignature(GenerateMembersUtil.generateSetterPrototype(field), false));
     }
 
     protected abstract boolean hasGetterOrSetter(final PsiMethod[] getters);

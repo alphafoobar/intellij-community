@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ public class PyCallByClassInspection extends PyInspection {
               PyClass qual_class = qual_class_type.getPyClass();
               final PyArgumentList arglist = call.getArgumentList();
               if (arglist != null) {
-                CallArgumentsMapping analysis = arglist.analyzeCall(resolveWithoutImplicits());
+                CallArgumentsMapping analysis = arglist.analyzeCall(getResolveContext());
                 final PyCallExpression.PyMarkedCallee markedCallee = analysis.getMarkedCallee();
                 if (markedCallee != null  && markedCallee.getModifier() != STATICMETHOD) {
                   final List<PyParameter> params = PyUtil.getParameters(markedCallee.getCallable(), myTypeEvalContext);
@@ -114,7 +114,7 @@ public class PyCallByClassInspection extends PyInspection {
                           if (first_arg_class != qual_class) {
                             // delegating to a parent is fine
                             if (markedCallee.getCallable() instanceof PyFunction) {
-                              Callable callable = PsiTreeUtil.getParentOfType(call, Callable.class);
+                              PyCallable callable = PsiTreeUtil.getParentOfType(call, PyCallable.class);
                               if (callable != null) {
                                 PyFunction method = callable.asMethod();
                                 if (method != null) {

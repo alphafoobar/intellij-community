@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.util.PopupUtil;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ui.UIUtil;
 import com.sun.awt.AWTUtilities;
@@ -58,6 +59,9 @@ public interface PopupComponent {
 
     class AwtHeavyweight implements Factory {
       public PopupComponent getPopup(Component owner, Component content, int x, int y, JBPopup jbPopup) {
+        if (OurHeavyWeightPopup.isEnabled()) {
+          return new AwtPopupWrapper(new OurHeavyWeightPopup(owner, content, x, y), jbPopup);
+        }
         final PopupFactory factory = PopupFactory.getSharedInstance();
 
         final int oldType = PopupUtil.getPopupType(factory);
@@ -102,7 +106,7 @@ public interface PopupComponent {
         throw new IllegalArgumentException("Popup owner must be showing");
       }
 
-      final Window wnd = owner instanceof Window ? (Window)owner: SwingUtilities.getWindowAncestor(owner);
+      final Window wnd = UIUtil.getWindow(owner);
       if (wnd instanceof Frame) {
         myDialog = new JDialog((Frame)wnd);
       } else if (wnd instanceof Dialog) {
@@ -133,27 +137,17 @@ public interface PopupComponent {
     }
 
     public void show() {
+
+    UIUtil.suppressFocusStealing(getWindow());
+
       if (!myRequestFocus) {
         myDialog.setFocusableWindowState(false);
       }
 
-      try {
-        if (UIUtil.isUnderDarcula()) {
-          AWTUtilities.setWindowOpaque(myDialog, false);
-        }
-      }
-      catch (Exception ignore) {
-      }
-
+      AwtPopupWrapper.fixFlickering(myDialog, false);
       myDialog.setVisible(true);
+      AwtPopupWrapper.fixFlickering(myDialog, true);
 
-      try {
-        if (UIUtil.isUnderDarcula()) {
-          AWTUtilities.setWindowOpaque(myDialog, true);
-        }
-      }
-      catch (Exception ignore) {
-      }
       SwingUtilities.invokeLater(new Runnable() {
         public void run() {
           myDialog.setFocusableWindowState(true);
@@ -172,7 +166,7 @@ public interface PopupComponent {
       myJBPopup = jbPopup;
 
       if (SystemInfo.isMac && UIUtil.isUnderAquaLookAndFeel()) {
-        final Component c = (Component)ReflectionUtil.getField(Popup.class, myPopup, Component.class, "component");
+        final Component c = ReflectionUtil.getField(Popup.class, myPopup, Component.class, "component");
         c.setBackground(UIUtil.getPanelBackground());
       }
     }
@@ -213,14 +207,14 @@ public interface PopupComponent {
 
     private static void fixFlickering(Window wnd, boolean opaque) {
       try {
-        if (UIUtil.isUnderDarcula() && !SystemInfo.isLinux && wnd != null) {
+        if (UIUtil.isUnderDarcula() && SystemInfo.isMac && Registry.is("darcula.fix.native.flickering") && wnd != null) {
           AWTUtilities.setWindowOpaque(wnd, opaque);
         }
       } catch (Exception ignore) {}
     }
 
     public Window getWindow() {
-      final Component c = (Component)ReflectionUtil.getField(Popup.class, myPopup, Component.class, "component");
+      final Component c = ReflectionUtil.getField(Popup.class, myPopup, Component.class, "component");
       return c instanceof JWindow ? (JWindow)c : null;
     }
 

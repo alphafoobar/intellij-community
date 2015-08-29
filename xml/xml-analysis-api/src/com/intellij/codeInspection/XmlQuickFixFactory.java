@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
  */
 package com.intellij.codeInspection;
 
-import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.psi.xml.XmlToken;
 import org.jetbrains.annotations.NotNull;
@@ -29,10 +29,13 @@ public abstract class XmlQuickFixFactory {
   }
 
   @NotNull
-  public abstract IntentionAction insertRequiredAttributeFix(@NotNull XmlTag tag, @NotNull String attrName,@NotNull String... values);
+  public abstract LocalQuickFixAndIntentionActionOnPsiElement insertRequiredAttributeFix(@NotNull XmlTag tag, @NotNull String attrName,@NotNull String... values);
 
   @NotNull
   public abstract LocalQuickFix createNSDeclarationIntentionFix(@NotNull final PsiElement element,
                                            @NotNull String namespacePrefix,
                                            @Nullable final XmlToken token);
+
+  @NotNull
+  public abstract LocalQuickFixAndIntentionActionOnPsiElement addAttributeValueFix(@NotNull XmlAttribute attribute);
 }

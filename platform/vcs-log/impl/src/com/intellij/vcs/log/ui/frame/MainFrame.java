@@ -11,19 +11,25 @@ import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.TextRevisionNumber;
 import com.intellij.openapi.vcs.changes.committed.RepositoryChangesBrowser;
 import com.intellij.openapi.vcs.changes.ui.ChangesBrowser;
+import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.components.JBLoadingPanel;
 import com.intellij.util.ArrayUtil;
-import com.intellij.vcs.log.VcsLog;
-import com.intellij.vcs.log.VcsLogDataKeys;
-import com.intellij.vcs.log.VcsLogSettings;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.table.ComponentsListFocusTraversalPolicy;
+import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.VcsLogDataHolder;
 import com.intellij.vcs.log.data.VcsLogUiProperties;
-import com.intellij.vcs.log.ui.VcsLogUI;
+import com.intellij.vcs.log.data.VisiblePack;
+import com.intellij.vcs.log.graph.PermanentGraph;
+import com.intellij.vcs.log.graph.impl.facade.bek.BekSorter;
+import com.intellij.vcs.log.ui.VcsLogUiImpl;
+import com.intellij.vcs.log.ui.actions.IntelliSortChooserPopupAction;
 import com.intellij.vcs.log.ui.filter.VcsLogClassicFilterUi;
-import com.intellij.vcs.log.ui.filter.VcsLogFilterUi;
 import com.intellij.vcs.log.ui.tables.GraphTableModel;
 import icons.VcsLogIcons;
 import org.jetbrains.annotations.NotNull;
@@ -33,51 +39,57 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * @author erokhins
- */
 public class MainFrame extends JPanel implements TypeSafeDataProvider {
 
+  public static final int MAX_SELECTED_COMMITS = 100;
   @NotNull private final VcsLogDataHolder myLogDataHolder;
-  @NotNull private final VcsLogUI myUI;
+  @NotNull private final VcsLogUiImpl myUI;
   @NotNull private final Project myProject;
   @NotNull private final VcsLogUiProperties myUiProperties;
   @NotNull private final VcsLog myLog;
-  @NotNull private final VcsLogFilterUi myFilterUi;
+  @NotNull private final VcsLogClassicFilterUi myFilterUi;
 
   @NotNull private final JBLoadingPanel myChangesLoadingPane;
   @NotNull private final VcsLogGraphTable myGraphTable;
   @NotNull private final BranchesPanel myBranchesPanel;
   @NotNull private final DetailsPanel myDetailsPanel;
   @NotNull private final Splitter myDetailsSplitter;
-  private final JComponent myToolbar;
+  @NotNull private final JComponent myToolbar;
+  @NotNull private final RepositoryChangesBrowser myChangesBrowser;
 
-  public MainFrame(@NotNull VcsLogDataHolder logDataHolder, @NotNull VcsLogUI vcsLogUI, @NotNull Project project,
-                   @NotNull VcsLogSettings settings, @NotNull VcsLogUiProperties uiProperties, @NotNull VcsLog log) {
+  public MainFrame(@NotNull VcsLogDataHolder logDataHolder,
+                   @NotNull VcsLogUiImpl vcsLogUI,
+                   @NotNull Project project,
+                   @NotNull VcsLogSettings settings,
+                   @NotNull VcsLogUiProperties uiProperties,
+                   @NotNull VcsLog log,
+                   @NotNull VisiblePack initialDataPack) {
     // collect info
     myLogDataHolder = logDataHolder;
     myUI = vcsLogUI;
     myProject = project;
     myUiProperties = uiProperties;
     myLog = log;
-    myFilterUi = new VcsLogClassicFilterUi(myUI);
+    myFilterUi = new VcsLogClassicFilterUi(myUI, logDataHolder, uiProperties, initialDataPack);
 
     // initialize components
-    myGraphTable = new VcsLogGraphTable(vcsLogUI, logDataHolder);
-    myBranchesPanel = new BranchesPanel(logDataHolder, vcsLogUI);
+    myGraphTable = new VcsLogGraphTable(vcsLogUI, logDataHolder, initialDataPack);
+    myBranchesPanel = new BranchesPanel(logDataHolder, vcsLogUI, initialDataPack.getRefsModel());
     myBranchesPanel.setVisible(settings.isShowBranchesPanel());
-    myDetailsPanel = new DetailsPanel(logDataHolder, myGraphTable, vcsLogUI.getColorManager());
+    myDetailsPanel = new DetailsPanel(logDataHolder, myGraphTable, vcsLogUI.getColorManager(), initialDataPack);
 
-    final ChangesBrowser changesBrowser = new RepositoryChangesBrowser(project, null, Collections.<Change>emptyList(), null);
-    changesBrowser.getDiffAction().registerCustomShortcutSet(CommonShortcuts.getDiff(), getGraphTable());
-    setDefaultEmptyText(changesBrowser);
+    myChangesBrowser = new RepositoryChangesBrowser(project, null, Collections.<Change>emptyList(), null);
+    myChangesBrowser.getDiffAction().registerCustomShortcutSet(myChangesBrowser.getDiffAction().getShortcutSet(), getGraphTable());
+    myChangesBrowser.getEditSourceAction().registerCustomShortcutSet(CommonShortcuts.getEditSource(), getGraphTable());
+    setDefaultEmptyText(myChangesBrowser);
     myChangesLoadingPane = new JBLoadingPanel(new BorderLayout(), project);
-    myChangesLoadingPane.add(changesBrowser);
+    myChangesLoadingPane.add(myChangesBrowser);
 
-    final CommitSelectionListener selectionChangeListener = new CommitSelectionListener(changesBrowser);
+    final CommitSelectionListener selectionChangeListener = new CommitSelectionListener(myChangesBrowser);
     myGraphTable.getSelectionModel().addListSelectionListener(selectionChangeListener);
     myGraphTable.getSelectionModel().addListSelectionListener(myDetailsPanel);
     updateWhenDetailsAreLoaded(selectionChangeListener);
@@ -86,7 +98,7 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
     myToolbar = createActionsToolbar();
 
     myDetailsSplitter = new Splitter(true, 0.7f);
-    myDetailsSplitter.setFirstComponent(ScrollPaneFactory.createScrollPane(myGraphTable));
+    myDetailsSplitter.setFirstComponent(setupScrolledGraph());
     setupDetailsSplitter(myUiProperties.isShowDetails());
 
     JComponent toolbars = new JPanel(new BorderLayout());
@@ -109,6 +121,21 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
         changesBrowserSplitter.dispose();
       }
     });
+    myGraphTable.resetDefaultFocusTraversalKeys();
+    setFocusTraversalPolicyProvider(true);
+    setFocusTraversalPolicy(new MyFocusPolicy());
+  }
+
+  /**
+   * Informs components that the actual DataPack has been updated (e.g. due to a log refresh). <br/>
+   * Components may want to update their fields and/or rebuild.
+   *
+   * @param dataPack new data pack.
+   */
+  public void updateDataPack(@NotNull VisiblePack dataPack) {
+    myFilterUi.updateDataPack(dataPack);
+    myDetailsPanel.updateDataPack(dataPack);
+    myGraphTable.updateDataPack(dataPack);
   }
 
   private void updateWhenDetailsAreLoaded(final CommitSelectionListener selectionChangeListener) {
@@ -129,12 +156,19 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
       @Override
       public void run() {
         myDetailsPanel.valueChanged(null);
+        myGraphTable.repaint(); // we may need to repaint highlighters
       }
     });
   }
 
   public void setupDetailsSplitter(boolean state) {
     myDetailsSplitter.setSecondComponent(state ? myDetailsPanel : null);
+  }
+
+  private JScrollPane setupScrolledGraph() {
+    JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(myGraphTable);
+    myGraphTable.viewportSet(scrollPane.getViewport());
+    return scrollPane;
   }
 
   private static void setDefaultEmptyText(ChangesBrowser changesBrowser) {
@@ -152,17 +186,54 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
   }
 
   private JComponent createActionsToolbar() {
-    AnAction hideBranchesAction = new GraphAction("Collapse linear branches", "Collapse linear branches", VcsLogIcons.CollapseBranches) {
-      @Override
-      public void actionPerformed(AnActionEvent e) {
-        myUI.hideAll();
-      }
-    };
+    AnAction collapseBranchesAction =
+      new GraphAction("Collapse linear branches", "Collapse linear branches", VcsLogIcons.CollapseBranches) {
+        @Override
+        public void actionPerformed(AnActionEvent e) {
+          myUI.collapseAll();
+        }
 
-    AnAction showBranchesAction = new GraphAction("Expand all branches", "Expand all branches", VcsLogIcons.ExpandBranches) {
+        @Override
+        public void update(AnActionEvent e) {
+          super.update(e);
+          if (!myFilterUi.getFilters().getDetailsFilters().isEmpty()) {
+            e.getPresentation().setEnabled(false);
+          }
+          if (myUI.getBekType() == PermanentGraph.SortType.LinearBek) {
+            e.getPresentation().setIcon(VcsLogIcons.CollapseMerges);
+            e.getPresentation().setText("Collapse all merges");
+            e.getPresentation().setDescription("Collapse all merges");
+          }
+          else {
+            e.getPresentation().setIcon(VcsLogIcons.CollapseBranches);
+            e.getPresentation().setText("Collapse all linear branches");
+            e.getPresentation().setDescription("Collapse all linear branches");
+          }
+        }
+      };
+
+    AnAction expandBranchesAction = new GraphAction("Expand all branches", "Expand all branches", VcsLogIcons.ExpandBranches) {
       @Override
       public void actionPerformed(AnActionEvent e) {
-        myUI.showAll();
+        myUI.expandAll();
+      }
+
+      @Override
+      public void update(AnActionEvent e) {
+        super.update(e);
+        if (!myFilterUi.getFilters().getDetailsFilters().isEmpty()) {
+          e.getPresentation().setEnabled(false);
+        }
+        if (myUI.getBekType() == PermanentGraph.SortType.LinearBek) {
+          e.getPresentation().setIcon(VcsLogIcons.ExpandMerges);
+          e.getPresentation().setText("Expand all merges");
+          e.getPresentation().setDescription("Expand all merges");
+        }
+        else {
+          e.getPresentation().setIcon(VcsLogIcons.ExpandBranches);
+          e.getPresentation().setText("Expand all linear branches");
+          e.getPresentation().setDescription("Expand all linear branches");
+        }
       }
     };
 
@@ -183,15 +254,25 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
 
     refreshAction.registerShortcutOn(this);
 
-    DefaultActionGroup toolbarGroup = new DefaultActionGroup(hideBranchesAction, showBranchesAction, showFullPatchAction, refreshAction,
-                                                             showDetailsAction);
-    toolbarGroup.add(ActionManager.getInstance().getAction(VcsLogUI.TOOLBAR_ACTION_GROUP));
+    DefaultActionGroup toolbarGroup =
+      new DefaultActionGroup(collapseBranchesAction, expandBranchesAction, showFullPatchAction, refreshAction, showDetailsAction);
+    toolbarGroup.add(ActionManager.getInstance().getAction(VcsLogUiImpl.TOOLBAR_ACTION_GROUP));
 
     DefaultActionGroup mainGroup = new DefaultActionGroup();
-    mainGroup.add(myFilterUi.getFilterActionComponents());
+    mainGroup.add(myFilterUi.createActionGroup());
     mainGroup.addSeparator();
+    if (BekSorter.isBekEnabled()) {
+      if (BekSorter.isLinearBekEnabled()) {
+        mainGroup.add(new IntelliSortChooserPopupAction());
+        // can not register both of the actions in xml file, choosing to register an action for the "outer world"
+        // I can of course if linear bek is enabled replace the action on start but why bother
+      }
+      else {
+        mainGroup.add(ActionManager.getInstance().getAction(VcsLogUiImpl.VCS_LOG_INTELLI_SORT_ACTION));
+      }
+    }
     mainGroup.add(toolbarGroup);
-    ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, mainGroup, true);
+    ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.CHANGES_VIEW_TOOLBAR, mainGroup, true);
     toolbar.setTargetComponent(this);
     return toolbar.getComponent();
   }
@@ -211,25 +292,43 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
 
   @Override
   public void calcData(DataKey key, DataSink sink) {
-    if (VcsLogDataKeys.VSC_LOG == key) {
+    if (VcsLogDataKeys.VCS_LOG == key) {
       sink.put(key, myLog);
     }
-    else if (VcsDataKeys.CHANGES.equals(key)) {
-      if (myGraphTable.getSelectedRowCount() == 1) {
-        List<Change> selectedChanges = getSelectedChanges();
-        if (selectedChanges != null) {
-          sink.put(VcsDataKeys.CHANGES, ArrayUtil.toObjectArray(selectedChanges, Change.class));
-        }
+    else if (VcsLogDataKeys.VCS_LOG_UI == key) {
+      sink.put(key, myUI);
+    }
+    else if (VcsLogDataKeys.VCS_LOG_DATA_PROVIDER == key) {
+      sink.put(key, myLogDataHolder);
+    }
+    else if (VcsDataKeys.CHANGES == key || VcsDataKeys.SELECTED_CHANGES == key) {
+      List<Change> selectedChanges = getSelectedChanges();
+      if (selectedChanges != null) {
+        sink.put(key, ArrayUtil.toObjectArray(selectedChanges, Change.class));
       }
+    }
+    else if (VcsDataKeys.VCS_REVISION_NUMBERS == key) {
+      List<Hash> hashes = myUI.getVcsLog().getSelectedCommits();
+      sink.put(key, ArrayUtil.toObjectArray(ContainerUtil.map(hashes, new Function<Hash, VcsRevisionNumber>() {
+        @Override
+        public VcsRevisionNumber fun(Hash hash) {
+          return new TextRevisionNumber(hash.asString(), hash.toShortString());
+        }
+      }), VcsRevisionNumber.class));
     }
   }
 
-  public Component getToolbar() {
+  @NotNull
+  public JComponent getToolbar() {
     return myToolbar;
   }
 
   public boolean areGraphActionsEnabled() {
     return myGraphTable.getModel() instanceof GraphTableModel && myGraphTable.getRowCount() > 0;
+  }
+
+  public void onFiltersChange(@NotNull VcsLogFilterCollection filters) {
+    myBranchesPanel.onFiltersChange(filters);
   }
 
   private class CommitSelectionListener implements ListSelectionListener {
@@ -240,11 +339,12 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
     }
 
     @Override
-    public void valueChanged(@Nullable ListSelectionEvent notUsed) {
+    public void valueChanged(@Nullable ListSelectionEvent event) {
+      if (event != null && event.getValueIsAdjusting()) return;
       int rows = getGraphTable().getSelectedRowCount();
-      if (rows < 1) {
+      if (rows < 1 || rows > MAX_SELECTED_COMMITS) {
         myChangesLoadingPane.stopLoading();
-        setDefaultEmptyText(myChangesBrowser);
+        myChangesBrowser.getViewer().setEmptyText(rows < 1 ? "" : "Too many commits selected.");
         myChangesBrowser.setChangesToDisplay(Collections.<Change>emptyList());
       }
       else {
@@ -255,6 +355,7 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
         }
         else {
           myChangesBrowser.setChangesToDisplay(Collections.<Change>emptyList());
+          setDefaultEmptyText(myChangesBrowser);
           myChangesLoadingPane.startLoading();
         }
       }
@@ -288,7 +389,7 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
 
     @Override
     public boolean isSelected(AnActionEvent e) {
-      return !myUI.areLongEdgesHidden();
+      return !myUI.getDataPack().getVisibleGraph().getActionController().areLongEdgesHidden();
     }
 
     @Override
@@ -314,4 +415,13 @@ public class MainFrame extends JPanel implements TypeSafeDataProvider {
       e.getPresentation().setEnabled(areGraphActionsEnabled());
     }
   }
+
+  private class MyFocusPolicy extends ComponentsListFocusTraversalPolicy {
+    @NotNull
+    @Override
+    protected List<Component> getOrderedComponents() {
+      return Arrays.<Component>asList(myGraphTable, myChangesBrowser.getPreferredFocusedComponent());
+    }
+  }
+
 }

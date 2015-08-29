@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.ArrayFactory;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
@@ -34,6 +36,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import static com.jetbrains.python.psi.PyUtil.as;
 
 /**
  * @author yole
@@ -100,9 +104,9 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
     List<PyImportElement> result = new ArrayList<PyImportElement>();
     final ASTNode importKeyword = getNode().findChildByType(PyTokenTypes.IMPORT_KEYWORD);
     if (importKeyword != null) {
-      for(ASTNode node = importKeyword.getTreeNext(); node != null; node = node.getTreeNext()) {
+      for (ASTNode node = importKeyword.getTreeNext(); node != null; node = node.getTreeNext()) {
         if (node.getElementType() == PyElementTypes.IMPORT_ELEMENT) {
-          result.add((PyImportElement) node.getPsi());
+          result.add((PyImportElement)node.getPsi());
         }
       }
     }
@@ -121,7 +125,7 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
 
     int result = 0;
     ASTNode seeker = getNode().getFirstChildNode();
-    while(seeker != null && (seeker.getElementType() == PyTokenTypes.FROM_KEYWORD || seeker.getElementType() == TokenType.WHITE_SPACE)) {
+    while (seeker != null && (seeker.getElementType() == PyTokenTypes.FROM_KEYWORD || seeker.getElementType() == TokenType.WHITE_SPACE)) {
       seeker = seeker.getTreeNext();
     }
     while (seeker != null && seeker.getElementType() == PyTokenTypes.DOT) {
@@ -146,7 +150,9 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
     return findChildByType(PyTokenTypes.RPAR);
   }
 
-  public boolean processDeclarations(@NotNull final PsiScopeProcessor processor, @NotNull final ResolveState state, final PsiElement lastParent,
+  public boolean processDeclarations(@NotNull final PsiScopeProcessor processor,
+                                     @NotNull final ResolveState state,
+                                     final PsiElement lastParent,
                                      @NotNull final PsiElement place) {
     // import is per-file
     if (place.getContainingFile() != getContainingFile()) {
@@ -165,7 +171,7 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
     }
     else {
       PyImportElement[] importElements = getImportElements();
-      for(PyImportElement element: importElements) {
+      for (PyImportElement element : importElements) {
         if (!processor.execute(element, state)) {
           return false;
         }
@@ -192,7 +198,8 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
     ASTNode prevNode = result;
     do {
       prevNode = prevNode.getTreePrev();
-    } while(prevNode != null && prevNode.getElementType() == TokenType.WHITE_SPACE);
+    }
+    while (prevNode != null && prevNode.getElementType() == TokenType.WHITE_SPACE);
 
     if (prevNode != null && prevNode.getElementType() == PyElementTypes.IMPORT_ELEMENT &&
         result.getElementType() == PyElementTypes.IMPORT_ELEMENT) {
@@ -205,14 +212,15 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
 
   @Override
   public void deleteChildInternal(@NotNull ASTNode child) {
-    PyPsiUtils.deleteAdjacentComma(this, child, getImportElements());
+    if (ArrayUtil.contains(child.getPsi(), getImportElements())) {
+      PyPsiUtils.deleteAdjacentCommaWithWhitespaces(this, child.getPsi());
+    }
     super.deleteChildInternal(child);
   }
 
   @Nullable
-  public PsiElement resolveImportSource() {
-    final List<PsiElement> candidates = resolveImportSourceCandidates();
-    return candidates.size() > 0 ? candidates.get(0) : null;
+  public PsiFileSystemItem resolveImportSource() {
+    return as(ContainerUtil.getFirstItem(resolveImportSourceCandidates()), PsiFileSystemItem.class);
   }
 
   @NotNull
@@ -227,5 +235,22 @@ public class PyFromImportStatementImpl extends PyBaseElementImpl<PyFromImportSta
       }
     }
     return ResolveImportUtil.resolveFromImportStatementSource(this, qName);
+  }
+
+  @NotNull
+  @Override
+  public List<String> getFullyQualifiedObjectNames() {
+    final QualifiedName source = getImportSourceQName();
+
+    final String prefix = (source != null) ? (source.join(".") + '.') : "";
+
+    final List<String> unqualifiedNames = PyImportStatementImpl.getImportElementNames(getImportElements());
+
+    final List<String> result = new ArrayList<String>(unqualifiedNames.size());
+
+    for (final String unqualifiedName : unqualifiedNames) {
+      result.add(prefix + unqualifiedName);
+    }
+    return result;
   }
 }

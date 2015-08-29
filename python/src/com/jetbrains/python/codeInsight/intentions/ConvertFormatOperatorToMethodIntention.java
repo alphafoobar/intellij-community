@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiWhiteSpace;
@@ -35,7 +34,10 @@ import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.impl.PyStringLiteralExpressionImpl;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeChecker;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -230,11 +232,7 @@ public class ConvertFormatOperatorToMethodIntention extends BaseIntentionAction 
     if (binaryExpression == null) {
       return false;
     }
-    final VirtualFile virtualFile = binaryExpression.getContainingFile().getVirtualFile();
-    if (virtualFile == null) {
-      return false;
-    }
-    final LanguageLevel languageLevel = LanguageLevel.forFile(virtualFile);
+    final LanguageLevel languageLevel = LanguageLevel.forElement(binaryExpression);
     if (languageLevel.isOlderThan(LanguageLevel.PYTHON26)) {
       return false;
     }
@@ -257,7 +255,7 @@ public class ConvertFormatOperatorToMethodIntention extends BaseIntentionAction 
     final PyExpression rhs = PyPsiUtils.flattenParens(rightExpression);
     if (rhs == null) return;
     final String paramText = sure(rhs).getText();
-    final TypeEvalContext context = TypeEvalContext.userInitiated(file);
+    final TypeEvalContext context = TypeEvalContext.userInitiated(file.getProject(), file);
     final PyType rhsType = context.getType(rhs);
     String prefix = "";
     if (PyTypeChecker.match(PyBuiltinCache.getInstance(rhs).getObjectType("unicode"), rhsType, context)) {
@@ -292,7 +290,10 @@ public class ConvertFormatOperatorToMethodIntention extends BaseIntentionAction 
       }
     }
     else target.append("(").append(paramText).append(")"); // tuple is ok as is
-    element.replace(elementGenerator.createExpressionFromText(LanguageLevel.forElement(element), target.toString()));
+    // Correctly handle multiline implicitly concatenated string literals (PY-9176)
+    target.insert(0, '(').append(')');
+    final PyExpression parenthesized = elementGenerator.createExpressionFromText(LanguageLevel.forElement(element), target.toString());
+    element.replace(sure(((PyParenthesizedExpression)parenthesized).getContainedExpression()));
   }
 
   private static String getSeparator(PyStringLiteralExpression leftExpression) {
@@ -318,6 +319,6 @@ public class ConvertFormatOperatorToMethodIntention extends BaseIntentionAction 
       if (seeker != null && seeker instanceof PsiWhiteSpace) sb.append(seeker.getText());
       else break;
     }
-    return new Pair<String, PsiElement>(sb.toString(), seeker);
+    return Pair.create(sb.toString(), seeker);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,9 @@
  */
 package com.jetbrains.python.run;
 
-import com.google.common.collect.Lists;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
-import com.intellij.execution.filters.Filter;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.options.SettingsEditor;
@@ -40,7 +38,6 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
-import java.util.List;
 
 /**
  * @author yole
@@ -50,8 +47,10 @@ public class PythonRunConfiguration extends AbstractPythonRunConfiguration
   public static final String SCRIPT_NAME = "SCRIPT_NAME";
   public static final String PARAMETERS = "PARAMETERS";
   public static final String MULTIPROCESS = "MULTIPROCESS";
+  public static final String SHOW_COMMAND_LINE = "SHOW_COMMAND_LINE";
   private String myScriptName;
   private String myScriptParameters;
+  private boolean myShowCommandLineAfterwards = false;
 
   protected PythonRunConfiguration(Project project, ConfigurationFactory configurationFactory) {
     super(project, configurationFactory);
@@ -64,10 +63,7 @@ public class PythonRunConfiguration extends AbstractPythonRunConfiguration
   }
 
   public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
-    List<Filter> filters = Lists.newArrayList();
-    filters.add(new PythonTracebackFilter(getProject(), getWorkingDirectory()));
-
-    return new PythonScriptCommandLineState(this, env, filters);
+    return new PythonScriptCommandLineState(this, env);
   }
 
   public void checkConfiguration() throws RuntimeConfigurationException {
@@ -104,18 +100,27 @@ public class PythonRunConfiguration extends AbstractPythonRunConfiguration
     myScriptParameters = scriptParameters;
   }
 
+  public boolean showCommandLineAfterwards() {
+    return myShowCommandLineAfterwards;
+  }
+
+  public void setShowCommandLineAfterwards(boolean showCommandLineAfterwards) {
+    myShowCommandLineAfterwards = showCommandLineAfterwards;
+  }
+
   public void readExternal(Element element) throws InvalidDataException {
     PathMacroManager.getInstance(getProject()).expandPaths(element);
     super.readExternal(element);
     myScriptName = JDOMExternalizerUtil.readField(element, SCRIPT_NAME);
     myScriptParameters = JDOMExternalizerUtil.readField(element, PARAMETERS);
+    myShowCommandLineAfterwards = Boolean.parseBoolean(JDOMExternalizerUtil.readField(element, SHOW_COMMAND_LINE, "false"));
   }
 
   public void writeExternal(Element element) throws WriteExternalException {
     super.writeExternal(element);
     JDOMExternalizerUtil.writeField(element, SCRIPT_NAME, myScriptName);
     JDOMExternalizerUtil.writeField(element, PARAMETERS, myScriptParameters);
-    PathMacroManager.getInstance(getProject()).collapsePathsRecursively(element);
+    JDOMExternalizerUtil.writeField(element, SHOW_COMMAND_LINE, Boolean.toString(myShowCommandLineAfterwards));
   }
 
   public AbstractPythonRunConfigurationParams getBaseParams() {
@@ -126,6 +131,7 @@ public class PythonRunConfiguration extends AbstractPythonRunConfiguration
     AbstractPythonRunConfiguration.copyParams(source.getBaseParams(), target.getBaseParams());
     target.setScriptName(source.getScriptName());
     target.setScriptParameters(source.getScriptParameters());
+    target.setShowCommandLineAfterwards(source.showCommandLineAfterwards());
   }
 
   @Override

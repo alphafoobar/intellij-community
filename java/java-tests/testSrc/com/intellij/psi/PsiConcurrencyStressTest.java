@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,11 @@
  */
 package com.intellij.psi;
 
+import com.intellij.codeInsight.daemon.DaemonAnalyzerTestCase;
 import com.intellij.codeInsight.daemon.impl.DaemonProgressIndicator;
+import com.intellij.codeInsight.daemon.impl.DefaultHighlightVisitor;
+import com.intellij.codeInsight.daemon.impl.HighlightVisitor;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightInfoHolder;
-import com.intellij.codeInsight.daemon.impl.analysis.HighlightVisitorImpl;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.ex.PathManagerEx;
@@ -32,24 +34,20 @@ import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.testFramework.IdeaTestUtil;
-import com.intellij.testFramework.PsiTestCase;
 import com.intellij.testFramework.PsiTestUtil;
+import com.intellij.testFramework.SkipSlowTestLocally;
 import com.intellij.testFramework.Timings;
 import com.intellij.util.IncorrectOperationException;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class PsiConcurrencyStressTest extends PsiTestCase {
-  private static final boolean SKIP = "true".equalsIgnoreCase(System.getProperty("skip.psi.concurrency.test"));
-
-  @Override
-  public void runBare() throws Throwable {
-    if (!SKIP) {
-      super.runBare();
-    }
-  }
+@SkipSlowTestLocally
+public class PsiConcurrencyStressTest extends DaemonAnalyzerTestCase {
+  private volatile PsiJavaFile myFile;
+  private volatile boolean writeActionInProgress;
 
   @Override
   protected void setUp() throws Exception {
@@ -61,14 +59,11 @@ public class PsiConcurrencyStressTest extends PsiTestCase {
     PsiTestUtil.createTestProjectStructure(myProject, myModule, root, myFilesToDelete);
   }
 
-  private volatile PsiJavaFile myFile;
-  private volatile boolean writeActionInProgress;
   public void testStress() throws Exception {
     int numOfThreads = 10;
     int iterations = Timings.adjustAccordingToMySpeed(20, true);
     System.out.println("iterations = " + iterations);
     final int readIterations = iterations * 3;
-    final int writeIterations = iterations;
 
     synchronized (this) {
       PsiClass myClass = myJavaFacade.findClass("StressClass", GlobalSearchScope.allScope(myProject));
@@ -81,37 +76,26 @@ public class PsiConcurrencyStressTest extends PsiTestCase {
     final CountDownLatch reads = new CountDownLatch(numOfThreads);
     final Random random = new Random();
     for (int i = 0; i < numOfThreads; i++) {
-      new Thread(new Runnable() {
-        @Override
-        public void run() {
-          for (int i = 0; i < readIterations; i++) {
-            if (myPsiManager == null) return;
-            ProgressManager.getInstance().runProcess(new Runnable() {
-              @Override
-              public void run() {
-                ApplicationManager.getApplication().runReadAction(new Runnable() {
-                  @Override
-                  public void run() {
-                    assertFalse(writeActionInProgress);
-                    readStep(random);
-                  }
-                });
-              }
-            }, new DaemonProgressIndicator());
-          }
-
-          reads.countDown();
+      new Thread(() -> {
+        for (int i1 = 0; i1 < readIterations; i1++) {
+          if (myPsiManager == null) return;
+          ProgressManager.getInstance().runProcess(() -> ApplicationManager.getApplication().runReadAction(() -> {
+            assertFalse(writeActionInProgress);
+            readStep(random);
+          }), new DaemonProgressIndicator());
         }
+
+        reads.countDown();
       }, "stress thread" + i).start();
     }
 
     final Document document = documentManager.getDocument(myFile);
 
-    for (int i = 0; i < writeIterations; i++) {
+    for (int i = 0; i < iterations; i++) {
       Thread.sleep(100);
       new WriteCommandAction(myProject, myFile) {
         @Override
-        protected void run(final Result result) throws Throwable {
+        protected void run(@NotNull final Result result) throws Throwable {
           writeActionInProgress = true;
           documentManager.commitAllDocuments();
           writeStep(random);
@@ -147,11 +131,8 @@ public class PsiConcurrencyStressTest extends PsiTestCase {
         mark("-");
         final PsiMethod[] psiMethods = getPsiClass().getMethods();
         if (psiMethods.length > 0) {
-          WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-            @Override
-            public void run() {
-              psiMethods[random.nextInt(psiMethods.length)].delete();
-            }
+          WriteCommandAction.runWriteCommandAction(null, () -> {
+            psiMethods[random.nextInt(psiMethods.length)].delete();
           });
         }
         break;
@@ -182,13 +163,8 @@ public class PsiConcurrencyStressTest extends PsiTestCase {
             super.visitElement(element);
 
             final HighlightInfoHolder infoHolder = new HighlightInfoHolder(myFile);
-            final HighlightVisitorImpl visitor = new HighlightVisitorImpl(PsiResolveHelper.SERVICE.getInstance(getProject()));
-            visitor.analyze(myFile, true, infoHolder, new Runnable() {
-              @Override
-              public void run() {
-                visitor.visit(element);
-              }
-            });
+            final HighlightVisitor visitor = new DefaultHighlightVisitor(getProject());
+            visitor.analyze(myFile, true, infoHolder, () -> visitor.visit(element));
           }
         });
         break;
@@ -203,7 +179,7 @@ public class PsiConcurrencyStressTest extends PsiTestCase {
   }
 
   @Override
-  protected void invokeTestRunnable(final Runnable runnable) throws Exception {
+  protected void invokeTestRunnable(@NotNull final Runnable runnable) throws Exception {
     runnable.run();
   }
 }

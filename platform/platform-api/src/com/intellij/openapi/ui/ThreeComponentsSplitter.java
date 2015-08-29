@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,18 @@ package com.intellij.openapi.ui;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Weighted;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeGlassPane;
 import com.intellij.openapi.wm.IdeGlassPaneUtil;
 import com.intellij.ui.ClickListener;
 import com.intellij.ui.UIBundle;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -44,7 +50,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
    *
    *                          /-------/
    *                          |   |   |
-   * This is horihontal split | 1 | 2 |
+   * This is horizontal split | 1 | 2 |
    *                          |   |   |
    *                          /-------/
    */
@@ -54,12 +60,13 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
   private final Divider myFirstDivider;
   private final Divider myLastDivider;
 
-  private JComponent myFirstComponent;
-  private JComponent myInnerComponent;
-  private JComponent myLastComponent;
+  @Nullable private JComponent myFirstComponent;
+  @Nullable private JComponent myInnerComponent;
+  @Nullable private JComponent myLastComponent;
 
-  private int myFirstSize = 10;
-  private int myLastSize = 10;
+  private int myFirstSize = 0;
+  private int myLastSize = 0;
+  private int myMinSize = 0;
 
   private boolean myShowDividerControls;
   private int myDividerZone;
@@ -72,16 +79,24 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     this(false);
   }
 
-
   public ThreeComponentsSplitter(boolean vertical) {
+    this(vertical, false);
+  }
+
+  public ThreeComponentsSplitter(boolean vertical, boolean onePixelDividers) {
     myVerticalSplit = vertical;
     myShowDividerControls = false;
-    myFirstDivider = new Divider(true);
+    myFirstDivider = new Divider(true, onePixelDividers);
     Disposer.register(this, myFirstDivider);
-    myLastDivider = new Divider(false);
+    myLastDivider = new Divider(false, onePixelDividers);
     Disposer.register(this, myLastDivider);
 
-    myDividerWidth = 7;
+    myDividerWidth = onePixelDividers ? 1 : 7;
+    if (onePixelDividers) {
+      Color bg = UIUtil.CONTRAST_BORDER_COLOR;
+      myFirstDivider.setBackground(bg);
+      myLastDivider.setBackground(bg);
+    }
     setOpaque(false);
     add(myFirstDivider);
     add(myLastDivider);
@@ -138,9 +153,9 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
   public Dimension getMinimumSize() {
     if (isHonorMinimumSize()) {
       final int dividerWidth = getDividerWidth();
-      final Dimension firstSize = myFirstComponent != null ? myFirstComponent.getMinimumSize() : new Dimension(0, 0);
-      final Dimension lastSize = myLastComponent != null ? myLastComponent.getMinimumSize() : new Dimension(0, 0);
-      final Dimension innerSize = myInnerComponent != null ? myInnerComponent.getMinimumSize() : new Dimension(0, 0);
+      final Dimension firstSize = myFirstComponent != null ? myFirstComponent.getMinimumSize() : JBUI.emptySize();
+      final Dimension lastSize = myLastComponent != null ? myLastComponent.getMinimumSize() : JBUI.emptySize();
+      final Dimension innerSize = myInnerComponent != null ? myInnerComponent.getMinimumSize() : JBUI.emptySize();
       if (getOrientation()) {
         int width = Math.max(firstSize.width, Math.max(lastSize.width, innerSize.width));
         int height = visibleDividersCount() * dividerWidth;
@@ -186,14 +201,22 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     else {
       firstCompontSize = getFirstSize();
       lastComponentSize = getLastSize();
-      int sizeLack = firstCompontSize + lastComponentSize - (componentSize - dividersCount * dividerWidth);
+      int sizeLack = firstCompontSize + lastComponentSize - (componentSize - dividersCount * dividerWidth - myMinSize);
       if (sizeLack > 0) {
-        // Lacking size. Reduce first component's size, inner -> empty
-        firstCompontSize -= sizeLack;
-        innerComponentSize = 0;
+        // Lacking size. Reduce first & last component's size, inner -> MIN_SIZE
+        double firstSizeRatio = (double)firstCompontSize / (firstCompontSize + lastComponentSize);
+        if (firstCompontSize > 0) {
+          firstCompontSize -= sizeLack * firstSizeRatio;
+          firstCompontSize = Math.max(myMinSize, firstCompontSize);
+        }
+        if (lastComponentSize > 0) {
+          lastComponentSize -= sizeLack * (1 - firstSizeRatio);
+          lastComponentSize = Math.max(myMinSize, lastComponentSize);
+        }
+        innerComponentSize = getMinSize(myInnerComponent);
       }
       else {
-        innerComponentSize = componentSize - dividersCount * dividerWidth - getFirstSize() - getLastSize();
+        innerComponentSize = Math.max(getMinSize(myInnerComponent), componentSize - dividersCount * dividerWidth - getFirstSize() - getLastSize());
       }
 
       if (!innerVisible()) {
@@ -301,6 +324,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     repaint();
   }
 
+  @Nullable
   public JComponent getFirstComponent() {
     return myFirstComponent;
   }
@@ -310,7 +334,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
    * repaint the splitter. If there is already
    *
    */
-  public void setFirstComponent(JComponent component) {
+  public void setFirstComponent(@Nullable JComponent component) {
     if (myFirstComponent != component) {
       if (myFirstComponent != null) {
         remove(myFirstComponent);
@@ -323,6 +347,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     }
   }
 
+  @Nullable
   public JComponent getLastComponent() {
     return myLastComponent;
   }
@@ -333,7 +358,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
    * repaint the splitter.
    *
    */
-  public void setLastComponent(JComponent component) {
+  public void setLastComponent(@Nullable JComponent component) {
     if (myLastComponent != component) {
       if (myLastComponent != null) {
         remove(myLastComponent);
@@ -346,7 +371,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     }
   }
 
-
+  @Nullable
   public JComponent getInnerComponent() {
     return myInnerComponent;
   }
@@ -357,7 +382,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
    * repaint the splitter.
    *
    */
-  public void setInnerComponent(JComponent component) {
+  public void setInnerComponent(@Nullable JComponent component) {
     if (myInnerComponent != component) {
       if (myInnerComponent != null) {
         remove(myInnerComponent);
@@ -369,6 +394,12 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
       }
     }
   }
+  public void setMinSize(int minSize) {
+    myMinSize = Math.max(0, minSize);
+    doLayout();
+    repaint();
+  }
+
 
   public void setFirstSize(final int size) {
     myFirstSize = size;
@@ -390,6 +421,29 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     return lastVisible() ? myLastSize : 0;
   }
 
+  public int getMinSize(boolean first) {
+    return getMinSize(first? myFirstComponent : myLastComponent);
+  }
+
+  public int getMaxSize(boolean first) {
+    final int size = getOrientation() ? this.getHeight() : this.getWidth();
+    return size - (first? myLastSize: myFirstSize) - myMinSize;
+  }
+
+  private int getMinSize(JComponent component) {
+    if (isHonorMinimumSize()) {
+      if (component != null && myFirstComponent != null && myFirstComponent.isVisible() && myLastComponent != null && myLastComponent.isVisible()) {
+        if (getOrientation()) {
+          return component.getMinimumSize().height;
+        }
+        else {
+          return component.getMinimumSize().width;
+        }
+      }
+    }
+    return myMinSize;
+  }
+
   @Override
   public void dispose() {
     myLastComponent = null;
@@ -403,13 +457,19 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
   }
 
   private class Divider extends JPanel implements Disposable {
+    private final boolean myIsOnePixel;
     protected boolean myDragging;
     protected Point myPoint;
     private final boolean myIsFirst;
 
+    @Override
+    public void paint(Graphics g) {
+      super.paint(g);
+    }
+
     private IdeGlassPane myGlassPane;
 
-    private final MouseAdapter myListener = new MouseAdapter() {
+    private class MyMouseAdapter extends MouseAdapter implements Weighted {
       @Override
       public void mousePressed(MouseEvent e) {
         _processMouseEvent(e);
@@ -429,33 +489,39 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
       public void mouseDragged(MouseEvent e) {
         _processMouseMotionEvent(e);
       }
-    };
+      @Override
+      public double getWeight() {
+        return 1;
+      }
+      private void _processMouseMotionEvent(MouseEvent e) {
+        MouseEvent event = getTargetEvent(e);
+        if (event == null) {
+          myGlassPane.setCursor(null, myListener);
+          return;
+        }
 
-    private void _processMouseMotionEvent(MouseEvent e) {
-      MouseEvent event = getTargetEvent(e);
-      if (event == null) {
-        myGlassPane.setCursor(null, myListener);
-        return;
+        processMouseMotionEvent(event);
+        if (event.isConsumed()) {
+          e.consume();
+        }
       }
 
-      processMouseMotionEvent(event);
-      if (event.isConsumed()) {
-        e.consume();
+      private void _processMouseEvent(MouseEvent e) {
+        MouseEvent event = getTargetEvent(e);
+        if (event == null) {
+          myGlassPane.setCursor(null, myListener);
+          return;
+        }
+
+        processMouseEvent(event);
+        if (event.isConsumed()) {
+          e.consume();
+        }
       }
     }
 
-    private void _processMouseEvent(MouseEvent e) {
-      MouseEvent event = getTargetEvent(e);
-      if (event == null) {
-        myGlassPane.setCursor(null, myListener);
-        return;
-      }
+    private final MouseAdapter myListener = new MyMouseAdapter();
 
-      processMouseEvent(event);
-      if (event.isConsumed()) {
-        e.consume();
-      }
-    }
 
     private MouseEvent getTargetEvent(MouseEvent e) {
       return SwingUtilities.convertMouseEvent(e.getComponent(), e, this);
@@ -463,8 +529,9 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
 
     private boolean myWasPressedOnMe;
 
-    public Divider(boolean isFirst) {
+    public Divider(boolean isFirst, boolean isOnePixel) {
       super(new GridBagLayout());
+      myIsOnePixel = isOnePixel;
       setFocusable(false);
       enableEvents(MouseEvent.MOUSE_EVENT_MASK | MouseEvent.MOUSE_MOTION_EVENT_MASK);
       myIsFirst = isFirst;
@@ -481,10 +548,11 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
     private boolean isInside(Point p) {
       if (!isVisible()) return false;
 
+      int dndOff = myIsOnePixel ? Registry.intValue("ide.splitter.mouseZone") / 2 : 0;
       if (myVerticalSplit) {
         if (p.x >= 0 && p.x < getWidth()) {
           if (getHeight() > 0) {
-            return p.y >= 0 && p.y < getHeight();
+            return p.y >= -dndOff && p.y < getHeight() + dndOff;
           }
           else {
             return p.y >= -myDividerZone / 2 && p.y <= myDividerZone / 2;
@@ -494,7 +562,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
       else {
         if (p.y >= 0 && p.y < getHeight()) {
           if (getWidth() > 0) {
-            return p.x >= 0 && p.x < getWidth();
+            return p.x >= -dndOff && p.x < getWidth() + dndOff;
           }
           else {
             return p.x >= -myDividerZone / 2 && p.x <= myDividerZone / 2;
@@ -534,7 +602,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
         .message("splitter.right.tooltip.text"));
       new ClickListener() {
         @Override
-        public boolean onClick(MouseEvent e, int clickCount) {
+        public boolean onClick(@NotNull MouseEvent e, int clickCount) {
           if (myInnerComponent != null) {
             final int income = myVerticalSplit ? myInnerComponent.getHeight() : myInnerComponent.getWidth();
             if (myIsFirst) {
@@ -560,7 +628,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
       splitCenterlabel.setToolTipText(UIBundle.message("splitter.center.tooltip.text"));
       new ClickListener() {
         @Override
-        public boolean onClick(MouseEvent e, int clickCount) {
+        public boolean onClick(@NotNull MouseEvent e, int clickCount) {
           center();
           return true;
         }
@@ -576,7 +644,7 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
         .message("splitter.left.tooltip.text"));
       new ClickListener() {
         @Override
-        public boolean onClick(MouseEvent e, int clickCount) {
+        public boolean onClick(@NotNull MouseEvent e, int clickCount) {
           if (myInnerComponent != null) {
             final int income = myVerticalSplit ? myInnerComponent.getHeight() : myInnerComponent.getWidth();
             if (myIsFirst) {
@@ -622,23 +690,24 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
         myGlassPane.setCursor(getResizeCursor(), myListener);
 
         myPoint = SwingUtilities.convertPoint(this, e.getPoint(), ThreeComponentsSplitter.this);
+        final int size = getOrientation() ? ThreeComponentsSplitter.this.getHeight() : ThreeComponentsSplitter.this.getWidth();
         if (getOrientation()) {
-          if (getHeight() > 0 || myDividerZone > 0) {
+          if (size > 0 || myDividerZone > 0) {
             if (myIsFirst) {
-              setFirstSize(Math.max(getMinSize(myFirstComponent), myPoint.y));
+              setFirstSize(Math.min(size - myLastSize - getMinSize(myInnerComponent) - getDividerWidth() * visibleDividersCount(), Math.max(getMinSize(myFirstComponent), myPoint.y)));
             }
             else {
-              setLastSize(Math.max(getMinSize(myLastComponent), ThreeComponentsSplitter.this.getHeight() - myPoint.y - getDividerWidth()));
+              setLastSize(Math.min(size - myFirstSize - getMinSize(myInnerComponent) - getDividerWidth() * visibleDividersCount(), Math.max(getMinSize(myLastComponent), size - myPoint.y - getDividerWidth())));
             }
           }
         }
         else {
-          if (getWidth() > 0 || myDividerZone > 0) {
+          if (size > 0 || myDividerZone > 0) {
             if (myIsFirst) {
-              setFirstSize(Math.max(getMinSize(myFirstComponent), myPoint.x));
+              setFirstSize(Math.min(size - myLastSize - getMinSize(myInnerComponent) - getDividerWidth() * visibleDividersCount(), Math.max(getMinSize(myFirstComponent), myPoint.x)));
             }
             else {
-              setLastSize(Math.max(getMinSize(myLastComponent), ThreeComponentsSplitter.this.getWidth() - myPoint.x - getDividerWidth()));
+              setLastSize(Math.min(size - myFirstSize - getMinSize(myInnerComponent) - getDividerWidth() * visibleDividersCount(), Math.max(getMinSize(myLastComponent), size - myPoint.x - getDividerWidth())));
             }
           }
         }
@@ -657,20 +726,6 @@ public class ThreeComponentsSplitter extends JPanel implements Disposable {
       if (myWasPressedOnMe) {
         e.consume();
       }
-    }
-
-    private int getMinSize(JComponent component) {
-      if (isHonorMinimumSize()) {
-        if (component != null && myFirstComponent != null && myFirstComponent.isVisible() && myLastComponent != null && myLastComponent.isVisible()) {
-          if (getOrientation()) {
-            return component.getMinimumSize().height;
-          }
-          else {
-            return component.getMinimumSize().width;
-          }
-        }
-      }
-      return 0;
     }
 
     protected void processMouseEvent(MouseEvent e) {

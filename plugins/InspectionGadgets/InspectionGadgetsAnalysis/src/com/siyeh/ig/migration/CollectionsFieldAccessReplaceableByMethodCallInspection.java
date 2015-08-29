@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2011 Bas Leijdekkers
+ * Copyright 2008-2014 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
@@ -170,8 +171,8 @@ public class CollectionsFieldAccessReplaceableByMethodCallInspection
         (PsiReferenceExpression)element;
       final String newMethodCallText =
         getCollectionsMethodCallText(referenceExpression);
-      replaceExpression(referenceExpression,
-                        "java.util." + newMethodCallText);
+      PsiReplacementUtil.replaceExpression(referenceExpression,
+                                           "java.util." + newMethodCallText);
     }
   }
 
@@ -180,15 +181,17 @@ public class CollectionsFieldAccessReplaceableByMethodCallInspection
     return new CollectionsFieldAccessReplaceableByMethodCallVisitor();
   }
 
+  @Override
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
+  }
+
   private static class CollectionsFieldAccessReplaceableByMethodCallVisitor
     extends BaseInspectionVisitor {
 
     @Override
     public void visitReferenceExpression(
       PsiReferenceExpression expression) {
-      if (!PsiUtil.isLanguageLevel5OrHigher(expression)) {
-        return;
-      }
       super.visitReferenceExpression(expression);
       @NonNls final String name = expression.getReferenceName();
       @NonNls final String replacement;

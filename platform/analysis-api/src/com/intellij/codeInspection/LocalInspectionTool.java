@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,8 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
   }
 
   /**
+   * If you want to change suppression id you have to define it in XML as well.
+   * 
    * <p>Inspection tool ID is a descriptive name to be used in "suppress" comments and annotations.
    * <p>It must satisfy {@link #VALID_ID_PATTERN} regexp pattern.
    * <p>If not defined {@link #getShortName()} is used as tool ID.
@@ -71,6 +73,13 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
     return getShortName();
   }
 
+  @NotNull
+  @Override
+  protected final String getSuppressId() {
+    return getID();
+  }
+
+  @Override
   @NonNls
   @Nullable
   public String getAlternativeID() {
@@ -112,7 +121,7 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
   /**
    * Override the method to provide your own inspection visitor, if you need to store additional state in the
    * LocalInspectionToolSession user data or get information about the inspection scope.
-   * Visitor created must not be recursive (e.g. it must not inherit {@link com.intellij.psi.PsiRecursiveElementVisitor})
+   * Visitor created must not be recursive (e.g. it must not inherit {@link PsiRecursiveElementVisitor})
    * since it will be fed with every element in the file anyway.
    * Visitor created must be thread-safe since it might be called on several elements concurrently.
    *
@@ -128,7 +137,7 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
 
   /**
    * Override the method to provide your own inspection visitor.
-   * Visitor created must not be recursive (e.g. it must not inherit {@link com.intellij.psi.PsiRecursiveElementVisitor})
+   * Visitor created must not be recursive (e.g. it must not inherit {@link PsiRecursiveElementVisitor})
    * since it will be fed with every element in the file anyway.
    * Visitor created must be thread-safe since it might be called on several elements concurrently.
    *
@@ -172,8 +181,7 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
   @Deprecated()
   public void inspectionFinished(@NotNull LocalInspectionToolSession session) {}
   @NotNull
-  public List<ProblemDescriptor> processFile(@NotNull PsiFile file,
-                                             @NotNull InspectionManager manager) {
+  public List<ProblemDescriptor> processFile(@NotNull PsiFile file, @NotNull InspectionManager manager) {
     final ProblemsHolder holder = new ProblemsHolder(manager, file, false);
     LocalInspectionToolSession session = new LocalInspectionToolSession(file, 0, file.getTextLength());
     final PsiElementVisitor customVisitor = buildVisitor(holder, false, session);
@@ -194,6 +202,4 @@ public abstract class LocalInspectionTool extends InspectionProfileEntry {
 
     return holder.getResults();
   }
-
-
 }

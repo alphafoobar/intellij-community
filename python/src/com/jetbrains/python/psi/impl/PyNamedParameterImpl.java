@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 package com.jetbrains.python.psi.impl;
 
 import com.intellij.lang.ASTNode;
+import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
@@ -31,6 +33,8 @@ import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.PythonDialectsTokenSetProvider;
+import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.stubs.PyNamedParameterStub;
@@ -39,14 +43,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author yole
  */
-public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParameterStub> implements PyNamedParameter {
+public class PyNamedParameterImpl extends PyBaseElementImpl<PyNamedParameterStub> implements PyNamedParameter {
   public PyNamedParameterImpl(ASTNode astNode) {
     super(astNode);
   }
@@ -122,6 +124,26 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
     }
   }
 
+  @Override
+  public boolean isKeywordOnly() {
+    final PyParameterList parameters = getStubOrPsiParentOfType(PyParameterList.class);
+    if (parameters == null) {
+      return false;
+    }
+    boolean varargSeen = false;
+    for (PyParameter param : parameters.getParameters()) {
+      if (param == this) {
+        break;
+      }
+      final PyNamedParameter named = param.getAsNamed();
+      if ((named != null && named.isPositionalContainer()) || param instanceof PySingleStarParameter) {
+        varargSeen = true;
+        break;
+      }
+    }
+    return varargSeen;
+  }
+
   @Nullable
   public PyExpression getDefaultValue() {
     final PyNamedParameterStub stub = getStub();
@@ -179,13 +201,6 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
       PyParameterList parameterList = (PyParameterList)parent;
       PyFunction func = parameterList.getContainingFunction();
       if (func != null) {
-        PyAnnotation anno = getAnnotation();
-        if (anno != null) {
-          final PyClass pyClass = anno.resolveToClass();
-          if (pyClass != null) {
-            return new PyClassTypeImpl(pyClass, false);
-          }
-        }
         StructuredDocString docString = func.getStructuredDocString();
         if (PyNames.INIT.equals(func.getName()) && docString == null) {
           PyClass pyClass = func.getContainingClass();
@@ -204,9 +219,9 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
           final PyClass containingClass = func.getContainingClass();
           if (containingClass != null) {
             PyType initType = null;
-            final PyFunction init = containingClass.findInitOrNew(true);
+            final PyFunction init = containingClass.findInitOrNew(true, context);
             if (init != null && init != func) {
-              initType = init.getReturnType(context, null);
+              initType = context.getReturnType(init);
               if (init.getContainingClass() != containingClass) {
                 if (initType instanceof PyCollectionType) {
                   final PyType elementType = ((PyCollectionType)initType).getElementType(context);
@@ -228,34 +243,42 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
           return PyBuiltinCache.getInstance(this).getTupleType();
         }
         for(PyTypeProvider provider: Extensions.getExtensions(PyTypeProvider.EP_NAME)) {
-          PyType result = provider.getParameterType(this, func, context);
-          if (result != null) return result;
+          final Ref<PyType> resultRef = provider.getParameterType(this, func, context);
+          if (resultRef != null) {
+            return resultRef.get();
+          }
         }
         if (context.maySwitchToAST(this)) {
           final PyExpression defaultValue = getDefaultValue();
           if (defaultValue != null) {
             final PyType type = context.getType(defaultValue);
             if (type != null && !(type instanceof PyNoneType)) {
+              if (type instanceof PyTupleType) {
+                return PyUnionType.createWeakType(type);
+              }
               return type;
             }
           }
         }
-        // Guess the type from file-local usages
-        if (context.allowLocalUsages(this)) {
+        // Guess the type from file-local calls
+        if (context.allowCallContext(this)) {
           final List<PyType> types = new ArrayList<PyType>();
           processLocalCalls(func, new Processor<PyCallExpression>() {
             @Override
             public boolean process(@NotNull PyCallExpression call) {
               final PyResolveContext resolveContext = PyResolveContext.noImplicits().withTypeEvalContext(context);
-              final CallArgumentsMapping mapping = call.getArgumentList().analyzeCall(resolveContext);
-              for (Map.Entry<PyExpression, PyNamedParameter> entry : mapping.getPlainMappedParams().entrySet()) {
-                if (entry.getValue() == PyNamedParameterImpl.this) {
-                  final PyExpression argument = entry.getKey();
-                  if (argument != null) {
-                    final PyType type = context.getType(argument);
-                    if (type != null) {
-                      types.add(type);
-                      return true;
+              final PyArgumentList argumentList = call.getArgumentList();
+              if (argumentList != null) {
+                final CallArgumentsMapping mapping = argumentList.analyzeCall(resolveContext);
+                for (Map.Entry<PyExpression, PyNamedParameter> entry : mapping.getPlainMappedParams().entrySet()) {
+                  if (entry.getValue() == PyNamedParameterImpl.this) {
+                    final PyExpression argument = entry.getKey();
+                    if (argument != null) {
+                      final PyType type = context.getType(argument);
+                      if (type != null) {
+                        types.add(type);
+                        return true;
+                      }
                     }
                   }
                 }
@@ -265,6 +288,115 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
           });
           if (!types.isEmpty()) {
             return PyUnionType.createWeakType(PyUnionType.union(types));
+          }
+        }
+        if (context.maySwitchToAST(this)) {
+          final Set<String> attributes = collectUsedAttributes(context);
+          if (!attributes.isEmpty()) {
+            return new PyStructuralType(attributes, true);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  @Override
+  public ItemPresentation getPresentation() {
+    return new PyElementPresentation(this);
+  }
+
+  @NotNull
+  private Set<String> collectUsedAttributes(@NotNull final TypeEvalContext context) {
+    final Set<String> result = new LinkedHashSet<String>();
+    final ScopeOwner owner = ScopeUtil.getScopeOwner(this);
+    final String name = getName();
+    if (owner != null && name != null) {
+      owner.accept(new PyRecursiveElementVisitor() {
+        @Override
+        public void visitPyElement(PyElement node) {
+          if (node instanceof ScopeOwner && node != owner) {
+            return;
+          }
+          if (node instanceof PyQualifiedExpression) {
+            final PyQualifiedExpression expr = (PyQualifiedExpression)node;
+            final PyExpression qualifier = expr.getQualifier();
+            if (qualifier != null) {
+              final String attributeName = expr.getReferencedName();
+              final PyExpression referencedExpr = node instanceof PyBinaryExpression && PyNames.isRightOperatorName(attributeName) ?
+                                                  ((PyBinaryExpression)node).getRightExpression() : qualifier;
+              if (referencedExpr != null) {
+                final PsiReference ref = referencedExpr.getReference();
+                if (ref != null && ref.isReferenceTo(PyNamedParameterImpl.this)) {
+                  if (attributeName != null && !result.contains(attributeName)) {
+                    result.add(attributeName);
+                  }
+                }
+              }
+            }
+            else {
+              final PsiReference ref = expr.getReference();
+              if (ref != null && ref.isReferenceTo(PyNamedParameterImpl.this)) {
+                final PyNamedParameter parameter = getParameterByCallArgument(expr, context);
+                if (parameter != null) {
+                  final PyType type = context.getType(parameter);
+                  if (type instanceof PyStructuralType) {
+                    result.addAll(((PyStructuralType)type).getAttributeNames());
+                  }
+                }
+              }
+            }
+          }
+          super.visitPyElement(node);
+        }
+
+        @Override
+        public void visitPyIfStatement(PyIfStatement node) {
+          final PyExpression ifCondition = node.getIfPart().getCondition();
+          if (ifCondition != null) {
+            ifCondition.accept(this);
+          }
+          for (PyIfPart part : node.getElifParts()) {
+            final PyExpression elseIfCondition = part.getCondition();
+            if (elseIfCondition != null) {
+              elseIfCondition.accept(this);
+            }
+          }
+        }
+      });
+    }
+    return result;
+  }
+
+  @Nullable
+  private PyNamedParameter getParameterByCallArgument(@NotNull PsiElement element, @NotNull TypeEvalContext context) {
+    final PyArgumentList argumentList = PsiTreeUtil.getParentOfType(element, PyArgumentList.class);
+    if (argumentList != null) {
+      boolean elementIsArgument = false;
+      for (PyExpression argument : argumentList.getArgumentExpressions()) {
+        if (PyPsiUtils.flattenParens(argument) == element) {
+          elementIsArgument = true;
+          break;
+        }
+      }
+      final PyCallExpression callExpression = argumentList.getCallExpression();
+      if (elementIsArgument && callExpression != null) {
+        final PyExpression callee = callExpression.getCallee();
+        if (callee instanceof PyReferenceExpression) {
+          final PyReferenceExpression calleeReferenceExpr = (PyReferenceExpression)callee;
+          final PyExpression firstQualifier = PyPsiUtils.getFirstQualifier(calleeReferenceExpr);
+          if (firstQualifier != null) {
+            final PsiReference ref = firstQualifier.getReference();
+            if (ref != null && ref.isReferenceTo(this)) {
+              return null;
+            }
+          }
+        }
+        final PyResolveContext resolveContext = PyResolveContext.noImplicits().withTypeEvalContext(context);
+        final CallArgumentsMapping mapping = argumentList.analyzeCall(resolveContext);
+        for (Map.Entry<PyExpression, PyNamedParameter> entry : mapping.getPlainMappedParams().entrySet()) {
+          if (entry.getKey() == element) {
+            return entry.getValue();
           }
         }
       }
@@ -298,9 +430,9 @@ public class PyNamedParameterImpl extends PyPresentableElementImpl<PyNamedParame
   @NotNull
   @Override
   public SearchScope getUseScope() {
-    PyFunction func = PsiTreeUtil.getParentOfType(this, PyFunction.class);
-    if (func != null) {
-      return new LocalSearchScope(func);
+    final ScopeOwner owner = ScopeUtil.getScopeOwner(this);
+    if (owner instanceof PyFunction) {
+      return new LocalSearchScope(owner);
     }
     return new LocalSearchScope(getContainingFile());
   }

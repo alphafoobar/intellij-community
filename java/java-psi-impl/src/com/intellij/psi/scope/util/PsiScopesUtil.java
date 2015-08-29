@@ -322,8 +322,13 @@ public class PsiScopesUtil {
                   final PsiMethod[] refMethods = anonymousClass.findMethodsByName(methodCall.getMethodExpression().getReferenceName(), false);
                   if (refMethods.length > 0) {
                     final PsiClass baseClass = PsiUtil.resolveClassInType(type);
-                    if (baseClass != null && !hasCovariantOverriding(baseClass, refMethods)) {
-                      type = initializer.getType();
+                    if (baseClass != null && !hasCovariantOverridingOrNotPublic(baseClass, refMethods)) {
+                      for (PsiMethod method : refMethods) {
+                        if (method.findSuperMethods(baseClass).length > 0) {
+                          type = initializer.getType();
+                          break;
+                        }
+                      }
                     }
                   }
                 }
@@ -388,11 +393,15 @@ public class PsiScopesUtil {
     }
   }
 
-  private static boolean hasCovariantOverriding(PsiClass baseClass, PsiMethod[] refMethods) {
+  private static boolean hasCovariantOverridingOrNotPublic(PsiClass baseClass, PsiMethod[] refMethods) {
     for (PsiMethod method : refMethods) {
       final PsiType methodReturnType = method.getReturnType();
       for (PsiMethod superMethod : method.findSuperMethods(baseClass)) {
         if (!Comparing.equal(methodReturnType, superMethod.getReturnType())) {
+          return true;
+        }
+
+        if (!superMethod.hasModifierProperty(PsiModifier.PUBLIC)) {
           return true;
         }
       }
@@ -441,6 +450,10 @@ public class PsiScopesUtil {
       PsiExpression qualifier = methodCall.getMethodExpression().getQualifierExpression();
       if (!(qualifier instanceof PsiSuperExpression)) {
         processor.setAccessClass((PsiClass)PsiUtil.getAccessObjectClass(qualifier).getElement());
+      }
+      else if (((PsiSuperExpression)qualifier).getQualifier() != null && PsiUtil.isLanguageLevel8OrHigher(qualifier) && 
+               CommonClassNames.JAVA_LANG_CLONEABLE.equals(((PsiClass)resolve).getQualifiedName()) && ((PsiClass)resolve).isInterface()) {
+        processor.setAccessClass((PsiClass)resolve);
       }
     }
 

@@ -12,24 +12,24 @@ public class UpdateZipAction extends BaseUpdateAction {
   Set<String> myFilesToUpdate;
   Set<String> myFilesToDelete;
 
-  public UpdateZipAction(String path, long checksum) {
-    super(path, checksum);
+  public UpdateZipAction(Patch patch, String path, String source, long checksum, boolean move) {
+    super(patch, path, source, checksum, move);
   }
 
   // test support
-  public UpdateZipAction(String path,
+  public UpdateZipAction(Patch patch, String path,
                          Collection<String> filesToCreate,
                          Collection<String> filesToUpdate,
                          Collection<String> filesToDelete,
                          long checksum) {
-    super(path, checksum);
+    super(patch, path, path, checksum, false);
     myFilesToCreate = new HashSet<String>(filesToCreate);
     myFilesToUpdate = new HashSet<String>(filesToUpdate);
     myFilesToDelete = new HashSet<String>(filesToDelete);
   }
 
-  public UpdateZipAction(DataInputStream in) throws IOException {
-    super(in);
+  public UpdateZipAction(Patch patch, DataInputStream in) throws IOException {
+    super(patch, in);
 
     int count = in.readInt();
     myFilesToCreate = new HashSet<String>(count);
@@ -87,9 +87,9 @@ public class UpdateZipAction extends BaseUpdateAction {
       }
     });
 
-    DiffCalculator.Result diff = DiffCalculator.calculate(oldCheckSums, newCheckSums);
+    DiffCalculator.Result diff = DiffCalculator.calculate(oldCheckSums, newCheckSums, new LinkedList<String>(), false);
 
-    myFilesToCreate = diff.filesToCreate;
+    myFilesToCreate = diff.filesToCreate.keySet();
     myFilesToUpdate = diff.filesToUpdate.keySet();
     myFilesToDelete = diff.filesToDelete.keySet();
 
@@ -103,6 +103,8 @@ public class UpdateZipAction extends BaseUpdateAction {
       new ZipFile(newerFile).close();
     }
     catch (IOException e) {
+      Runner.logger.error("Corrupted target file: " + newerFile);
+      Runner.printStackTrace(e);
       throw new IOException("Corrupted target file: " + newerFile, e);
     }
 
@@ -115,6 +117,8 @@ public class UpdateZipAction extends BaseUpdateAction {
       olderZip = new ZipFile(olderFile);
     }
     catch (IOException e) {
+      Runner.logger.error("Corrupted source file: " + olderFile);
+      Runner.printStackTrace(e);
       throw new IOException("Corrupted source file: " + olderFile, e);
     }
 
@@ -137,6 +141,8 @@ public class UpdateZipAction extends BaseUpdateAction {
             patchOutput.closeEntry();
           }
           catch (IOException e) {
+            Runner.logger.error("Error building patch for .zip entry " + name);
+            Runner.printStackTrace(e);
             throw new IOException("Error building patch for .zip entry " + name, e);
           }
         }
@@ -147,14 +153,16 @@ public class UpdateZipAction extends BaseUpdateAction {
     }
   }
 
-  protected void doApply(final ZipFile patchFile, File toFile) throws IOException {
+  @Override
+  protected void doApply(final ZipFile patchFile, File backupDir, File toFile) throws IOException {
     File temp = Utils.createTempFile();
     FileOutputStream fileOut = new FileOutputStream(temp);
     try {
       final ZipOutputWrapper out = new ZipOutputWrapper(fileOut);
       out.setCompressionLevel(0);
 
-      processZipFile(toFile, new Processor() {
+      processZipFile(getSource(backupDir), new Processor() {
+        @Override
         public void process(ZipEntry entry, InputStream in) throws IOException {
           String path = entry.getName();
           if (myFilesToDelete.contains(path)) return;

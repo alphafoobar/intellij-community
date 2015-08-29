@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -203,9 +203,9 @@ public class AbstractTreeUpdater implements Disposable, Activatable {
       public void run() {
         AbstractTreeStructure structure = myTreeBuilder.getTreeStructure();
         if (structure.hasSomethingToCommit()) {
-          structure.asyncCommit().doWhenDone(new Runnable() {
+          structure.asyncCommit().doWhenDone(new TreeRunnable("AbstractTreeUpdater.reQueueViewUpdate") {
             @Override
-            public void run() {
+            public void perform() {
               reQueueViewUpdateIfNeeded();
             }
           });
@@ -251,9 +251,9 @@ public class AbstractTreeUpdater implements Disposable, Activatable {
 
       final TreeUpdatePass eachPass = myNodeQueue.removeFirst();
 
-      beforeUpdate(eachPass).doWhenDone(new Runnable() {
+      beforeUpdate(eachPass).doWhenDone(new TreeRunnable("AbstractTreeUpdater.performUpdate") {
         @Override
-        public void run() {
+        public void perform() {
           try {
             myTreeBuilder.getUi().updateSubtreeNow(eachPass, false);
           }
@@ -272,9 +272,9 @@ public class AbstractTreeUpdater implements Disposable, Activatable {
 
   private void maybeRunAfterUpdate() {
     if (myRunAfterUpdate != null) {
-      final Runnable runnable = new Runnable() {
+      final Runnable runnable = new TreeRunnable("AbstractTreeUpdater.maybeRunAfterUpdate") {
         @Override
-        public void run() {
+        public void perform() {
           List<Runnable> runAfterUpdate = null;
           synchronized (myRunAfterUpdate) {
             if (!myRunAfterUpdate.isEmpty()) {
@@ -299,7 +299,7 @@ public class AbstractTreeUpdater implements Disposable, Activatable {
   }
 
   protected ActionCallback beforeUpdate(TreeUpdatePass pass) {
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   /**

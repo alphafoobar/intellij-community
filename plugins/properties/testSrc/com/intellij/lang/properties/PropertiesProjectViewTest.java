@@ -21,17 +21,11 @@ import com.intellij.lang.properties.projectView.ResourceBundleGrouper;
 import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.projectView.TestProjectTreeStructure;
 import com.intellij.psi.PsiFile;
-import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
 
 public class PropertiesProjectViewTest extends LightPlatformCodeInsightFixtureTestCase {
   private TestProjectTreeStructure myStructure;
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  public PropertiesProjectViewTest() {
-    PlatformTestCase.initPlatformLangPrefix();
-  }
 
   @Override
   protected void setUp() throws Exception {
@@ -57,7 +51,6 @@ public class PropertiesProjectViewTest extends LightPlatformCodeInsightFixtureTe
                        "    xxx_en.properties\n" +
                        "    xxx_ru_RU.properties\n" +
                        "   X.txt\n" +
-                       myStructure.getProjectFileRepresentation() +
                        " External Libraries\n";
     PlatformTestUtil.assertTreeEqual(pane.getTree(), structure);
   }
@@ -74,7 +67,6 @@ public class PropertiesProjectViewTest extends LightPlatformCodeInsightFixtureTe
                        "   xxx2.properties\n" +
                        "   yyy.properties\n" +
                        "   X.txt\n" +
-                       myStructure.getProjectFileRepresentation() +
                        " External Libraries\n";
 
     PlatformTestUtil.assertTreeEqual(pane.getTree(), structure);
@@ -94,7 +86,6 @@ public class PropertiesProjectViewTest extends LightPlatformCodeInsightFixtureTe
                        "    xxx.properties\n" +
                        "    xxx_en.properties\n" +
                        "   X.txt\n" +
-                       myStructure.getProjectFileRepresentation() +
                        " External Libraries\n";
 
     PlatformTestUtil.assertTreeEqual(pane.getTree(), structure);
@@ -111,7 +102,6 @@ public class PropertiesProjectViewTest extends LightPlatformCodeInsightFixtureTe
                 "    xxx_en.properties\n" +
                 "   xxx2.properties\n" +
                 "   yyy.properties\n" +
-                myStructure.getProjectFileRepresentation() +
                 " External Libraries\n";
 
     PlatformTestUtil.assertTreeEqual(pane.getTree(), structure);

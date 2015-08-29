@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,11 @@
  */
 package com.jetbrains.python.packaging;
 
-import com.intellij.openapi.module.Module;
 import com.intellij.openapi.projectRoots.Sdk;
-import org.jetbrains.annotations.Nullable;
+import com.jetbrains.python.sdk.PythonSdkType;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,27 +28,20 @@ import java.util.Map;
 public class PyPackageManagersImpl extends PyPackageManagers {
   private final Map<String, PyPackageManagerImpl> myInstances = new HashMap<String, PyPackageManagerImpl>();
 
+  @NotNull
   @Override
   public synchronized PyPackageManager forSdk(Sdk sdk) {
     final String name = sdk.getName();
     PyPackageManagerImpl manager = myInstances.get(name);
     if (manager == null) {
-      manager = new PyPackageManagerImpl(sdk);
+      if (PythonSdkType.isRemote(sdk)) {
+        manager = new PyRemotePackageManagerImpl(sdk);
+      }
+      else {
+        manager = new PyPackageManagerImpl(sdk);
+      }
       myInstances.put(name, manager);
     }
     return manager;
-  }
-
-  @Nullable
-  @Override
-  public List<PyRequirement> getRequirements(Module module) {
-    return PyPackageManagerImpl.getRequirements(module);
-  }
-
-
-  @Nullable
-  @Override
-  public List<PyRequirement> getRequirementsFromTxt(Module module) {
-    return PyPackageManagerImpl.getRequirementsFromTxt(module);
   }
 }

@@ -15,9 +15,7 @@
  */
 package com.intellij.lang.ant.config.execution;
 
-import com.intellij.compiler.impl.javaCompiler.FileObject;
 import com.intellij.compiler.impl.javaCompiler.javac.JavacOutputParser;
-import com.intellij.compiler.impl.javaCompiler.jikes.JikesOutputParser;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.lang.ant.AntBundle;
 import com.intellij.openapi.application.ApplicationManager;
@@ -27,6 +25,8 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.problems.Problem;
+import com.intellij.problems.WolfTheProblemSolver;
 import com.intellij.rt.ant.execution.IdeaAntLogger2;
 import com.intellij.util.text.StringTokenizer;
 import org.jetbrains.annotations.NonNls;
@@ -34,6 +34,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class OutputParser{
@@ -47,7 +48,7 @@ public class OutputParser{
   private final WeakReference<ProgressIndicator> myProgress;
   private final String myBuildName;
   private final OSProcessHandler myProcessHandler;
-  private boolean isStopped;
+  private volatile boolean isStopped;
   private List<String> myJavacMessages;
   private boolean myFirstLineProcessed;
   private boolean myStartedSuccessfully;
@@ -71,7 +72,7 @@ public class OutputParser{
   }
 
   public boolean isTerminateInvoked() {
-    return myProcessHandler.isProcessTerminating();
+    return myProcessHandler.isProcessTerminating() || myProcessHandler.isProcessTerminated();
   }
 
   protected Project getProject() {
@@ -181,30 +182,6 @@ public class OutputParser{
     }
   }
 
-  private static boolean isJikesMessage(String errorMessage) {
-    for (int j = 0; j < errorMessage.length(); j++) {
-      if (errorMessage.charAt(j) == ':') {
-        int offset = getNextTwoPoints(j, errorMessage);
-        if (offset < 0) {
-          continue;
-        }
-        offset = getNextTwoPoints(offset, errorMessage);
-        if (offset < 0) {
-          continue;
-        }
-        offset = getNextTwoPoints(offset, errorMessage);
-        if (offset < 0) {
-          continue;
-        }
-        offset = getNextTwoPoints(offset, errorMessage);
-        if (offset >= 0) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   private static int getNextTwoPoints(int offset, String message) {
     for (int i = offset + 1; i < message.length(); i++) {
       char c = message.charAt(i);
@@ -219,31 +196,19 @@ public class OutputParser{
     return -1;
   }
 
-  private static void processJavacMessages(final List<String> javacMessages, final AntBuildMessageView messageView, Project project) {
-    if (javacMessages == null) return;
-
-    boolean isJikes = false;
-    for (String errorMessage : javacMessages) {
-      if (isJikesMessage(errorMessage)) {
-        isJikes = true;
-        break;
-      }
+  private static void processJavacMessages(final List<String> javacMessages, final AntBuildMessageView messageView, final Project project) {
+    if (javacMessages == null) {
+      return;
     }
 
-    com.intellij.compiler.OutputParser outputParser;
-    if (isJikes) {
-      outputParser = new JikesOutputParser(project);
-    }
-    else {
-      outputParser = new JavacOutputParser(project);
-    }
+    final com.intellij.compiler.OutputParser outputParser = new JavacOutputParser(project);
 
     com.intellij.compiler.OutputParser.Callback callback = new com.intellij.compiler.OutputParser.Callback() {
       private int myIndex = -1;
 
       @Nullable
       public String getCurrentLine() {
-        if (javacMessages == null || myIndex >= javacMessages.size()) {
+        if (myIndex >= javacMessages.size()) {
           return null;
         }
         return javacMessages.get(myIndex);
@@ -279,6 +244,12 @@ public class OutputParser{
           public void run() {
             VirtualFile file = url == null ? null : VirtualFileManager.getInstance().findFileByUrl(url);
             messageView.outputJavacMessage(convertCategory(category), strings, file, url, lineNum, columnNum);
+
+            if (file != null && category == CompilerMessageCategory.ERROR) {
+              final WolfTheProblemSolver wolf = WolfTheProblemSolver.getInstance(project);
+              final Problem problem = wolf.convertToProblem(file, lineNum, columnNum, strings);
+              wolf.weHaveGotNonIgnorableProblems(file, Collections.singletonList(problem));
+            }
           }
         });
       }
@@ -289,7 +260,7 @@ public class OutputParser{
       public void fileProcessed(String path) {
       }
 
-      public void fileGenerated(FileObject path) {
+      public void fileGenerated(String path) {
       }
     };
     try {

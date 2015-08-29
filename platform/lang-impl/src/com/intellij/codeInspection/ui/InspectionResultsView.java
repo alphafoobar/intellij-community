@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,7 +56,10 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.*;
+import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.OpenSourceUtil;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -66,6 +69,7 @@ import javax.swing.*;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.MutableTreeNode;
 import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.event.InputEvent;
@@ -76,6 +80,7 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author max
@@ -84,29 +89,21 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
   public static final DataKey<InspectionResultsView> DATA_KEY = DataKey.create("inspectionView");
 
   private final Project myProject;
-  private InspectionTree myTree;
+  private final InspectionTree myTree;
   private final Browser myBrowser;
-  private Map<HighlightDisplayLevel, Map<String, InspectionGroupNode>> myGroups = null;
-  private OccurenceNavigator myOccurenceNavigator;
-  private InspectionProfile myInspectionProfile;
+  private final ConcurrentMap<HighlightDisplayLevel, ConcurrentMap<String, InspectionGroupNode>> myGroups = ContainerUtil.newConcurrentMap();
+  private final OccurenceNavigator myOccurenceNavigator;
+  private volatile InspectionProfile myInspectionProfile;
   private final AnalysisScope myScope;
   @NonNls
   private static final String HELP_ID = "reference.toolWindows.inspections";
-  private final Map<HighlightDisplayLevel, InspectionSeverityGroupNode> mySeverityGroupNodes = new TreeMap<HighlightDisplayLevel, InspectionSeverityGroupNode>(new Comparator<HighlightDisplayLevel>() {
-    @Override
-    public int compare(HighlightDisplayLevel o1, HighlightDisplayLevel o2) {
-      final int severityDiff = o1.getSeverity().compareTo(o2.getSeverity());
-      if (severityDiff == 0) {
-        return o1.toString().compareTo(o2.toString());
-      }
-      return severityDiff;
-    }
-  });
+  private final ConcurrentMap<HighlightDisplayLevel, InspectionSeverityGroupNode> mySeverityGroupNodes = ContainerUtil.newConcurrentMap();
 
   private final Splitter mySplitter;
   @NotNull
   private final GlobalInspectionContextImpl myGlobalInspectionContext;
-  private boolean myRerun = false;
+  private boolean myRerun;
+  private volatile boolean myDisposed;
 
   @NotNull
   private final InspectionRVContentProvider myProvider;
@@ -133,7 +130,7 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
 
     myBrowser = new Browser(this);
 
-    mySplitter = new Splitter(false, AnalysisUIOptions.getInstance(myProject).SPLITTER_PROPORTION);
+    mySplitter = new OnePixelSplitter(false, AnalysisUIOptions.getInstance(myProject).SPLITTER_PROPORTION);
 
     mySplitter.setFirstComponent(ScrollPaneFactory.createScrollPane(myTree, SideBorder.LEFT | SideBorder.RIGHT));
     mySplitter.setSecondComponent(myBrowser);
@@ -278,32 +275,43 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
 
       @Override
       public void actionPerformed(AnActionEvent e) {
-        ((InspectionTreeNode)myTree.getSelectionPath().getLastPathComponent()).amnesty();
+        final TreePath[] paths = myTree.getSelectionPaths();
+        if (paths != null) {
+          for (TreePath path : paths) {
+            ((InspectionTreeNode)path.getLastPathComponent()).amnesty();
+          }
+        }
         updateView(false);
       }
 
       @Override
       public void update(final AnActionEvent e) {
-        final TreePath path = myTree.getSelectionPath();
-        e.getPresentation().setEnabled(path != null && !myGlobalInspectionContext.getUIOptions().FILTER_RESOLVED_ITEMS);
+        final TreePath[] paths = myTree.getSelectionPaths();
+        e.getPresentation().setEnabled(paths != null && paths.length > 0 && 
+                                       !myGlobalInspectionContext.getUIOptions().FILTER_RESOLVED_ITEMS);
       }
     };
 
     myExcludeAction = new AnAction(InspectionsBundle.message("inspections.result.view.exclude.action.text")) {
       {
-        registerCustomShortcutSet(CommonShortcuts.DELETE, myTree);
+        registerCustomShortcutSet(CommonShortcuts.getDelete(), myTree);
       }
 
       @Override
       public void actionPerformed(final AnActionEvent e) {
-        ((InspectionTreeNode)myTree.getSelectionPath().getLastPathComponent()).ignoreElement();
+        final TreePath[] paths = myTree.getSelectionPaths();
+        if (paths != null) {
+          for (TreePath path : paths) {
+            ((InspectionTreeNode)path.getLastPathComponent()).ignoreElement();
+          }
+        }
         updateView(false);
       }
 
       @Override
       public void update(final AnActionEvent e) {
-        final TreePath path = myTree.getSelectionPath();
-        e.getPresentation().setEnabled(path != null);
+        final TreePath[] path = myTree.getSelectionPaths();
+        e.getPresentation().setEnabled(path != null && path.length > 0);
       }
     };
 
@@ -357,17 +365,15 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
   }
 
   private static JComponent createToolbar(final DefaultActionGroup specialGroup) {
-    return ActionManager.getInstance()
-      .createActionToolbar(ActionPlaces.CODE_INSPECTION, specialGroup, false).getComponent();
+    return ActionManager.getInstance().createActionToolbar(ActionPlaces.CODE_INSPECTION, specialGroup, false).getComponent();
   }
 
   @Override
   public void dispose(){
     mySplitter.dispose();
     myBrowser.dispose();
-    myTree = null;
-    myOccurenceNavigator = null;
     myInspectionProfile = null;
+    myDisposed = true;
   }
 
 
@@ -469,7 +475,7 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
     myProvider.appendToolNodeContent(myGlobalInspectionContext, toolNode, parentNode, showStructure);
     InspectionToolPresentation presentation = myGlobalInspectionContext.getPresentation(toolWrapper);
     toolNode = presentation.createToolNode(myGlobalInspectionContext, toolNode, myProvider, parentNode, showStructure);
-    ((DefaultInspectionToolPresentation)presentation).myToolNode = toolNode;
+    ((DefaultInspectionToolPresentation)presentation).setToolNode(toolNode);
 
     registerActionShortcuts(presentation);
     return toolNode;
@@ -516,7 +522,7 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
   private boolean buildTree() {
     InspectionProfile profile = myInspectionProfile;
     boolean isGroupedBySeverity = myGlobalInspectionContext.getUIOptions().GROUP_BY_SEVERITY;
-    myGroups = new HashMap<HighlightDisplayLevel, Map<String, InspectionGroupNode>>();
+    myGroups.clear();
     final Map<String, Tools> tools = myGlobalInspectionContext.getTools();
     boolean resultsFound = false;
     for (Tools currentTools : tools.values()) {
@@ -534,29 +540,27 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
   }
 
   @NotNull
-  public InspectionTreeNode getToolParentNode(@NotNull String groupName, HighlightDisplayLevel errorLevel, boolean groupedBySeverity) {
+  private InspectionTreeNode getToolParentNode(@NotNull String groupName, HighlightDisplayLevel errorLevel, boolean groupedBySeverity) {
     if (groupName.isEmpty()) {
       return getRelativeRootNode(groupedBySeverity, errorLevel);
     }
-    if (myGroups == null) {
-      myGroups = new HashMap<HighlightDisplayLevel, Map<String, InspectionGroupNode>>();
-    }
-    Map<String, InspectionGroupNode> map = myGroups.get(errorLevel);
+    ConcurrentMap<String, InspectionGroupNode> map = myGroups.get(errorLevel);
     if (map == null) {
-      map = new HashMap<String, InspectionGroupNode>();
-      myGroups.put(errorLevel, map);
+      map = ConcurrencyUtil.cacheOrGet(myGroups, errorLevel, ContainerUtil.<String, InspectionGroupNode>newConcurrentMap());
     }
-    Map<String, InspectionGroupNode> searchMap = new HashMap<String, InspectionGroupNode>(map);
-    if (!groupedBySeverity) {
+    InspectionGroupNode group;
+    if (groupedBySeverity) {
+      group = map.get(groupName);
+    }
+    else {
+      group = null;
       for (Map<String, InspectionGroupNode> groupMap : myGroups.values()) {
-        searchMap.putAll(groupMap);
+        if ((group = groupMap.get(groupName)) != null) break;
       }
     }
-    InspectionGroupNode group = searchMap.get(groupName);
     if (group == null) {
-      group = new InspectionGroupNode(groupName);
-      map.put(groupName, group);
-      getRelativeRootNode(groupedBySeverity, errorLevel).add(group);
+      group  = ConcurrencyUtil.cacheOrGet(map, groupName, new InspectionGroupNode(groupName));
+      addChildNodeInEDT(getRelativeRootNode(groupedBySeverity, errorLevel), group);
     }
     return group;
   }
@@ -564,15 +568,29 @@ public class InspectionResultsView extends JPanel implements Disposable, Occuren
   @NotNull
   private InspectionTreeNode getRelativeRootNode(boolean isGroupedBySeverity, HighlightDisplayLevel level) {
     if (isGroupedBySeverity) {
-      if (mySeverityGroupNodes.containsKey(level)) {
-        return mySeverityGroupNodes.get(level);
+      InspectionSeverityGroupNode severityGroupNode = mySeverityGroupNodes.get(level);
+      if (severityGroupNode == null) {
+        InspectionSeverityGroupNode newNode = new InspectionSeverityGroupNode(myProject, level);
+        severityGroupNode = ConcurrencyUtil.cacheOrGet(mySeverityGroupNodes, level, newNode);
+        if (severityGroupNode == newNode) {
+          InspectionTreeNode root = myTree.getRoot();
+          addChildNodeInEDT(root, severityGroupNode);
+        }
       }
-      final InspectionSeverityGroupNode severityGroupNode = new InspectionSeverityGroupNode(myProject, level);
-      mySeverityGroupNodes.put(level, severityGroupNode);
-      myTree.getRoot().add(severityGroupNode);
       return severityGroupNode;
     }
     return myTree.getRoot();
+  }
+
+  private void addChildNodeInEDT(@NotNull final DefaultMutableTreeNode root, @NotNull final MutableTreeNode severityGroupNode) {
+    UIUtil.invokeLaterIfNeeded(new Runnable() {
+      @Override
+      public void run() {
+        if (!myDisposed) {
+          root.add(severityGroupNode);
+        }
+      }
+    });
   }
 
 

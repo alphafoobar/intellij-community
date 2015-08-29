@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,9 @@ package com.intellij.openapi.editor.colors.impl;
 import com.intellij.openapi.editor.colors.ColorKey;
 import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.openapi.editor.colors.ex.DefaultColorSchemesManager;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.openapi.util.InvalidDataException;
 import org.jdom.Element;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
@@ -33,8 +32,8 @@ import java.awt.*;
 public class DefaultColorsScheme extends AbstractColorsScheme implements ReadOnlyColorsScheme {
   private String myName;
 
-  public DefaultColorsScheme(DefaultColorSchemesManager defaultColorSchemesManager) {
-    super(null, defaultColorSchemesManager);
+  public DefaultColorsScheme() {
+    super(null);
   }
 
   @Override
@@ -52,6 +51,7 @@ public class DefaultColorsScheme extends AbstractColorsScheme implements ReadOnl
     return attrs;
   }
 
+  @Nullable
   @Override
   public Color getColor(ColorKey key) {
     if (key == null) return null;
@@ -60,11 +60,12 @@ public class DefaultColorsScheme extends AbstractColorsScheme implements ReadOnl
   }
 
   @Override
-  public void readExternal(Element parentNode) throws InvalidDataException {
+  public void readExternal(Element parentNode) {
     super.readExternal(parentNode);
     myName = parentNode.getAttributeValue(NAME_ATTR);
   }
 
+  @NotNull
   @Override
   public String getName() {
     return myName;
@@ -84,10 +85,9 @@ public class DefaultColorsScheme extends AbstractColorsScheme implements ReadOnl
 
   @Override
   public Object clone() {
-    EditorColorsSchemeImpl newScheme = new EditorColorsSchemeImpl(this, myDefaultColorSchemesManager);
+    EditorColorsSchemeImpl newScheme = new EditorColorsSchemeImpl(this);
     copyTo(newScheme);
     newScheme.setName(DEFAULT_SCHEME_NAME);
     return newScheme;
   }
-
 }

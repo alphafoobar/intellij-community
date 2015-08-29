@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.net;
 
 import com.intellij.Patches;
@@ -21,6 +20,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.util.SystemProperties;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,14 +29,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.*;
 
-/**
- * @author yole
- */
 public class NetUtils {
   private static final Logger LOG = Logger.getInstance(NetUtils.class);
 
-  private NetUtils() {
-  }
+  private NetUtils() { }
 
   public static boolean canConnectToSocket(String host, int port) {
     return canConnectToSocket(host, port, false);
@@ -69,7 +65,7 @@ public class NetUtils {
   }
 
   public static boolean isLocalhost(@NotNull String host) {
-    return host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1");
+    return host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1") || host.equals("::1");
   }
 
   private static boolean canBindToLocalSocket(String host, int port) {
@@ -190,21 +186,23 @@ public class NetUtils {
    * @param indicator           Progress indicator.
    * @param inputStream         source stream
    * @param outputStream        destination stream
-   * @param expectedContentSize expected content size, used in progress indicator. can be -1.
+   * @param expectedContentSize expected content size, used in progress indicator (negative means unknown length)
    * @return bytes copied
-   * @throws IOException                                            if IO error occur
-   * @throws com.intellij.openapi.progress.ProcessCanceledException if process was canceled.
+   * @throws IOException              if IO error occur
+   * @throws ProcessCanceledException if process was canceled.
    */
   public static int copyStreamContent(@Nullable ProgressIndicator indicator,
-                                      InputStream inputStream,
-                                      OutputStream outputStream,
+                                      @NotNull InputStream inputStream,
+                                      @NotNull OutputStream outputStream,
                                       int expectedContentSize) throws IOException, ProcessCanceledException {
     if (indicator != null) {
       indicator.checkCanceled();
-      if (expectedContentSize < 0) indicator.setIndeterminate(true);
+      if (expectedContentSize < 0) {
+        indicator.setIndeterminate(true);
+      }
     }
 
-    final byte[] buffer = new byte[4 * 1024];
+    final byte[] buffer = new byte[8 * 1024];
     int count;
     int total = 0;
     while ((count = inputStream.read(buffer)) > 0) {
@@ -224,6 +222,14 @@ public class NetUtils {
       indicator.checkCanceled();
     }
 
+    if (total < expectedContentSize) {
+      throw new IOException(String.format("Connection closed at byte %d. Expected %d bytes.", total, expectedContentSize));
+    }
+
     return total;
+  }
+
+  public static boolean isSniEnabled() {
+    return SystemInfo.isJavaVersionAtLeast("1.7") && SystemProperties.getBooleanProperty("jsse.enableSNIExtension", true);
   }
 }

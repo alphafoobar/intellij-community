@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,27 +33,35 @@ public class BuildNumber implements Comparable<BuildNumber> {
   private static final String SNAPSHOT = "SNAPSHOT";
   private static final String FALLBACK_VERSION = "999.SNAPSHOT";
 
-  private static final int TOP_BASELINE_VERSION = fromFile().getBaselineVersion();
+  private static class Holder {
+    private static final int TOP_BASELINE_VERSION = fromFile().getBaselineVersion();
+  }
 
   private final String myProductCode;
   private final int myBaselineVersion;
   private final int myBuildNumber;
+  private final String myAttemptInfo;
 
-  public BuildNumber(String productCode, int baselineVersion, int buildNumber) {
+  public BuildNumber(@NotNull String productCode, int baselineVersion, int buildNumber) {
+    this(productCode, baselineVersion, buildNumber, null);
+  }
+
+  public BuildNumber(@NotNull String productCode, int baselineVersion, int buildNumber, @Nullable String attemptInfo) {
     myProductCode = productCode;
     myBaselineVersion = baselineVersion;
     myBuildNumber = buildNumber;
+    myAttemptInfo = StringUtil.isEmpty(attemptInfo) ? null : attemptInfo;
   }
 
   public String asString() {
-    return asString(true);
+    return asString(true, false);
   }
 
   public String asStringWithoutProductCode() {
-    return asString(false);
+    return asString(false, false);
   }
 
-  private String asString(boolean includeProductCode) {
+  private String asString(boolean includeProductCode, boolean withBuildAttempt) {
     StringBuilder builder = new StringBuilder();
 
     if (includeProductCode && !StringUtil.isEmpty(myProductCode)) {
@@ -69,6 +77,10 @@ public class BuildNumber implements Comparable<BuildNumber> {
       builder.append(SNAPSHOT);
     }
 
+    if (withBuildAttempt && myAttemptInfo != null) {
+      builder.append('.').append(myAttemptInfo);
+    }
+
     return builder.toString();
   }
 
@@ -81,7 +93,7 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
     if (BUILD_NUMBER.equals(version)) {
       final String productCode = name != null ? name : "";
-      return new BuildNumber(productCode, TOP_BASELINE_VERSION, Integer.MAX_VALUE);
+      return new BuildNumber(productCode, Holder.TOP_BASELINE_VERSION, Integer.MAX_VALUE);
     }
 
     String code = version;
@@ -98,9 +110,11 @@ public class BuildNumber implements Comparable<BuildNumber> {
     int baselineVersionSeparator = code.indexOf('.');
     int baselineVersion;
     int buildNumber;
+    String attemptInfo = null;
+
     if (baselineVersionSeparator > 0) {
       try {
-        final String baselineVersionString = code.substring(0, baselineVersionSeparator);
+        String baselineVersionString = code.substring(0, baselineVersionSeparator);
         if (baselineVersionString.trim().isEmpty()) return null;
         baselineVersion = Integer.parseInt(baselineVersionString);
         code = code.substring(baselineVersionSeparator + 1);
@@ -109,6 +123,11 @@ public class BuildNumber implements Comparable<BuildNumber> {
         throw new RuntimeException("Invalid version number: " + version + "; plugin name: " + name);
       }
 
+      int minorBuildSeparator = code.indexOf('.'); // allow <BuildNumber>.<BuildAttemptNumber> skipping BuildAttemptNumber
+      if (minorBuildSeparator > 0) {
+        attemptInfo = code.substring(minorBuildSeparator + 1);
+        code = code.substring(0, minorBuildSeparator);
+      }
       buildNumber = parseBuildNumber(version, code, name);
     }
     else {
@@ -116,13 +135,13 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
       if (buildNumber <= 2000) {
         // it's probably a baseline, not a build number
-        return new BuildNumber(productCode, buildNumber, 0);
+        return new BuildNumber(productCode, buildNumber, 0, null);
       }
 
       baselineVersion = getBaseLineForHistoricBuilds(buildNumber);
     }
 
-    return new BuildNumber(productCode, baselineVersion, buildNumber);
+    return new BuildNumber(productCode, baselineVersion, buildNumber, attemptInfo);
   }
 
   private static int parseBuildNumber(String version, String code, String name) {
@@ -139,8 +158,8 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
   private static BuildNumber fromFile() {
     try {
-      final String homePath = PathManager.getHomePath();
-      final File buildTxtFile = FileUtil.findFirstThatExist(homePath + "/build.txt", homePath + "/community/build.txt");
+      String home = PathManager.getHomePath();
+      File buildTxtFile = FileUtil.findFirstThatExist(home + "/build.txt", home + "/Resources/build.txt", home + "/community/build.txt");
       if (buildTxtFile != null) {
         String text = FileUtil.loadFile(buildTxtFile).trim();
         return fromString(text);
@@ -162,10 +181,16 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
   @Override
   public int compareTo(@NotNull BuildNumber o) {
+    //if both are snapshots then IDEA and plugin are built from sources,
+    //in that case comparing baselines doesn't make sense,
+    //so we treat those builds equal
+    if (isSnapshot() && o.isSnapshot()) return 0;
+
     if (myBaselineVersion == o.myBaselineVersion) return myBuildNumber - o.myBuildNumber;
     return myBaselineVersion - o.myBaselineVersion;
   }
 
+  @NotNull
   public String getProductCode() {
     return myProductCode;
   }
@@ -185,25 +210,32 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
     BuildNumber that = (BuildNumber)o;
 
+    if (isSnapshot() && ((BuildNumber)o).isSnapshot()) return true;
+
     if (myBaselineVersion != that.myBaselineVersion) return false;
     if (myBuildNumber != that.myBuildNumber) return false;
     if (!myProductCode.equals(that.myProductCode)) return false;
+    if (!Comparing.equal(myAttemptInfo, that.myAttemptInfo)) return false;
 
     return true;
   }
 
   @Override
   public int hashCode() {
+    if (isSnapshot()) {
+      return 0;
+    }
     int result = myProductCode.hashCode();
     result = 31 * result + myBaselineVersion;
     result = 31 * result + myBuildNumber;
+    if (myAttemptInfo != null) result = 31 * result + myAttemptInfo.hashCode();
     return result;
   }
 
   // See http://www.jetbrains.net/confluence/display/IDEADEV/Build+Number+Ranges for historic build ranges
   private static int getBaseLineForHistoricBuilds(int bn) {
     if (bn == Integer.MAX_VALUE) {
-      return TOP_BASELINE_VERSION; // SNAPSHOTS
+      return Holder.TOP_BASELINE_VERSION; // SNAPSHOTS
     }
 
     if (bn >= 10000) {
@@ -255,5 +287,9 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
   public boolean isSnapshot() {
     return myBuildNumber == Integer.MAX_VALUE;
+  }
+
+  public String asStringWithAllDetails() {
+    return asString(true, true);
   }
 }

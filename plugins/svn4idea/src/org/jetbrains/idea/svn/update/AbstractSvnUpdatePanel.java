@@ -23,8 +23,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.DepthCombo;
 import org.jetbrains.idea.svn.SvnConfiguration;
 import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.info.Info;
 import org.tmatesoft.svn.core.SVNURL;
-import org.tmatesoft.svn.core.wc.SVNInfo;
 
 import javax.swing.*;
 import java.awt.*;
@@ -85,7 +85,7 @@ public abstract class AbstractSvnUpdatePanel {
   }
 
   public void reset(final SvnConfiguration configuration) {
-    getDepthBox().setSelectedItem(configuration.UPDATE_DEPTH);
+    getDepthBox().setSelectedItem(configuration.getUpdateDepth());
 
     for (FilePath filePath : myRootToPanel.keySet()) {
       myRootToPanel.get(filePath).reset(configuration);
@@ -94,7 +94,7 @@ public abstract class AbstractSvnUpdatePanel {
   }
 
   public void apply(final SvnConfiguration configuration) throws ConfigurationException {
-    configuration.UPDATE_DEPTH = getDepthBox().getDepth();
+    configuration.setUpdateDepth(getDepthBox().getDepth());
 
     for (FilePath filePath : myRootToPanel.keySet()) {
       final SvnPanel svnPanel = myRootToPanel.get(filePath);
@@ -106,7 +106,7 @@ public abstract class AbstractSvnUpdatePanel {
 
   @Nullable
   private SVNURL getUrlFor(@NotNull final FilePath root) {
-    final SVNInfo info = myVCS.getInfo(root.getIOFile());
+    final Info info = myVCS.getInfo(root.getIOFile());
     return info != null ? info.getURL() : null;
   }
 

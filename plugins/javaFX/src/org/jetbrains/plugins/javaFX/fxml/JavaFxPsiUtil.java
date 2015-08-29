@@ -93,20 +93,20 @@ public class JavaFxPsiUtil {
     return null;
   }
 
-  public static PsiClass findPsiClass(String name, XmlTag tag) {
-    final Project project = tag.getProject();
+  public static PsiClass findPsiClass(String name, PsiElement context) {
+    final Project project = context.getProject();
     if (!StringUtil.getShortName(name).equals(name)) {
       return JavaPsiFacade.getInstance(project).findClass(name, GlobalSearchScope.allScope(project));
     }
-    return findPsiClass(name, parseImports((XmlFile)tag.getContainingFile()), tag, project);
+    return findPsiClass(name, parseImports((XmlFile)context.getContainingFile()), context, project);
   }
 
-  private static PsiClass findPsiClass(String name, List<String> imports, XmlTag tag, Project project) {
+  private static PsiClass findPsiClass(String name, List<String> imports, PsiElement context, Project project) {
     PsiClass psiClass = null;
     if (imports != null) {
       JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
 
-      PsiFile file = tag.getContainingFile();
+      PsiFile file = context.getContainingFile();
       for (String anImport : imports) {
         if (StringUtil.getShortName(anImport).equals(name)) {
           psiClass = psiFacade.findClass(anImport, file.getResolveScope());
@@ -270,6 +270,14 @@ public class JavaFxPsiUtil {
     if (!(currentTagClass instanceof PsiClass)) return false;
     final PsiField handlerField = ((PsiClass)currentTagClass).findFieldByName(attributeName, true);
     if (handlerField == null) {
+      final String suggestedSetterName = PropertyUtil.suggestSetterName(attributeName);
+      final PsiMethod[] existingSetters = ((PsiClass)currentTagClass).findMethodsByName(suggestedSetterName, true);
+      for (PsiMethod setter : existingSetters) {
+        final PsiParameter[] parameters = setter.getParameterList().getParameters();
+        if (parameters.length == 1 && InheritanceUtil.isInheritor(parameters[0].getType(), JavaFxCommonClassNames.JAVAFX_EVENT_EVENT_HANDLER)) {
+          return true;
+        }
+      }
       return false;
     }
     final PsiClass objectPropertyClass = getPropertyClass(handlerField);
@@ -397,7 +405,10 @@ public class JavaFxPsiUtil {
     return null;
   }
 
-  public static String getDefaultPropertyName(PsiClass aClass) {
+  public static String getDefaultPropertyName(@Nullable PsiClass aClass) {
+    if (aClass == null) {
+      return null;
+    }
     final PsiAnnotation annotation = AnnotationUtil.findAnnotationInHierarchy(aClass,
                                                                               Collections.singleton(JavaFxCommonClassNames.JAVAFX_BEANS_DEFAULT_PROPERTY));
     if (annotation != null) {
@@ -412,7 +423,16 @@ public class JavaFxPsiUtil {
   public static String isAbleToInstantiate(final PsiClass psiClass) {
     if(psiClass.getConstructors().length > 0) {
       for (PsiMethod constr : psiClass.getConstructors()) {
-        if (constr.getParameterList().getParametersCount() == 0) return null;
+        final PsiParameter[] parameters = constr.getParameterList().getParameters();
+        if (parameters.length == 0) return null;
+        boolean annotated = true;
+        for (PsiParameter parameter : parameters) {
+          if (!AnnotationUtil.isAnnotated(parameter, JavaFxCommonClassNames.JAVAFX_BEANS_NAMED_ARG, false)) {
+            annotated = false;
+            break;
+          }
+        }
+        if (annotated) return null;
       }
       final PsiMethod valueOf = findValueOfMethod(psiClass);
       if (valueOf == null) {
@@ -516,15 +536,15 @@ public class JavaFxPsiUtil {
     return false;
   }
 
-  public static PsiType getWrappedPropertyType(PsiField field, final Project project, final Map<String, PsiType> typeMap) {
-    final PsiType fieldType = field.getType();
-    final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(fieldType);
-    final PsiClass fieldClass = resolveResult.getElement();
-    if (fieldClass == null) return fieldType;
-    return CachedValuesManager.getManager(project).getCachedValue(field, new CachedValueProvider<PsiType>() {
+  public static PsiType getWrappedPropertyType(final PsiField field, final Project project, final Map<String, PsiType> typeMap) {
+    return CachedValuesManager.getCachedValue(field, new CachedValueProvider<PsiType>() {
       @Nullable
       @Override
       public Result<PsiType> compute() {
+        final PsiType fieldType = field.getType();
+        final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(fieldType);
+        final PsiClass fieldClass = resolveResult.getElement();
+        if (fieldClass == null) return Result.create(fieldType, PsiModificationTracker.JAVA_STRUCTURE_MODIFICATION_COUNT);
         PsiType substitute = null;
         for (String typeName : typeMap.keySet()) {
           if (InheritanceUtil.isInheritor(fieldType, typeName)) {

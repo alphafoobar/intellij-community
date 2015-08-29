@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,19 @@
  */
 package org.jetbrains.jps.service.impl;
 
+import org.jetbrains.jps.plugin.JpsPluginManager;
 import org.jetbrains.jps.service.JpsServiceManager;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author nik
  */
 public class JpsServiceManagerImpl extends JpsServiceManager {
-  private final ConcurrentHashMap<Class, Object> myServices = new ConcurrentHashMap<Class, Object>(16, 0.75f, 1);
-  private final ConcurrentHashMap<Class, List<?>> myExtensions = new ConcurrentHashMap<Class, List<?>>(16, 0.75f, 1);
+  private final ConcurrentMap<Class, Object> myServices = new ConcurrentHashMap<Class, Object>(16, 0.75f, 1);
+  private final ConcurrentMap<Class, List<?>> myExtensions = new ConcurrentHashMap<Class, List<?>>(16, 0.75f, 1);
 
   @Override
   public <T> T getService(Class<T> serviceClass) {
@@ -54,11 +56,7 @@ public class JpsServiceManagerImpl extends JpsServiceManager {
   public <T> Iterable<T> getExtensions(Class<T> extensionClass) {
     List<?> cached = myExtensions.get(extensionClass);
     if (cached == null) {
-      final ServiceLoader<T> loader = ServiceLoader.load(extensionClass, extensionClass.getClassLoader());
-      final List<T> extensions = new ArrayList<T>();
-      for (T t : loader) {
-        extensions.add(t);
-      }
+      final List<T> extensions = new ArrayList<T>(JpsPluginManager.getInstance().loadExtensions(extensionClass));
       cached = myExtensions.putIfAbsent(extensionClass, extensions);
       if (cached == null) {
         cached = extensions;

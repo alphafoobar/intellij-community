@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.siyeh.ig.migration;
 
 import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
-import com.intellij.lang.java.JavaLanguage;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -24,6 +23,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.psiutils.MethodUtils;
+import org.intellij.lang.annotations.Pattern;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,6 +38,19 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
   @SuppressWarnings("PublicField") public boolean ignoreUncompilable = false;
 
   @SuppressWarnings("PublicField") public boolean ignoreParametersOfOverridingMethods = false;
+
+  @Pattern(VALID_ID_PATTERN)
+  @NotNull
+  @Override
+  public String getID() {
+    return "rawtypes";
+  }
+
+  @Nullable
+  @Override
+  public String getAlternativeID() {
+    return "RawUseOfParameterized";
+  }
 
   @Override
   @NotNull
@@ -67,8 +80,8 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
   }
 
   @Override
-  public String getAlternativeID() {
-    return "rawtypes";
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
   }
 
   @Override
@@ -80,9 +93,6 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
 
     @Override
     public void visitNewExpression(@NotNull PsiNewExpression expression) {
-      if (!hasNeededLanguageLevel(expression)) {
-        return;
-      }
       super.visitNewExpression(expression);
       if (ignoreObjectConstruction) {
         return;
@@ -97,9 +107,6 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
 
     @Override
     public void visitTypeElement(@NotNull PsiTypeElement typeElement) {
-      if (!hasNeededLanguageLevel(typeElement)) {
-        return;
-      }
       final PsiType type = typeElement.getType();
       if (!(type instanceof PsiClassType)) {
         return;
@@ -140,9 +147,6 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
 
     @Override
     public void visitReferenceElement(PsiJavaCodeReferenceElement reference) {
-      if (!hasNeededLanguageLevel(reference)) {
-        return;
-      }
       super.visitReferenceElement(reference);
       final PsiElement referenceParent = reference.getParent();
       if (!(referenceParent instanceof PsiReferenceList)) {
@@ -180,10 +184,6 @@ public class RawUseOfParameterizedTypeInspection extends BaseInspection {
         return;
       }
       registerError(reference);
-    }
-
-    private boolean hasNeededLanguageLevel(PsiElement element) {
-      return element.getLanguage().isKindOf(JavaLanguage.INSTANCE) && PsiUtil.isLanguageLevel5OrHigher(element);
     }
   }
 }

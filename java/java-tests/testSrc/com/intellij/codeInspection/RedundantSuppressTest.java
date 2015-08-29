@@ -1,10 +1,12 @@
 package com.intellij.codeInspection;
 
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.codeInspection.emptyMethod.EmptyMethodInspection;
 import com.intellij.codeInspection.ex.*;
 import com.intellij.codeInspection.i18n.I18nInspection;
 import com.intellij.psi.PsiElement;
 import com.intellij.testFramework.InspectionTestCase;
+import com.siyeh.ig.migration.RawUseOfParameterizedTypeInspection;
 import org.jetbrains.annotations.NotNull;
 
 public class RedundantSuppressTest extends InspectionTestCase {
@@ -14,9 +16,11 @@ public class RedundantSuppressTest extends InspectionTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    InspectionToolRegistrar.getInstance().ensureInitialized();
-    myInspectionToolWrappers = new InspectionToolWrapper[]{new LocalInspectionToolWrapper(new I18nInspection()),
-      new GlobalInspectionToolWrapper(new EmptyMethodInspection())};
+    myInspectionToolWrappers = new InspectionToolWrapper[]{
+      new LocalInspectionToolWrapper(new I18nInspection()),
+      new LocalInspectionToolWrapper(new RawUseOfParameterizedTypeInspection()),
+      new GlobalInspectionToolWrapper(new EmptyMethodInspection()),
+      new GlobalInspectionToolWrapper(new UnusedDeclarationInspection())};
 
     myWrapper = new GlobalInspectionToolWrapper(new RedundantSuppressInspection() {
       @Override
@@ -27,6 +31,14 @@ public class RedundantSuppressTest extends InspectionTestCase {
   }
 
   public void testDefaultFile() throws Exception {
+    doTest();
+  }
+
+  public void testAlternativeIds() throws Exception {
+    doTest();
+  }
+
+  public void testIgnoreUnused() throws Exception {
     doTest();
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@ import com.intellij.ide.highlighter.HighlighterFactory;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.navigation.NavigationItem;
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -41,6 +39,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vcs.FileStatusManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ListCellRendererWrapper;
@@ -48,7 +47,9 @@ import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.SideBorder;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.usages.UsageView;
+import com.intellij.util.DocumentUtil;
 import com.intellij.util.PairFunction;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -87,7 +88,7 @@ public class ImplementationViewComponent extends JPanel {
   private final ActionToolbar myToolbar;
   private JLabel myLabel;
 
-  public void setHint(final JBPopup hint, final String title) {
+  public void setHint(final JBPopup hint, @NotNull String title) {
     myHint = hint;
     myTitle = title;
   }
@@ -172,8 +173,8 @@ public class ImplementationViewComponent extends JPanel {
     final GridBagConstraints gc = new GridBagConstraints(GridBagConstraints.RELATIVE, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(0,2,0,0), 0,0);
     toolbarPanel.add(myToolbar.getComponent(), gc);
 
-    setPreferredSize(new Dimension(600, 400));
-    
+    setPreferredSize(JBUI.size(600, 400));
+
     update(elements, new PairFunction<PsiElement[], List<FileDescriptor>, Boolean>() {
       @Override
       public Boolean fun(final PsiElement[] psiElements, final List<FileDescriptor> fileDescriptors) {
@@ -273,7 +274,7 @@ public class ImplementationViewComponent extends JPanel {
       @Override
       public Boolean fun(PsiElement[] psiElements, List<FileDescriptor> fileDescriptors) {
         if (psiElements.length == 0) return false;
-        
+
         final Project project = psiElements[0].getProject();
         myElements = psiElements;
 
@@ -302,7 +303,7 @@ public class ImplementationViewComponent extends JPanel {
         else {
           myFileChooser.setVisible(false);
           myCountLabel.setVisible(false);
-          
+
           VirtualFile file = psiFile.getVirtualFile();
           if (file != null) {
             myLabel.setIcon(getIconForFile(psiFile));
@@ -321,9 +322,9 @@ public class ImplementationViewComponent extends JPanel {
         return true;
       }
     });
-    
+
   }
-  
+
   private static void update(@NotNull PsiElement[] elements, @NotNull PairFunction<PsiElement[], List<FileDescriptor>, Boolean> fun) {
     List<PsiElement> candidates = new ArrayList<PsiElement>(elements.length);
     List<FileDescriptor> files = new ArrayList<FileDescriptor>(elements.length);
@@ -332,12 +333,26 @@ public class ImplementationViewComponent extends JPanel {
       if (element instanceof PsiNamedElement) {
         names.add(((PsiNamedElement)element).getName());
       }
+      if (names.size() > 1) {
+        break;
+      }
     }
+
     for (PsiElement element : elements) {
       PsiFile file = getContainingFile(element);
       if (file == null) continue;
-      final PsiElement parent = element.getParent();
-      files.add(new FileDescriptor(file, names.size() > 1 || parent == file ? element : parent));
+      if (names.size() > 1) {
+        files.add(new FileDescriptor(file, element));
+      }
+      else {
+        final PsiElement parent = PsiTreeUtil.getStubOrPsiParent(element);
+        if (parent == file) {
+          files.add(new FileDescriptor(file, element));
+        }
+        else {
+          files.add(new FileDescriptor(file, parent));
+        }
+      }
       candidates.add(element);
     }
     
@@ -404,25 +419,19 @@ public class ImplementationViewComponent extends JPanel {
   private void updateTextElement(final PsiElement elt) {
     final String newText = getNewText(elt);
     if (newText == null || Comparing.strEqual(newText, myEditor.getDocument().getText())) return;
-    CommandProcessor.getInstance().runUndoTransparentAction(new Runnable() {
+    DocumentUtil.writeInRunUndoTransparentAction(new Runnable() {
       @Override
       public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            Document fragmentDoc = myEditor.getDocument();
-            fragmentDoc.setReadOnly(false);
+        Document fragmentDoc = myEditor.getDocument();
+        fragmentDoc.setReadOnly(false);
 
-            fragmentDoc.replaceString(0, fragmentDoc.getTextLength(), newText);
-            fragmentDoc.setReadOnly(true);
-            myEditor.getCaretModel().moveToOffset(0);
-            myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
-          }
-        });
+        fragmentDoc.replaceString(0, fragmentDoc.getTextLength(), newText);
+        fragmentDoc.setReadOnly(true);
+        myEditor.getCaretModel().moveToOffset(0);
+        myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
       }
     });
   }
-
 
   @Nullable
   public static String getNewText(PsiElement elt) {

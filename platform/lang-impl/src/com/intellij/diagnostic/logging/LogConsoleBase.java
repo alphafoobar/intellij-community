@@ -40,6 +40,7 @@ import com.intellij.openapi.util.Key;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.FilterComponent;
 import com.intellij.util.Alarm;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -65,6 +66,10 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
   private static final Logger LOG = Logger.getInstance("com.intellij.diagnostic.logging.LogConsoleImpl");
   @NonNls public static final String APPLYING_FILTER_TITLE = "Applying filter...";
 
+  private JPanel mySearchComponent;
+  private JComboBox myLogFilterCombo;
+  private JPanel myTextFilterWrapper;
+
   private boolean myDisposed;
   private ConsoleView myConsole;
   private final LightProcessHandler myProcessHandler = new LightProcessHandler();
@@ -80,6 +85,7 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
   private ActionGroup myActions;
   private final boolean myBuildInActions;
   private LogFilterModel myModel;
+  private final LogFormatter myFormatter;
 
   private final List<LogConsoleListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final List<? extends LogFilter> myFilters;
@@ -96,20 +102,23 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
       ProgressManager.getInstance().run(task);
     }
   };
-  private JPanel mySearchComponent;
-  private JComboBox myLogFilterCombo;
-  private JPanel myTextFilterWrapper;
 
   public LogConsoleBase(@NotNull Project project, @Nullable Reader reader, String title, final boolean buildInActions, LogFilterModel model) {
     this(project, reader, title, buildInActions, model, GlobalSearchScope.allScope(project));
   }
 
   public LogConsoleBase(@NotNull Project project, @Nullable Reader reader, String title, final boolean buildInActions, LogFilterModel model,
-                        @NotNull GlobalSearchScope scope) {
+                        @NotNull GlobalSearchScope scope){
+    this(project, reader, title, buildInActions, model, scope, new DefaultLogFormatter());
+  }
+
+  public LogConsoleBase(@NotNull Project project, @Nullable Reader reader, String title, final boolean buildInActions, LogFilterModel model,
+                        @NotNull GlobalSearchScope scope, LogFormatter formatter) {
     super(new BorderLayout());
     myProject = project;
     myTitle = title;
     myModel = model;
+    myFormatter = formatter;
     myFilters = myModel.getLogFilters();
     myReaderThread = new ReaderThread(reader);
     myBuildInActions = buildInActions;
@@ -249,6 +258,7 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
     activate();
   }
 
+  @NotNull
   @Override
   public String getTabTitle() {
     return myTitle;
@@ -309,7 +319,8 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
       final List<LogFragment> fragments = myContentPreprocessor.parseLogLine(text + "\n");
       myOriginalDocument = getOriginalDocument();
       for (LogFragment fragment : fragments) {
-        myProcessHandler.notifyTextAvailable(fragment.getText(), fragment.getOutputType());
+        String formattedMessage = myFormatter.formatMessage(fragment.getText());
+        myProcessHandler.notifyTextAvailable(formattedMessage, fragment.getOutputType());
         if (myOriginalDocument != null) {
           myOriginalDocument.append(fragment.getText());
         }
@@ -322,9 +333,11 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
         if (key != null) {
           final String messagePrefix = processingResult.getMessagePrefix();
           if (messagePrefix != null) {
-            myProcessHandler.notifyTextAvailable(messagePrefix, key);
+            String formattedPrefix = myFormatter.formatPrefix(messagePrefix);
+            myProcessHandler.notifyTextAvailable(formattedPrefix, key);
           }
-          myProcessHandler.notifyTextAvailable(text + "\n", key);
+          String formattedMessage = myFormatter.formatMessage(text);
+          myProcessHandler.notifyTextAvailable(formattedMessage + "\n", key);
         }
       }
       myOriginalDocument = getOriginalDocument();
@@ -420,7 +433,7 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
     console.clear();
     myModel.processingStarted();
 
-    final String[] lines = myOriginalDocument.toString().split("\n");
+    final String[] lines = myOriginalDocument != null ? myOriginalDocument.toString().split("\n") : ArrayUtil.EMPTY_STRING_ARRAY;;
     int offset = 0;
     boolean caretPositioned = false;
 
@@ -455,7 +468,8 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
       for (LogFragment fragment : fragments) {
         ConsoleViewContentType consoleViewType = ConsoleViewContentType.getConsoleViewType(fragment.getOutputType());
         if (consoleViewType != null) {
-          console.print(fragment.getText(), consoleViewType);
+          String formattedText = myFormatter.formatMessage(fragment.getText());
+          console.print(formattedText, consoleViewType);
         }
       }
       return line.length() + 1;
@@ -469,9 +483,11 @@ public abstract class LogConsoleBase extends AdditionalTabComponent implements L
           if (type != null) {
             final String messagePrefix = processingResult.getMessagePrefix();
             if (messagePrefix != null) {
-              console.print(messagePrefix, type);
+              String formattedPrefix = myFormatter.formatPrefix(messagePrefix);
+              console.print(formattedPrefix, type);
             }
-            console.print(line + "\n", type);
+            String formattedMessage = myFormatter.formatMessage(line);
+            console.print(formattedMessage + "\n", type);
             return (messagePrefix != null ? messagePrefix.length() : 0) + line.length() + 1;
           }
         }

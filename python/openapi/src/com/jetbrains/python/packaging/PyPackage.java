@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.packaging;
 
+import com.google.common.collect.Lists;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.webcore.packaging.InstalledPackage;
 import org.jetbrains.annotations.NotNull;
@@ -38,6 +39,17 @@ public class PyPackage extends InstalledPackage {
   @NotNull
   public List<PyRequirement> getRequirements() {
     return myRequirements;
+  }
+
+
+  /**
+   * Checks if package meets requirement, descriped in [PEP-0386] format using {@link com.jetbrains.python.packaging.PyRequirement}
+   *
+   * @param requirement to check if package matches
+   * @return true if matches.
+   */
+  public boolean matches(@NotNull final PyRequirement requirement) {
+    return requirement.match(Lists.newArrayList(this)) != null;
   }
 
   @Nullable

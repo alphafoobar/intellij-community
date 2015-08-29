@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +15,16 @@
  */
 package com.intellij.openapi.options;
 
-import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Constructor;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 
-
-public class CompoundScheme<T extends SchemeElement> implements ExternalizableScheme {
-
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.options.CompoundScheme");
-
-  protected String myName;
+public class CompoundScheme<T extends SchemeElement> extends ExternalizableSchemeAdapter {
   private final List<T> myElements = new ArrayList<T>();
-  private final ExternalInfo myExternalInfo = new ExternalInfo();
 
   public CompoundScheme(final String name) {
     myName = name;
@@ -46,17 +42,12 @@ public class CompoundScheme<T extends SchemeElement> implements ExternalizableSc
     }
   }
 
-
-
   public List<T> getElements() {
     return Collections.unmodifiableList(new ArrayList<T>(myElements));
   }
 
-  public String getName() {
-    return myName;
-  }
-
-  public void setName(final String name) {
+  @Override
+  public void setName(@NotNull final String name) {
     myName = name;
     for (T template : myElements) {
       template.setGroupName(name);
@@ -64,8 +55,8 @@ public class CompoundScheme<T extends SchemeElement> implements ExternalizableSc
   }
 
   public void removeElement(final T template) {
-    for (Iterator templateIterator = myElements.iterator(); templateIterator.hasNext();) {
-      T t = (T)templateIterator.next();
+    for (Iterator<T> templateIterator = myElements.iterator(); templateIterator.hasNext();) {
+      T t = templateIterator.next();
       if (t.getKey() != null && t.getKey().equals(template.getKey())) {
         templateIterator.remove();
       }
@@ -76,37 +67,28 @@ public class CompoundScheme<T extends SchemeElement> implements ExternalizableSc
     return myElements.isEmpty();
   }
 
-  @NotNull
-  public ExternalInfo getExternalInfo() {
-    return myExternalInfo;
-  }
-
-  public CompoundScheme copy() {
-    CompoundScheme result = createNewInstance(getName());
-    for (T element : myElements) {
-      result.addElement(element.copy());
-    }
-    result.getExternalInfo().copy(getExternalInfo());
-    return result;
-  }
-
   private CompoundScheme createNewInstance(final String name) {
     try {
       Constructor<? extends CompoundScheme> constructor = getClass().getConstructor(String.class);
       return constructor.newInstance(name);
     }
     catch (Exception e) {
-      LOG.error(e);
-      return null;
+      throw new RuntimeException(e);
     }
   }
 
-  @Override
-  public String toString() {
-    return getName();
+  @NotNull
+  public CompoundScheme<T> copy() {
+    //noinspection unchecked
+    CompoundScheme<T> result = createNewInstance(getName());
+    for (T element : myElements) {
+      //noinspection unchecked
+      result.addElement((T)element.copy());
+    }
+    return result;
   }
 
-  public boolean contains(final T element) {
+  public boolean contains(@NotNull T element) {
     for (T t : myElements) {
       if (t.getKey() != null && t.getKey().equals(element.getKey())) {
         return true;

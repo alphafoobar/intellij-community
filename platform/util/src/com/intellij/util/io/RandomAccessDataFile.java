@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ package com.intellij.util.io;
 
 import com.intellij.openapi.Forceable;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.*;
@@ -47,11 +48,11 @@ public class RandomAccessDataFile implements Forceable, Closeable {
 
   private static final boolean DEBUG = false;
 
-  public RandomAccessDataFile(final File file) throws IOException {
+  public RandomAccessDataFile(@NotNull File file) throws IOException {
     this(file, PagePool.SHARED);
   }
 
-  public RandomAccessDataFile(final File file, final PagePool pool) throws IOException {
+  public RandomAccessDataFile(@NotNull File file, @NotNull PagePool pool) throws IOException {
     myPool = pool;
     myFile = file;
     if (!file.exists()) {
@@ -138,27 +139,16 @@ public class RandomAccessDataFile implements Forceable, Closeable {
   }
 
   public String getUTF(long addr) {
-    try {
-      int len = getInt(addr);
-      byte[] bytes = new byte[len];
-      get(addr + 4, bytes, 0, len);
-      return new String(bytes, "UTF-8");
-    }
-    catch (UnsupportedEncodingException e) {
-      // Can't be
-      return "";
-    }
+    int len = getInt(addr);
+    byte[] bytes = new byte[len];
+    get(addr + 4, bytes, 0, len);
+    return new String(bytes, CharsetToolkit.UTF8_CHARSET);
   }
 
   public void putUTF(long addr, String value) {
-    try {
-      final byte[] bytes = value.getBytes("UTF-8");
-      putInt(addr, bytes.length);
-      put(addr + 4, bytes, 0, bytes.length);
-    }
-    catch (UnsupportedEncodingException e) {
-      // Can't be
-    }
+    final byte[] bytes = value.getBytes(CharsetToolkit.UTF8_CHARSET);
+    putInt(addr, bytes.length);
+    put(addr + 4, bytes, 0, bytes.length);
   }
 
   public long length() {
@@ -201,12 +191,32 @@ public class RandomAccessDataFile implements Forceable, Closeable {
     dispose();
   }
 
+  /**
+   * Flushes dirty pages to underlying buffers
+   */
   @Override
   public void force() {
     assertNotDisposed();
     if (isDirty()) {
       myPool.flushPages(this);
       myIsDirty = false;
+    }
+  }
+
+  /**
+   * Flushes dirty pages to buffers and saves them to disk
+   */
+  public void sync() {
+    force();
+    try {
+      RandomAccessFile file = getRandomAccessFile();
+      file.getChannel().force(true);
+    }
+    catch (IOException ignored) {
+
+    }
+    finally {
+      releaseFile();
     }
   }
 
@@ -229,7 +239,7 @@ public class RandomAccessDataFile implements Forceable, Closeable {
 
   private void assertNotDisposed() {
     if (myIsDisposed) {
-      LOG.assertTrue(false, "storage file is disposed: " + myFile);
+      LOG.error("storage file is disposed: " + myFile);
     }
   }
 
@@ -316,6 +326,7 @@ public class RandomAccessDataFile implements Forceable, Closeable {
     file.seek(fileOffset);
   }
 
+  @Override
   public int hashCode() {
     return myCount;
   }

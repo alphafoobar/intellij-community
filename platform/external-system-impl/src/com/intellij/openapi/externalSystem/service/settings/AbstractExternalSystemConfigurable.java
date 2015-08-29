@@ -83,6 +83,11 @@ public abstract class AbstractExternalSystemConfigurable<
     myExternalSystemId = externalSystemId;
   }
 
+  @NotNull
+  public Project getProject() {
+    return myProject;
+  }
+
   @Nullable
   @Override
   public Runnable enableSearch(String option) {
@@ -142,6 +147,9 @@ public abstract class AbstractExternalSystemConfigurable<
       control.fillUi(myComponent, 1);
       myProjectsModel.addElement(getProjectName(setting.getExternalProjectPath()));
       myProjectSettingsControls.add(control);
+      if (control instanceof AbstractExternalProjectSettingsControl<?>) {
+        ((AbstractExternalProjectSettingsControl)control).setCurrentProject(myProject);
+      }
       control.showUi(false);
     }
 
@@ -166,9 +174,12 @@ public abstract class AbstractExternalSystemConfigurable<
 
     
     if (!myProjectsModel.isEmpty()) {
-      addTitle(ExternalSystemBundle.message("settings.title.system.settings", myExternalSystemId.getReadableName()));
       myProjectsList.setSelectedIndex(0);
     }
+  }
+
+  public void selectProject(@NotNull String linkedProjectPath) {
+    myProjectsList.setSelectedValue(getProjectName(linkedProjectPath), true);
   }
   
   private void addTitle(@NotNull String title) {
@@ -190,12 +201,13 @@ public abstract class AbstractExternalSystemConfigurable<
   @NotNull
   protected String getProjectName(@NotNull String path) {
     File file = new File(path);
-    return file.isDirectory() ? file.getName() : file.getParentFile().getName();
+    return file.isDirectory() || file.getParentFile() == null ? file.getName() : file.getParentFile().getName();
   }
 
   private void prepareSystemSettings(@NotNull SystemSettings s) {
     mySystemSettingsControl = createSystemSettingsControl(s);
     if (mySystemSettingsControl != null) {
+      addTitle(ExternalSystemBundle.message("settings.title.system.settings", myExternalSystemId.getReadableName()));
       mySystemSettingsControl.fillUi(myComponent, 1);
     }
   }

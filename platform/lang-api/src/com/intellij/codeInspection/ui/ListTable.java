@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.codeInspection.ui;
 
 import com.intellij.ui.table.JBTable;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.table.JTableHeader;
@@ -53,7 +54,7 @@ public class ListTable extends JBTable {
     }
 
     @Override
-    public void setModel(TableModel dataModel) {
+    public void setModel(@NotNull TableModel dataModel) {
         if (!(dataModel instanceof ListWrappingTableModel)) {
             throw new IllegalArgumentException(
                     "dataModel should be of type ListWrappingTableModel");
@@ -61,8 +62,9 @@ public class ListTable extends JBTable {
         super.setModel(dataModel);
     }
 
+    @NotNull
     @Override
-    public Component prepareRenderer(TableCellRenderer renderer, int row,
+    public Component prepareRenderer(@NotNull TableCellRenderer renderer, int row,
                                      int column) {
         final Component component =
                 super.prepareRenderer(renderer, row, column);

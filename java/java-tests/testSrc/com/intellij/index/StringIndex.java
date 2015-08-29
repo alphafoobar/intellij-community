@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.index;
 
 import com.intellij.openapi.util.Factory;
@@ -28,15 +43,23 @@ public class StringIndex {
     myIndex.setInputIdToDataKeysIndex(factory);
   }
   
-  public List<String> getFilesByWord(String word) throws StorageException {
+  public List<String> getFilesByWord(@NotNull String word) throws StorageException {
     return myIndex.getData(word).toValueList();
   }
   
   public void update(final String path, @Nullable String content, @Nullable String oldContent) throws StorageException {
-    myIndex.update(path.hashCode(), toInput(path, content)).compute();
+    myIndex.update(Math.abs(path.hashCode()), toInput(path, content)).compute();
   }
-  
-  @Nullable 
+
+  public void flush() throws StorageException {
+    myIndex.flush();
+  }
+
+  public void dispose() {
+    myIndex.dispose();
+  }
+
+  @Nullable
   private PathContentPair toInput(@NotNull String path, @Nullable String content) {
     return content != null ? new PathContentPair(path, content) : null;
   }
@@ -44,7 +67,7 @@ public class StringIndex {
   private static class Indexer implements DataIndexer<String, String, PathContentPair> {
     @Override
     @NotNull
-    public Map<String,String> map(final PathContentPair inputData) {
+    public Map<String,String> map(@NotNull final PathContentPair inputData) {
       final Map<String,String> _map = new HashMap<String, String>();
       final StringBuilder builder = new StringBuilder();
       final String content = inputData.content;

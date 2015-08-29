@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.util.ThreeState;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,27 +30,68 @@ public abstract class XmlSuppressableInspectionTool extends LocalInspectionTool 
   @NonNls static final String ALL = "ALL";
 
   @NotNull
-  @Override
-  public SuppressQuickFix[] getBatchSuppressActions(@Nullable PsiElement element) {
-    return new SuppressQuickFix[]{new SuppressTag(), new SuppressForFile(getID()), new SuppressAllForFile()};
+  public static SuppressQuickFix[] getSuppressFixes(@NotNull String toolId) {
+    return getSuppressFixes(toolId, new DefaultXmlSuppressionProvider());
   }
 
-  @Override
-  public boolean isSuppressedFor(@NotNull final PsiElement element) {
-    return XmlSuppressionProvider.isSuppressed(element, getID());
+  @NotNull
+  public static SuppressQuickFix[] getSuppressFixes(@NotNull String toolId, @NotNull XmlSuppressionProvider provider) {
+    return new SuppressQuickFix[]{new SuppressTagStatic(toolId, provider), new SuppressForFile(toolId, provider),
+      new SuppressAllForFile(provider)};
   }
 
-  public class SuppressTag extends SuppressTagStatic {
-    public SuppressTag() {
-      super(getID());
+  public abstract static class XmlSuppressFix implements InjectionAwareSuppressQuickFix, ContainerBasedSuppressQuickFix {
+
+    protected final String myId;
+    protected final XmlSuppressionProvider myProvider;
+    private ThreeState myShouldBeAppliedToInjectionHost = ThreeState.UNSURE;
+
+    protected XmlSuppressFix(String inspectionId, XmlSuppressionProvider suppressionProvider) {
+      myId = inspectionId;
+      myProvider = suppressionProvider;
+    }
+
+    protected XmlSuppressFix(String id) {
+      this(id, new DefaultXmlSuppressionProvider());
+    }
+
+    @Override
+    public boolean isAvailable(@NotNull Project project, @NotNull PsiElement context) {
+      return context.isValid() && getContainer(context) != null;
+    }
+
+    @Override
+    @NotNull
+    public String getFamilyName() {
+      return getName();
+    }
+    
+    @Nullable
+    @Override
+    public PsiElement getContainer(@Nullable PsiElement context) {
+      return null;
+    }
+
+    @NotNull
+    @Override
+    public ThreeState isShouldBeAppliedToInjectionHost() {
+      return myShouldBeAppliedToInjectionHost;
+    }
+
+    @Override
+    public void setShouldBeAppliedToInjectionHost(@NotNull ThreeState shouldBeAppliedToInjectionHost) {
+      myShouldBeAppliedToInjectionHost = shouldBeAppliedToInjectionHost;
     }
   }
 
-  public static class SuppressTagStatic implements SuppressQuickFix {
-    private final String id;
+  public static class SuppressTagStatic extends XmlSuppressFix {
 
-    public SuppressTagStatic(@NotNull String id) {
-      this.id = id;
+    public SuppressTagStatic(String inspectionId, XmlSuppressionProvider suppressionProvider) {
+      super(inspectionId, suppressionProvider);
+    }
+
+    public SuppressTagStatic(String id) {
+      super(id);
     }
 
     @NotNull
@@ -59,29 +101,27 @@ public abstract class XmlSuppressableInspectionTool extends LocalInspectionTool 
     }
 
     @Override
-    public boolean isAvailable(@NotNull Project project, @NotNull PsiElement context) {
-      return context.isValid();
-    }
-
-    @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       PsiElement element = descriptor.getPsiElement();
       if (PsiTreeUtil.getParentOfType(element, XmlTag.class) == null) return;
-      XmlSuppressionProvider.getProvider(element.getContainingFile()).suppressForTag(element, id);
+      myProvider.suppressForTag(element, myId);
     }
-
+    
+    @Nullable
     @Override
-    @NotNull
-    public String getFamilyName() {
-      return getName();
+    public PsiElement getContainer(@Nullable PsiElement context) {
+      return PsiTreeUtil.getParentOfType(context, XmlTag.class);
     }
   }
 
-  public static class SuppressForFile implements SuppressQuickFix {
-    private final String myInspectionId;
+  public static class SuppressForFile extends XmlSuppressFix {
 
-    public SuppressForFile(@NotNull String inspectionId) {
-      myInspectionId = inspectionId;
+    public SuppressForFile(String inspectionId, XmlSuppressionProvider suppressionProvider) {
+      super(inspectionId, suppressionProvider);
+    }
+
+    public SuppressForFile(String id) {
+      super(id);
     }
 
     @NotNull
@@ -93,23 +133,24 @@ public abstract class XmlSuppressableInspectionTool extends LocalInspectionTool 
     @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       PsiElement element = descriptor.getPsiElement();
-      if (element == null || !element.isValid() || !(element.getContainingFile() instanceof XmlFile)) return;
-      XmlSuppressionProvider.getProvider(element.getContainingFile()).suppressForFile(element, myInspectionId);
+      PsiElement container = getContainer(element);
+      if (container instanceof XmlFile) {
+        myProvider.suppressForFile(element, myId);
+      }
     }
-
+    
+    @Nullable
     @Override
-    public boolean isAvailable(@NotNull Project project, @NotNull PsiElement context) {
-      return context.isValid();
-    }
-
-    @Override
-    @NotNull
-    public String getFamilyName() {
-      return getName();
+    public PsiElement getContainer(@Nullable PsiElement context) {
+      return context == null || !context.isValid() ? null : context.getContainingFile();
     }
   }
 
   public static class SuppressAllForFile extends SuppressForFile {
+    public SuppressAllForFile(XmlSuppressionProvider provider) {
+      super(ALL, provider);
+    }
+
     public SuppressAllForFile() {
       super(ALL);
     }

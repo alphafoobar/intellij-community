@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,338 +20,188 @@ import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.NotificationsManager;
 import com.intellij.openapi.application.*;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.ComponentManager;
+import com.intellij.openapi.components.ComponentsPackage;
+import com.intellij.openapi.components.TrackingPathMacroSubstitutor;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.DocumentRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
-import com.intellij.openapi.project.ex.ProjectEx;
-import com.intellij.openapi.util.JDOMUtil;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream;
+import com.intellij.openapi.project.ex.ProjectManagerEx;
+import com.intellij.openapi.project.impl.ProjectMacrosUtil;
+import com.intellij.openapi.startup.StartupManager;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.SystemProperties;
-import com.intellij.util.UniqueFileNamesProvider;
+import com.intellij.ui.AppUIUtil;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.io.fs.IFile;
-import com.intellij.util.ui.UIUtil;
-import org.jdom.Document;
-import org.jdom.Element;
-import org.jdom.JDOMException;
-import org.jdom.Parent;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.event.HyperlinkEvent;
-import java.io.*;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 
-/**
- * @author mike
- */
 public class StorageUtil {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.components.impl.stores.StorageUtil");
+  public static final String DEFAULT_EXT = ".xml";
 
-  private static final boolean DUMP_COMPONENT_STATES = SystemProperties.getBooleanProperty("idea.log.externally.changed.component.states", false);
-  @SuppressWarnings("SpellCheckingInspection")
-  private static final SimpleDateFormat LOG_DIR_FORMAT = new SimpleDateFormat("yyyyMMdd-HHmmss");
+  private static final Logger LOG = Logger.getInstance(StorageUtil.class);
+
+  @TestOnly
+  public static String DEBUG_LOG = null;
 
   private StorageUtil() { }
 
-  public static void notifyUnknownMacros(@NotNull TrackingPathMacroSubstitutor substitutor,
-                                         @NotNull final Project project,
-                                         @Nullable String componentName) {
+  public static void checkUnknownMacros(@NotNull final ComponentManager componentManager, @NotNull final Project project) {
+    Application application = ApplicationManager.getApplication();
+    if (application.isHeadlessEnvironment() || application.isUnitTestMode()) {
+      return;
+    }
+
+    // should be invoked last
+    StartupManager.getInstance(project).runWhenProjectIsInitialized(new Runnable() {
+      @Override
+      public void run() {
+        notifyUnknownMacros(ComponentsPackage.getStateStore(componentManager), project, null);
+      }
+    });
+  }
+
+  public static void notifyUnknownMacros(@NotNull final IComponentStore store, @NotNull final Project project, @Nullable final String componentName) {
+    TrackingPathMacroSubstitutor substitutor = store.getStateStorageManager().getMacroSubstitutor();
+    if (substitutor == null) {
+      return;
+    }
+
     final LinkedHashSet<String> macros = new LinkedHashSet<String>(substitutor.getUnknownMacros(componentName));
     if (macros.isEmpty()) {
       return;
     }
 
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
+    AppUIUtil.invokeOnEdt(new Runnable() {
       @Override
       public void run() {
-        macros.removeAll(getMacrosFromExistingNotifications(project));
-
-        if (!macros.isEmpty()) {
-          String format = "<p><i>%s</i> %s undefined. <a href=\"define\">Fix it</a></p>";
-          String productName = ApplicationNamesInfo.getInstance().getProductName();
-          String content = String.format(format, StringUtil.join(macros, ", "), macros.size() == 1 ? "is" : "are") +
-                           "<br>Path variables are used to substitute absolute paths " +
-                           "in " + productName + " project files " +
-                           "and allow project file sharing in version control systems.<br>" +
-                           "Some of the files describing the current project settings contain unknown path variables " +
-                           "and " + productName + " cannot restore those paths.";
-          new UnknownMacroNotification("Load Error", "Load error: undefined path variables", content, NotificationType.ERROR,
-                                       new NotificationListener() {
-                                         @Override
-                                         public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
-                                           ((ProjectEx)project).checkUnknownMacros(true);
-                                         }
-                                       }, macros).notify(project);
+        List<String> notified = null;
+        NotificationsManager manager = NotificationsManager.getNotificationsManager();
+        for (UnknownMacroNotification notification : manager.getNotificationsOfType(UnknownMacroNotification.class, project)) {
+          if (notified == null) {
+            notified = new SmartList<String>();
+          }
+          notified.addAll(notification.getMacros());
         }
+        if (!ContainerUtil.isEmpty(notified)) {
+          macros.removeAll(notified);
+        }
+
+        if (macros.isEmpty()) {
+          return;
+        }
+
+        LOG.debug("Reporting unknown path macros " + macros + " in component " + componentName);
+        String format = "<p><i>%s</i> %s undefined. <a href=\"define\">Fix it</a></p>";
+        String productName = ApplicationNamesInfo.getInstance().getProductName();
+        String content = String.format(format, StringUtil.join(macros, ", "), macros.size() == 1 ? "is" : "are") +
+                         "<br>Path variables are used to substitute absolute paths " +
+                         "in " + productName + " project files " +
+                         "and allow project file sharing in version control systems.<br>" +
+                         "Some of the files describing the current project settings contain unknown path variables " +
+                         "and " + productName + " cannot restore those paths.";
+        new UnknownMacroNotification("Load Error", "Load error: undefined path variables", content, NotificationType.ERROR,
+                                     new NotificationListener() {
+                                       @Override
+                                       public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
+                                         checkUnknownMacros(store, project, true);
+                                       }
+                                     }, macros).notify(project);
       }
-    });
+    }, project.getDisposed());
   }
 
-  private static List<String> getMacrosFromExistingNotifications(Project project) {
-    List<String> notified = ContainerUtil.newArrayList();
-    NotificationsManager manager = NotificationsManager.getNotificationsManager();
-    for (final UnknownMacroNotification notification : manager.getNotificationsOfType(UnknownMacroNotification.class, project)) {
-      notified.addAll(notification.getMacros());
+  public static void checkUnknownMacros(@NotNull IComponentStore store, @NotNull Project project, boolean showDialog) {
+    // default project doesn't have it
+    List<TrackingPathMacroSubstitutor> substitutors;
+    if (store instanceof IProjectStore) {
+      substitutors = ((IProjectStore)store).getSubstitutors();
     }
-    return notified;
-  }
+    else {
+      substitutors = Collections.emptyList();
+    }
+    Set<String> unknownMacros = new THashSet<String>();
+    for (TrackingPathMacroSubstitutor substitutor : substitutors) {
+      unknownMacros.addAll(substitutor.getUnknownMacros(null));
+    }
 
-  @Nullable
-  static VirtualFile save(@NotNull IFile file, Parent element, Object requestor) throws StateStorageException {
-    try {
-      VirtualFile vFile = LocalFileSystem.getInstance().findFileByIoFile(file);
-      Pair<String, String> pair = loadFile(vFile);
-      String text = JDOMUtil.writeParent(element, pair.second);
+    if (unknownMacros.isEmpty() || showDialog && !ProjectMacrosUtil.checkMacros(project, new THashSet<String>(unknownMacros))) {
+      return;
+    }
 
-      if (file.exists()) {
-        if (text.equals(pair.first)) {
-          return null;
+    final PathMacros pathMacros = PathMacros.getInstance();
+    final Set<String> macrosToInvalidate = new THashSet<String>(unknownMacros);
+    for (Iterator<String> it = macrosToInvalidate.iterator(); it.hasNext(); ) {
+      String macro = it.next();
+      if (StringUtil.isEmptyOrSpaces(pathMacros.getValue(macro)) && !pathMacros.isIgnoredMacroName(macro)) {
+        it.remove();
+      }
+    }
+
+    if (macrosToInvalidate.isEmpty()) {
+      return;
+    }
+
+    Set<String> components = new THashSet<String>();
+    for (TrackingPathMacroSubstitutor substitutor : substitutors) {
+      components.addAll(substitutor.getComponents(macrosToInvalidate));
+    }
+
+    if (store.isReloadPossible(components)) {
+      for (TrackingPathMacroSubstitutor substitutor : substitutors) {
+        substitutor.invalidateUnknownMacros(macrosToInvalidate);
+      }
+
+      for (UnknownMacroNotification notification : NotificationsManager.getNotificationsManager().getNotificationsOfType(UnknownMacroNotification.class, project)) {
+        if (macrosToInvalidate.containsAll(notification.getMacros())) {
+          notification.expire();
         }
       }
-      else {
-        file.createParentDirs();
-      }
 
-      // mark this action as modifying the file which daemon analyzer should ignore
-      AccessToken token = ApplicationManager.getApplication().acquireWriteActionLock(DocumentRunnable.IgnoreDocumentRunnable.class);
-      try {
-        VirtualFile virtualFile = getOrCreateVirtualFile(requestor, file);
-        byte[] bytes = text.getBytes(CharsetToolkit.UTF8);
-        virtualFile.setBinaryContent(bytes, -1, -1, requestor);
-        return virtualFile;
-      }
-      finally {
-        token.finish();
-      }
+      store.reloadStates(components, project.getMessageBus());
     }
-    catch (IOException e) {
-      throw new StateStorageException(e);
+    else if (Messages.showYesNoDialog(project, "Component could not be reloaded. Reload project?", "Configuration Changed", Messages.getQuestionIcon()) == Messages.YES) {
+      ProjectManagerEx.getInstanceEx().reloadProject(project);
     }
   }
 
   @NotNull
-  static VirtualFile getOrCreateVirtualFile(final Object requestor, final IFile ioFile) throws IOException {
-    VirtualFile vFile = getVirtualFile(ioFile);
+  public static VirtualFile getOrCreateVirtualFile(@Nullable final Object requestor, @NotNull final File file) throws IOException {
+    VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
+    if (virtualFile != null) {
+      return virtualFile;
+    }
+    File absoluteFile = file.getAbsoluteFile();
+    FileUtil.createParentDirs(absoluteFile);
 
-    if (vFile == null) {
-      vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile);
+    File parentFile = absoluteFile.getParentFile();
+    // need refresh if the directory has just been created
+    final VirtualFile parentVirtualFile = StringUtil.isEmpty(parentFile.getPath()) ? null : LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile);
+    if (parentVirtualFile == null) {
+      throw new IOException(ProjectBundle.message("project.configuration.save.file.not.found", parentFile));
     }
 
-    if (vFile == null) {
-      final IFile parentFile = ioFile.getParentFile();
-      final VirtualFile parentVFile =
-        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile); // need refresh if the directory has just been created
-      if (parentVFile == null) {
-        throw new IOException(ProjectBundle.message("project.configuration.save.file.not.found", parentFile.getPath()));
-      }
-      vFile = parentVFile.createChildData(requestor, ioFile.getName());
+    if (ApplicationManager.getApplication().isWriteAccessAllowed()) {
+      return parentVirtualFile.createChildData(requestor, file.getName());
     }
 
-    return vFile;
-  }
-
-  @Nullable
-  static VirtualFile getVirtualFile(final IFile ioFile) {
-    return LocalFileSystem.getInstance().findFileByIoFile(ioFile);
-  }
-
-  /**
-   * @return pair.first - file contents (null if file does not exist), pair.second - file line separators
-   */
-  private static Pair<String, String> loadFile(@Nullable final VirtualFile file) throws IOException {
-    if (file == null || !file.exists()) {
-      return Pair.create(null, SystemProperties.getLineSeparator());
-    }
-
-    String fileText = new String(file.contentsToByteArray(), CharsetToolkit.UTF8);
-    final int index = fileText.indexOf('\n');
-    return Pair.create(fileText, index == -1
-                                 ? SystemProperties.getLineSeparator()
-                                 : index - 1 >= 0 ? fileText.charAt(index - 1) == '\r' ? "\r\n" : "\n" : "\n");
-  }
-
-  public static boolean contentEquals(@NotNull final Document document, @NotNull final VirtualFile file) {
+    AccessToken token = WriteAction.start();
     try {
-      final Pair<String, String> pair = loadFile(file);
-      return pair.first != null && pair.first.equals(JDOMUtil.writeDocument(document, pair.second));
-    }
-    catch (IOException e) {
-      LOG.debug(e);
-      return false;
-    }
-  }
-
-  public static boolean contentEquals(@NotNull final Element element, @NotNull final VirtualFile file) {
-    try {
-      final Pair<String, String> pair = loadFile(file);
-      return pair.first != null && pair.first.equals(printElement(element, pair.second));
-    }
-    catch (IOException e) {
-      LOG.debug(e);
-      return false;
-    }
-  }
-
-  static String printElement(final Element element, final String lineSeparator) throws StateStorageException {
-    return JDOMUtil.writeElement(element, lineSeparator);
-  }
-
-  @Nullable
-  public static Document loadDocument(final byte[] bytes) {
-    try {
-      return bytes == null || bytes.length == 0 ? null : JDOMUtil.loadDocument(new ByteArrayInputStream(bytes));
-    }
-    catch (JDOMException e) {
-      return null;
-    }
-    catch (IOException e) {
-      return null;
-    }
-  }
-
-  @Nullable
-  public static Document loadDocument(@Nullable InputStream stream) {
-    if (stream == null) {
-      return null;
-    }
-
-    try {
-      try {
-        return JDOMUtil.loadDocument(stream);
-      }
-      finally {
-        stream.close();
-      }
-    }
-    catch (JDOMException e) {
-      return null;
-    }
-    catch (IOException e) {
-      return null;
-    }
-  }
-
-  public static BufferExposingByteArrayOutputStream documentToBytes(@NotNull Document document, boolean useSystemLineSeparator) throws IOException {
-    BufferExposingByteArrayOutputStream out = new BufferExposingByteArrayOutputStream(512);
-    OutputStreamWriter writer = new OutputStreamWriter(out, CharsetToolkit.UTF8_CHARSET);
-    try {
-      JDOMUtil.writeDocument(document, writer, useSystemLineSeparator ? SystemProperties.getLineSeparator() : "\n");
-      return out;
+      return parentVirtualFile.createChildData(requestor, file.getName());
     }
     finally {
-      writer.close();
+      token.finish();
     }
-  }
-
-  public static boolean sendContent(@NotNull StreamProvider provider, @NotNull String fileSpec, @NotNull Document copy, @NotNull RoamingType type, boolean async) {
-    if (!provider.isApplicable(fileSpec, type)) {
-      return false;
-    }
-
-    try {
-      return doSendContent(provider, fileSpec, copy, type, async);
-    }
-    catch (IOException e) {
-      LOG.warn(e);
-      return false;
-    }
-  }
-
-  public static void deleteContent(@NotNull StreamProvider provider, @NotNull String fileSpec, @NotNull RoamingType type) {
-    if (provider.isApplicable(fileSpec, type)) {
-      provider.deleteFile(fileSpec, type);
-    }
-  }
-
-  /**
-   * You must call {@link StreamProvider#isApplicable(String, com.intellij.openapi.components.RoamingType)} before
-   */
-  public static boolean doSendContent(StreamProvider provider, String fileSpec, Document copy, RoamingType type, boolean async) throws IOException {
-    // we should use standard line-separator (\n) - stream provider can share file content on any OS
-    BufferExposingByteArrayOutputStream content = documentToBytes(copy, false);
-    return provider.saveContent(fileSpec, content.getInternalBuffer(), content.size(), type, async);
-  }
-
-  public static void logStateDiffInfo(Set<Pair<VirtualFile, StateStorage>> changedFiles, Set<String> componentNames) {
-    if (componentNames.isEmpty() || !(DUMP_COMPONENT_STATES || ApplicationManager.getApplication().isInternal())) {
-      return;
-    }
-
-    try {
-      File logDirectory = createLogDirectory();
-      if (!logDirectory.mkdirs()) {
-        throw new IOException("Cannot create " + logDirectory);
-      }
-
-      for (Pair<VirtualFile, StateStorage> pair : changedFiles) {
-        File file = new File(pair.first.getPath());
-        StateStorage storage = pair.second;
-
-        if (storage instanceof XmlElementStorage) {
-          Document state = ((XmlElementStorage)storage).logComponents();
-          if (state != null) {
-            File logFile = new File(logDirectory, "prev_" + file.getName());
-            JDOMUtil.writeDocument(state, logFile, "\n");
-          }
-        }
-
-        if (file.exists()) {
-          File logFile = new File(logDirectory, "new_" + file.getName());
-          FileUtil.copy(file, logFile);
-        }
-      }
-
-      File logFile = new File(logDirectory, "components.txt");
-      FileUtil.writeToFile(logFile, componentNames.toString() + "\n");
-    }
-    catch (Throwable e) {
-      LOG.info(e);
-    }
-  }
-
-  private static File createLogDirectory() {
-    UniqueFileNamesProvider namesProvider = new UniqueFileNamesProvider();
-
-    File statesDir = new File(PathManager.getSystemPath(), "log/componentStates");
-    File[] children = statesDir.listFiles();
-    if (children != null) {
-      if (children.length > 10) {
-        File childToDelete = null;
-
-        for (File child : children) {
-          if (childToDelete == null || childToDelete.lastModified() > child.lastModified()) {
-            childToDelete = child;
-          }
-        }
-
-        if (childToDelete != null) {
-          FileUtil.delete(childToDelete);
-        }
-      }
-
-      for (File child : children) {
-        namesProvider.reserveFileName(child.getName());
-      }
-    }
-
-    String name = "state-" + LOG_DIR_FORMAT.format(new Date()) + "-" + ApplicationInfo.getInstance().getBuild().asString();
-    return new File(statesDir, namesProvider.suggestName(name));
-  }
-
-  public static boolean isProjectOrModuleFile(@NotNull String fileSpec) {
-    return StoragePathMacros.PROJECT_FILE.equals(fileSpec) || fileSpec.startsWith(StoragePathMacros.PROJECT_CONFIG_DIR) || fileSpec.equals("$MODULE_FILE$");
   }
 }

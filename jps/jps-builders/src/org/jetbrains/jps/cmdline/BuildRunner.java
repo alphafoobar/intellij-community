@@ -27,6 +27,7 @@ import org.jetbrains.jps.builders.*;
 import org.jetbrains.jps.builders.impl.BuildDataPathsImpl;
 import org.jetbrains.jps.builders.impl.BuildRootIndexImpl;
 import org.jetbrains.jps.builders.impl.BuildTargetIndexImpl;
+import org.jetbrains.jps.builders.impl.BuildTargetRegistryImpl;
 import org.jetbrains.jps.builders.java.dependencyView.Callbacks;
 import org.jetbrains.jps.builders.logging.BuildLoggingManager;
 import org.jetbrains.jps.builders.storage.BuildDataPaths;
@@ -57,23 +58,30 @@ public class BuildRunner {
   public static final boolean PARALLEL_BUILD_ENABLED = Boolean.parseBoolean(System.getProperty(GlobalOptions.COMPILE_PARALLEL_OPTION, "false"));
   private static final boolean STORE_TEMP_CACHES_IN_MEMORY = PARALLEL_BUILD_ENABLED || Boolean.valueOf(System.getProperty(GlobalOptions.USE_MEMORY_TEMP_CACHE_OPTION, "true"));
   private final JpsModelLoader myModelLoader;
-  private final List<String> myFilePaths;
-  private final Map<String, String> myBuilderParams;
+  private List<String> myFilePaths = Collections.emptyList();
+  private Map<String, String> myBuilderParams = Collections.emptyMap();
   private boolean myForceCleanCaches;
 
-  public BuildRunner(JpsModelLoader modelLoader, List<String> filePaths, Map<String, String> builderParams) {
+  public BuildRunner(JpsModelLoader modelLoader) {
     myModelLoader = modelLoader;
-    myFilePaths = filePaths;
-    myBuilderParams = builderParams;
+  }
+
+  public void setFilePaths(List<String> filePaths) {
+    myFilePaths = filePaths != null? filePaths : Collections.<String>emptyList();
+  }
+
+  public void setBuilderParams(Map<String, String> builderParams) {
+    myBuilderParams = builderParams != null? builderParams : Collections.<String, String>emptyMap();
   }
 
   public ProjectDescriptor load(MessageHandler msgHandler, File dataStorageRoot, BuildFSState fsState) throws IOException {
     final JpsModel jpsModel = myModelLoader.loadModel();
     BuildDataPaths dataPaths = new BuildDataPathsImpl(dataStorageRoot);
-    BuildTargetIndexImpl targetIndex = new BuildTargetIndexImpl(jpsModel);
+    BuildTargetRegistryImpl targetRegistry = new BuildTargetRegistryImpl(jpsModel);
     ModuleExcludeIndex index = new ModuleExcludeIndexImpl(jpsModel);
     IgnoredFileIndexImpl ignoredFileIndex = new IgnoredFileIndexImpl(jpsModel);
-    BuildRootIndexImpl buildRootIndex = new BuildRootIndexImpl(targetIndex, jpsModel, index, dataPaths, ignoredFileIndex);
+    BuildRootIndexImpl buildRootIndex = new BuildRootIndexImpl(targetRegistry, jpsModel, index, dataPaths, ignoredFileIndex);
+    BuildTargetIndexImpl targetIndex = new BuildTargetIndexImpl(targetRegistry, buildRootIndex);
     BuildTargetsState targetsState = new BuildTargetsState(dataPaths, jpsModel, buildRootIndex);
 
     ProjectTimestamps projectTimestamps = null;
@@ -202,7 +210,7 @@ public class BuildRunner {
           }
           fileSet.add(file);
           if (targetTypesToForceBuild.contains(descriptor.getTarget().getTargetType())) {
-            pd.fsState.markDirty(null, file, descriptor, timestamps, false);
+            pd.fsState.markDirty(null, file, descriptor, timestamps);
           }
         }
       }

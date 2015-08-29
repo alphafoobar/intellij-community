@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.ui.VcsSynchronousProgressWrapper;
+import org.jetbrains.annotations.CalledInAwt;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -61,6 +62,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
 
   @NonNls protected static final String ourIntegerPattern = "\\d+";
 
+  @NotNull
   protected final Project myProject;
   private final String myName;
   private final VcsKey myKey;
@@ -80,7 +82,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
     }
   }
 
-  public AbstractVcs(final Project project, final String name) {
+  public AbstractVcs(@NotNull Project project, final String name) {
     super(project);
 
     myProject = project;
@@ -89,7 +91,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
   }
 
   // for tests only
-  protected AbstractVcs(final Project project, String name, VcsKey key) {
+  protected AbstractVcs(@NotNull Project project, String name, VcsKey key) {
     super();
     myProject = project;
     myName = name;
@@ -375,7 +377,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
    * from revision numbers.
    *
    * @param revisionNumberString the string to be parsed
-   * @param path                 the path for which revsion number is queried
+   * @param path                 the path for which revision number is queried
    * @return the parsed revision number
    */
   @Nullable
@@ -409,7 +411,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
   }
 
   /**
-   * If VCS does not implement detection whether directory is versioned ({@link #isVersionedDirectory(com.intellij.openapi.vfs.VirtualFile)}),
+   * If VCS does not implement detection whether directory is versioned ({@link #isVersionedDirectory(VirtualFile)}),
    * it should return <code>false</code>. Otherwise return <code>true</code>
    */
   public boolean supportsVersionedStateDetection() {
@@ -419,7 +421,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
   /**
    * Returns the configurable to be shown in the VCS directory mapping dialog which should be displayed
    * for configuring VCS-specific settings for the specified root, or null if no such configuration is required.
-   * The VCS-specific settings are stored in {@link com.intellij.openapi.vcs.VcsDirectoryMapping#getRootSettings()}.
+   * The VCS-specific settings are stored in {@link VcsDirectoryMapping#getRootSettings()}.
    *
    * @param mapping the mapping being configured
    * @return the configurable instance, or null if no configuration is required.
@@ -440,7 +442,9 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
   }
 
   public interface RootsConvertor {
-    List<VirtualFile> convertRoots(List<VirtualFile> result);
+
+    @NotNull
+    List<VirtualFile> convertRoots(@NotNull List<VirtualFile> result);
   }
 
   /**
@@ -491,6 +495,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
     return scope;
   }
 
+  @NotNull
   public Project getProject() {
     return myProject;
   }
@@ -589,8 +594,7 @@ public abstract class AbstractVcs<ComList extends CommittedChangeList> extends S
         }
       }
     };
-    final boolean succeded = VcsSynchronousProgressWrapper.wrap(runnable, getProject(), "Load revision contents");
-    return succeded ? list[0] : null;
+    return VcsSynchronousProgressWrapper.wrap(runnable, getProject(), "Load revision contents") ? list[0] : null;
   }
 
   @Nullable

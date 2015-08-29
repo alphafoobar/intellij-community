@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ import com.intellij.psi.filters.TrueFilter;
 import com.intellij.psi.impl.source.resolve.reference.impl.PsiMultiReference;
 import com.intellij.psi.meta.PsiMetaData;
 import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.util.ReflectionCache;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -64,7 +64,7 @@ public class CompletionData {
       return true;
 
     for (final Class myFinalScope : myFinalScopes) {
-      if (ReflectionCache.isAssignable(myFinalScope, scopeClass)) {
+      if (ReflectionUtil.isAssignable(myFinalScope, scopeClass)) {
         return true;
       }
     }
@@ -109,13 +109,13 @@ public class CompletionData {
     boolean hasApplicableVariants = false;
     for (CompletionVariant variant : variants) {
       if (variant.hasReferenceFilter()) {
-        variant.addReferenceCompletions(reference, position, set, file, CompletionData.this);
+        variant.addReferenceCompletions(reference, position, set, file, this);
         hasApplicableVariants = true;
       }
     }
 
     if (!hasApplicableVariants) {
-      myGenericVariant.addReferenceCompletions(reference, position, set, file, CompletionData.this);
+      myGenericVariant.addReferenceCompletions(reference, position, set, file, this);
     }
   }
 
@@ -127,7 +127,7 @@ public class CompletionData {
                                     final PrefixMatcher matcher,
                                     final PsiFile file){
     for (final CompletionVariant variant : variants) {
-      variant.addKeywords(set, position, matcher, file, CompletionData.this);
+      variant.addKeywords(set, position, matcher, file, this);
     }
   }
 
@@ -231,7 +231,7 @@ public class CompletionData {
     return substr.substring(i).trim();
   }
 
-  public static LookupElement objectToLookupItem(Object object) {
+  public static LookupElement objectToLookupItem(final @NotNull Object object) {
     if (object instanceof LookupElement) return (LookupElement)object;
 
     String s = null;
@@ -252,16 +252,13 @@ public class CompletionData {
       s = ((PresentableLookupValue)object).getPresentation();
     }
     if (s == null) {
-      throw new AssertionError("Null string for object: " + object + " of class " + (object != null ? object.getClass() : null));
+      throw new AssertionError("Null string for object: " + object + " of class " + object.getClass());
     }
 
     LookupItem item = new LookupItem(object, s);
 
     if (object instanceof LookupValueWithUIHint && ((LookupValueWithUIHint) object).isBold()) {
       item.setBold();
-    }
-    if (object instanceof LookupValueWithTail) {
-      item.setAttribute(LookupItem.TAIL_TEXT_ATTR, " " + ((LookupValueWithTail)object).getTailText());
     }
     item.setAttribute(CompletionUtil.TAIL_TYPE_ATTR, tailType);
     return item;
@@ -314,6 +311,7 @@ public class CompletionData {
       for (Object completion : completions) {
         if (completion == null) {
           LOG.error("Position=" + position + "\n;Reference=" + reference + "\n;variants=" + Arrays.toString(completions));
+          continue;
         }
         if (completion instanceof PsiElement) {
           final PsiElement psiElement = (PsiElement)completion;
@@ -328,7 +326,12 @@ public class CompletionData {
               if (!filter.isClassAcceptable(o.getClass()) || !filter.isAcceptable(o, position)) continue;
             }
           }
-          addLookupItem(set, tailType, completion, file, variant);
+          try {
+            addLookupItem(set, tailType, completion, file, variant);
+          }
+          catch (AssertionError e) {
+            LOG.error("Caused by variant from reference: " + reference.getClass(), e);
+          }
         }
       }
     }
@@ -364,7 +367,7 @@ public class CompletionData {
     }
   }
 
-  private void addKeyword(Set<LookupElement> set, final TailType tailType, final Object comp, final PrefixMatcher matcher,
+  protected void addKeyword(Set<LookupElement> set, final TailType tailType, final Object comp, final PrefixMatcher matcher,
                           final PsiFile file,
                           final CompletionVariant variant) {
     for (final LookupElement item : set) {

@@ -29,6 +29,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.FileContentUtil;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 import org.jetbrains.idea.maven.importing.MavenRootModelAdapter;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.server.NativeMavenProjectHolder;
 
 import java.io.File;
@@ -263,28 +264,28 @@ public class MavenProjectsManagerTest extends MavenImportingTestCase {
                                      "<artifactId>m1</artifactId>" +
                                      "<version>1</version>");
 
-    VirtualFile m2 = createModulePom("m2",
+    final VirtualFile m2 = createModulePom("m2",
                                      "<groupId>test</groupId>" +
                                      "<artifactId>m2</artifactId>" +
                                      "<version>1</version>");
     importProject(m1);
     assertModules("m1");
 
-    myProjectsManager.performScheduledImportInTests(); // ensure no pending imports
+    resolveDependenciesAndImport(); // ensure no pending imports
 
     getMavenImporterSettings().setImportAutomatically(autoImport);
 
-    myProjectsManager.addManagedFiles(Arrays.asList(m2));
+    myProjectsManager.addManagedFiles(Collections.singletonList(m2));
     waitForReadingCompletion();
-    myProjectsManager.performScheduledImportInTests();
+    resolveDependenciesAndImport();
 
     assertModules("m1", "m2");
 
     configConfirmationForYesAnswer();
 
-    myProjectsManager.removeManagedFiles(Arrays.asList(m2));
+    myProjectsManager.removeManagedFiles(Collections.singletonList(m2));
     waitForReadingCompletion();
-    myProjectsManager.performScheduledImportInTests();
+    resolveDependenciesAndImport();
 
     assertModules("m1");
   }
@@ -686,7 +687,7 @@ public class MavenProjectsManagerTest extends MavenImportingTestCase {
                                      "<version>1</version>");
 
     importProjects(p1, p2);
-    myProjectsManager.setExplicitProfiles(Arrays.asList("one", "two"));
+    myProjectsManager.setExplicitProfiles(new MavenExplicitProfiles(Arrays.asList("one", "two")));
     myProjectsManager.setIgnoredFilesPaths(Arrays.asList(p1.getPath()));
     myProjectsManager.setIgnoredFilesPatterns(Arrays.asList("*.xxx"));
 
@@ -707,7 +708,7 @@ public class MavenProjectsManagerTest extends MavenImportingTestCase {
 
     assertUnorderedPathsAreEqual(myProjectsManager.getProjectsTreeForTests().getManagedFilesPaths(),
                                  Arrays.asList(p1.getPath(), p3.getPath()));
-    assertUnorderedElementsAreEqual(myProjectsManager.getExplicitProfiles(), "three");
+    assertUnorderedElementsAreEqual(myProjectsManager.getExplicitProfiles().getEnabledProfiles(), "three");
     assertUnorderedPathsAreEqual(myProjectsManager.getIgnoredFilesPaths(), Arrays.asList(p1.getPath()));
     assertUnorderedElementsAreEqual(myProjectsManager.getIgnoredFilesPatterns(), "*.zzz");
 
@@ -744,7 +745,7 @@ public class MavenProjectsManagerTest extends MavenImportingTestCase {
 
     waitForReadingCompletion();
 
-    myProjectsManager.performScheduledImportInTests();
+    resolveDependenciesAndImport();
     assertModules("project");
   }
 

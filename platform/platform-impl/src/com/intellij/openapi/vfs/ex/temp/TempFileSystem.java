@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,11 +56,6 @@ public class TempFileSystem extends LocalFileSystemBase {
     return "/";
   }
 
-  @Override
-  public int getRank() {
-    return 1;
-  }
-
   @Nullable
   private FSItem convert(VirtualFile file) {
     final VirtualFile parentFile = file.getParent();
@@ -92,6 +87,7 @@ public class TempFileSystem extends LocalFileSystemBase {
     return new FakeVirtualFile(parent, dir);
   }
 
+  @NotNull
   @Override
   public VirtualFile createChildFile(Object requestor, @NotNull VirtualFile parent, @NotNull String file) throws IOException {
     final FSItem fsItem = convert(parent);
@@ -109,6 +105,7 @@ public class TempFileSystem extends LocalFileSystemBase {
     return new FakeVirtualFile(parent, file);
   }
 
+  @NotNull
   @Override
   public VirtualFile copyFile(Object requestor,
                               @NotNull VirtualFile file,
@@ -139,7 +136,8 @@ public class TempFileSystem extends LocalFileSystemBase {
     }
 
     fsItem.getParent().removeChild(fsItem);
-    ((FSDir)newParentItem).addChild(fsItem);
+    newDir.addChild(fsItem);
+    fsItem.myParent = newDir;
   }
 
   @Override
@@ -206,7 +204,7 @@ public class TempFileSystem extends LocalFileSystemBase {
   public byte[] contentsToByteArray(@NotNull final VirtualFile file) throws IOException {
     final FSItem fsItem = convert(file);
     if (fsItem == null) throw new FileNotFoundException("Cannot find temp for " + file.getPath());
-    assert fsItem instanceof FSFile;
+    assert fsItem instanceof FSFile : fsItem;
     return ((FSFile)fsItem).myContent;
   }
 
@@ -266,7 +264,7 @@ public class TempFileSystem extends LocalFileSystemBase {
   }
 
   private abstract static class FSItem {
-    private final FSDir myParent;
+    private FSDir myParent;
     private String myName;
     private long myTimestamp;
     private boolean myWritable;
@@ -380,6 +378,7 @@ public class TempFileSystem extends LocalFileSystemBase {
     throw new IncorrectOperationException();
   }
 
+  @NotNull
   @Override
   public Set<WatchRequest> replaceWatchedRoots(@NotNull Collection<WatchRequest> watchRequests,
                                                @Nullable Collection<String> recursiveRoots,

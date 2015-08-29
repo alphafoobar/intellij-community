@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 package org.jetbrains.plugins.javaFX;
 
 import com.intellij.util.io.DataExternalizer;
+import com.intellij.util.io.DataInputOutputUtil;
+import com.intellij.util.io.IOUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -29,20 +32,20 @@ import java.util.Set;
 */
 public class FxmlDataExternalizer implements DataExternalizer<Set<String>> {
   @Override
-  public void save(DataOutput out, Set<String> value) throws IOException {
-    out.writeInt(value.size());
+  public void save(@NotNull DataOutput out, Set<String> value) throws IOException {
+    DataInputOutputUtil.writeINT(out, value.size());
     for (String s : value) {
-      out.writeUTF(s);
+      IOUtil.writeUTF(out, s);
     }
   }
 
   @Override
-  public Set<String> read(DataInput in) throws IOException {
-    final int size = in.readInt();
+  public Set<String> read(@NotNull DataInput in) throws IOException {
+    final int size = DataInputOutputUtil.readINT(in);
     final Set<String> result = new HashSet<String>(size);
 
     for (int i = 0; i < size; i++) {
-      final String s = in.readUTF();
+      final String s = IOUtil.readUTF(in);
       result.add(s);
     }
     return result;

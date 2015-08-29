@@ -25,10 +25,12 @@ import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.concurrency.SwingWorker;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.*;
@@ -84,7 +86,12 @@ public abstract class AbstractStepWithProgress<Result> extends ModuleWizardStep 
     myProgressLabel = new JLabel();
     progressPanel.add(myProgressLabel, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 1.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL, new Insets(8, 10, 0, 10), 0, 0));
 
-    myProgressLabel2 = new JLabel();
+    myProgressLabel2 = new JLabel() {
+          @Override
+          public void setText(String text) {
+            super.setText(StringUtil.trimMiddle(text, 80));
+          }
+        };
     progressPanel.add(myProgressLabel2, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 1.0, 1.0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL, new Insets(8, 10, 0, 10), 0, 0));
 
     JButton stopButton = new JButton(IdeBundle.message("button.stop.searching"));
@@ -95,6 +102,14 @@ public abstract class AbstractStepWithProgress<Result> extends ModuleWizardStep 
     });
     progressPanel.add(stopButton, new GridBagConstraints(1, GridBagConstraints.RELATIVE, 1, 2, 0.0, 1.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE, new Insets(10, 0, 0, 10), 0, 0));
     return progressPanel;
+  }
+
+  @TestOnly
+  public void performStep() {
+    Result result = calculate();
+    createResultsPanel();
+    onFinished(result, false);
+    updateDataModel();
   }
 
   private void cancelSearch() {

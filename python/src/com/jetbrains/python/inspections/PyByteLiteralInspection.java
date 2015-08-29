@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ public class PyByteLiteralInspection extends PyInspection {
         );
       }
 
-      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(file.getText());
+      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(file);
       try {
         if (charsetString != null && !Charset.forName(charsetString).equals(Charset.forName("US-ASCII")))
           default_bytes = false;

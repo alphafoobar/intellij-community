@@ -1,14 +1,29 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.completion;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.compiler.classFilesIndex.api.index.ClassFilesIndexFeature;
-import com.intellij.compiler.classFilesIndex.api.index.ClassFilesIndexFeaturesHolder;
 import com.intellij.compiler.classFilesIndex.chainsSearch.ChainRelevance;
 import com.intellij.compiler.classFilesIndex.chainsSearch.completion.MethodsChainsCompletionContributor;
 import com.intellij.compiler.classFilesIndex.chainsSearch.completion.lookup.ChainCompletionMethodCallLookupElement;
 import com.intellij.compiler.classFilesIndex.chainsSearch.completion.lookup.WeightableChainLookupElement;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.testFramework.SkipSlowTestLocally;
 import com.intellij.util.SmartList;
 
 import java.util.List;
@@ -16,6 +31,7 @@ import java.util.List;
 /**
  * @author Dmitry Batkovich
  */
+@SkipSlowTestLocally
 public class MethodChainsCompletionTest extends AbstractCompilerAwareTest {
   private final static String TEST_INDEX_FILE_NAME = "TestIndex.java";
   private final static String TEST_COMPLETION_FILE_NAME = "TestCompletion.java";
@@ -92,7 +108,7 @@ public class MethodChainsCompletionTest extends AbstractCompilerAwareTest {
     assertOneElement(doCompletion());
   }
 
-  public void testInnerClasses() {
+  public void _testInnerClasses() {
     assertAdvisorLookupElementEquals("j.getEntry", 0, 8, 1, 0, assertOneElement(doCompletion()));
   }
 
@@ -216,36 +232,26 @@ public class MethodChainsCompletionTest extends AbstractCompilerAwareTest {
   }
 
   private void doTestRendering() {
-    final ClassFilesIndexFeaturesHolder indicesHolder = ClassFilesIndexFeaturesHolder.getInstance(getProject());
     PropertiesComponent.getInstance(getProject())
       .setValue(ChainCompletionMethodCallLookupElement.PROP_METHODS_CHAIN_COMPLETION_AUTO_COMPLETION, String.valueOf(true));
-    indicesHolder.projectOpened();
     compileAndIndexData(TEST_INDEX_FILE_NAME);
     myFixture.configureByFiles(getBeforeCompletionFilePath());
     myFixture.complete(CompletionType.BASIC, MethodsChainsCompletionContributor.INVOCATIONS_THRESHOLD);
     PropertiesComponent.getInstance(getProject())
       .setValue(ChainCompletionMethodCallLookupElement.PROP_METHODS_CHAIN_COMPLETION_AUTO_COMPLETION, String.valueOf(false));
     myFixture.checkResultByFile(getAfterCompletionFilePath());
-    indicesHolder.projectClosed();
   }
 
   private List<WeightableChainLookupElement> doCompletion() {
-    final ClassFilesIndexFeaturesHolder indicesHolder = ClassFilesIndexFeaturesHolder.getInstance(getProject());
-    try {
-      indicesHolder.projectOpened();
-      compileAndIndexData(TEST_INDEX_FILE_NAME);
-      final LookupElement[] allLookupElements = runCompletion();
-      final List<WeightableChainLookupElement> targetLookupElements = new SmartList<WeightableChainLookupElement>();
-      for (final LookupElement lookupElement : allLookupElements) {
-        if (lookupElement instanceof WeightableChainLookupElement) {
-          targetLookupElements.add((WeightableChainLookupElement)lookupElement);
-        }
+    compileAndIndexData(TEST_INDEX_FILE_NAME);
+    final LookupElement[] allLookupElements = runCompletion();
+    final List<WeightableChainLookupElement> targetLookupElements = new SmartList<WeightableChainLookupElement>();
+    for (final LookupElement lookupElement : allLookupElements) {
+      if (lookupElement instanceof WeightableChainLookupElement) {
+        targetLookupElements.add((WeightableChainLookupElement)lookupElement);
       }
-      return targetLookupElements;
     }
-    finally {
-      indicesHolder.projectClosed();
-    }
+    return targetLookupElements;
   }
 
   private LookupElement[] runCompletion() {

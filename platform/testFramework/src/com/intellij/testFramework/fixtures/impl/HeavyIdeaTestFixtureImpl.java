@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.testFramework.fixtures.impl;
 
 import com.intellij.ide.IdeView;
 import com.intellij.ide.highlighter.ProjectFileType;
-import com.intellij.ide.startup.impl.StartupManagerImpl;
 import com.intellij.idea.IdeaTestApplication;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
@@ -29,14 +28,13 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.roots.impl.DirectoryIndex;
-import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
-import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
@@ -45,10 +43,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
-import com.intellij.psi.PsiDirectory;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiManager;
+import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.testFramework.EditorListenerTracker;
 import com.intellij.testFramework.LightPlatformTestCase;
@@ -58,16 +53,17 @@ import com.intellij.testFramework.builders.ModuleFixtureBuilder;
 import com.intellij.testFramework.fixtures.HeavyIdeaTestFixture;
 import com.intellij.util.PathUtil;
 import com.intellij.util.ui.UIUtil;
-import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.junit.Assert;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
@@ -81,7 +77,7 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
   private Project myProject;
   private final Set<File> myFilesToDelete = new HashSet<File>();
   private IdeaTestApplication myApplication;
-  private final Set<ModuleFixtureBuilder> myModuleFixtureBuilders = new THashSet<ModuleFixtureBuilder>();
+  private final Set<ModuleFixtureBuilder> myModuleFixtureBuilders = new LinkedHashSet<ModuleFixtureBuilder>();
   private EditorListenerTracker myEditorListenerTracker;
   private ThreadTracker myThreadTracker;
   private final String myName;
@@ -115,7 +111,6 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
     for (ModuleFixtureBuilder moduleFixtureBuilder : myModuleFixtureBuilders) {
       moduleFixtureBuilder.getFixture().tearDown();
     }
-    ((DirectoryIndexImpl)DirectoryIndex.getInstance(getProject())).assertAncestorConsistent();
 
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
@@ -132,7 +127,7 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
 
     for (final File fileToDelete : myFilesToDelete) {
       boolean deleted = FileUtil.delete(fileToDelete);
-      assert deleted : "Can't delete " + fileToDelete;
+      Assert.assertTrue("Can't delete " + fileToDelete, deleted);
     }
 
     super.tearDown();
@@ -140,46 +135,50 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
     myEditorListenerTracker.checkListenersLeak();
     myThreadTracker.checkLeak();
     LightPlatformTestCase.checkEditorsReleased();
+    PlatformTestCase.cleanupApplicationCaches(project);
     InjectedLanguageManagerImpl.checkInjectorsAreDisposed(project);
   }
 
 
   private void setUpProject() throws Exception {
-    new WriteCommandAction.Simple(null) {
+    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
-      protected void run() throws Throwable {
-        File projectFile = FileUtil.createTempFile(myName+"_", PROJECT_FILE_SUFFIX);
-        FileUtil.delete(projectFile);
-        myFilesToDelete.add(projectFile);
+      public void run() {
+        try {
+          File tempDirectory = FileUtil.createTempDirectory(myName, "");
+          PlatformTestCase.synchronizeTempDirVfs(LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory));
+          myFilesToDelete.add(tempDirectory);
 
-        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(projectFile);
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        new Throwable(projectFile.getPath()).printStackTrace(new PrintStream(buffer));
-        myProject = PlatformTestCase.createProject(projectFile, buffer.toString());
+          File projectFile = new File(tempDirectory, myName + PROJECT_FILE_SUFFIX);
 
-        for (ModuleFixtureBuilder moduleFixtureBuilder: myModuleFixtureBuilders) {
-          moduleFixtureBuilder.getFixture().setUp();
+          LocalFileSystem.getInstance().refreshAndFindFileByIoFile(projectFile);
+          ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+          new Throwable(projectFile.getPath()).printStackTrace(new PrintStream(buffer));
+          myProject = PlatformTestCase.createProject(projectFile, buffer.toString());
+          ProjectManagerEx.getInstanceEx().openTestProject(myProject);
+
+          for (ModuleFixtureBuilder moduleFixtureBuilder: myModuleFixtureBuilders) {
+            moduleFixtureBuilder.getFixture().setUp();
+          }
+
+          LightPlatformTestCase.clearUncommittedDocuments(myProject);
+          ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue();
         }
-
-        StartupManagerImpl sm = (StartupManagerImpl)StartupManager.getInstance(myProject);
-        sm.runStartupActivities();
-        sm.startCacheUpdate();
-        sm.runPostStartupActivities();
-
-        ProjectManagerEx.getInstanceEx().openTestProject(myProject);
-        LightPlatformTestCase.clearUncommittedDocuments(myProject);
+        catch (Exception e) {
+          throw new RuntimeException(e);
+        }
       }
-    }.execute().throwException();
+    });
   }
 
   private void initApplication() throws Exception {
-    myApplication = IdeaTestApplication.getInstance(null);
+    myApplication = IdeaTestApplication.getInstance();
     myApplication.setDataProvider(new MyDataProvider());
   }
 
   @Override
   public Project getProject() {
-    assert myProject != null : "setUp() should be called first";
+    Assert.assertNotNull("setUp() should be called first", myProject);
     return myProject;
   }
 
@@ -204,7 +203,7 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
         Editor editor = (Editor)getData(CommonDataKeys.EDITOR.getName());
         if (editor != null) {
           FileEditorManagerEx manager = FileEditorManagerEx.getInstanceEx(myProject);
-          return manager.getData(dataId, editor, manager.getSelectedFiles()[0]);
+          return manager.getData(dataId, editor, editor.getCaretModel().getCurrentCaret());
         }
         else if (LangDataKeys.IDE_VIEW.is(dataId)) {
           VirtualFile[] contentRoots = ProjectRootManager.getInstance(myProject).getContentRoots();
@@ -216,6 +215,7 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
 
               }
 
+              @NotNull
               @Override
               public PsiDirectory[] getDirectories() {
                 return new PsiDirectory[] {psiDirectory};
@@ -234,7 +234,7 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
   }
 
   @Override
-  public PsiFile addFileToProject(@NonNls String rootPath, @NonNls final String relativePath, @NonNls final String fileText) throws IOException {
+  public PsiFile addFileToProject(@NotNull @NonNls String rootPath, @NotNull @NonNls final String relativePath, @NotNull @NonNls final String fileText) throws IOException {
     final VirtualFile dir = VfsUtil.createDirectories(rootPath + "/" + PathUtil.getParentPath(relativePath));
 
     final VirtualFile[] virtualFile = new VirtualFile[1];
@@ -243,9 +243,11 @@ class HeavyIdeaTestFixtureImpl extends BaseFixture implements HeavyIdeaTestFixtu
       protected void run() throws Throwable {
         virtualFile[0] = dir.createChildData(this, StringUtil.getShortName(relativePath, '/'));
         VfsUtil.saveText(virtualFile[0], fileText);
+        PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
       }
     }.execute();
     return ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>() {
+            @Override
             public PsiFile compute() {
               return PsiManager.getInstance(getProject()).findFile(virtualFile[0]);
             }

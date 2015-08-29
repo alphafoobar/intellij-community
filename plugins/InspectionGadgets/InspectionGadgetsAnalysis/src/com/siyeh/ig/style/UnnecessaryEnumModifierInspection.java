@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2012 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 package com.siyeh.ig.style;
 
+import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.util.IncorrectOperationException;
@@ -26,7 +28,7 @@ import com.siyeh.ig.InspectionGadgetsFix;
 import com.siyeh.ig.psiutils.ClassUtils;
 import org.jetbrains.annotations.NotNull;
 
-public class UnnecessaryEnumModifierInspection extends BaseInspection {
+public class UnnecessaryEnumModifierInspection extends BaseInspection implements CleanupLocalInspectionTool{
 
   @Override
   @NotNull
@@ -44,6 +46,11 @@ public class UnnecessaryEnumModifierInspection extends BaseInspection {
     else {
       return InspectionGadgetsBundle.message("unnecessary.enum.modifier.problem.descriptor1");
     }
+  }
+
+  @Override
+  public boolean isEnabledByDefault() {
+    return true;
   }
 
   @Override
@@ -111,7 +118,7 @@ public class UnnecessaryEnumModifierInspection extends BaseInspection {
       for (final PsiElement child : children) {
         final String text = child.getText();
         if (PsiModifier.STATIC.equals(text)) {
-          registerError(child, child, aClass);
+          registerError(child, ProblemHighlightType.LIKE_UNUSED_SYMBOL, child, aClass);
         }
       }
     }
@@ -130,7 +137,7 @@ public class UnnecessaryEnumModifierInspection extends BaseInspection {
       for (final PsiElement child : children) {
         final String text = child.getText();
         if (PsiModifier.PRIVATE.equals(text)) {
-          registerError(child, child, method);
+          registerError(child, ProblemHighlightType.LIKE_UNUSED_SYMBOL, child, method);
         }
       }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,13 +50,14 @@ public class VirtualEnvProjectFilter implements Predicate<Sdk> {
     return false;
   }
 
-  public static void removeNotMatching(Project project, List<Sdk> sdks) {
+  public static boolean removeNotMatching(Project project, List<Sdk> sdks) {
     if (project != null) {
       final String basePath = project.getBasePath();
       if (basePath != null) {
-        Iterables.removeIf(sdks, new VirtualEnvProjectFilter(FileUtil.toSystemIndependentName(basePath)));
+        return Iterables.removeIf(sdks, new VirtualEnvProjectFilter(FileUtil.toSystemIndependentName(basePath)));
       }
     }
+    return false;
   }
 
   public static void removeAllAssociated(List<Sdk> sdks) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,11 +25,12 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.impl.local.FileWatcher;
 import com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl;
+import com.intellij.openapi.vfs.impl.local.NativeFileWatcherImpl;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.openapi.vfs.newvfs.events.*;
-import com.intellij.openapi.vfs.newvfs.impl.VirtualDirectoryImpl;
-import com.intellij.testFramework.PlatformLangTestCase;
+import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess;
+import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.util.Alarm;
 import com.intellij.util.Function;
 import com.intellij.util.TimeoutUtil;
@@ -44,7 +45,8 @@ import java.util.*;
 
 import static com.intellij.openapi.util.io.IoTestUtil.*;
 
-public class FileWatcherTest extends PlatformLangTestCase {
+@SuppressWarnings("Duplicates")
+public class FileWatcherTest extends PlatformTestCase {
   private static final int INTER_RESPONSE_DELAY = 500;  // time to wait for a next event in a sequence
   private static final int NATIVE_PROCESS_DELAY = 60000;  // time to wait for a native watcher response
 
@@ -109,9 +111,9 @@ public class FileWatcherTest extends PlatformLangTestCase {
     ((LocalFileSystemImpl)myFileSystem).cleanupForNextTest();
 
     myAcceptedDirectories.clear();
-    myAcceptedDirectories.add(FileUtil.getTempDirectory());
+    myAcceptedDirectories.add(getTempDirectory().getAbsolutePath());
 
-    LOG = FileWatcher.getLog();
+    LOG = NativeFileWatcherImpl.getLog();
     LOG.debug("================== setting up " + getName() + " ==================");
   }
 
@@ -133,6 +135,19 @@ public class FileWatcherTest extends PlatformLangTestCase {
     LOG.debug("================== tearing down " + getName() + " ==================");
   }
 
+
+  public void testWatchRequestConvention() {
+    File dir = createTestDir("top");
+
+    LocalFileSystem.WatchRequest r1 = myFileSystem.addRootToWatch(dir.getPath(), true);
+    LocalFileSystem.WatchRequest r2 = myFileSystem.addRootToWatch(dir.getPath(), true);
+    assertNotNull(r1);
+    assertNotNull(r2);
+    assertFalse(r1.equals(r2));
+
+    myFileSystem.removeWatchedRoots(ContainerUtil.immutableList(r1, r2));
+    FileUtil.delete(dir);
+  }
 
   public void testFileRoot() throws Exception {
     File file = createTestFile("test.txt");
@@ -436,7 +451,7 @@ public class FileWatcherTest extends PlatformLangTestCase {
     File subDir = createTestDir(targetDir, "sub");
     File file = createTestFile(subDir, "test.txt");
     File rootFile = createSubst(targetDir.getPath());
-    VirtualDirectoryImpl.allowRootAccess(rootFile.getPath());
+    VfsRootAccess.allowRootAccess(rootFile.getPath());
     VirtualFile vfsRoot = myFileSystem.findFileByIoFile(rootFile);
 
     try {
@@ -478,7 +493,7 @@ public class FileWatcherTest extends PlatformLangTestCase {
         ((NewVirtualFile)vfsRoot).markDirty();
         myFileSystem.refresh(false);
       }
-      VirtualDirectoryImpl.disallowRootAccess(rootFile.getPath());
+      VfsRootAccess.disallowRootAccess(rootFile.getPath());
     }
   }
 
@@ -713,6 +728,72 @@ public class FileWatcherTest extends PlatformLangTestCase {
     }
   }
 
+  public void testDisplacementByIsomorphicTree() throws Exception {
+    if (SystemInfo.isMac) {
+      assertTrue("Kaboom", new GregorianCalendar(2015, Calendar.SEPTEMBER, 1).getTimeInMillis() > new Date().getTime());
+      System.out.println("** skipped");
+      return;
+    }
+
+    File top = createTestDir("top");
+    File up = createTestDir(top, "up");
+    File middle = createTestDir(up, "middle");
+    File file = createTestFile(middle, "file.txt", "original content");
+    File up_copy = new File(top, "up_copy");
+    FileUtil.copyDir(up, up_copy);
+    FileUtil.writeToFile(file, "new content");
+
+    VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
+    assertNotNull(vFile);
+    assertEquals("new content", VfsUtilCore.loadText(vFile));
+
+    LocalFileSystem.WatchRequest request = watch(up);
+    try {
+      myAccept = true;
+      FileUtil.rename(up, new File(top, "up.bak"));
+      FileUtil.rename(up_copy, up);
+      assertEvent(VFileContentChangeEvent.class, file.getPath());
+      assertTrue(vFile.isValid());
+      assertEquals("original content", VfsUtilCore.loadText(vFile));
+    }
+    finally {
+      unwatch(request);
+    }
+  }
+
+  public void testWatchRootReplacement() throws IOException {
+    File top = createTestDir("top");
+    File dir1 = createTestDir(top, "dir1");
+    File dir2 = createTestDir(top, "dir2");
+    File f1 = createTestFile(dir1, "f.txt");
+    File f2 = createTestFile(dir2, "f.txt");
+    refresh(f1);
+    refresh(f2);
+
+    final Ref<LocalFileSystem.WatchRequest> request = Ref.create(watch(dir1));
+    try {
+      myAccept = true;
+      FileUtil.writeToFile(f1, "data");
+      FileUtil.writeToFile(f2, "data");
+      assertEvent(VFileContentChangeEvent.class, f1.getPath());
+
+      final String newRoot = dir2.getPath();
+      getEvents("events to replace watch root", new Runnable() {
+        @Override
+        public void run() {
+          request.set(myFileSystem.replaceWatchedRoot(request.get(), newRoot, true));
+        }
+      });
+
+      myAccept = true;
+      FileUtil.writeToFile(f1, "more data");
+      FileUtil.writeToFile(f2, "more data");
+      assertEvent(VFileContentChangeEvent.class, f2.getPath());
+    }
+    finally {
+      unwatch(request.get());
+    }
+  }
 
   @NotNull
   private LocalFileSystem.WatchRequest watch(File watchFile) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
@@ -47,6 +48,7 @@ import com.intellij.ui.InsertPathAction;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ImageLoader;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
@@ -149,8 +151,7 @@ public class CustomizableActionsPanel {
         if (selectionPath != null) {
           DefaultMutableTreeNode node = (DefaultMutableTreeNode)selectionPath.getLastPathComponent();
           final FindAvailableActionsDialog dlg = new FindAvailableActionsDialog();
-          dlg.show();
-          if (dlg.isOK()) {
+          if (dlg.showAndGet()) {
             final Set<Object> toAdd = dlg.getTreeSelectedActionIds();
             if (toAdd == null) return;
             for (final Object o : toAdd) {
@@ -178,8 +179,7 @@ public class CustomizableActionsPanel {
         final TreePath selectionPath = myActionsTree.getLeadSelectionPath();
         if (selectionPath != null) {
           EditIconDialog dlg = new EditIconDialog((DefaultMutableTreeNode)selectionPath.getLastPathComponent());
-          dlg.show();
-          if (dlg.isOK()) {
+          if (dlg.showAndGet()) {
             myActionsTree.repaint();
           }
         }
@@ -332,6 +332,7 @@ public class CustomizableActionsPanel {
       if (exitCode == Messages.OK) {
         mySelectedSchema.addIconCustomization(actionId, null);
         anAction.getTemplatePresentation().setIcon(AllIcons.Toolbar.Unknown);
+        anAction.getTemplatePresentation().setDisabledIcon(IconLoader.getDisabledIcon(AllIcons.Toolbar.Unknown));
         anAction.setDefaultIcon(false);
         node.setUserObject(Pair.create(actionId, AllIcons.Toolbar.Unknown));
         myActionsTree.repaint();
@@ -450,7 +451,7 @@ public class CustomizableActionsPanel {
                                                   boolean leaf,
                                                   int row,
                                                   boolean hasFocus) {
-      super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+      super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, false);
       if (value instanceof DefaultMutableTreeNode) {
         Object userObject = ((DefaultMutableTreeNode)value).getUserObject();
         Icon icon = null;
@@ -458,10 +459,7 @@ public class CustomizableActionsPanel {
           Group group = (Group)userObject;
           String name = group.getName();
           setText(name != null ? name : group.getId());
-          icon = group.getIcon();
-          if (icon == null) {
-            icon = getClosedIcon();
-          }
+          icon = ObjectUtils.notNull(group.getIcon(), AllIcons.Nodes.Folder);
         }
         else if (userObject instanceof String) {
           String actionId = (String)userObject;
@@ -485,7 +483,7 @@ public class CustomizableActionsPanel {
           setText("-------------");
         }
         else if (userObject instanceof QuickList) {
-          setText(((QuickList)userObject).getDisplayName());
+          setText(((QuickList)userObject).getName());
           icon = AllIcons.Actions.QuickList;
         }
         else {
@@ -531,8 +529,8 @@ public class CustomizableActionsPanel {
       if (StringUtil.isNotEmpty(path)) {
         Image image = null;
         try {
-          image = ImageLoader.loadFromStream(VfsUtil.convertToURL(VfsUtil.pathToUrl(path.replace(File.separatorChar,
-                                                                                                        '/'))).openStream());
+          image = ImageLoader.loadFromStream(VfsUtilCore.convertToURL(VfsUtil.pathToUrl(path.replace(File.separatorChar,
+                                                                                                     '/'))).openStream());
         }
         catch (IOException e) {
           LOG.debug(e);

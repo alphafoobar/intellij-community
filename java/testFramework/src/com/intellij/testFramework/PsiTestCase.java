@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,9 +35,9 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.util.IncorrectOperationException;
-import org.jdom.Document;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
@@ -69,25 +69,31 @@ public abstract class PsiTestCase extends ModuleTestCase {
     super.tearDown();
   }
 
-  protected PsiFile createDummyFile(String fileName, String text) throws IncorrectOperationException {
+  @NotNull
+  protected PsiFile createDummyFile(@NotNull String fileName, @NotNull String text) throws IncorrectOperationException {
     FileType type = FileTypeRegistry.getInstance().getFileTypeByFileName(fileName);
     return PsiFileFactory.getInstance(myProject).createFileFromText(fileName, type, text);
   }
 
-  protected PsiFile createFile(@NonNls String fileName, String text) throws Exception {
+  @NotNull
+  protected PsiFile createFile(@NonNls @NotNull String fileName, @NotNull String text) throws Exception {
     return createFile(myModule, fileName, text);
   }
-  protected PsiFile createFile(Module module, String fileName, String text) throws Exception {
+
+  @NotNull
+  protected PsiFile createFile(@NotNull Module module, @NotNull String fileName, @NotNull String text) throws Exception {
     File dir = createTempDirectory();
     VirtualFile vDir = LocalFileSystem.getInstance().refreshAndFindFileByPath(dir.getCanonicalPath().replace(File.separatorChar, '/'));
 
+    assert vDir != null : dir;
     return createFile(module, vDir, fileName, text);
   }
 
-  protected PsiFile createFile(final Module module, final VirtualFile vDir, final String fileName, final String text) throws IOException {
+  @NotNull
+  protected PsiFile createFile(@NotNull final Module module, @NotNull final VirtualFile vDir, @NotNull final String fileName, @NotNull final String text) throws IOException {
     return new WriteAction<PsiFile>() {
       @Override
-      protected void run(Result<PsiFile> result) throws Throwable {
+      protected void run(@NotNull Result<PsiFile> result) throws Throwable {
         if (!ModuleRootManager.getInstance(module).getFileIndex().isInSourceContent(vDir)) {
           addSourceContentToRoots(module, vDir);
         }
@@ -122,7 +128,7 @@ public abstract class PsiTestCase extends ModuleTestCase {
     return myFile.findElementAt(offset);
   }
 
-  protected void configure(String path, String dataName) throws Exception {
+  protected void configure(@NotNull String path, String dataName) throws Exception {
     myDataRoot = getTestDataPath() + path;
 
     myTestDataBefore = loadData(dataName);
@@ -144,10 +150,8 @@ public abstract class PsiTestCase extends ModuleTestCase {
   }
 
   private PsiTestData loadData(String dataName) throws Exception {
-    Document document = JDOMUtil.loadDocument(new File(myDataRoot + "/" + "data.xml"));
-
     PsiTestData data = createData();
-    Element documentElement = document.getRootElement();
+    Element documentElement = JDOMUtil.load(new File(myDataRoot + "/" + "data.xml"));
 
     final List nodes = documentElement.getChildren("data");
 

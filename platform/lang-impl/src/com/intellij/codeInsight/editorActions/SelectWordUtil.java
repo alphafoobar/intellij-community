@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.lexer.Lexer;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.actions.EditorActionUtil;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
@@ -65,7 +66,7 @@ public class SelectWordUtil {
     return SELECTIONERS;
   }
 
-  private static final CharCondition JAVA_IDENTIFIER_PART_CONDITION = new CharCondition() {
+  public static final CharCondition JAVA_IDENTIFIER_PART_CONDITION = new CharCondition() {
     @Override
     public boolean value(char ch) {
       return Character.isJavaIdentifierPart(ch);
@@ -187,16 +188,21 @@ public class SelectWordUtil {
     }
   }
 
-  private static void processInFile(@NotNull PsiElement element,
-                                    Processor<TextRange> consumer,
-                                    CharSequence text,
-                                    int cursorOffset,
-                                    Editor editor) {
-    PsiElement e = element;
-    while (e != null && !(e instanceof PsiFile)) {
-      if (processElement(e, consumer, text, cursorOffset, editor)) return;
-      e = e.getParent();
-    }
+  private static void processInFile(@NotNull final PsiElement element,
+                                    final Processor<TextRange> consumer,
+                                    final CharSequence text,
+                                    final int cursorOffset,
+                                    final Editor editor) {
+    DumbService.getInstance(element.getProject()).withAlternativeResolveEnabled(new Runnable() {
+      @Override
+      public void run() {
+        PsiElement e = element;
+        while (e != null && !(e instanceof PsiFile)) {
+          if (processElement(e, consumer, text, cursorOffset, editor)) return;
+          e = e.getParent();
+        }
+      }
+    });
   }
 
   private static boolean processElement(@NotNull PsiElement element,
@@ -218,8 +224,12 @@ public class SelectWordUtil {
         availableSelectioners.add(selectioner);
       }
     }
+    long stamp = editor.getDocument().getModificationStamp();
     for (ExtendWordSelectionHandler selectioner : availableSelectioners) {
       List<TextRange> ranges = selectioner.select(element, text, cursorOffset, editor);
+      if (stamp != editor.getDocument().getModificationStamp()) {
+        throw new AssertionError("Selectioner " + selectioner + " has changed the document");
+      }
       if (ranges == null) continue;
 
       for (TextRange range : ranges) {

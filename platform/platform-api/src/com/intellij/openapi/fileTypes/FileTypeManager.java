@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,11 +55,12 @@ public abstract class FileTypeManager extends FileTypeRegistry {
    * @return the instance of FileTypeManager
    */
   public static FileTypeManager getInstance() {
-    if (ourInstance == null) {
+    FileTypeManager instance = ourInstance;
+    if (instance == null) {
       Application app = ApplicationManager.getApplication();
-      ourInstance = app != null ? app.getComponent(FileTypeManager.class) : new MockFileTypeManager();
+      ourInstance = instance = app != null ? app.getComponent(FileTypeManager.class) : new MockFileTypeManager();
     }
-    return ourInstance;
+    return instance;
   }
 
   /**
@@ -116,7 +117,7 @@ public abstract class FileTypeManager extends FileTypeRegistry {
    * registered file types.
    *
    * @param listener The listener instance.
-   * @deprecated Subscribe to #TOPIC on any message bus level.
+   * @deprecated Subscribe to {@link #TOPIC} on any message bus level instead.
    */
 
   public abstract void addFileTypeListener(@NotNull FileTypeListener listener);
@@ -126,7 +127,7 @@ public abstract class FileTypeManager extends FileTypeRegistry {
    * registered file types.
    *
    * @param listener The listener instance.
-   * @deprecated Subscribe to #TOPIC on any message bus level.
+   * @deprecated Subscribe to {@link #TOPIC} on any message bus level instead.
    */
 
   public abstract void removeFileTypeListener(@NotNull FileTypeListener listener);

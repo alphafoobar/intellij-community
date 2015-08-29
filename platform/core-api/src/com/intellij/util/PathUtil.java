@@ -16,15 +16,20 @@
 package com.intellij.util;
 
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileProvider;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.util.io.URLUtil;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.io.File;
 
 public class PathUtil {
   private PathUtil() {
@@ -81,6 +86,13 @@ public class PathUtil {
     return PathUtilRt.getFileName(path);
   }
 
+  @Nullable
+  public static String getFileExtension(@NotNull String name) {
+    int index = name.lastIndexOf('.');
+    if (index < 0) return null;
+    return name.substring(index + 1);
+  }
+
   @NotNull
   public static String getParentPath(@NotNull String path) {
     return PathUtilRt.getParentPath(path);
@@ -100,4 +112,30 @@ public class PathUtil {
     return PathUtilRt.isValidFileName(fileName);
   }
 
+  @Contract("null -> null; !null -> !null")
+  public static String toSystemIndependentName(@Nullable String path) {
+    return path == null ? null : FileUtilRt.toSystemIndependentName(path);
+  }
+
+
+  @Contract("null -> null; !null -> !null")
+  public static String toSystemDependentName(@Nullable String path) {
+    return path == null ? null : FileUtilRt.toSystemDependentName(path);
+  }
+
+  @NotNull
+  public static String driveLetterToLowerCase(@NotNull String path) {
+    if (SystemInfo.isWindows && path.length() >= 2 && Character.isUpperCase(path.charAt(0)) && path.charAt(1) == ':') {
+      File file = new File(path);
+      if (file.isAbsolute()) {
+        return Character.toLowerCase(path.charAt(0)) + path.substring(1);
+      }
+    }
+    return path;
+  }
+
+  @NotNull
+  public static String makeFileName(@NotNull String name, @Nullable String extension) {
+    return name + (StringUtil.isEmpty(extension) ? "" : "." + extension);
+  }
 }

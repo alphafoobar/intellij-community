@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.intellij.openapi.actionSystem;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.ApplicationComponent;
+import com.intellij.openapi.components.NamedComponent;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.util.ActionCallback;
 import org.jetbrains.annotations.NonNls;
@@ -35,7 +35,7 @@ import java.awt.event.InputEvent;
  *
  * @see AnAction
  */
-public abstract class ActionManager implements ApplicationComponent {
+public abstract class ActionManager implements NamedComponent {
 
   /**
    * Fetches the instance of ActionManager implementation.
@@ -72,7 +72,7 @@ public abstract class ActionManager implements ApplicationComponent {
    *
    * @return An instance of <code>ActionToolbar</code>
    */
-  public abstract ActionToolbar createActionToolbar(@NonNls String place, ActionGroup group, boolean horizontal);
+  public abstract ActionToolbar createActionToolbar(@NonNls String place, @NotNull ActionGroup group, boolean horizontal);
 
   /**
    * Returns action associated with the specified actionId.
@@ -80,7 +80,7 @@ public abstract class ActionManager implements ApplicationComponent {
    * @param actionId Id of the registered action
    *
    * @return Action associated with the specified actionId, <code>null</code> if
-   *  there is no actions associated with the speicified actionId
+   *  there is no actions associated with the specified actionId
    *
    * @exception java.lang.IllegalArgumentException if <code>actionId</code> is <code>null</code>
    *
@@ -151,7 +151,7 @@ public abstract class ActionManager implements ApplicationComponent {
    * @return the created panel.
    * @since 5.1
    */
-  public abstract JComponent createButtonToolbar(final String actionPlace, final ActionGroup messageActionGroup);
+  public abstract JComponent createButtonToolbar(final String actionPlace, @NotNull ActionGroup messageActionGroup);
 
   public abstract AnAction getActionOrStub(@NonNls String id);
 
@@ -172,5 +172,5 @@ public abstract class ActionManager implements ApplicationComponent {
   public abstract void removeAnActionListener(AnActionListener listener);
 
   @Nullable
-  public abstract KeyboardShortcut getKeyboardShortcut(@NotNull String actionId);
+  public abstract KeyboardShortcut getKeyboardShortcut(@NonNls @NotNull String actionId);
 }

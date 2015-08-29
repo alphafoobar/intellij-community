@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupAdapter;
 import com.intellij.openapi.ui.popup.LightweightWindowEvent;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.reference.SoftReference;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -42,27 +43,40 @@ public class Notification {
   private Runnable myWhenExpired;
   private Boolean myImportant;
   private WeakReference<Balloon> myBalloonRef;
+  private final long myTimestamp;
 
-  public Notification(@NotNull final String groupDisplayId, @NotNull final String title, @NotNull final String content, @NotNull final NotificationType type) {
+  public Notification(@NotNull String groupDisplayId, @NotNull String title, @NotNull String content, @NotNull NotificationType type) {
     this(groupDisplayId, title, content, type, null);
   }
 
   /**
    * @param groupDisplayId this should be a human-readable, capitalized string like "Facet Detector".
    *                       It will appear in "Notifications" configurable.
-   * @param title notification title
-   * @param content notification content
-   * @param type notification type
-   * @param listener notification lifecycle listener
+   * @param title          notification title
+   * @param content        notification content
+   * @param type           notification type
+   * @param listener       notification lifecycle listener
    */
-  public Notification(@NotNull final String groupDisplayId, @NotNull final String title, @NotNull final String content, @NotNull final NotificationType type, @Nullable NotificationListener listener) {
+  public Notification(@NotNull String groupDisplayId,
+                      @NotNull String title,
+                      @NotNull String content,
+                      @NotNull NotificationType type,
+                      @Nullable NotificationListener listener) {
     myGroupId = groupDisplayId;
     myTitle = title;
     myContent = content;
     myType = type;
     myListener = listener;
+    myTimestamp = System.currentTimeMillis();
 
-    LOG.assertTrue(myContent.trim().length() > 0, "Notification should have content, groupId: " + myGroupId);
+    LOG.assertTrue(!StringUtil.isEmptyOrSpaces(myContent), "Notification should have content, groupId: " + myGroupId);
+  }
+
+  /**
+   * Returns the time (in milliseconds since Jan 1, 1970) when the notification was created.
+   */
+  public long getTimestamp() {
+    return myTimestamp;
   }
 
   @SuppressWarnings("MethodMayBeStatic")

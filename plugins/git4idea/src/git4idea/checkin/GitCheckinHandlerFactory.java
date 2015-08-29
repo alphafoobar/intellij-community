@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,19 @@
  */
 package git4idea.checkin;
 
+import com.intellij.CommonBundle;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.CheckinProjectPanel;
 import com.intellij.openapi.vcs.FilePath;
@@ -34,6 +39,7 @@ import com.intellij.openapi.vcs.checkin.CheckinHandler;
 import com.intellij.openapi.vcs.checkin.VcsCheckinHandlerFactory;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.PairConsumer;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import git4idea.GitPlatformFacade;
@@ -131,14 +137,17 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
       }
 
       if (crlfHelper.get().shouldWarn()) {
-        final GitCrlfDialog dialog = new GitCrlfDialog(myProject);
-        UIUtil.invokeAndWaitIfNeeded(new Runnable() {
+        Pair<Integer, Boolean> codeAndDontWarn = UIUtil.invokeAndWaitIfNeeded(new Computable<Pair<Integer, Boolean>>() {
           @Override
-          public void run() {
+          public Pair<Integer, Boolean> compute() {
+            final GitCrlfDialog dialog = new GitCrlfDialog(myProject);
             dialog.show();
+            return Pair.create(dialog.getExitCode(), dialog.dontWarnAgain());
           }
         });
-        int decision = dialog.getExitCode();
+        int decision = codeAndDontWarn.first;
+        boolean dontWarnAgain = codeAndDontWarn.second;
+
         if  (decision == GitCrlfDialog.CANCEL) {
           return ReturnResult.CANCEL;
         }
@@ -148,7 +157,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
             setCoreAutoCrlfAttribute(anyRoot);
           }
           else {
-            if (dialog.dontWarnAgain()) {
+            if (dontWarnAgain) {
               settings.setWarnAboutCrlf(false);
             }
           }
@@ -169,33 +178,16 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
     }
 
     private ReturnResult checkUserName() {
-      Project project = myPanel.getProject();
+      final Project project = myPanel.getProject();
       GitVcs vcs = GitVcs.getInstance(project);
       assert vcs != null;
 
-      Collection<VirtualFile> notDefined = new ArrayList<VirtualFile>();
-      Map<VirtualFile, Pair<String, String>> defined = new HashMap<VirtualFile, Pair<String, String>>();
-      Collection<VirtualFile> allRoots = new ArrayList<VirtualFile>(Arrays.asList(
-        ProjectLevelVcsManager.getInstance(project).getRootsUnderVcs(vcs)));
-
       Collection<VirtualFile> affectedRoots = getSelectedRoots();
-      for (VirtualFile root : affectedRoots) {
-        try {
-          Pair<String, String> nameAndEmail = getUserNameAndEmailFromGitConfig(project, root);
-          String name = nameAndEmail.getFirst();
-          String email = nameAndEmail.getSecond();
-          if (name == null || email == null) {
-            notDefined.add(root);
-          }
-          else {
-            defined.put(root, nameAndEmail);
-          }
-        }
-        catch (VcsException e) {
-          LOG.error("Couldn't get user.name and user.email for root " + root, e);
-          // doing nothing - let commit with possibly empty user.name/email
-        }
-      }
+      Map<VirtualFile, Couple<String>> defined = getDefinedUserNames(project, affectedRoots, false);
+
+      Collection<VirtualFile> allRoots = new ArrayList<VirtualFile>(Arrays.asList(ProjectLevelVcsManager.getInstance(project).getRootsUnderVcs(vcs)));
+      Collection<VirtualFile> notDefined = new ArrayList<VirtualFile>(affectedRoots);
+      notDefined.removeAll(defined.keySet());
 
       if (notDefined.isEmpty()) {
         return ReturnResult.COMMIT;
@@ -212,56 +204,89 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
         return ReturnResult.CANCEL;
       }
 
+      // try to find a root with defined user name among other roots - to propose this user name in the dialog
       if (defined.isEmpty() && allRoots.size() > affectedRoots.size()) {
         allRoots.removeAll(affectedRoots);
-        for (VirtualFile root : allRoots) {
-          try {
-            Pair<String, String> nameAndEmail = getUserNameAndEmailFromGitConfig(project, root);
-            String name = nameAndEmail.getFirst();
-            String email = nameAndEmail.getSecond();
-            if (name != null && email != null) {
-              defined.put(root, nameAndEmail);
-              break;
-            }
-          }
-          catch (VcsException e) {
-            LOG.error("Couldn't get user.name and user.email for root " + root, e);
-            // doing nothing - not critical not to find the values for other roots not affected by commit
-          }
-        }
+        defined.putAll(getDefinedUserNames(project, allRoots, true));
       }
 
-      GitUserNameNotDefinedDialog dialog = new GitUserNameNotDefinedDialog(project, notDefined, affectedRoots, defined);
-      dialog.show();
-      if (dialog.isOK()) {
-        try {
-          if (dialog.isGlobal()) {
-            GitConfigUtil.setValue(project, notDefined.iterator().next(), GitConfigUtil.USER_NAME, dialog.getUserName(), "--global");
-            GitConfigUtil.setValue(project, notDefined.iterator().next(), GitConfigUtil.USER_EMAIL, dialog.getUserEmail(), "--global");
-          }
-          else {
-            for (VirtualFile root : notDefined) {
-              GitConfigUtil.setValue(project, root, GitConfigUtil.USER_NAME, dialog.getUserName());
-              GitConfigUtil.setValue(project, root, GitConfigUtil.USER_EMAIL, dialog.getUserEmail());
-            }
-          }
-        }
-        catch (VcsException e) {
-          String message = "Couldn't set user.name and user.email";
-          LOG.error(message, e);
-          Messages.showErrorDialog(myPanel.getComponent(), message);
-          return ReturnResult.CANCEL;
-        }
-        return ReturnResult.COMMIT;
+      final GitUserNameNotDefinedDialog dialog = new GitUserNameNotDefinedDialog(project, notDefined, affectedRoots, defined);
+      if (dialog.showAndGet()) {
+        return setUserNameUnderProgress(project, notDefined, dialog) ? ReturnResult.COMMIT : ReturnResult.CANCEL;
       }
       return ReturnResult.CLOSE_WINDOW;
     }
 
     @NotNull
-    private Pair<String, String> getUserNameAndEmailFromGitConfig(@NotNull Project project, @NotNull VirtualFile root) throws VcsException {
+    private Map<VirtualFile, Couple<String>> getDefinedUserNames(@NotNull final Project project,
+                                                                 @NotNull final Collection<VirtualFile> roots,
+                                                                 final boolean stopWhenFoundFirst) {
+      final Map<VirtualFile, Couple<String>> defined = ContainerUtil.newHashMap();
+      ProgressManager.getInstance().run(new Task.Modal(project, "Checking Git user name...", false) {
+        @Override
+        public void run(@NotNull ProgressIndicator pi) {
+          for (VirtualFile root : roots) {
+            try {
+              Couple<String> nameAndEmail = getUserNameAndEmailFromGitConfig(project, root);
+              String name = nameAndEmail.getFirst();
+              String email = nameAndEmail.getSecond();
+              if (name != null && email != null) {
+                defined.put(root, nameAndEmail);
+                if (stopWhenFoundFirst) {
+                  return;
+                }
+              }
+            }
+            catch (VcsException e) {
+              LOG.error("Couldn't get user.name and user.email for root " + root, e);
+              // doing nothing - let commit with possibly empty user.name/email
+            }
+          }
+        }
+      });
+      return defined;
+    }
+
+    private boolean setUserNameUnderProgress(@NotNull final Project project,
+                                             @NotNull final Collection<VirtualFile> notDefined,
+                                             @NotNull final GitUserNameNotDefinedDialog dialog) {
+      final Ref<String> error = Ref.create();
+      ProgressManager.getInstance().run(new Task.Modal(project, "Setting Git User Name...", false) {
+        @Override
+        public void run(@NotNull ProgressIndicator pi) {
+          try {
+            if (dialog.isGlobal()) {
+              GitConfigUtil.setValue(project, notDefined.iterator().next(), GitConfigUtil.USER_NAME, dialog.getUserName(), "--global");
+              GitConfigUtil.setValue(project, notDefined.iterator().next(), GitConfigUtil.USER_EMAIL, dialog.getUserEmail(), "--global");
+            }
+            else {
+              for (VirtualFile root : notDefined) {
+                GitConfigUtil.setValue(project, root, GitConfigUtil.USER_NAME, dialog.getUserName());
+                GitConfigUtil.setValue(project, root, GitConfigUtil.USER_EMAIL, dialog.getUserEmail());
+              }
+            }
+          }
+          catch (VcsException e) {
+            String message = "Couldn't set user.name and user.email";
+            LOG.error(message, e);
+            error.set(message);
+          }
+        }
+      });
+      if (error.isNull()) {
+        return true;
+      }
+      else {
+        Messages.showErrorDialog(myPanel.getComponent(), error.get());
+        return false;
+      }
+    }
+
+    @NotNull
+    private Couple<String> getUserNameAndEmailFromGitConfig(@NotNull Project project, @NotNull VirtualFile root) throws VcsException {
       String name = GitConfigUtil.getValue(project, root, GitConfigUtil.USER_NAME);
       String email = GitConfigUtil.getValue(project, root, GitConfigUtil.USER_EMAIL);
-      return Pair.create(name, email);
+      return Couple.of(name, email);
     }
 
     private boolean emptyCommitMessage() {
@@ -276,7 +301,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
     private ReturnResult warnAboutDetachedHeadIfNeeded() {
       // Warning: commit on a detached HEAD
       DetachedRoot detachedRoot = getDetachedRoot();
-      if (detachedRoot == null) {
+      if (detachedRoot == null || !GitVcsSettings.getInstance(myProject).warnAboutDetachedHead()) {
         return ReturnResult.COMMIT;
       }
 
@@ -295,13 +320,41 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
         message = messageCommonStart + " is in the <b>detached HEAD</b> state. <br/>" +
                   "You can look around, make experimental changes and commit them, but be sure to checkout a branch not to lose your work. <br/>" +
                   "Otherwise you risk losing your changes. <br/>" +
-                  readMore("http://sitaramc.github.com/concepts/detached-head.html", "Read more about detached HEAD");
+                  readMore("http://gitolite.com/detached-head.html", "Read more about detached HEAD");
       }
 
-      final int choice = Messages.showOkCancelDialog(myPanel.getComponent(), XmlStringUtil.wrapInHtml(message), title,
-                                                                                                      "Cancel", "Commit",
-                                                                                                      Messages.getWarningIcon());
-      if (choice != Messages.OK) {
+      DialogWrapper.DoNotAskOption dontAskAgain = new DialogWrapper.DoNotAskOption() {
+        @Override
+        public boolean isToBeShown() {
+          return true;
+        }
+
+        @Override
+        public void setToBeShown(boolean toBeShown, int exitCode) {
+          if (exitCode == Messages.OK) {
+            GitVcsSettings.getInstance(myProject).setWarnAboutDetachedHead(toBeShown);
+          }
+        }
+
+        @Override
+        public boolean canBeHidden() {
+          return true;
+        }
+
+        @Override
+        public boolean shouldSaveOptionsOnCancel() {
+          return false;
+        }
+
+        @NotNull
+        @Override
+        public String getDoNotShowMessage() {
+          return "Don't warn again";
+        }
+      };
+      int choice = Messages.showOkCancelDialog(myProject, XmlStringUtil.wrapInHtml(message), title, "Commit",
+                                               CommonBundle.getCancelButtonText(), Messages.getWarningIcon(), dontAskAgain);
+      if (choice == Messages.OK) {
         return ReturnResult.COMMIT;
       } else {
         return ReturnResult.CLOSE_WINDOW;

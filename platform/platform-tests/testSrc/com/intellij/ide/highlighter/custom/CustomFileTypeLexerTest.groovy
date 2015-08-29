@@ -1,8 +1,7 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
- * Licensed under the Apache License, Version 2.0 (the "License")
-
+ * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
@@ -27,6 +26,7 @@ import com.intellij.util.Processor
 import com.intellij.util.ThrowableRunnable
 import junit.framework.TestCase
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.annotations.NotNull
 import org.jetbrains.annotations.Nullable
 /**
  * @author peter
@@ -52,25 +52,29 @@ class CustomFileTypeLexerTest extends TestCase {
     table.addKeyword1("then");
     table.addKeyword2("return");
     table.addKeyword1("length");
-    table.addKeyword1("sysvar ");
 
     return table;
 
   }
 
   public void testSpacesInsideKeywords() {
-    doTest createGenericTable(), 'if length(variable)then return 1', '''\
+    def table = createGenericTable()
+    table.addKeyword1("sysvar ");
+    doTest table, 'if length(if_variable)then return 1 sysvar  ', '''\
 KEYWORD_1 ('if')
 WHITESPACE (' ')
 KEYWORD_1 ('length')
 CHARACTER ('(')
-IDENTIFIER ('variable')
+IDENTIFIER ('if_variable')
 CHARACTER (')')
 KEYWORD_1 ('then')
 WHITESPACE (' ')
 KEYWORD_2 ('return')
 WHITESPACE (' ')
 NUMBER ('1')
+WHITESPACE (' ')
+KEYWORD_1 ('sysvar ')
+WHITESPACE (' ')
 '''
   }
 
@@ -279,6 +283,16 @@ IDENTIFIER ('k')
 '''
   }
 
+  public void testCpp() {
+    SyntaxTable table = new SyntaxTable()
+    table.addKeyword1('->')
+    doTest table, "foo->bar", '''\
+IDENTIFIER ('foo')
+KEYWORD_1 ('->')
+IDENTIFIER ('bar')
+'''
+  }
+
   public void testNumber() {
     doTest createPropTable(), "1.23=1.24", '''\
 NUMBER ('1.23')
@@ -408,6 +422,7 @@ class SlowCharSequence extends StringUtil.BombedCharSequence {
     super(sequence)
   }
 
+  @NotNull
   @Override
   CharSequence subSequence(int i, int i1) {
     return new SlowCharSequence(super.subSequence(i, i1))

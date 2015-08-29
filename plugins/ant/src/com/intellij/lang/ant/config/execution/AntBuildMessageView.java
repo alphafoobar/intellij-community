@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ProjectManagerListener;
@@ -52,6 +53,7 @@ import com.intellij.problems.WolfTheProblemSolver;
 import com.intellij.ui.content.*;
 import com.intellij.util.Alarm;
 import com.intellij.util.text.DateFormatUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -90,8 +92,8 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
   private AntBuildFileBase myBuildFile;
   private final String[] myTargets;
   private int myPriorityThreshold = PRIORITY_BRIEF;
-  private int myErrorCount;
-  private int myWarningCount;
+  private volatile int myErrorCount;
+  private volatile int myWarningCount;
   private volatile boolean myIsOutputPaused = false;
 
   @NotNull
@@ -109,7 +111,7 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
   private final Runnable myFlushLogRunnable = new Runnable() {
     @Override
     public void run() {
-      if (myTreeView != null && myCommandsProcessedCount < myLog.size()) {
+      if (myCommandsProcessedCount < myLog.size()) {
         if (!myIsOutputPaused) {
           new OutputFlusher().doFlush();
           myTreeView.scrollToLastMessage();
@@ -150,12 +152,11 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
     myPlainTextView = new PlainTextView(project);
     myTreeView = new TreeView(project, buildFile);
 
-    myMessagePanel = new JPanel(new BorderLayout());
     myCardLayout = new CardLayout();
     myContentPanel = new JPanel(myCardLayout);
     myContentPanel.add(myTreeView.getComponent(), myTreeView.getId());
     myContentPanel.add(myPlainTextView.getComponent(), myPlainTextView.getId());
-    myMessagePanel.add(myContentPanel, BorderLayout.CENTER);
+    myMessagePanel = JBUI.Panels.simplePanel(myContentPanel);
 
     setVerboseMode(AntBuildFileImpl.VERBOSE.value(buildFile.getAllOptions()));
 
@@ -597,16 +598,21 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
         return true;
       }
 
-      AntBuildMessageView messageView = myContent.getUserData(KEY);
+      final AntBuildMessageView messageView = myContent.getUserData(KEY);
 
-      if (messageView.isStoppedOrTerminateRequested()) {
+      if (messageView == null || messageView.isStoppedOrTerminateRequested()) {
         return true;
       }
 
-      if (myCloseAllowed) return true;
+      if (myCloseAllowed) {
+        return true;
+      }
 
-      int result = Messages.showYesNoCancelDialog(AntBundle.message("ant.process.is.active.terminate.confirmation.text"),
-                                                  AntBundle.message("close.ant.build.messages.dialog.title"), Messages.getQuestionIcon());
+      final int result = Messages.showYesNoCancelDialog(
+        AntBundle.message("ant.process.is.active.terminate.confirmation.text"), 
+        AntBundle.message("close.ant.build.messages.dialog.title"), Messages.getQuestionIcon()
+      );
+      
       if (result == 0) { // yes
         messageView.stopProcess();
         myCloseAllowed = true;
@@ -791,26 +797,30 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
               final Runnable finishRunnable = new Runnable() {
                 public void run() {
                   final int errorCount = getErrorCount();
-                  final AntBuildFileBase buildFile = myBuildFile;
-                  if (buildFile != null) {
-                    if (errorCount == 0 && buildFile.isViewClosedWhenNoErrors()) {
-                      close();
-                    }
-                    else if (errorCount > 0) {
-                      myTreeView.scrollToFirstError();
+                  try {
+                    final AntBuildFileBase buildFile = myBuildFile;
+                    if (buildFile != null) {
+                      if (errorCount == 0 && buildFile.isViewClosedWhenNoErrors()) {
+                        close();
+                      }
+                      else if (errorCount > 0) {
+                        myTreeView.scrollToFirstError();
+                      }
+                      else {
+                        myTreeView.scrollToStatus();
+                      }
                     }
                     else {
-                      myTreeView.scrollToStatus();
+                      myTreeView.scrollToLastMessage();
                     }
                   }
-                  else {
-                    myTreeView.scrollToLastMessage();
+                  finally {
+                    VirtualFileManager.getInstance().asyncRefresh(new Runnable() {
+                      public void run() {
+                        antBuildListener.buildFinished(aborted ? AntBuildListener.ABORTED : AntBuildListener.FINISHED_SUCCESSFULLY, errorCount);
+                      }
+                    });
                   }
-                  VirtualFileManager.getInstance().asyncRefresh(new Runnable() {
-                    public void run() {
-                      antBuildListener.buildFinished(aborted ? AntBuildListener.ABORTED : AntBuildListener.FINISHED_SUCCESSFULLY, errorCount);
-                    }
-                  });
                 }
               };
               if (shouldActivate) {
@@ -833,8 +843,15 @@ public final class AntBuildMessageView extends JPanel implements DataProvider, O
     //noinspection SSBasedInspection
     SwingUtilities.invokeLater(new Runnable() {
       public void run() {
-        if (!myIsOutputPaused) {
-          new OutputFlusher().doFlush();
+        if (!myProject.isDisposed()) {
+          DumbService.getInstance(myProject).runWhenSmart(new Runnable() {
+            @Override
+            public void run() {
+              if (!myIsOutputPaused) {
+                new OutputFlusher().doFlush();
+              }
+            }
+          });
         }
       }
     });

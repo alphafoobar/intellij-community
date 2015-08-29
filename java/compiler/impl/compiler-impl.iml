@@ -16,8 +16,7 @@
     <orderEntry type="library" name="Trove4j" level="project" />
     <orderEntry type="module" module-name="java-runtime" />
     <orderEntry type="module" module-name="instrumentation-util" />
-    <orderEntry type="library" name="asm4" level="project" />
-    <orderEntry type="library" name="Eclipse" level="project" />
+    <orderEntry type="library" name="asm5" level="project" />
     <orderEntry type="module" module-name="platform-api" />
     <orderEntry type="module" module-name="lang-impl" />
     <orderEntry type="module" module-name="jsp-openapi" />
@@ -28,6 +27,7 @@
     <orderEntry type="module" module-name="testFramework-java" scope="TEST" />
     <orderEntry type="module" module-name="jps-model-impl" />
     <orderEntry type="module" module-name="java-analysis-impl" />
+    <orderEntry type="module" module-name="built-in-server" />
   </component>
   <component name="copyright">
     <Base>
@@ -35,4 +35,3 @@
     </Base>
   </component>
 </module>
-

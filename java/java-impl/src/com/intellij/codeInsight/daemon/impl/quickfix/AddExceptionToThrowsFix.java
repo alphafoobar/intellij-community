@@ -57,9 +57,10 @@ public class AddExceptionToThrowsFix extends BaseIntentionAction {
 
     PsiDocumentManager.getInstance(project).commitAllDocuments();
 
-    PsiMethod targetMethod = PsiTreeUtil.getParentOfType(myWrongElement, PsiMethod.class);
-    List<PsiClassType> exceptions = getUnhandledExceptions(myWrongElement, targetMethod);
-    if (exceptions == null || targetMethod == null) return;
+    final List<PsiClassType> exceptions = new ArrayList<PsiClassType>();
+    final PsiMethod targetMethod = collectExceptions(exceptions);
+    if (targetMethod == null) return;
+
     Set<PsiClassType> unhandledExceptions = new THashSet<PsiClassType>(exceptions);
 
     addExceptionsToThrowsList(project, targetMethod, unhandledExceptions);
@@ -72,7 +73,8 @@ public class AddExceptionToThrowsFix extends BaseIntentionAction {
 
     final boolean processSuperMethods;
     if (hasSuperMethodsWithoutExceptions && superMethods.length > 0) {
-      int result = Messages.showYesNoCancelDialog(
+      int result = ApplicationManager.getApplication().isUnitTestMode() ? Messages.YES :
+                   Messages.showYesNoCancelDialog(
         QuickFixBundle.message("add.exception.to.throws.inherited.method.warning.text", targetMethod.getName()),
         QuickFixBundle.message("method.is.inherited.warning.title"),
         Messages.getQuestionIcon());
@@ -168,13 +170,34 @@ public class AddExceptionToThrowsFix extends BaseIntentionAction {
     if (!(file instanceof PsiJavaFile)) return false;
     if (myWrongElement == null || !myWrongElement.isValid()) return false;
 
-    PsiMethod method = PsiTreeUtil.getParentOfType(myWrongElement, PsiMethod.class);
-    if (method == null || !method.getThrowsList().isPhysical()) return false;
-    List<PsiClassType> unhandled = getUnhandledExceptions(myWrongElement, method);
-    if (unhandled == null || unhandled.isEmpty()) return false;
+    final List<PsiClassType> unhandled = new ArrayList<PsiClassType>();
+    if (collectExceptions(unhandled) == null) return false;
 
     setText(QuickFixBundle.message("add.exception.to.throws.text", unhandled.size()));
     return true;
+  }
+
+  @Nullable
+  private PsiMethod collectExceptions(List<PsiClassType> unhandled) {
+    PsiElement targetElement = null;
+    PsiMethod targetMethod = null;
+
+    final PsiElement psiElement = myWrongElement instanceof PsiMethodReferenceExpression ? myWrongElement 
+                                                                                         : PsiTreeUtil.getParentOfType(myWrongElement, PsiFunctionalExpression.class, PsiMethod.class);
+    if (psiElement instanceof PsiFunctionalExpression) {
+      targetMethod = LambdaUtil.getFunctionalInterfaceMethod(psiElement);
+      targetElement = psiElement instanceof PsiLambdaExpression ? ((PsiLambdaExpression)psiElement).getBody() : psiElement;
+    }
+    else if (psiElement instanceof PsiMethod) {
+      targetMethod = (PsiMethod)psiElement;
+      targetElement = psiElement;
+    }
+
+    if (targetElement == null || targetMethod == null || !targetMethod.getThrowsList().isPhysical()) return null;
+    List<PsiClassType> exceptions = getUnhandledExceptions(myWrongElement, targetElement, targetMethod);
+    if (exceptions == null || exceptions.isEmpty()) return null;
+    unhandled.addAll(exceptions);
+    return targetMethod;
   }
 
   @Override
@@ -184,13 +207,16 @@ public class AddExceptionToThrowsFix extends BaseIntentionAction {
   }
 
   @Nullable
-  private static List<PsiClassType> getUnhandledExceptions(@Nullable PsiElement element, PsiMethod topElement) {
-    if (element == null || element == topElement) return null;
+  private static List<PsiClassType> getUnhandledExceptions(@Nullable PsiElement element, PsiElement topElement, PsiMethod targetMethod) {
+    if (element == null || element == topElement && !(topElement instanceof PsiMethodReferenceExpression)) return null;
     List<PsiClassType> unhandledExceptions = ExceptionUtil.getUnhandledExceptions(element);
-    if (!filterInProjectExceptions(topElement, unhandledExceptions).isEmpty()) {
+    if (!filterInProjectExceptions(targetMethod, unhandledExceptions).isEmpty()) {
       return unhandledExceptions;
     }
-    return getUnhandledExceptions(element.getParent(), topElement);
+    if (topElement instanceof PsiMethodReferenceExpression) {
+      return null;
+    }
+    return getUnhandledExceptions(element.getParent(), topElement, targetMethod);
   }
 
   @NotNull

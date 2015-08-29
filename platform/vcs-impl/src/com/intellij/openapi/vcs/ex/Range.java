@@ -15,138 +15,125 @@
  */
 package com.intellij.openapi.vcs.ex;
 
+import com.intellij.diff.util.DiffUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
-import com.intellij.util.diff.Diff;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * author: lesya
- */
+import java.util.List;
+
 public class Range {
   private static final Logger LOG = Logger.getInstance(Range.class);
+  public static final byte EQUAL = 0;
   public static final byte MODIFIED = 1;
   public static final byte INSERTED = 2;
   public static final byte DELETED = 3;
 
-  private int myOffset1;
-  private int myOffset2;
-  private final int myUpToDateOffset1;
-  private final int myUpToDateOffset2;
-  private final byte myType;
+  // (2,3) - modified 2nd line
+  // (2,2) - empty range between 1 and 2 lines
+  // index of first line is 0
+  private int myLine1;
+  private int myLine2;
+  private final int myVcsLine1;
+  private final int myVcsLine2;
+
+  @Nullable private final List<InnerRange> myInnerRanges;
+
   @Nullable private RangeHighlighter myRangeHighlighter;
+  private boolean myValid = true;
 
-  public static Range createOn(@NotNull Diff.Change change, int shift, int upToDateShift) {
-    byte type = getChangeTypeFrom(change);
-
-    int offset1 = shift + change.line1;
-    int offset2 = offset1 + change.inserted;
-
-    int uOffset1 = upToDateShift + change.line0;
-    int uOffset2 = uOffset1 + change.deleted;
-
-    return new Range(offset1, offset2, uOffset1, uOffset2, type);
+  public Range(@NotNull Range range) {
+    this(range.getLine1(), range.getLine2(), range.getVcsLine1(), range.getVcsLine2());
   }
 
-  private static byte getChangeTypeFrom(@NotNull Diff.Change change) {
-    if ((change.deleted > 0) && (change.inserted > 0)) return MODIFIED;
-    if ((change.deleted > 0)) return DELETED;
-    if ((change.inserted > 0)) return INSERTED;
-    LOG.error("Unknown change type");
-    return 0;
+  public Range(int line1, int line2, int vcsLine1, int vcsLine2) {
+    this(line1, line2, vcsLine1, vcsLine2, null);
   }
 
-  public Range(int offset1, int offset2, int uOffset1, int uOffset2, byte type) {
-    myOffset1 = offset1;
-    myOffset2 = offset2;
-    myUpToDateOffset1 = uOffset1;
-    myUpToDateOffset2 = uOffset2;
-    myType = type;
+  public Range(int line1, int line2, int vcsLine1, int vcsLine2, @Nullable List<InnerRange> innerRanges) {
+    assert line1 != line2 || vcsLine1 != vcsLine2;
+
+    myLine1 = line1;
+    myLine2 = line2;
+    myVcsLine1 = vcsLine1;
+    myVcsLine2 = vcsLine2;
+    myInnerRanges = innerRanges;
   }
 
   public int hashCode() {
-    return myUpToDateOffset1 ^ myUpToDateOffset2 ^ myType ^ myOffset1 ^ myOffset2;
+    return myVcsLine1 ^ myVcsLine2 ^ myLine1 ^ myLine2;
   }
 
-  public boolean equals(Object object) {
-    if (!(object instanceof Range)) return false;
-    Range other = (Range)object;
-    return
-      (myUpToDateOffset1 == other.myUpToDateOffset1)
-      && (myUpToDateOffset2 == other.myUpToDateOffset2)
-      && (myOffset1 == other.myOffset1)
-      && (myOffset2 == other.myOffset2)
-      && (myType == other.myType);
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+
+    Range range = (Range)o;
+
+    if (myLine1 != range.myLine1) return false;
+    if (myLine2 != range.myLine2) return false;
+    if (myVcsLine1 != range.myVcsLine1) return false;
+    if (myVcsLine2 != range.myVcsLine2) return false;
+
+    if (myInnerRanges == null) return range.myInnerRanges == null;
+    if (range.myInnerRanges == null) return false;
+
+    if (myInnerRanges.size() != range.myInnerRanges.size()) return false;
+    for (int i = 0; i < myInnerRanges.size(); i++) {
+      if (!myInnerRanges.get(i).equals(range.myInnerRanges.get(i))) return false;
+    }
+
+    return true;
   }
 
   public String toString() {
-    return String.format("%s, %s, %s, %s, %s", myOffset1, myOffset2, myUpToDateOffset1, myUpToDateOffset2, getTypeName());
-  }
-
-  @NonNls
-  private String getTypeName() {
-    switch (myType) {
-      case MODIFIED:
-        return "MODIFIED";
-      case INSERTED:
-        return "INSERTED";
-      case DELETED:
-        return "DELETED";
-    }
-    return "UNKNOWN";
+    return String.format("%s, %s, %s, %s", myLine1, myLine2, myVcsLine1, myVcsLine2);
   }
 
   public byte getType() {
-    return myType;
-  }
-
-  public int getUpToDateRangeLength() {
-    return myUpToDateOffset2 - myUpToDateOffset1;
+    if (myLine1 == myLine2) return DELETED;
+    if (myVcsLine1 == myVcsLine2) return INSERTED;
+    return MODIFIED;
   }
 
   public void shift(int shift) {
-    myOffset1 += shift;
-    myOffset2 += shift;
+    myLine1 += shift;
+    myLine2 += shift;
+
+    if (myInnerRanges != null) {
+      for (InnerRange range : myInnerRanges) {
+        range.shift(shift);
+      }
+    }
   }
 
-  public int getOffset1() {
-    return myOffset1;
+  @Nullable
+  public List<InnerRange> getInnerRanges() {
+    return myInnerRanges;
   }
 
-  public int getOffset2() {
-    return myOffset2;
+  public int getLine1() {
+    return myLine1;
   }
 
-  public int getUOffset1() {
-    return myUpToDateOffset1;
+  public int getLine2() {
+    return myLine2;
   }
 
-  public int getUOffset2() {
-    return myUpToDateOffset2;
+  public int getVcsLine1() {
+    return myVcsLine1;
   }
 
-  public boolean canBeMergedWith(@NotNull Range range) {
-    return myOffset2 == range.myOffset1;
-  }
-
-  @NotNull
-  public Range mergeWith(@NotNull Range range) {
-    return new Range(myOffset1, range.myOffset2, myUpToDateOffset1, range.myUpToDateOffset2, mergedStatusWith(range));
-  }
-
-  private byte mergedStatusWith(@NotNull Range range) {
-    byte type = myType;
-    if (myType != range.myType) type = MODIFIED;
-    return type;
+  public int getVcsLine2() {
+    return myVcsLine2;
   }
 
   public boolean hasHighlighter() {
     return myRangeHighlighter != null;
   }
 
-  public void setHighlighter(RangeHighlighter highlighter) {
+  public void setHighlighter(@Nullable RangeHighlighter highlighter) {
     myRangeHighlighter = highlighter;
   }
 
@@ -155,21 +142,88 @@ public class Range {
     return myRangeHighlighter;
   }
 
-  public boolean contains(int offset1, int offset2) {
-    return  getOffset1() <= offset1 && getOffset2() >= offset2;
+  public boolean isValid() {
+    return myValid;
   }
 
-  public boolean containsLine(int line) {
-    if (myType == DELETED) return (myOffset1 - 1) <= line
-                                  && (myOffset2) >= line;
-    return myOffset1 <= line && myOffset2 >= line;
+  public void invalidate() {
+    myValid = false;
   }
 
-  public boolean isAfter(int line) {
-    if (myType == DELETED)
-      return (getOffset1() - 1) > line;
-    else
-      return getOffset1() > line;
+  public static class InnerRange {
+    private int myLine1;
+    private int myLine2;
+    private final byte myType;
+
+    public InnerRange(int line1, int line2, byte type) {
+      myLine1 = line1;
+      myLine2 = line2;
+      myType = type;
+    }
+
+    public int getLine1() {
+      return myLine1;
+    }
+
+    public int getLine2() {
+      return myLine2;
+    }
+
+    public byte getType() {
+      return myType;
+    }
+
+    public void shift(int shift) {
+      myLine1 += shift;
+      myLine2 += shift;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+
+      InnerRange range = (InnerRange)o;
+
+      if (myLine1 != range.myLine1) return false;
+      if (myLine2 != range.myLine2) return false;
+      if (myType != range.myType) return false;
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = myLine1;
+      result = 31 * result + myLine2;
+      result = 31 * result + (int)myType;
+      return result;
+    }
+
+    public String toString() {
+      return String.format("%s, %s, %s", myLine1, myLine2, getTypeName(myType));
+    }
   }
 
+  /*
+   * Check, if caret at <line> is corresponds to the current range
+   */
+  public boolean isSelectedByLine(int line) {
+    return DiffUtil.isSelectedByLine(line, myLine1, myLine2);
+  }
+
+  @NotNull
+  private static String getTypeName(byte type) {
+    switch (type) {
+      case MODIFIED:
+        return "MODIFIED";
+      case INSERTED:
+        return "INSERTED";
+      case DELETED:
+        return "DELETED";
+      case EQUAL:
+        return "EQUAL";
+    }
+    return "UNKNOWN(" + type + ")";
+  }
 }

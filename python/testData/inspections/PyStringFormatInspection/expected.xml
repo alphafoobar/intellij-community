@@ -160,4 +160,30 @@
     <line>99</line>
     <description>Too few arguments for format string</description>
   </problem>
+  <problem>
+    <file>string-format.py</file>
+    <line>103</line>
+    <description>Unexpected type</description>
+  </problem>
+  <problem>
+    <file>string-format.py</file>
+    <line>104</line>
+    <description>Too few arguments for format string</description>
+  </problem>
+  <problem>
+    <file>string-format.py</file>
+    <line>105</line>
+    <description>Too many arguments for format string</description>
+  </problem>
+  <problem>
+    <file>string-format.py</file>
+    <line>124</line>
+    <description>Too few arguments for format string</description>
+  </problem>
+  <problem>
+    <file>string-format.py</file>
+    <line>126</line>
+    <description>Too few arguments for format string</description>
+  </problem>
+
 </problems>

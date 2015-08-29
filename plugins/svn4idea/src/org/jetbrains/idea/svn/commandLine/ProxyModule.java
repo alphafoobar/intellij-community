@@ -15,13 +15,11 @@
  */
 package org.jetbrains.idea.svn.commandLine;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.svn.IdeaSVNConfigFile;
-import org.jetbrains.idea.svn.SvnAuthenticationManager;
-import org.jetbrains.idea.svn.SvnConfiguration;
-import org.jetbrains.idea.svn.checkin.IdeaSvnkitBasedAuthenticationCallback;
+import org.jetbrains.idea.svn.auth.AuthenticationService;
+import org.jetbrains.idea.svn.auth.SvnAuthenticationManager;
 import org.tmatesoft.svn.core.SVNURL;
 
 import java.net.InetSocketAddress;
@@ -32,48 +30,39 @@ import java.net.Proxy;
  */
 public class ProxyModule extends BaseCommandRuntimeModule {
 
-  private static final Logger LOG = Logger.getInstance(ProxyModule.class);
-
   public ProxyModule(@NotNull CommandRuntime runtime) {
     super(runtime);
   }
 
   @Override
   public void onStart(@NotNull Command command) throws SvnBindException {
-    if (myAuthCallback.haveDataForTmpConfig()) {
+    if (myAuthenticationService.haveDataForTmpConfig() && !CommandRuntime.isLocal(command)) {
       setupProxy(command);
     }
   }
 
   private void setupProxy(@NotNull Command command) {
-    // TODO: We assume that if repository url is null - command is local and do not require repository access
-    // TODO: Check if this is correct for all cases
-    SVNURL repositoryUrl = command.getRepositoryUrl();
+    SVNURL repositoryUrl = command.requireRepositoryUrl();
+    Proxy proxy = AuthenticationService.getIdeaDefinedProxy(repositoryUrl);
 
-    if (repositoryUrl != null) {
-      Proxy proxy = IdeaSvnkitBasedAuthenticationCallback.getIdeaDefinedProxy(repositoryUrl);
+    if (proxy != null) {
+      String hostGroup = ensureGroupForHost(command, repositoryUrl.getHost());
+      InetSocketAddress address = (InetSocketAddress)proxy.address();
 
-      if (proxy != null) {
-        String hostGroup = ensureGroupForHost(command, repositoryUrl.getHost());
-        InetSocketAddress address = (InetSocketAddress)proxy.address();
-
-        command.put("--config-option");
-        command.put(String.format("servers:%s:http-proxy-host=%s", hostGroup, address.getHostName()));
-        command.put("--config-option");
-        command.put(String.format("servers:%s:http-proxy-port=%s", hostGroup, address.getPort()));
-      }
-    } else {
-      LOG.info("Configured proxy should be used, but repository url is null for command - " + command.getText());
+      command.put("--config-option");
+      command.put(String.format("servers:%s:http-proxy-host=%s", hostGroup, address.getHostName()));
+      command.put("--config-option");
+      command.put(String.format("servers:%s:http-proxy-port=%s", hostGroup, address.getPort()));
     }
   }
 
   @NotNull
   private String ensureGroupForHost(@NotNull Command command, @NotNull String host) {
-    IdeaSVNConfigFile configFile = new IdeaSVNConfigFile(myAuthCallback.getSpecialConfigDir());
+    IdeaSVNConfigFile configFile = new IdeaSVNConfigFile(myAuthenticationService.getSpecialConfigDir());
     String groupName = SvnAuthenticationManager.getGroupForHost(host, configFile);
 
     if (StringUtil.isEmptyOrSpaces(groupName)) {
-      groupName = SvnConfiguration.getNewGroupName(host, configFile);
+      groupName = IdeaSVNConfigFile.getNewGroupName(host, configFile);
 
       command.put("--config-option");
       command.put(String.format("servers:groups:%s=%s*", groupName, host));

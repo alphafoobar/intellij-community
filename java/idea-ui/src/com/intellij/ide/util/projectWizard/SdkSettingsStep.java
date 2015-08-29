@@ -47,16 +47,29 @@ public class SdkSettingsStep extends ModuleWizardStep {
   protected final WizardContext myWizardContext;
   protected final ProjectSdksModel myModel;
   private final ModuleBuilder myModuleBuilder;
+  private final JPanel myJdkPanel;
 
-  public SdkSettingsStep(@NotNull SettingsStep settingsStep, @NotNull ModuleBuilder moduleBuilder, @NotNull Condition<SdkTypeId> sdkFilter) {
+  public SdkSettingsStep(SettingsStep settingsStep, @NotNull ModuleBuilder moduleBuilder,
+                           @NotNull Condition<SdkTypeId> sdkFilter) {
+
+    this(settingsStep.getContext(), moduleBuilder, sdkFilter);
+    if (!isEmpty()) {
+      settingsStep.addSettingsField(getSdkFieldLabel(settingsStep.getContext().getProject()), myJdkPanel);
+    }
+  }
+
+  public SdkSettingsStep(WizardContext context,
+                         @NotNull ModuleBuilder moduleBuilder,
+                         @NotNull Condition<SdkTypeId> sdkFilter) {
     myModuleBuilder = moduleBuilder;
 
-    myWizardContext = settingsStep.getContext();
+    myWizardContext = context;
     myModel = new ProjectSdksModel();
     Project project = myWizardContext.getProject();
     myModel.reset(project);
 
     myJdkComboBox = new JdkComboBox(myModel, sdkFilter);
+    myJdkPanel = new JPanel(new BorderLayout(4, 0));
 
     final PropertiesComponent component = project == null ? PropertiesComponent.getInstance() : PropertiesComponent.getInstance(project);
     ModuleType moduleType = moduleBuilder.getModuleType();
@@ -68,43 +81,52 @@ public class SdkSettingsStep extends ModuleWizardStep {
         if (jdk != null) {
           component.setValue(selectedJdkProperty, jdk.getName());
         }
+        onSdkSelected(jdk);
       }
     });
 
-    if (project != null) {
-      Sdk sdk = ProjectRootManager.getInstance(project).getProjectSdk();
-      if (sdk != null && moduleBuilder.isSuitableSdkType(sdk.getSdkType())) {
-        // use project SDK
-        return;
-      }
-    }
-    else  {
-      // set default project SDK
-      Project defaultProject = ProjectManager.getInstance().getDefaultProject();
-      Sdk sdk = ProjectRootManager.getInstance(defaultProject).getProjectSdk();
-      if (sdk != null && sdkFilter.value(sdk.getSdkType())) {
-        myJdkComboBox.setSelectedJdk(sdk);
-      }
-    }
-
-    String value = component.getValue(selectedJdkProperty);
-    if (value != null) {
-      Sdk jdk = ProjectJdkTable.getInstance().findJdk(value);
-      if (jdk != null) {
-        myJdkComboBox.setSelectedJdk(jdk);
-      }
-    }
+    Sdk sdk = getPreselectedSdk(project, component.getValue(selectedJdkProperty), sdkFilter);
+    myJdkComboBox.setSelectedJdk(sdk);
 
     JButton button = new JButton("Ne\u001Bw...");
     myJdkComboBox.setSetupButton(button, project, myModel,
                                  project == null ? new JdkComboBox.NoneJdkComboBoxItem() : new JdkComboBox.ProjectJdkComboBoxItem(),
                                  null,
                                  false);
-    JPanel jdkPanel = new JPanel(new BorderLayout(4, 0));
-    jdkPanel.add(myJdkComboBox);
-    jdkPanel.add(button, BorderLayout.EAST);
-    settingsStep.addSettingsField(getSdkFieldLabel(project), jdkPanel);
 
+    myJdkPanel.add(myJdkComboBox);
+    myJdkPanel.add(myJdkComboBox.getSetUpButton(), BorderLayout.EAST);
+  }
+
+  private Sdk getPreselectedSdk(Project project, String lastUsedSdk, Condition<SdkTypeId> sdkFilter) {
+    if (project != null) {
+      Sdk sdk = ProjectRootManager.getInstance(project).getProjectSdk();
+      if (sdk != null && myModuleBuilder.isSuitableSdkType(sdk.getSdkType())) {
+        // use project SDK
+        //noinspection unchecked
+        myJdkComboBox.insertItemAt(new JdkComboBox.ProjectJdkComboBoxItem(), 0);
+        return null;
+      }
+    }
+    if (lastUsedSdk != null) {
+      Sdk sdk = ProjectJdkTable.getInstance().findJdk(lastUsedSdk);
+      if (sdk != null && myModuleBuilder.isSuitableSdkType(sdk.getSdkType())) {
+        return sdk;
+      }
+    }
+    // set default project SDK
+    Project defaultProject = ProjectManager.getInstance().getDefaultProject();
+    Sdk selected = ProjectRootManager.getInstance(defaultProject).getProjectSdk();
+    if (selected != null && sdkFilter.value(selected.getSdkType())) {
+      return selected;
+    }
+    return null;
+  }
+
+  protected void onSdkSelected(Sdk sdk) {}
+
+  public boolean isEmpty() {
+    return myJdkPanel.getComponentCount() == 0;
   }
 
   @NotNull
@@ -114,7 +136,7 @@ public class SdkSettingsStep extends ModuleWizardStep {
 
   @Override
   public JComponent getComponent() {
-    return null;
+    return myJdkPanel;
   }
 
   @Override
@@ -125,16 +147,13 @@ public class SdkSettingsStep extends ModuleWizardStep {
       myWizardContext.setProjectJdk(jdk);
     }
     else {
-      Sdk sdk = ProjectRootManager.getInstance(project).getProjectSdk();
-      if (sdk == null || !myModuleBuilder.isSuitableSdkType(sdk.getSdkType())) {
-        myModuleBuilder.setModuleJdk(myJdkComboBox.getSelectedJdk());
-      } // else, inherit project jdk
+      myModuleBuilder.setModuleJdk(myJdkComboBox.getSelectedJdk());
     }
   }
 
   @Override
   public boolean validate() throws ConfigurationException {
-    if (myJdkComboBox.getSelectedJdk() == null) {
+    if (myJdkComboBox.getSelectedJdk() == null && !myJdkComboBox.isProjectJdkSelected()) {
       if (Messages.showDialog(getNoSdkMessage(),
                                        IdeBundle.message("title.no.jdk.specified"),
                                        new String[]{CommonBundle.getYesButtonText(), CommonBundle.getNoButtonText()}, 1, Messages.getWarningIcon()) != Messages.YES) {

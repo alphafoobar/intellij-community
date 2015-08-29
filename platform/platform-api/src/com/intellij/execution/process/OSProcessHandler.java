@@ -17,6 +17,7 @@ package com.intellij.execution.process;
 
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.execution.configurations.PtyCommandLine;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -30,11 +31,13 @@ import java.util.concurrent.Future;
 
 public class OSProcessHandler extends BaseOSProcessHandler {
   private static final Logger LOG = Logger.getInstance("#com.intellij.execution.process.OSProcessHandler");
+  private boolean myHasPty = false;
 
   private boolean myDestroyRecursively = true;
 
   public OSProcessHandler(@NotNull GeneralCommandLine commandLine) throws ExecutionException {
     this(commandLine.createProcess(), commandLine.getCommandLineString(), CharsetToolkit.UTF8_CHARSET);
+    setHasPty(commandLine instanceof PtyCommandLine);
   }
 
   public OSProcessHandler(@NotNull final Process process) {
@@ -92,18 +95,67 @@ public class OSProcessHandler extends BaseOSProcessHandler {
   }
 
   /**
-   * Kill the whole process tree.
+   * Kills the whole process tree asynchronously.
+   * As a potentially time-consuming operation, it's executed asynchronously on a pooled thread.
    *
    * @param process Process
-   * @return True if process tree has been successfully killed.
    */
-  protected boolean killProcessTree(final Process process) {
+  protected void killProcessTree(@NotNull final Process process) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      killProcessTreeSync(process);
+    }
+    else {
+      executeOnPooledThread(new Runnable() {
+        @Override
+        public void run() {
+          killProcessTreeSync(process);
+        }
+      });
+    }
+  }
+
+  private void killProcessTreeSync(@NotNull Process process) {
     LOG.debug("killing process tree");
     final boolean destroyed = OSProcessManager.getInstance().killProcessTree(process);
     if (!destroyed) {
-      LOG.warn("Cannot kill process tree. Trying to destroy process using Java API. Cmdline:\n" + myCommandLine);
-      process.destroy();
+      if (isTerminated(process)) {
+        LOG.warn("Process has been already terminated: " + myCommandLine);
+      }
+      else {
+        LOG.warn("Cannot kill process tree. Trying to destroy process using Java API. Cmdline:\n" + myCommandLine);
+        process.destroy();
+      }
     }
-    return destroyed;
+  }
+
+  private static boolean isTerminated(@NotNull Process process) {
+    try {
+      process.exitValue();
+      return true;
+    }
+    catch (IllegalThreadStateException e) {
+      return false;
+    }
+  }
+
+  /**
+   * In case of pty this process handler will use blocking read. The value should be set before
+   * startNotify invocation. It is set by default in case of using GeneralCommandLine based constructor.
+   *
+   * @param hasPty true if process is pty based
+   */
+  public void setHasPty(boolean hasPty) {
+    myHasPty = hasPty;
+  }
+
+  @Override
+  protected boolean useNonBlockingRead() {
+    if (myHasPty) {
+      // blocking read in case of pty based process
+      return false;
+    }
+    else {
+      return super.useNonBlockingRead();
+    }
   }
 }

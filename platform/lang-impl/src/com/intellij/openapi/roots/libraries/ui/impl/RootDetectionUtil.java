@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.roots.libraries.ui.LibraryRootsComponentDescriptor;
 import com.intellij.openapi.roots.libraries.ui.LibraryRootsDetector;
 import com.intellij.openapi.roots.libraries.ui.OrderRoot;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -69,7 +70,7 @@ public class RootDetectionUtil {
         try {
           for (VirtualFile rootCandidate : rootCandidates) {
             final Collection<DetectedLibraryRoot> roots = detector.detectRoots(rootCandidate, indicator);
-            if (!roots.isEmpty() && allRootsHaveOneTypeAndEqualTo(roots, rootCandidate)) {
+            if (!roots.isEmpty() && allRootsHaveOneTypeAndEqualToOrAreDirectParentOf(roots, rootCandidate)) {
               for (DetectedLibraryRoot root : roots) {
                 final LibraryRootType libraryRootType = root.getTypes().get(0);
                 result.add(new OrderRoot(root.getFile(), libraryRootType.getType(), libraryRootType.isJarDirectory()));
@@ -80,7 +81,7 @@ public class RootDetectionUtil {
                 final HashMap<LibraryRootType, String> names = new HashMap<LibraryRootType, String>();
                 for (LibraryRootType type : root.getTypes()) {
                   final String typeName = detector.getRootTypeName(type);
-                  LOG.assertTrue(typeName != null, "Unexpected root type " + type.getType().name() + (type.isJarDirectory() ? " (jar directory)" : "") + ", detectors: " + detector);
+                  LOG.assertTrue(typeName != null, "Unexpected root type " + type.getType().name() + (type.isJarDirectory() ? " (JAR directory)" : "") + ", detectors: " + detector);
                   names.put(type, typeName);
                 }
                 suggestedRoots.add(new SuggestedChildRootInfo(rootCandidate, root, names));
@@ -97,8 +98,7 @@ public class RootDetectionUtil {
       final DetectedRootsChooserDialog dialog = parentComponent != null
                                                 ? new DetectedRootsChooserDialog(parentComponent, suggestedRoots)
                                                 : new DetectedRootsChooserDialog(project, suggestedRoots);
-      dialog.show();
-      if (!dialog.isOK()) {
+      if (!dialog.showAndGet()) {
         return Collections.emptyList();
       }
       for (SuggestedChildRootInfo rootInfo : dialog.getChosenRoots()) {
@@ -113,7 +113,7 @@ public class RootDetectionUtil {
         for (boolean isJarDirectory : new boolean[]{false, true}) {
           final String typeName = detector.getRootTypeName(new LibraryRootType(type, isJarDirectory));
           if (typeName != null) {
-            types.put(typeName, Pair.create(type, isJarDirectory));
+            types.put(StringUtil.capitalizeWords(typeName, true), Pair.create(type, isJarDirectory));
           }
         }
       }
@@ -140,9 +140,9 @@ public class RootDetectionUtil {
     return result;
   }
 
-  private static boolean allRootsHaveOneTypeAndEqualTo(Collection<DetectedLibraryRoot> roots, VirtualFile candidate) {
+  private static boolean allRootsHaveOneTypeAndEqualToOrAreDirectParentOf(Collection<DetectedLibraryRoot> roots, VirtualFile candidate) {
     for (DetectedLibraryRoot root : roots) {
-      if (root.getTypes().size() > 1 || !root.getFile().equals(candidate)) {
+      if (root.getTypes().size() > 1 || !root.getFile().equals(candidate) && !root.getFile().equals(candidate.getParent())) {
         return false;
       }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.navigation.ItemPresentation;
 import com.intellij.navigation.NavigationItem;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
@@ -42,6 +43,7 @@ import com.intellij.psi.PsiNamedElement;
 import com.intellij.ui.CollectionListModel;
 import com.intellij.ui.JBListWithHintProvider;
 import com.intellij.ui.popup.AbstractPopup;
+import com.intellij.ui.popup.HintUpdateSupply;
 import com.intellij.usages.UsageView;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
@@ -86,10 +88,10 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
   @Nullable
   protected abstract GotoData getSourceAndTargetElements(Editor editor, PsiFile file);
 
-  private void show(final Project project,
-                    Editor editor,
-                    final PsiFile file,
-                    final GotoData gotoData) {
+  private void show(@NotNull final Project project,
+                    @NotNull Editor editor,
+                    @NotNull PsiFile file,
+                    @NotNull final GotoData gotoData) {
     final PsiElement[] targets = gotoData.targets;
     final List<AdditionalAction> additionalActions = gotoData.additionalActions;
 
@@ -127,6 +129,8 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
         return selectedValue instanceof PsiElement ? (PsiElement) selectedValue : null;
       }
     };
+
+    list.setFont(EditorUtil.getEditorFont());
     
     list.setCellRenderer(new DefaultListCellRenderer() {
       @Override
@@ -152,8 +156,13 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
           }
           else {
             Navigatable nav = element instanceof Navigatable ? (Navigatable)element : EditSourceUtil.getDescriptor((PsiElement)element);
-            if (nav != null && nav.canNavigate()) {
-              navigateToElement(nav);
+            try {
+              if (nav != null && nav.canNavigate()) {
+                navigateToElement(nav);
+              }
+            }
+            catch (IndexNotReadyException e) {
+              DumbService.getInstance(project).showDumbModeNotification("Navigation is not available while indexing");
             }
           }
         }
@@ -179,7 +188,7 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
       setCancelCallback(new Computable<Boolean>() {
         @Override
         public Boolean compute() {
-          list.hideHint();
+          HintUpdateSupply.hideHint(list);
           return true;
         }
       }).
@@ -193,6 +202,10 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
       }).
       setAdText(getAdText(gotoData.source, targets.length)).
       createPopup();
+
+    builder.getScrollPane().setBorder(null);
+    builder.getScrollPane().setViewportBorder(null);
+
     if (gotoData.listUpdaterTask != null) {
       gotoData.listUpdaterTask.init((AbstractPopup)popup, list, usageView);
       ProgressManager.getInstance().run(gotoData.listUpdaterTask);
@@ -229,7 +242,8 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
     };
   }
 
-  protected static PsiElementListCellRenderer createRenderer(GotoData gotoData, PsiElement eachTarget) {
+  @NotNull
+  public static PsiElementListCellRenderer createRenderer(@NotNull GotoData gotoData, @NotNull PsiElement eachTarget) {
     PsiElementListCellRenderer renderer = null;
     for (GotoTargetRendererProvider eachProvider : Extensions.getExtensions(GotoTargetRendererProvider.EP_NAME)) {
       renderer = eachProvider.getRenderer(eachTarget, gotoData);
@@ -250,18 +264,23 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
     return true;
   }
 
+  @NotNull
   protected abstract String getChooserTitle(PsiElement sourceElement, String name, int length);
+  @NotNull
   protected String getFindUsagesTitle(PsiElement sourceElement, String name, int length) {
     return getChooserTitle(sourceElement, name, length);
   }
 
-  protected abstract String getNotFoundMessage(Project project, Editor editor, PsiFile file);
+  @NotNull
+  protected abstract String getNotFoundMessage(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file);
+
   @Nullable
   protected String getAdText(PsiElement source, int length) {
     return null;
   }
 
   public interface AdditionalAction {
+    @NotNull
     String getText();
 
     Icon getIcon();
@@ -270,7 +289,7 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
   }
 
   public static class GotoData {
-    public final PsiElement source;
+    @NotNull public final PsiElement source;
     public PsiElement[] targets;
     public final List<AdditionalAction> additionalActions;
 
@@ -279,7 +298,7 @@ public abstract class GotoTargetHandler implements CodeInsightActionHandler {
     protected final Set<String> myNames;
     public Map<Object, PsiElementListCellRenderer> renderers = new HashMap<Object, PsiElementListCellRenderer>();
 
-    public GotoData(PsiElement source, PsiElement[] targets, List<AdditionalAction> additionalActions) {
+    public GotoData(@NotNull PsiElement source, @NotNull PsiElement[] targets, @NotNull List<AdditionalAction> additionalActions) {
       this.source = source;
       this.targets = targets;
       this.additionalActions = additionalActions;

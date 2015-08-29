@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static com.intellij.openapi.actionSystem.PlatformDataKeys.CONTEXT_COMPONENT;
+
 /*
  * Class SetValueAction
  * @author Jeka
@@ -71,7 +73,8 @@ public class JavaMarkObjectActionHandler extends MarkObjectActionHandler {
     
     final DebuggerTree tree = node.getTree();
     tree.saveState(node);
-    
+
+    final Component parent = event.getData(CONTEXT_COMPONENT);
     final ValueDescriptorImpl valueDescriptor = ((ValueDescriptorImpl)descriptor);
     final DebuggerContextImpl debuggerContext = tree.getDebuggerContext();
     final DebugProcessImpl debugProcess = debuggerContext.getDebugProcess();
@@ -93,9 +96,8 @@ public class JavaMarkObjectActionHandler extends MarkObjectActionHandler {
               final boolean suggestAdditionalMarkup = canSuggestAdditionalMarkup(debugProcess, valueDescriptor.getValue());
               SwingUtilities.invokeAndWait(new Runnable() {
                 public void run() {
-                  ObjectMarkupPropertiesDialog dialog = new ObjectMarkupPropertiesDialog(defaultText, suggestAdditionalMarkup);
-                  dialog.show();
-                  if (dialog.isOK()) {
+                  ObjectMarkupPropertiesDialog dialog = new ObjectMarkupPropertiesDialog(parent, defaultText, suggestAdditionalMarkup);
+                  if (dialog.showAndGet()) {
                     result.set(Pair.create(dialog.getConfiguredMarkup(), dialog.isMarkAdditionalFields()));
                   }
                 }

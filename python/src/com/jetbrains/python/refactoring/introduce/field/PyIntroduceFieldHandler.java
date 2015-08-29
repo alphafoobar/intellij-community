@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,8 @@ import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
 import com.jetbrains.python.PyNames;
-import com.jetbrains.python.inspections.quickfix.AddFieldQuickFix;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.inspections.quickfix.AddFieldQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyFunctionBuilder;
 import com.jetbrains.python.refactoring.PyReplaceExpressionUtil;
@@ -49,7 +49,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
 
 /**
  * @author Dennis.Ushakov
@@ -310,7 +313,7 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
 
   private static void putCaretOnFieldName(Editor editor, PsiElement occurrence) {
     PyQualifiedExpression qExpr = PsiTreeUtil.getParentOfType(occurrence, PyQualifiedExpression.class, false);
-    if (qExpr != null && qExpr.getQualifier() == null) {
+    if (qExpr != null && !qExpr.isQualified()) {
       qExpr = PsiTreeUtil.getParentOfType(qExpr, PyQualifiedExpression.class);
     }
     if (qExpr != null) {
@@ -383,5 +386,10 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
         }
       }
     }
+  }
+
+  @Override
+  protected String getRefactoringId() {
+    return "refactoring.python.introduce.field";
   }
 }

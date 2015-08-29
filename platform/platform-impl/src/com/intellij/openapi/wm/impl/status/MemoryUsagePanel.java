@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,17 @@
 package com.intellij.openapi.wm.impl.status;
 
 import com.intellij.concurrency.JobScheduler;
-import com.intellij.openapi.util.SystemInfo;
+import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.wm.CustomStatusBarWidget;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.UIBundle;
-import com.intellij.util.SystemProperties;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.update.Activatable;
+import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -39,10 +41,6 @@ import java.util.concurrent.TimeUnit;
 
 public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
   @NonNls public static final String WIDGET_ID = "Memory";
-
-  // todo: drop unless J. will insist to keep old style look
-  private static final boolean FRAMED_STYLE = SystemInfo.isMac || !SystemProperties.getBooleanProperty("idea.ui.old.mem.use", false);
-
   private static final int MEGABYTE = 1024 * 1024;
   @NonNls private static final String SAMPLE_STRING;
   
@@ -50,16 +48,11 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
     long maxMemory = Math.min(Runtime.getRuntime().maxMemory() / MEGABYTE, 9999);
     SAMPLE_STRING = maxMemory + " of " + maxMemory + "M ";
   }
-  private static final int HEIGHT = 16;
-  private static final Color USED_COLOR_1 = new JBColor(Gray._185, Gray._150);
-  private static final Color USED_COLOR_2 = new JBColor(Gray._145, Gray._120);
-  private static final Color UNUSED_COLOR_1 = new JBColor(Gray._200.withAlpha(100), Gray._120);
-  private static final Color UNUSED_COLOR_2 = new JBColor(Gray._150.withAlpha(130), Gray._100);
-  private static final Color UNUSED_COLOR_3 = Gray._175;
+  private static final Color USED_COLOR = new JBColor(Gray._185, Gray._110);
+  private static final Color UNUSED_COLOR = new JBColor(Gray._200.withAlpha(100), Gray._90);
 
   private long myLastTotal = -1;
   private long myLastUsed = -1;
-  private ScheduledFuture<?> myFuture;
   private Image myBufferedImage;
   private boolean myWasPressed;
 
@@ -76,12 +69,34 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
 
     setBorder(StatusBarWidget.WidgetBorder.INSTANCE);
     updateUI();
+
+    new UiNotifyConnector(this, new Activatable() {
+      private ScheduledFuture<?> myFuture;
+
+      @Override
+      public void showNotify() {
+        myFuture = JobScheduler.getScheduler().scheduleWithFixedDelay(new Runnable() {
+          public void run() {
+            if (isDisplayable()) {
+              updateState();
+            }
+          }
+        }, 1, 5, TimeUnit.SECONDS);
+      }
+
+      @Override
+      public void hideNotify() {
+        if (myFuture != null) {
+          myFuture.cancel(true);
+          myFuture = null;
+        }
+      }
+    });
+
   }
 
   @Override
   public void dispose() {
-    myFuture.cancel(true);
-    myFuture = null;
   }
 
   @Override
@@ -113,8 +128,7 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
   }
 
   private static Font getWidgetFont() {
-    final Font font = UIUtil.getLabelFont();
-    return FRAMED_STYLE ? font.deriveFont(11.0f) : font;
+    return JBUI.Fonts.label(11);
   }
 
   @Override
@@ -130,7 +144,7 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
 
     if (myBufferedImage == null || stateChanged) {
       final Dimension size = getSize();
-      final Insets insets = FRAMED_STYLE ? getInsets() : new Insets(0, 0, 0, 0);
+      final Insets insets = getInsets();
 
       myBufferedImage = UIUtil.createImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
       final Graphics2D g2 = (Graphics2D)myBufferedImage.getGraphics().create();
@@ -144,36 +158,21 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
       final int totalBarLength = size.width - insets.left - insets.right;
       final int usedBarLength = (int)(totalBarLength * usedMem / maxMem);
       final int unusedBarLength = (int)(totalBarLength * unusedMem / maxMem);
-      final int barHeight = FRAMED_STYLE ? HEIGHT : size.height;
+      final int barHeight = Math.max(size.height, getFont().getSize() + 2);
       final int yOffset = (size.height - barHeight) / 2;
       final int xOffset = insets.left;
 
       // background
-      if (!UIUtil.isUnderAquaLookAndFeel()) {
-        g2.setColor(UIUtil.getControlColor());
-      }
-      else {
-        g2.setPaint(UIUtil.getGradientPaint(0, 0, new JBColor(Gray._190, Gray._120), 0, barHeight, new JBColor(Gray._230, Gray._160)));
-      }
-      g2.fillRect(xOffset, yOffset, totalBarLength, barHeight);
+      g2.setColor(UIUtil.getPanelBackground());
+      g2.fillRect(0, 0, size.width, size.height);
 
       // gauge (used)
-      setGradient(g2, pressed, barHeight, USED_COLOR_1, USED_COLOR_2);
+      g2.setColor(USED_COLOR);
       g2.fillRect(xOffset, yOffset, usedBarLength, barHeight);
 
       // gauge (unused)
-      setGradient(g2, pressed, barHeight, UNUSED_COLOR_1, UNUSED_COLOR_2);
+      g2.setColor(UNUSED_COLOR);
       g2.fillRect(xOffset + usedBarLength, yOffset, unusedBarLength, barHeight);
-      if (!UIUtil.isUnderDarcula()) {
-        g2.setColor(UNUSED_COLOR_3);
-        g2.drawLine(xOffset + usedBarLength + unusedBarLength, yOffset, xOffset + usedBarLength + unusedBarLength, barHeight);
-      }
-
-      // frame
-      if (FRAMED_STYLE && !UIUtil.isUnderDarcula()) {
-        g2.setColor(USED_COLOR_2);
-        g2.drawRect(xOffset, yOffset, totalBarLength - 1, barHeight - 1);
-      }
 
       // label
       g2.setFont(getFont());
@@ -183,34 +182,30 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
       final FontMetrics fontMetrics = g.getFontMetrics();
       final int infoWidth = fontMetrics.charsWidth(info.toCharArray(), 0, info.length());
       final int infoHeight = fontMetrics.getAscent();
-      UIUtil.applyRenderingHints(g2);
-      g2.setColor(UIUtil.getLabelForeground());
+      UISettings.setupAntialiasing(g2);
+      final Color fg = pressed ? UIUtil.getLabelDisabledForeground() : JBColor.foreground();
+      g2.setColor(fg);
       g2.drawString(info, xOffset + (totalBarLength - infoWidth) / 2, yOffset + infoHeight + (barHeight - infoHeight) / 2 - 1);
 
       g2.dispose();
     }
 
     UIUtil.drawImage(g, myBufferedImage, 0, 0, null);
-  }
-
-  private static void setGradient(Graphics2D g2, boolean invert, int height, Color start, Color end) {
-    if (UIUtil.isUnderDarcula()) {
-      start = start.darker();
-      end = end.darker();
-    }
-    if (invert) {
-      g2.setPaint(UIUtil.getGradientPaint(0, 0, end, 0, height, start));
-    }
-    else {
-      g2.setPaint(UIUtil.getGradientPaint(0, 0, start, 0, height, end));
+    if (UIUtil.isRetina() && !UIUtil.isUnderDarcula()) {
+      Graphics2D g2 = (Graphics2D)g.create(0, 0, getWidth(), getHeight());
+      g2.scale(0.5, 0.5);
+      g2.setColor(Gray.x91);
+      g2.drawLine(0,0,2 * getWidth(), 0);
+      g2.scale(1, 1);
+      g2.dispose();
     }
   }
 
   @Override
   public Dimension getPreferredSize() {
     final Insets insets = getInsets();
-    int width = getFontMetrics(getWidgetFont()).stringWidth(SAMPLE_STRING) + insets.left + insets.right + 2;
-    int height = getFontMetrics(getWidgetFont()).getHeight() + insets.top + insets.bottom + 2;
+    int width = getFontMetrics(getWidgetFont()).stringWidth(SAMPLE_STRING) + insets.left + insets.right + JBUI.scale(2);
+    int height = getFontMetrics(getWidgetFont()).getHeight() + insets.top + insets.bottom + JBUI.scale(2);
     return new Dimension(width, height);
   }
 
@@ -222,21 +217,6 @@ public class MemoryUsagePanel extends JButton implements CustomStatusBarWidget {
   @Override
   public Dimension getMaximumSize() {
     return getPreferredSize();
-  }
-
-  /**
-   * Invoked when enclosed frame is being shown.
-   */
-  @Override
-  public void addNotify() {
-    myFuture = JobScheduler.getScheduler().scheduleWithFixedDelay(new Runnable() {
-      public void run() {
-        if (isDisplayable()) {
-          updateState();
-        }
-      }
-    }, 1, 5, TimeUnit.SECONDS);
-    super.addNotify();
   }
 
   private void updateState() {

@@ -18,14 +18,20 @@ package com.intellij.codeInspection;
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInspection.dataFlow.DataFlowInspection;
-import com.intellij.openapi.Disposable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.testFramework.LightProjectDescriptor;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author peter
  */
 public class DataFlowInspection8Test extends LightCodeInsightFixtureTestCase {
+  @NotNull
+  @Override
+  protected LightProjectDescriptor getProjectDescriptor() {
+    return JAVA_8;
+  }
 
   @Override
   protected String getTestDataPath() {
@@ -53,23 +59,50 @@ public class DataFlowInspection8Test extends LightCodeInsightFixtureTestCase {
     doTest();
   }
 
+  public void testUnboxingBoxingInLambdaReturn() throws Exception {
+    doTest();
+  }
+
+  public void testUnboxingInMethodReferences() throws Exception {
+    doTest();
+  }
+
   private void setupCustomAnnotations() {
     myFixture.addClass("package foo;\n\nimport java.lang.annotation.*;\n\n@Target({ElementType.TYPE_USE}) public @interface Nullable { }");
     myFixture.addClass("package foo;\n\nimport java.lang.annotation.*;\n\n@Target({ElementType.TYPE_USE}) public @interface NotNull { }");
     final NullableNotNullManager nnnManager = NullableNotNullManager.getInstance(getProject());
     nnnManager.setNotNulls("foo.NotNull");
     nnnManager.setNullables("foo.Nullable");
-    Disposer.register(myTestRootDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        nnnManager.setNotNulls();
-        nnnManager.setNullables();
-      }
+    Disposer.register(myTestRootDisposable, () -> {
+      nnnManager.setNotNulls();
+      nnnManager.setNullables();
     });
   }
+
+  public void testMethodReferenceOnNullable() { doTest(); }
+  public void testNullableVoidLambda() { doTest(); }
 
   public void testNullableForeachVariable() {
     setupCustomAnnotations();
     doTest();
   }
+
+  public void testNullableArrayComponent() {
+    setupCustomAnnotations();
+    final DataFlowInspection inspection = new DataFlowInspection();
+    inspection.IGNORE_ASSERT_STATEMENTS = true;
+    myFixture.enableInspections(inspection);
+    myFixture.testHighlighting(true, false, true, getTestName(false) + ".java");
+  }
+
+
+  public void testOptionalOfNullable() { doTest(); }
+
+  public void testLambdaParametersWithDefaultNullability() {
+    DataFlowInspectionTest.addJavaxNullabilityAnnotations(myFixture);
+    DataFlowInspectionTest.addJavaxDefaultNullabilityAnnotations(myFixture);
+
+    doTest();
+  }
+
 }

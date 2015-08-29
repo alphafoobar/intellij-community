@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.text.DateFormatUtil;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.plaf.TreeUI;
@@ -114,10 +115,12 @@ public class CommittedChangeListRenderer extends ColoredTreeCellRenderer {
     int descMaxWidth = availableWidth - dateCommitterSize - 8;
     boolean partial = (changeList instanceof ReceivedChangeList) && ((ReceivedChangeList)changeList).isPartial();
     int descWidth = 0;
+    int partialMarkerWidth = 0;
     if (partial) {
       final String partialMarker = VcsBundle.message("committed.changes.partial.list") + " ";
       append(partialMarker, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
-      descWidth += boldMetrics.stringWidth(partialMarker);
+      partialMarkerWidth = boldMetrics.stringWidth(partialMarker);
+      descWidth += partialMarkerWidth;
     }
 
     descWidth += fontMetrics.stringWidth(description);
@@ -145,19 +148,19 @@ public class CommittedChangeListRenderer extends ColoredTreeCellRenderer {
 
     if (description.isEmpty() && !truncated) {
       append(VcsBundle.message("committed.changes.empty.comment"), SimpleTextAttributes.GRAYED_ATTRIBUTES);
-      appendFixedTextFragmentWidth(descMaxWidth);
+      appendTextPadding(descMaxWidth);
     }
     else if (descMaxWidth < 0) {
       myRenderer.appendTextWithLinks(description);
     }
     else if (descWidth < descMaxWidth && !truncated) {
       myRenderer.appendTextWithLinks(description);
-      appendFixedTextFragmentWidth(descMaxWidth);
+      appendTextPadding(descMaxWidth);
     }
     else {
       final String moreMarker = VcsBundle.message("changes.browser.details.marker");
       int moreWidth = fontMetrics.stringWidth(moreMarker);
-      int remainingWidth = descMaxWidth - moreWidth - numberWidth - branchWidth;
+      int remainingWidth = descMaxWidth - moreWidth - numberWidth - branchWidth - partialMarkerWidth;
       description = truncateDescription(description, fontMetrics, remainingWidth);
       myRenderer.appendTextWithLinks(description);
       if (!StringUtil.isEmpty(description)) {
@@ -167,7 +170,7 @@ public class CommittedChangeListRenderer extends ColoredTreeCellRenderer {
         append(moreMarker, SimpleTextAttributes.LINK_ATTRIBUTES, new CommittedChangesTreeBrowser.MoreLauncher(myProject, changeList));
       }
       // align value is for the latest added piece
-      appendFixedTextFragmentWidth(descMaxWidth);
+      appendTextPadding(descMaxWidth);
     }
 
     append(changeList.getCommitterName(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
@@ -182,6 +185,7 @@ public class CommittedChangeListRenderer extends ColoredTreeCellRenderer {
     return description.substring(0, description.length()-1);
   }
 
+  @NotNull
   public Dimension getPreferredSize() {
     return new Dimension(2000, super.getPreferredSize().height);
   }

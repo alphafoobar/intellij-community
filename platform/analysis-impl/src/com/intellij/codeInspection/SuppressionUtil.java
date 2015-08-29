@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ import com.intellij.lang.LanguageCommenters;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.NullableComputable;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
@@ -52,7 +52,7 @@ public class SuppressionUtil extends SuppressionUtilCore {
                                                       "(\\s*,\\s*" + LocalInspectionTool.VALID_ID_PATTERN + ")*)\\s*\\w*";
 
   @NonNls
-  public static final Pattern SUPPRESS_IN_LINE_COMMENT_PATTERN = Pattern.compile("//" + COMMON_SUPPRESS_REGEXP);  // for Java, C, JS line comments
+  public static final Pattern SUPPRESS_IN_LINE_COMMENT_PATTERN = Pattern.compile("//" + COMMON_SUPPRESS_REGEXP + ".*");  // for Java, C, JS line comments
 
   @NonNls
   public static final String ALL = "ALL";
@@ -60,7 +60,7 @@ public class SuppressionUtil extends SuppressionUtilCore {
   private SuppressionUtil() {
   }
 
-  public static boolean isInspectionToolIdMentioned(@NotNull String inspectionsList, String inspectionToolID) {
+  public static boolean isInspectionToolIdMentioned(@NotNull String inspectionsList, @NotNull String inspectionToolID) {
     Iterable<String> ids = StringUtil.tokenize(inspectionsList, "[, ]");
 
     for (@NonNls String id : ids) {
@@ -71,17 +71,17 @@ public class SuppressionUtil extends SuppressionUtilCore {
   }
 
   @Nullable
-  public static PsiElement getStatementToolSuppressedIn(final PsiElement place,
-                                                        final String toolId,
-                                                        final Class<? extends PsiElement> statementClass) {
+  public static PsiElement getStatementToolSuppressedIn(@NotNull PsiElement place,
+                                                        @NotNull String toolId,
+                                                        @NotNull Class<? extends PsiElement> statementClass) {
     return getStatementToolSuppressedIn(place, toolId, statementClass, SUPPRESS_IN_LINE_COMMENT_PATTERN);
   }
 
   @Nullable
-  public static PsiElement getStatementToolSuppressedIn(final PsiElement place,
-                                                        final String toolId,
-                                                        final Class<? extends PsiElement> statementClass,
-                                                        final Pattern suppressInLineCommentPattern) {
+  public static PsiElement getStatementToolSuppressedIn(@NotNull PsiElement place,
+                                                        @NotNull String toolId,
+                                                        @NotNull Class<? extends PsiElement> statementClass,
+                                                        @NotNull Pattern suppressInLineCommentPattern) {
     PsiElement statement = PsiTreeUtil.getNonStrictParentOfType(place, statementClass);
     if (statement != null) {
       PsiElement prev = PsiTreeUtil.skipSiblingsBackward(statement, PsiWhiteSpace.class);
@@ -96,9 +96,9 @@ public class SuppressionUtil extends SuppressionUtilCore {
     return null;
   }
 
-  public static boolean isSuppressedInStatement(final PsiElement place,
-                                                final String toolId,
-                                                final Class<? extends PsiElement> statementClass) {
+  public static boolean isSuppressedInStatement(@NotNull final PsiElement place,
+                                                @NotNull final String toolId,
+                                                @NotNull final Class<? extends PsiElement> statementClass) {
     return ApplicationManager.getApplication().runReadAction(new NullableComputable<PsiElement>() {
       @Override
       public PsiElement compute() {
@@ -116,13 +116,13 @@ public class SuppressionUtil extends SuppressionUtilCore {
   }
 
   @Nullable
-  public static Pair<String, String> getBlockPrefixSuffixPair(PsiElement comment) {
+  public static Couple<String> getBlockPrefixSuffixPair(@NotNull PsiElement comment) {
     final Commenter commenter = LanguageCommenters.INSTANCE.forLanguage(comment.getLanguage());
     if (commenter != null) {
       final String prefix = commenter.getBlockCommentPrefix();
       final String suffix = commenter.getBlockCommentSuffix();
       if (prefix != null || suffix != null) {
-        return Pair.create(StringUtil.notNullize(prefix), StringUtil.notNullize(suffix));
+        return Couple.of(StringUtil.notNullize(prefix), StringUtil.notNullize(suffix));
       }
     }
     return null;
@@ -140,7 +140,7 @@ public class SuppressionUtil extends SuppressionUtilCore {
     if (prefix != null) {
       return commentText.startsWith(prefix + SUPPRESS_INSPECTIONS_TAG_NAME);
     }
-    final Pair<String, String> prefixSuffixPair = getBlockPrefixSuffixPair(comment);
+    final Couple<String> prefixSuffixPair = getBlockPrefixSuffixPair(comment);
     return prefixSuffixPair != null
            && commentText.startsWith(prefixSuffixPair.first + SUPPRESS_INSPECTIONS_TAG_NAME)
            && commentText.endsWith(prefixSuffixPair.second);
@@ -150,7 +150,7 @@ public class SuppressionUtil extends SuppressionUtilCore {
                                                boolean replaceOtherSuppressionIds, @NotNull Language commentLanguage) {
     final String oldSuppressionCommentText = comment.getText();
     final String lineCommentPrefix = getLineCommentPrefix(comment);
-    Pair<String, String> blockPrefixSuffix = null;
+    Couple<String> blockPrefixSuffix = null;
     if (lineCommentPrefix == null) {
       blockPrefixSuffix = getBlockPrefixSuffixPair(comment);
     }
@@ -177,14 +177,14 @@ public class SuppressionUtil extends SuppressionUtilCore {
 
   public static void createSuppression(@NotNull Project project,
                                        @NotNull PsiElement container,
-                                       @NotNull String id, @NotNull Language commentLanguage) {
+                                       @NotNull String id,
+                                       @NotNull Language commentLanguage) {
     final String text = SUPPRESS_INSPECTIONS_TAG_NAME + " " + id;
     PsiComment comment = createComment(project, text, commentLanguage);
     container.getParent().addBefore(comment, container);
   }
 
-  public static boolean isSuppressed(@NotNull PsiElement psiElement, String id) {
-    if (id == null) return false;
+  public static boolean isSuppressed(@NotNull PsiElement psiElement, @NotNull String id) {
     for (InspectionExtensionsFactory factory : Extensions.getExtensions(InspectionExtensionsFactory.EP_NAME)) {
       if (!factory.isToCheckMember(psiElement, id)) {
         return true;
@@ -194,18 +194,6 @@ public class SuppressionUtil extends SuppressionUtilCore {
   }
 
   public static boolean inspectionResultSuppressed(@NotNull PsiElement place, @NotNull LocalInspectionTool tool) {
-    if (tool instanceof CustomSuppressableInspectionTool) {
-      return ((CustomSuppressableInspectionTool)tool).isSuppressedFor(place);
-    }
-    if (tool instanceof BatchSuppressableTool) {
-      return ((BatchSuppressableTool)tool).isSuppressedFor(place);
-    }
-    String alternativeId;
-    String id;
-
-    return isSuppressed(place, id = tool.getID()) ||
-           (alternativeId = tool.getAlternativeID()) != null &&
-           !alternativeId.equals(id) &&
-           isSuppressed(place, alternativeId);
+    return tool.isSuppressedFor(place);
   }
 }

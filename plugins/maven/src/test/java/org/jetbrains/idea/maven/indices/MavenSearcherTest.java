@@ -90,6 +90,7 @@ public class MavenSearcherTest extends MavenIndicesTestCase {
   public void testArtifactSearch() throws Exception {
     assertArtifactSearchResults("",
                                 "asm:asm:3.3.1 asm:asm:3.3",
+                                "asm:asm-attrs:2.2.1",
                                 "commons-io:commons-io:2.4",
                                 "jmock:jmock:1.2.0 jmock:jmock:1.1.0 jmock:jmock:1.0.0",
                                 "junit:junit:4.0 junit:junit:3.8.2 junit:junit:3.8.1",
@@ -128,7 +129,7 @@ public class MavenSearcherTest extends MavenIndicesTestCase {
 
   private void assertArtifactSearchResults(String pattern, String... expected) {
     List<String> actual = new ArrayList<String>();
-    for (MavenArtifactSearchResult eachResult : new MavenArtifactSearcher().search(myProject, pattern, 100)) {
+    for (MavenArtifactSearchResult eachResult : new MavenArtifactSearcher(true).search(myProject, pattern, 100)) {
       String s = "";
       for (MavenArtifactInfo eachVersion : eachResult.versions) {
         if (s.length() > 0) s += " ";

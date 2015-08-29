@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,6 @@ import jetbrains.buildServer.messages.serviceMessages.TestFinished;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author Sergey Simonchik
- */
 public class TestFinishedEvent extends TreeNodeEvent {
 
   private final long myDuration;
@@ -35,6 +32,12 @@ public class TestFinishedEvent extends TreeNodeEvent {
     myDuration = duration;
   }
 
+  public TestFinishedEvent(@NotNull String name, long duration) {
+    this(name, -1, duration);
+  }
+
+  /** @deprecated use {@link #TestFinishedEvent(String, long)} (to be removed in IDEA 16) */
+  @SuppressWarnings("unused")
   public TestFinishedEvent(@NotNull String name, int duration) {
     this(name, -1, duration);
   }

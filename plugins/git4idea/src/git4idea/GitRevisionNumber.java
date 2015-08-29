@@ -15,6 +15,7 @@
  */
 package git4idea;
 
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
@@ -103,7 +104,7 @@ public class GitRevisionNumber implements ShortVcsRevisionNumber {
    */
   @NotNull
   public String getShortRev() {
-    return GitUtil.getShortHash(myRevisionHash);
+    return DvcsUtil.getShortHash(myRevisionHash);
   }
 
   /**
@@ -217,11 +218,18 @@ public class GitRevisionNumber implements ShortVcsRevisionNumber {
   }
 
   @NotNull
-  public static GitRevisionNumber parseRevlistOutputAsRevisionNumber(@NotNull GitSimpleHandler h, @NotNull String output) {
-    StringTokenizer tokenizer = new StringTokenizer(output, "\n\r \t", false);
-    LOG.assertTrue(tokenizer.hasMoreTokens(), "No required tokens in the output: \n" + output);
-    Date timestamp = GitUtil.parseTimestampWithNFEReport(tokenizer.nextToken(), h, output);
-    return new GitRevisionNumber(tokenizer.nextToken(), timestamp);
+  public static GitRevisionNumber parseRevlistOutputAsRevisionNumber(@NotNull GitSimpleHandler h, @NotNull String output)
+    throws VcsException
+  {
+    try {
+      StringTokenizer tokenizer = new StringTokenizer(output, "\n\r \t", false);
+      LOG.assertTrue(tokenizer.hasMoreTokens(), "No required tokens in the output: \n" + output);
+      Date timestamp = GitUtil.parseTimestampWithNFEReport(tokenizer.nextToken(), h, output);
+      return new GitRevisionNumber(tokenizer.nextToken(), timestamp);
+    }
+    catch (Exception e) {
+      throw new VcsException("Couldn't parse the output: ["  + output + "]", e);
+    }
   }
 
   @Override

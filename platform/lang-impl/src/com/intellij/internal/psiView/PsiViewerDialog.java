@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@ import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -49,13 +48,11 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.*;
 import com.intellij.openapi.fileTypes.impl.AbstractFileType;
 import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.DimensionService;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.psi.PsiElement;
@@ -78,6 +75,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NonNls;
@@ -102,7 +100,7 @@ import java.util.regex.Pattern;
  */
 public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disposable {
   private static final String REFS_CACHE = "References Resolve Cache";
-  private static final Color SELECTION_BG_COLOR = new JBColor(new Color(0x009999), new Color(0, 80, 80));
+  private static final Color BOX_COLOR = new JBColor(new Color(0xFC6C00), new Color(0xDE6C01));
   private static final Logger LOG = Logger.getInstance("#com.intellij.internal.psiView.PsiViewerDialog");
   private final Project myProject;
 
@@ -134,7 +132,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
   @Nullable
   private BlockTreeBuilder myBlockTreeBuilder;
   private RangeHighlighter myHighlighter;
-  private RangeHighlighter myIntersectHighlighter;
   private HashMap<PsiElement, BlockTreeNode> myPsiToBlockMap;
 
   private final Set<SourceWrapper> mySourceWrappers = ContainerUtil.newTreeSet();
@@ -164,7 +161,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     }
 
     @Override
-    public int compare(String o1, String o2) {
+    public int compare(@NotNull String o1, @NotNull String o2) {
       if (o1.equals(myOnTop)) return -1;
       if (o2.equals(myOnTop)) return 1;
       return o1.compareToIgnoreCase(o2);
@@ -195,8 +192,8 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     }
 
     @Override
-    public int compareTo(final SourceWrapper o) {
-      return o == null ? -1 : getText().compareToIgnoreCase(o.getText());
+    public int compareTo(@NotNull final SourceWrapper o) {
+      return getText().compareToIgnoreCase(o.getText());
     }
   }
 
@@ -209,6 +206,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     setCancelButtonText("&Close");
     Disposer.register(myProject, getDisposable());
     EditorEx editor = null;
+    final Ref<Integer> initOffset = Ref.create();
     if (myCurrentFile == null) {
       setTitle("PSI Viewer");
     }
@@ -217,6 +215,9 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       myFileType = myCurrentFile.getLanguage().getDisplayName();
       if (currentEditor != null) {
         myInitText = currentEditor.getSelectionModel().getSelectedText();
+        if (myInitText == null) {
+          initOffset.set(currentEditor.getCaretModel().getOffset());
+        }
       }
       if (myInitText == null) {
         myInitText = currentFile.getText();
@@ -232,6 +233,16 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     init();
     if (myCurrentFile != null) {
       doOKAction();
+
+      if (!initOffset.isNull()) {
+        ApplicationManager.getApplication().invokeLater(new Runnable() {
+          @Override
+          public void run() {
+            myEditor.getCaretModel().moveToOffset(initOffset.get());
+            myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
+          }
+        });
+      }
     }
   }
 
@@ -243,7 +254,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     final TreeCellRenderer renderer = myPsiTree.getCellRenderer();
     myPsiTree.setCellRenderer(new TreeCellRenderer() {
       @Override
-      public Component getTreeCellRendererComponent(JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) {
+      public Component getTreeCellRendererComponent(@NotNull JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) {
         final Component c = renderer.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus);
         if (value instanceof DefaultMutableTreeNode) {
           final Object userObject = ((DefaultMutableTreeNode)value).getUserObject();
@@ -252,7 +263,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
             if (c instanceof NodeRenderer) {
               ((NodeRenderer)c).setToolTipText(element == null ? null : element.getClass().getName());
             }
-            if ((element instanceof PsiElement && FileContextUtil.getFileContext(((PsiElement)element).getContainingFile()) != null) ||
+            if (element instanceof PsiElement && FileContextUtil.getFileContext(((PsiElement)element).getContainingFile()) != null ||
                 element instanceof ViewerTreeStructure.Inject) {
               final TextAttributes attr = EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.INJECTED_LANGUAGE_FRAGMENT);
               c.setBackground(attr.getBackgroundColor());
@@ -272,10 +283,14 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     myRefs.getSelectionModel().addListSelectionListener(listener);
     myRefs.setCellRenderer(new DefaultListCellRenderer() {
       @Override
-      public Component getListCellRendererComponent(JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+      public Component getListCellRendererComponent(@NotNull JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
         final Component comp = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-        if (resolve(index) == null) {
-          comp.setForeground(JBColor.RED);
+        try {
+          if (resolve(index) == null) {
+            comp.setForeground(JBColor.RED);
+          }
+        }
+        catch (IndexNotReadyException ignore) {
         }
         return comp;
       }
@@ -290,7 +305,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     getPeer().getWindow().setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
       @Override
-      public Component getInitialComponent(Window window) {
+      public Component getInitialComponent(@NotNull Window window) {
         return myEditor.getComponent();
       }
     });
@@ -325,7 +340,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
         mySourceWrappers.add(wrapper);
         if (lastUsed == null && wrapper.getText().equals(type)) lastUsed = wrapper;
         if (myCurrentFile != null && wrapper.myFileType instanceof LanguageFileType &&
-            ((LanguageFileType)wrapper.myFileType).equals(curLanguage.getAssociatedFileType())) {
+            wrapper.myFileType.equals(curLanguage.getAssociatedFileType())) {
           lastUsed = wrapper;
         }
       }
@@ -348,7 +363,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     };
     myFileTypeComboBox.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         updateDialectsCombo(null);
         updateExtensionsCombo();
         updateEditor();
@@ -356,7 +371,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     });
     myDialectComboBox.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         updateEditor();
       }
     });
@@ -383,14 +398,14 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     final ViewerTreeStructure psiTreeStructure = (ViewerTreeStructure)myPsiTreeBuilder.getTreeStructure();
     myShowWhiteSpacesBox.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         psiTreeStructure.setShowWhiteSpaces(myShowWhiteSpacesBox.isSelected());
         myPsiTreeBuilder.queueUpdate();
       }
     });
     myShowTreeNodesCheckBox.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         psiTreeStructure.setShowTreeNodes(myShowTreeNodesCheckBox.isSelected());
         myPsiTreeBuilder.queueUpdate();
       }
@@ -403,7 +418,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     myBlockStructurePanel.setVisible(settings.showBlocks);
     myShowBlocksCheckBox.addActionListener(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         if (!myShowBlocksCheckBox.isSelected()) {
           settings.blockRefDividerLocation = myBlockRefSplitPane.getDividerLocation();
         }
@@ -434,7 +449,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     final Dimension size = DimensionService.getInstance().getSize(getDimensionServiceKey(), myProject);
     if (size == null) {
-      DimensionService.getInstance().setSize(getDimensionServiceKey(), new Dimension(800, 600));
+      DimensionService.getInstance().setSize(getDimensionServiceKey(), JBUI.size(800, 600));
     }
     myTextSplit.setDividerLocation(settings.textDividerLocation);
     myTreeSplit.setDividerLocation(settings.treeDividerLocation);
@@ -474,14 +489,14 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     registerKeyboardAction(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         focusEditor();
       }
     }, KeyStroke.getKeyStroke(KeyEvent.VK_T, mask));
 
     registerKeyboardAction(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         focusTree();
       }
     }, KeyStroke.getKeyStroke(KeyEvent.VK_S, mask));
@@ -489,21 +504,21 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     registerKeyboardAction(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         focusBlockTree();
       }
     }, KeyStroke.getKeyStroke(KeyEvent.VK_K, mask));
 
     registerKeyboardAction(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         focusRefs();
       }
     }, KeyStroke.getKeyStroke(KeyEvent.VK_R, mask));
 
     registerKeyboardAction(new ActionListener() {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         if (myRefs.isFocusOwner()) {
           focusBlockTree();
         }
@@ -547,26 +562,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     myPsiTreeSeparator.setLabelFor(myPsiTree);
     myRefsSeparator.setLabelFor(myRefs);
     myBlockTreeSeparator.setLabelFor(myBlockTree);
-  }
-
-  private void updateIntersectHighlighter(int highlightStart, int highlightEnd) {
-    if (myIntersectHighlighter != null) {
-      myEditor.getMarkupModel().removeHighlighter(myIntersectHighlighter);
-      myIntersectHighlighter.dispose();
-    }
-    if (myEditor.getSelectionModel().hasSelection()) {
-      int selectionStart = myEditor.getSelectionModel().getSelectionStart();
-      int selectionEnd = myEditor.getSelectionModel().getSelectionEnd();
-      TextRange resRange = new TextRange(highlightStart, highlightEnd).intersection(new TextRange(selectionStart, selectionEnd));
-      if (resRange != null) {
-        TextAttributes attributes = new TextAttributes();
-        attributes.setBackgroundColor(Color.LIGHT_GRAY);
-        attributes.setForegroundColor(Color.white);
-        myIntersectHighlighter = myEditor.getMarkupModel()
-          .addRangeHighlighter(resRange.getStartOffset(), resRange.getEndOffset(), HighlighterLayer.LAST + 1, attributes,
-                               HighlighterTargetArea.EXACT_RANGE);
-      }
-    }
   }
 
   @Nullable
@@ -677,7 +672,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
   protected Action[] createActions() {
     AbstractAction copyPsi = new AbstractAction("Cop&y PSI") {
       @Override
-      public void actionPerformed(ActionEvent e) {
+      public void actionPerformed(@NotNull ActionEvent e) {
         PsiElement element = parseText(myEditor.getDocument().getText());
         List<PsiElement> allToParse = new ArrayList<PsiElement>();
         if (element instanceof PsiFile) {
@@ -736,7 +731,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     myPsiToBlockMap = new HashMap<PsiElement, BlockTreeNode>();
     final PsiElement psiFile = ((ViewerTreeStructure)myPsiTreeBuilder.getTreeStructure()).getRootPsiElement();
     initMap(rootNode, psiFile);
-    PsiElement rootPsi = (rootNode.getBlock() instanceof ASTBlock) ?
+    PsiElement rootPsi = rootNode.getBlock() instanceof ASTBlock ?
                          ((ASTBlock)rootNode.getBlock()).getNode().getPsi() : rootElement;
     BlockTreeNode blockNode = myPsiToBlockMap.get(rootPsi);
 
@@ -767,9 +762,10 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
           ext = myExtensionComboBox.getSelectedItem().toString().toLowerCase();
         }
         if (type instanceof LanguageFileType) {
-          final Language language = ((LanguageFileType)type).getLanguage();
           final Language dialect = (Language)myDialectComboBox.getSelectedItem();
-          return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, dialect == null ? language : dialect, text);
+          if (dialect != null) {
+            return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, dialect, text);
+          }
         }
         return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, type, text);
       }
@@ -857,12 +853,12 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     public MyPsiTreeSelectionListener() {
       myAttributes = new TextAttributes();
-      myAttributes.setBackgroundColor(SELECTION_BG_COLOR);
-      myAttributes.setForegroundColor(Color.white);
+      myAttributes.setEffectColor(BOX_COLOR);
+      myAttributes.setEffectType(EffectType.ROUNDED_BOX);
     }
 
     @Override
-    public void valueChanged(TreeSelectionEvent e) {
+    public void valueChanged(@NotNull TreeSelectionEvent e) {
       if (!myEditor.getDocument().getText().equals(myLastParsedText) || myBlockTree.hasFocus()) return;
       TreePath path = myPsiTree.getSelectionPath();
       clearSelection();
@@ -888,8 +884,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
           final int textLength = myEditor.getDocument().getTextLength();
           if (end <= textLength) {
             myHighlighter = myEditor.getMarkupModel().addRangeHighlighter(start, end, HighlighterLayer.LAST, myAttributes, HighlighterTargetArea.EXACT_RANGE);
-              updateIntersectHighlighter(start, end);
-
             if (myPsiTree.hasFocus()) {
               myEditor.getCaretModel().moveToOffset(start);
               myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
@@ -947,12 +941,12 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
     public MyBlockTreeSelectionListener() {
       myAttributes = new TextAttributes();
-      myAttributes.setBackgroundColor(SELECTION_BG_COLOR);
-      myAttributes.setForegroundColor(Color.white);
+      myAttributes.setEffectColor(BOX_COLOR);
+      myAttributes.setEffectType(EffectType.ROUNDED_BOX);
     }
 
     @Override
-    public void valueChanged(TreeSelectionEvent e) {
+    public void valueChanged(@NotNull TreeSelectionEvent e) {
       if (myIgnoreBlockTreeSelectionMarker > 0 || myBlockTreeBuilder == null) {
         return;
       }
@@ -989,7 +983,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
           if (end <= textLength) {
             myHighlighter = myEditor.getMarkupModel()
               .addRangeHighlighter(start, end, HighlighterLayer.LAST, myAttributes, HighlighterTargetArea.EXACT_RANGE);
-            updateIntersectHighlighter(start, end);
 
             myEditor.getCaretModel().moveToOffset(start);
             myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
@@ -1113,7 +1106,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
   private class GoToListener implements KeyListener, MouseListener, ListSelectionListener {
     private RangeHighlighter myListenerHighlighter;
     private final TextAttributes myAttributes =
-      new TextAttributes(Color.white, SELECTION_BG_COLOR, JBColor.RED, EffectType.BOXED, Font.PLAIN);
+      new TextAttributes(JBColor.RED, null, null, null, Font.PLAIN);
 
     private void navigate() {
       final Object value = myRefs.getSelectedValue();
@@ -1125,21 +1118,21 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     }
 
     @Override
-    public void keyPressed(KeyEvent e) {
+    public void keyPressed(@NotNull KeyEvent e) {
       if (e.getKeyCode() == KeyEvent.VK_ENTER) {
         navigate();
       }
     }
 
     @Override
-    public void mouseClicked(MouseEvent e) {
+    public void mouseClicked(@NotNull MouseEvent e) {
       if (e.getClickCount() > 1) {
         navigate();
       }
     }
 
     @Override
-    public void valueChanged(ListSelectionEvent e) {
+    public void valueChanged(@NotNull ListSelectionEvent e) {
       clearSelection();
       updateDialectsCombo(null);
       updateExtensionsCombo();
@@ -1177,17 +1170,17 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     }
 
     @Override
-    public void keyTyped(KeyEvent e) {}
+    public void keyTyped(@NotNull KeyEvent e) {}
     @Override
     public void keyReleased(KeyEvent e) {}
     @Override
-    public void mousePressed(MouseEvent e) {}
+    public void mousePressed(@NotNull MouseEvent e) {}
     @Override
-    public void mouseReleased(MouseEvent e) {}
+    public void mouseReleased(@NotNull MouseEvent e) {}
     @Override
-    public void mouseEntered(MouseEvent e) {}
+    public void mouseEntered(@NotNull MouseEvent e) {}
     @Override
-    public void mouseExited(MouseEvent e) {}
+    public void mouseExited(@NotNull MouseEvent e) {}
   }
 
   private void updateEditor() {
@@ -1211,7 +1204,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     myEditor.setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, lightFile));
   }
 
-  private class EditorListener implements CaretListener, SelectionListener, DocumentListener {
+  private class EditorListener extends CaretAdapter implements SelectionListener, DocumentListener {
     @Override
     public void caretPositionChanged(CaretEvent e) {
       if (!available() || myEditor.getSelectionModel().hasSelection()) return;
@@ -1248,7 +1241,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
         if (myEditor.getContentComponent().hasFocus()) {
           TextRange rangeInHostFile = InjectedLanguageManager.getInstance(myProject).injectedToHost(element, element.getTextRange());
           selectBlockNode(findBlockNode(rangeInHostFile, true));
-          updateIntersectHighlighter(myHighlighter.getStartOffset(), myHighlighter.getEndOffset());
         }
       }
       myPsiTreeBuilder.select(element);
@@ -1271,13 +1263,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       return myLastParsedTextHashCode == myNewDocumentHashCode && myEditor.getContentComponent().hasFocus();
     }
 
-    @Nullable
-    private PsiFile getPsiFile() {
-      ViewerTreeStructure treeStructure = (ViewerTreeStructure)myPsiTreeBuilder.getTreeStructure();
-      final PsiElement root = treeStructure != null ? treeStructure.getRootPsiElement() : null;
-      return root instanceof PsiFile ? (PsiFile)root : null;
-    }
-
     @Override
     public void beforeDocumentChange(DocumentEvent event) {
 
@@ -1298,7 +1283,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     }
 
     @Override
-    public void focusGained(final FocusEvent e) {
+    public void focusGained(@NotNull final FocusEvent e) {
       final Component from = e.getOppositeComponent();
       if (!e.isTemporary() && from != null && !myComboBox.isPopupVisible() && isUnder(from, myParent)) {
         myComboBox.setPopupVisible(true);

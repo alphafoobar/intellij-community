@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,21 +21,18 @@
 package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.codeInsight.generation.GenerateMembersUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiModifier;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.util.PropertyUtil;
-import com.intellij.refactoring.encapsulateFields.EncapsulateFieldsDescriptor;
-import com.intellij.refactoring.encapsulateFields.EncapsulateFieldsProcessor;
-import com.intellij.refactoring.encapsulateFields.FieldDescriptor;
-import com.intellij.refactoring.encapsulateFields.FieldDescriptorImpl;
+import com.intellij.refactoring.encapsulateFields.*;
 import com.intellij.refactoring.util.DocCommentPolicy;
 import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 
 public class EncapsulateFieldsTest extends MultiFileTestCase{
   public void testAlreadyExist() throws Exception {
@@ -50,24 +47,45 @@ public class EncapsulateFieldsTest extends MultiFileTestCase{
     doTest("i", "There is already method <b><code>Super setI(int)</code></b> which differs from setter <b><code>setI</code></b> by return type only");
   }
 
+  public void testPostfixExpressionUsedInAssignment() throws Exception {
+    doTest("i", "Unable to proceed with postfix/prefix expression when it's result type is used");
+  }
+
   public void testHideOverriderMethod() throws Exception {
     doTest("i", "A", "There is already a method <b><code>B.getI()</code></b> which would hide generated getter for a.i");
+  }
+
+  public void testJavadocRefs() throws Exception {
+    doTest("i", "A", null);
+  }
+  
+  public void testJavadocRefs1() throws Exception {
+    doTest("i", "B.A", null);
   }
 
   public void testHideOuterclassMethod() throws Exception {
     doTest("i", "A.B", "There is already a method <b><code>A.getI()</code></b> which would be hidden by generated getter");
   }
 
+  public void testCommentsInside() throws Exception {
+    doTest("i", "A", null);
+  }
+
   public void testMoveJavadocToGetter() throws Exception {
-    doTest(new PerformAction() {
-      @Override
-      public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
-        final PsiClass aClass = myJavaFacade.findClass("A", GlobalSearchScope.projectScope(myProject));
-        assertNotNull("Tested class not found", aClass);
-        final PsiField field = aClass.findFieldByName("i", false);
-        assertNotNull(field);
-        doTest(aClass, field, null, true, true);
-      }
+    doTest((rootDir, rootAfter) -> {
+      final PsiClass aClass = myJavaFacade.findClass("A", GlobalSearchScope.projectScope(myProject));
+      assertNotNull("Tested class not found", aClass);
+      final PsiField field = aClass.findFieldByName("i", false);
+      assertNotNull(field);
+      doTest(aClass, null, true, true, field);
+    });
+  }
+
+  public void testFilterEnumConstants() throws Exception {
+    doTest((rootDir, rootAfter) -> {
+      final PsiClass aClass = myJavaFacade.findClass("A", GlobalSearchScope.projectScope(myProject));
+      assertNotNull("Tested class not found", aClass);
+      doTest(aClass, null, true, true, new JavaEncapsulateFieldHelper().getApplicableFields(aClass));
     });
   }
 
@@ -76,6 +94,7 @@ public class EncapsulateFieldsTest extends MultiFileTestCase{
     return JavaTestUtil.getJavaTestDataPath();
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/encapsulateFields/";
@@ -87,37 +106,38 @@ public class EncapsulateFieldsTest extends MultiFileTestCase{
   }
 
   private void doTest(final String fieldName, final String className, final String conflicts) throws Exception {
-    doTest(new PerformAction() {
-      @Override
-      public void performAction(final VirtualFile rootDir, final VirtualFile rootAfter) throws Exception {
-        PsiClass aClass = myJavaFacade.findClass(className, GlobalSearchScope.projectScope(myProject));
+    doTest((rootDir, rootAfter) -> {
+      PsiClass aClass = myJavaFacade.findClass(className, GlobalSearchScope.projectScope(myProject));
 
-        assertNotNull("Tested class not found", aClass);
+      assertNotNull("Tested class not found", aClass);
 
 
-        doTest(aClass, aClass.findFieldByName(fieldName, false), conflicts, true, true);
-      }
+      doTest(aClass, conflicts, true, true, aClass.findFieldByName(fieldName, false));
     });
   }
 
 
   private static void doTest(final PsiClass aClass,
-                             final PsiField field,
                              final String conflicts,
                              final boolean generateGetters,
-                             final boolean generateSetters) {
+                             final boolean generateSetters,
+                             final PsiField... fields) {
     try {
       final Project project = aClass.getProject();
       EncapsulateFieldsProcessor processor = new EncapsulateFieldsProcessor(project, new EncapsulateFieldsDescriptor() {
         @Override
         public FieldDescriptor[] getSelectedFields() {
-          return new FieldDescriptor[]{new FieldDescriptorImpl(
-            field,
-            PropertyUtil.suggestGetterName(field),
-            PropertyUtil.suggestSetterName(field),
-            isToEncapsulateGet() ? PropertyUtil.generateGetterPrototype(field) : null,
-            isToEncapsulateSet() ? PropertyUtil.generateSetterPrototype(field) : null
-          )};
+          final FieldDescriptor[] descriptors = new FieldDescriptor[fields.length];
+          for (int i = 0; i < fields.length; i++) {
+            descriptors[i] = new FieldDescriptorImpl(
+              fields[i],
+              GenerateMembersUtil.suggestGetterName(fields[i]),
+              GenerateMembersUtil.suggestSetterName(fields[i]),
+              isToEncapsulateGet() ? GenerateMembersUtil.generateGetterPrototype(fields[i]) : null,
+              isToEncapsulateSet() ? GenerateMembersUtil.generateSetterPrototype(fields[i]) : null
+            );
+          }
+          return descriptors;
         }
 
         @Override

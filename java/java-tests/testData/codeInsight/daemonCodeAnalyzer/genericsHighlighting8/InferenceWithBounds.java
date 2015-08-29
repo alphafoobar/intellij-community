@@ -4,11 +4,11 @@ class CLS {
     static <V extends String>  void bar (V v) {}
 
     static void foo () {
-        <error descr="Inferred type 'java.lang.Object' for type parameter 'V' is not within its bound; should extend 'java.lang.String'">bar(new Object())</error>;
+        bar<error descr="'bar(V)' in 'CLS' cannot be applied to '(java.lang.Object)'">(new Object())</error>;
     }
 }
 //////////////////////////////
-public abstract class ZZZ<K> {
+abstract class ZZZ<K> {
   public abstract <T extends String> ZZZ<T> get();
 }
 class Z2<K> extends ZZZ<K> {
@@ -44,7 +44,7 @@ interface Callable<V> {
     class B extends A {}
 }
 //////////////////////////
-public class BadCodeGreen<T, C extends Collection<? extends T>> {
+class BadCodeGreen<T, C extends Collection<? extends T>> {
     public BadCodeGreen(C c, T t) {
         c.add<error descr="'add(capture<? extends T>)' in 'java.util.Collection' cannot be applied to '(T)'">(t)</error>;
     }

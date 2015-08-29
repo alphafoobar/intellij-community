@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,12 +41,12 @@ import java.util.concurrent.Future;
 public class EnvironmentUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.EnvironmentUtil");
 
-  private static final int SHELL_ENV_READING_TIMEOUT = 10000;
+  private static final int SHELL_ENV_READING_TIMEOUT = 20000;
 
   private static final Future<Map<String, String>> ourEnvGetter;
   static {
     if (SystemInfo.isMac && "unlocked".equals(System.getProperty("__idea.mac.env.lock")) && Registry.is("idea.fix.mac.env")) {
-      ExecutorService executor = Executors.newSingleThreadExecutor();
+      ExecutorService executor = Executors.newSingleThreadExecutor(ConcurrencyUtil.newNamedThreadFactory("get shell env"));
       ourEnvGetter = executor.submit(new Callable<Map<String, String>>() {
         @Override
         public Map<String, String> call() throws Exception {
@@ -207,7 +207,7 @@ public class EnvironmentUtil {
 
     public void killAfter(long timeout) {
       final long stop = System.currentTimeMillis() + timeout;
-      new Thread() {
+      new Thread("kill after") {
         @Override
         public void run() {
           synchronized (myWaiter) {
@@ -229,7 +229,7 @@ public class EnvironmentUtil {
             myProcess.exitValue();
           }
           catch (IllegalThreadStateException e) {
-            UnixProcessManager.sendSigIntToProcessTree(myProcess);
+            UnixProcessManager.sendSigKillToProcessTree(myProcess);
             LOG.warn("timed out");
           }
         }
@@ -243,16 +243,22 @@ public class EnvironmentUtil {
     }
   }
 
-  /** @deprecated use {@link #getEnvironmentMap()} (to remove in IDEA 14) */
-  @SuppressWarnings({"UnusedDeclaration", "SpellCheckingInspection"})
-  public static Map<String, String> getEnviromentProperties() {
-    return getEnvironmentMap();
+  public static void inlineParentOccurrences(@NotNull Map<String, String> envs) {
+    Map<String, String> parentParams = new HashMap<String, String>(System.getenv());
+    for (Map.Entry<String, String> entry : envs.entrySet()) {
+      String key = entry.getKey();
+      String value = entry.getValue();
+      if (value != null) {
+        String parentVal = parentParams.get(key);
+        if (parentVal != null && containsEnvKeySubstitution(key, value)) {
+          envs.put(key, value.replace("$" + key + "$", parentVal));
+        }
+      }
+    }
   }
 
-  /** @deprecated use {@link #getEnvironmentMap()} (to remove in IDEA 14) */
-  @SuppressWarnings({"UnusedDeclaration", "SpellCheckingInspection"})
-  public static Map<String, String> getEnvironmentProperties() {
-    return getEnvironmentMap();
+  private static boolean containsEnvKeySubstitution(final String envKey, final String val) {
+    return ArrayUtil.find(val.split(File.pathSeparator), "$" + envKey + "$") != -1;
   }
 
   @TestOnly

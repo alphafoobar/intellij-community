@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,11 +43,13 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.Map;
 
 class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
-  public EncodingFileTreeTable(@NotNull Project project) {
+  EncodingFileTreeTable(@NotNull Project project) {
     super(project, Charset.class, "Default Encoding", VirtualFileFilter.ALL, false);
-    reset(EncodingProjectManager.getInstance(project).getAllMappings());
+    Map<VirtualFile, Charset> mappings = FileEncodingConfigurable.getExistingMappingIncludingDefault(project);
+    reset(mappings);
     getValueColumn().setCellRenderer(new DefaultTableCellRenderer(){
       @Override
       public Component getTableCellRendererComponent(final JTable table, final Object value,
@@ -121,16 +123,16 @@ class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
             return cfa.createActionGroup(myVirtualFile, null, document, bytes, "<Clear>");
           }
         };
-        Presentation templatePresentation = changeAction.getTemplatePresentation();
-        JComponent comboComponent = changeAction.createCustomComponent(templatePresentation);
-
         DataContext dataContext = SimpleDataContext.getSimpleContext(CommonDataKeys.VIRTUAL_FILE.getName(), myVirtualFile,
                                                                       SimpleDataContext.getProjectContext(getProject()));
-        AnActionEvent event = new AnActionEvent(null, dataContext, ActionPlaces.UNKNOWN, templatePresentation, ActionManager.getInstance(), 0);
+        AnActionEvent event = AnActionEvent.createFromAnAction(changeAction, null, ActionPlaces.UNKNOWN, dataContext);
+        Presentation presentation = event.getPresentation();
+        JComponent comboComponent = changeAction.createCustomComponent(presentation);
+
         changeAction.update(event);
-        templatePresentation.setDescription(null);
+        presentation.setDescription(null);
         if (myVirtualFile == null) {
-          templatePresentation.setEnabled(true); // enable changing encoding for tree root (entire project)
+          presentation.setEnabled(true); // enable changing encoding for tree root (entire project)
         }
         editorComponent = comboComponent;
         comboComponent.addComponentListener(new ComponentAdapter() {
@@ -140,7 +142,7 @@ class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
           }
         });
         Charset charset = (Charset)getTableModel().getValueAt(new DefaultMutableTreeNode(myVirtualFile), 1);
-        templatePresentation.setText(charset == null ? "" : charset.displayName());
+        presentation.setText(charset == null ? "" : charset.displayName());
         comboComponent.setToolTipText(null);
         comboComponent.revalidate();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ProjectManagerAdapter;
 import com.intellij.openapi.startup.StartupManager;
+import com.intellij.openapi.ui.DialogWrapperDialog;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.popup.*;
 import com.intellij.openapi.util.Disposer;
@@ -37,9 +38,11 @@ import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame;
 import com.intellij.ui.BalloonImpl;
 import com.intellij.ui.BalloonLayout;
-import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.Gray;
+import com.intellij.ui.JBColor;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -87,7 +90,7 @@ public class NotificationsManagerImpl extends NotificationsManager {
   private static void doNotify(@NotNull final Notification notification,
                               @Nullable NotificationDisplayType displayType,
                               @Nullable final Project project) {
-    final NotificationsConfigurationImpl configuration = NotificationsConfigurationImpl.getNotificationsConfigurationImpl();
+    final NotificationsConfigurationImpl configuration = NotificationsConfigurationImpl.getInstanceImpl();
     if (!configuration.isRegistered(notification.getGroupId())) {
       configuration.register(notification.getGroupId(), displayType == null ? NotificationDisplayType.BALLOON : displayType);
     }
@@ -96,12 +99,12 @@ public class NotificationsManagerImpl extends NotificationsManager {
     boolean shouldLog = settings.isShouldLog();
     boolean displayable = settings.getDisplayType() != NotificationDisplayType.NONE;
 
-    boolean willBeShown = displayable && NotificationsConfigurationImpl.getNotificationsConfigurationImpl().SHOW_BALLOONS;
+    boolean willBeShown = displayable && NotificationsConfigurationImpl.getInstanceImpl().SHOW_BALLOONS;
     if (!shouldLog && !willBeShown) {
       notification.expire();
     }
 
-    if (NotificationsConfigurationImpl.getNotificationsConfigurationImpl().SHOW_BALLOONS) {
+    if (NotificationsConfigurationImpl.getInstanceImpl().SHOW_BALLOONS) {
       final Runnable runnable = new DumbAwareRunnable() {
         @Override
         public void run() {
@@ -109,8 +112,9 @@ public class NotificationsManagerImpl extends NotificationsManager {
         }
       };
       if (project == null) {
-        runnable.run();
-      } else if (!project.isDisposed()) {
+        UIUtil.invokeLaterIfNeeded(runnable);
+      }
+      else if (!project.isDisposed()) {
         StartupManager.getInstance(project).runWhenProjectIsInitialized(runnable);
       }
     }
@@ -133,7 +137,7 @@ public class NotificationsManagerImpl extends NotificationsManager {
     final NotificationSettings settings = NotificationsConfigurationImpl.getSettings(groupId);
 
     NotificationDisplayType type = settings.getDisplayType();
-    String toolWindowId = NotificationsConfigurationImpl.getNotificationsConfigurationImpl().getToolWindowId(groupId);
+    String toolWindowId = NotificationsConfigurationImpl.getInstanceImpl().getToolWindowId(groupId);
     if (type == NotificationDisplayType.TOOL_WINDOW &&
         (toolWindowId == null || project == null || !ToolWindowManager.getInstance(project).canShowNotification(toolWindowId))) {
       type = NotificationDisplayType.BALLOON;
@@ -211,6 +215,7 @@ public class NotificationsManagerImpl extends NotificationsManager {
 
       if (layout == null) return null;
       layout.add(balloon);
+      ((BalloonImpl)balloon).startFadeoutTimer(0);
       if (NotificationDisplayType.BALLOON == displayType) {
         FrameStateManager.getInstance().getApplicationActive().doWhenDone(new Runnable() {
           @Override
@@ -220,7 +225,7 @@ public class NotificationsManagerImpl extends NotificationsManager {
             }
 
             if (!sticky) {
-              ((BalloonImpl)balloon).startFadeoutTimer(15000);
+              ((BalloonImpl)balloon).startFadeoutTimer(0);
               ((BalloonImpl)balloon).setHideOnClickOutside(true);
             }
             else //noinspection ConstantConditions
@@ -248,6 +253,9 @@ public class NotificationsManagerImpl extends NotificationsManager {
     Window frame = WindowManager.getInstance().getFrame(project);
     if (frame == null && project == null) {
       frame = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+      while (frame instanceof DialogWrapperDialog && ((DialogWrapperDialog)frame).getDialogWrapper().isModalProgress()) {
+        frame = frame.getOwner();
+      }
     }
     if (frame == null && project == null) {
       frame = (Window)WelcomeFrame.getInstance();
@@ -265,7 +273,7 @@ public class NotificationsManagerImpl extends NotificationsManager {
     }
 
     final JLabel label = new JLabel(NotificationsUtil.buildHtml(notification, null));
-    text.setText(NotificationsUtil.buildHtml(notification, "width:" + Math.min(400, label.getPreferredSize().width) + "px;"));
+    text.setText(NotificationsUtil.buildHtml(notification, "width:" + Math.min(JBUI.scale(350), label.getPreferredSize().width) + "px;"));
     text.setEditable(false);
     text.setOpaque(false);
 
@@ -277,11 +285,11 @@ public class NotificationsManagerImpl extends NotificationsManager {
 
     final JPanel content = new NonOpaquePanel(new BorderLayout((int)(label.getIconTextGap() * 1.5), (int)(label.getIconTextGap() * 1.5)));
 
-    text.setCaretPosition(0);
-    JScrollPane pane = ScrollPaneFactory.createScrollPane(text,
-                                                          ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                                                          ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    pane.setBorder(null);
+    if (text.getCaret() != null) {
+      text.setCaretPosition(0);
+    }
+    JScrollPane pane = new JScrollPane(text); // do not add 1px border for viewport on UI update
+    pane.setBorder(BorderFactory.createEmptyBorder());
     pane.setOpaque(false);
     pane.getViewport().setOpaque(false);
     content.add(pane, BorderLayout.CENTER);
@@ -296,8 +304,16 @@ public class NotificationsManagerImpl extends NotificationsManager {
     text.setSize(preferredSize);
     
     Dimension paneSize = new Dimension(text.getPreferredSize());
-    int maxHeight = Math.min(400, window.getComponent().getHeight() - 20);
-    int maxWidth = Math.min(600, window.getComponent().getWidth() - 20);
+    JComponent windowComponent = window.getComponent();
+
+    int maxHeight = JBUI.scale(400);
+    int maxWidth = JBUI.scale(600);
+
+    if (windowComponent != null) {
+      maxHeight = Math.min(maxHeight, windowComponent.getHeight() - 20);
+      maxWidth = Math.min(maxWidth, windowComponent.getWidth() - 20);
+    }
+
     if (paneSize.height > maxHeight) {
       pane.setPreferredSize(new Dimension(Math.min(maxWidth, paneSize.width + UIUtil.getScrollBarWidth()), maxHeight));
     } else if (paneSize.width > maxWidth) {
@@ -305,13 +321,18 @@ public class NotificationsManagerImpl extends NotificationsManager {
     }
 
     final BalloonBuilder builder = JBPopupFactory.getInstance().createBalloonBuilder(content);
-    builder.setFillColor(NotificationsUtil.getBackground(notification)).setCloseButtonEnabled(true).setShowCallout(showCallout)
+    builder.setFillColor(new JBColor(Gray._234, Gray._92))
+      .setCloseButtonEnabled(true)
+      .setShowCallout(showCallout)
+      .setShadow(false)
       .setHideOnClickOutside(hideOnClickOutside)
       .setHideOnAction(hideOnClickOutside)
-      .setHideOnKeyOutside(hideOnClickOutside).setHideOnFrameResize(false)
-      .setBorderColor(NotificationsUtil.getBorderColor(notification));
+      .setHideOnKeyOutside(hideOnClickOutside)
+      .setHideOnFrameResize(false)
+      .setBorderColor(new JBColor(Gray._180, Gray._110));
 
     final Balloon balloon = builder.createBalloon();
+    balloon.setAnimationEnabled(false);
     notification.setBalloon(balloon);
     return balloon;
   }

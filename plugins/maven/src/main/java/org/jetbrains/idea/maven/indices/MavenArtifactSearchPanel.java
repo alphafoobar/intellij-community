@@ -22,6 +22,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
 import com.intellij.ui.*;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.Alarm;
 import com.intellij.util.ui.AbstractLayoutManager;
@@ -47,6 +48,10 @@ import java.util.*;
 import java.util.List;
 
 public class MavenArtifactSearchPanel extends JPanel {
+
+  public static final boolean USE_LUCENE_INDEXES = Boolean.getBoolean("idea.maven.artifact.search.use.lucene");
+
+  private static final int MAX_RESULT = 1000;
   private final Project myProject;
   private final MavenArtifactSearchDialog myDialog;
   private final boolean myClassMode;
@@ -120,7 +125,7 @@ public class MavenArtifactSearchPanel extends JPanel {
     pane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
     pane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS); // Don't remove this line.
                                                                                     // Without VERTICAL_SCROLLBAR_ALWAYS policy our custom layout
-                                                                                    // works incorrectly, see http://youtrack.jetbrains.com/issue/IDEA-72986
+                                                                                    // works incorrectly, see https://youtrack.jetbrains.com/issue/IDEA-72986
 
     add(pane, BorderLayout.CENTER);
 
@@ -211,8 +216,8 @@ public class MavenArtifactSearchPanel extends JPanel {
   }
 
   private void doSearch(String searchText) {
-    MavenSearcher searcher = myClassMode ? new MavenClassSearcher() : new MavenArtifactSearcher();
-    List<MavenArtifactSearchResult> result = searcher.search(myProject, searchText, 200);
+    MavenSearcher searcher = myClassMode ? new MavenClassSearcher() : new MavenArtifactSearcher(USE_LUCENE_INDEXES);
+    List<MavenArtifactSearchResult> result = searcher.search(myProject, searchText, MAX_RESULT);
 
     resortUsingDependencyVersionMap(result);
 
@@ -346,14 +351,11 @@ public class MavenArtifactSearchPanel extends JPanel {
           Insets insets = tree.getInsets();
           w -= insets.left + insets.right;
 
-          Container parent = tree.getParent();
-          if (parent != null) {
-            Container parentParent = parent.getParent();
-            if (parentParent instanceof JScrollPane) {
-              JScrollBar sb = ((JScrollPane)parentParent).getVerticalScrollBar();
-              if (sb != null) {
-                w -= sb.getWidth();
-              }
+          JScrollPane scrollPane = JBScrollPane.findScrollPane(tree);
+          if (scrollPane != null) {
+            JScrollBar sb = scrollPane.getVerticalScrollBar();
+            if (sb != null) {
+              w -= sb.getWidth();
             }
           }
           return w;

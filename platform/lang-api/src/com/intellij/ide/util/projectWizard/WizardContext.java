@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,17 @@
  */
 package com.intellij.ide.util.projectWizard;
 
-import com.intellij.ide.GeneralSettings;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.RecentProjectsManager;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.util.IconLoader;
+import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
 import com.intellij.openapi.util.UserDataHolderBase;
+import com.intellij.platform.ProjectTemplate;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -34,21 +36,22 @@ import java.io.File;
 import java.util.List;
 
 public class WizardContext extends UserDataHolderBase {
-  private static final Icon NEW_PROJECT_ICON = IconLoader.getIcon("/newprojectwizard.png");
-  private static final Icon NEW_MODULE_ICON = IconLoader.getIcon("/addmodulewizard.png");
   /**
    * a project where the module should be added, can be null => the wizard creates a new project
    */
   @Nullable
   private final Project myProject;
+  private final Disposable myDisposable;
   private String myProjectFileDirectory;
   private String myProjectName;
   private String myCompilerOutputDirectory;
   private Sdk myProjectJdk;
   private ProjectBuilder myProjectBuilder;
+  private ProjectTemplate myProjectTemplate;
   private final List<Listener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private StorageScheme myProjectStorageFormat = StorageScheme.DIRECTORY_BASED;
   private boolean myNewWizard;
+  private ModulesProvider myModulesProvider;
 
   public void setProjectStorageFormat(StorageScheme format) {
     myProjectStorageFormat = format;
@@ -62,16 +65,37 @@ public class WizardContext extends UserDataHolderBase {
     myNewWizard = newWizard;
   }
 
+  public ModulesProvider getModulesProvider() {
+    return myModulesProvider;
+  }
+
+  public void setModulesProvider(ModulesProvider modulesProvider) {
+    myModulesProvider = modulesProvider;
+  }
+
+  public Disposable getDisposable() {
+    return myDisposable;
+  }
+
   public interface Listener {
     void buttonsUpdateRequested();
     void nextStepRequested();
   }
 
-  public WizardContext(@Nullable Project project) {
+  public WizardContext(@Nullable Project project, Disposable parentDisposable) {
     myProject = project;
+    myDisposable = parentDisposable;
     if (myProject != null){
       myProjectJdk = ProjectRootManager.getInstance(myProject).getProjectSdk();
     }
+  }
+
+  /**
+   * Use {@link #WizardContext(Project, Disposable)}.
+   */
+  @Deprecated
+  public WizardContext(@Nullable Project project) {
+    this(project, null);
   }
 
   @Nullable
@@ -84,7 +108,7 @@ public class WizardContext extends UserDataHolderBase {
     if (myProjectFileDirectory != null) {
       return myProjectFileDirectory;
     }
-    final String lastProjectLocation = GeneralSettings.getInstance().getLastProjectCreationLocation();
+    final String lastProjectLocation = RecentProjectsManager.getInstance().getLastProjectCreationLocation();
     if (lastProjectLocation != null) {
       return lastProjectLocation.replace('/', File.separatorChar);
     }
@@ -123,7 +147,7 @@ public class WizardContext extends UserDataHolderBase {
   }
 
   public Icon getStepIcon() {
-    return isCreatingNewProject() ? NEW_PROJECT_ICON : NEW_MODULE_ICON;
+    return null;
   }
 
   public void requestWizardButtonsUpdate() {
@@ -161,6 +185,16 @@ public class WizardContext extends UserDataHolderBase {
 
   public void setProjectBuilder(@Nullable final ProjectBuilder projectBuilder) {
     myProjectBuilder = projectBuilder;
+  }
+
+  @Nullable
+  public ProjectTemplate getProjectTemplate() {
+    return myProjectTemplate;
+  }
+
+  public void setProjectTemplate(ProjectTemplate projectTemplate) {
+    myProjectTemplate = projectTemplate;
+    setProjectBuilder(projectTemplate.createModuleBuilder());
   }
 
   public String getPresentationName() {

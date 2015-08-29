@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,36 +90,7 @@ public class MethodUtils {
         return false;
       }
     }
-    if (parameterTypes != null) {
-      final PsiParameterList parameterList = method.getParameterList();
-      if (parameterList.getParametersCount() != parameterTypes.length) {
-        return false;
-      }
-      final PsiParameter[] parameters = parameterList.getParameters();
-      for (int i = 0; i < parameters.length; i++) {
-        final PsiParameter parameter = parameters[i];
-        final PsiType type = parameter.getType();
-        final PsiType parameterType = parameterTypes[i];
-        if (PsiType.NULL.equals(parameterType)) {
-          continue;
-        }
-        if (parameterType != null &&
-            !EquivalenceChecker.typesAreEquivalent(type, parameterType)) {
-          return false;
-        }
-      }
-    }
-    if (returnType != null) {
-      final PsiType methodReturnType = method.getReturnType();
-      if (!EquivalenceChecker.typesAreEquivalent(returnType, methodReturnType)) {
-        return false;
-      }
-    }
-    if (containingClassName != null) {
-      final PsiClass containingClass = method.getContainingClass();
-      return InheritanceUtil.isInheritor(containingClass, containingClassName);
-    }
-    return true;
+    return methodMatches(method, containingClassName, returnType, parameterTypes);
   }
 
   /**
@@ -144,6 +115,13 @@ public class MethodUtils {
     if (methodName != null && !methodName.equals(name)) {
       return false;
     }
+    return methodMatches(method, containingClassName, returnType, parameterTypes);
+  }
+
+  private static boolean methodMatches(@NotNull PsiMethod method,
+                                       @NonNls @Nullable String containingClassName,
+                                       @Nullable PsiType returnType,
+                                       @Nullable PsiType... parameterTypes) {
     if (parameterTypes != null) {
       final PsiParameterList parameterList = method.getParameterList();
       if (parameterList.getParametersCount() != parameterTypes.length) {
@@ -157,8 +135,7 @@ public class MethodUtils {
         if (PsiType.NULL.equals(parameterType)) {
           continue;
         }
-        if (parameterType != null &&
-            !EquivalenceChecker.typesAreEquivalent(type, parameterType)) {
+        if (parameterType != null && !EquivalenceChecker.typesAreEquivalent(type, parameterType)) {
           return false;
         }
       }
@@ -187,7 +164,7 @@ public class MethodUtils {
     final PsiElementFactory factory = psiFacade.getElementFactory();
     try {
       if (parameterTypeStrings != null) {
-        final PsiType[] parameterTypes = new PsiType[parameterTypeStrings.length];
+        final PsiType[] parameterTypes = PsiType.createArray(parameterTypeStrings.length);
         for (int i = 0; i < parameterTypeStrings.length; i++) {
           final String parameterTypeString = parameterTypeStrings[i];
           parameterTypes[i] = factory.createTypeFromText(parameterTypeString, method);
@@ -256,6 +233,64 @@ public class MethodUtils {
     }
     final PsiStatement[] statements = body.getStatements();
     return statements.length == 0;
+  }
+
+  public static boolean isTrivial(PsiMethod method, boolean throwIsTrivial) {
+    return isTrivial(method.getBody(), throwIsTrivial);
+  }
+
+  public static boolean isTrivial(PsiClassInitializer initializer) {
+    return isTrivial(initializer.getBody(), false);
+  }
+
+  private static boolean isTrivial(PsiCodeBlock codeBlock, boolean throwIsTrivial) {
+    if (codeBlock == null) {
+      return true;
+    }
+    final PsiStatement[] statements = codeBlock.getStatements();
+    if (statements.length == 0) {
+      return true;
+    }
+    for (PsiStatement statement : statements) {
+      if (statement instanceof PsiEmptyStatement) {
+        continue;
+      }
+      else if (statement instanceof PsiReturnStatement) {
+        final PsiReturnStatement returnStatement = (PsiReturnStatement)statement;
+        final PsiExpression returnValue = ParenthesesUtils.stripParentheses(returnStatement.getReturnValue());
+        if (returnValue == null || returnValue instanceof PsiLiteralExpression) {
+          return true;
+        }
+      }
+      else if (statement instanceof PsiIfStatement) {
+        final PsiIfStatement ifStatement = (PsiIfStatement)statement;
+        final PsiExpression condition = ifStatement.getCondition();
+        final Object result = ExpressionUtils.computeConstantExpression(condition);
+        if (result == null || !result.equals(Boolean.FALSE)) {
+          return false;
+        }
+      }
+      else if (statement instanceof PsiExpressionStatement) {
+        final PsiExpressionStatement expressionStatement = (PsiExpressionStatement)statement;
+        final PsiExpression expression = expressionStatement.getExpression();
+        if (!(expression instanceof PsiMethodCallExpression)) {
+          return false;
+        }
+        final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)expression;
+        final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
+        if (!PsiKeyword.SUPER.equals(methodExpression.getText())) {
+          // constructor super call
+          return false;
+        }
+      }
+      else if (throwIsTrivial && statement instanceof PsiThrowStatement) {
+        return true;
+      }
+      else {
+        return false;
+      }
+    }
+    return true;
   }
 
   public static boolean hasInThrows(@NotNull PsiMethod method, @NotNull String... exceptions) {

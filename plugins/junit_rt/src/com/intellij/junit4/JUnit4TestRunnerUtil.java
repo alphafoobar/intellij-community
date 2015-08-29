@@ -33,6 +33,7 @@ import org.junit.runners.model.FrameworkMethod;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.text.MessageFormat;
 import java.util.*;
@@ -43,7 +44,7 @@ public class JUnit4TestRunnerUtil {
    */
   private static final ResourceBundle ourBundle = ResourceBundle.getBundle("RuntimeBundle");
 
-  public static Request buildRequest(String[] suiteClassNames, boolean notForked) {
+  public static Request buildRequest(String[] suiteClassNames, String name, boolean notForked) {
     if (suiteClassNames.length == 0) {
       return null;
     }
@@ -58,6 +59,9 @@ public class JUnit4TestRunnerUtil {
           try {
             final String packageName = reader.readLine();
             if (packageName == null) return null;
+
+            final String categoryName = reader.readLine();
+            final Class category = categoryName != null && categoryName.length() > 0 ? loadTestClass(categoryName) : null;
             String line;
 
             while ((line = reader.readLine()) != null) {
@@ -84,7 +88,7 @@ public class JUnit4TestRunnerUtil {
             Request allClasses;
             try {
               Class.forName("org.junit.runner.Computer");
-              allClasses = JUnit46ClassesRequestBuilder.getClassesRequest(suiteName, classes, classMethods);
+              allClasses = JUnit46ClassesRequestBuilder.getClassesRequest(suiteName, classes, classMethods, category);
             }
             catch (ClassNotFoundException e) {
               allClasses = getClassRequestsUsing44API(suiteName, classes);
@@ -122,12 +126,13 @@ public class JUnit4TestRunnerUtil {
           final Class clazz = loadTestClass(suiteClassName.substring(0, index));
           final String methodName = suiteClassName.substring(index + 1);
           final RunWith clazzAnnotation = (RunWith)clazz.getAnnotation(RunWith.class);
+          final Description testMethodDescription = Description.createTestDescription(clazz, methodName);
           if (clazzAnnotation == null) { //do not override external runners
             try {
               final Method method = clazz.getMethod(methodName, null);
               if (method != null && notForked && (method.getAnnotation(Ignore.class) != null || clazz.getAnnotation(Ignore.class) != null)) { //override ignored case only
                 final Request classRequest = createIgnoreIgnoredClassRequest(clazz, true);
-                final Filter ignoredTestFilter = Filter.matchMethodDescription(Description.createTestDescription(clazz, methodName));
+                final Filter ignoredTestFilter = Filter.matchMethodDescription(testMethodDescription);
                 return classRequest.filterWith(new Filter() {
                   public boolean shouldRun(Description description) {
                     return ignoredTestFilter.shouldRun(description);
@@ -143,26 +148,49 @@ public class JUnit4TestRunnerUtil {
               //return simple method runner
             }
           } else {
-            final Class runnerClass = clazzAnnotation.value();
-            if (runnerClass.isAssignableFrom(Parameterized.class)) {
-              try {
-                Class.forName("org.junit.runners.BlockJUnit4ClassRunner"); //ignore for junit4.4 and <
-                return Request.runner(new ParameterizedMethodRunner(clazz, methodName));
-              }
-              catch (Throwable throwable) {
-                //return simple method runner
-              }
+            final Request request = getParameterizedRequest(name, methodName, clazz, clazzAnnotation);
+            if (request != null) {
+              return request;
             }
           }
           try {
             if (clazz.getMethod("suite", new Class[0]) != null && !methodName.equals("suite")) {
-              return Request.classWithoutSuiteMethod(clazz).filterWith(Description.createTestDescription(clazz, methodName));
+              return Request.classWithoutSuiteMethod(clazz).filterWith(testMethodDescription);
             }
           }
           catch (Throwable e) {
             //ignore
           }
-          return Request.method(clazz, methodName);
+
+          final Filter methodFilter;
+          try {
+            methodFilter = Filter.matchMethodDescription(testMethodDescription);
+          }
+          catch (NoSuchMethodError e) {
+            return Request.method(clazz, methodName);
+          }
+          return Request.aClass(clazz).filterWith(new Filter() {
+            public boolean shouldRun(Description description) {
+              if (description.isTest() && description.getDisplayName().startsWith("warning(junit.framework.TestSuite$")) {
+                return true;
+              }
+
+              return methodFilter.shouldRun(description);
+            }
+
+            public String describe() {
+              return methodFilter.describe();
+            }
+          });
+        } else if (name != null && suiteClassNames.length == 1) {
+          final Class clazz = loadTestClass(suiteClassName);
+          if (clazz != null) {
+            final RunWith clazzAnnotation = (RunWith)clazz.getAnnotation(RunWith.class);
+            final Request request = getParameterizedRequest(name, null, clazz, clazzAnnotation);
+            if (request != null) {
+              return request;
+            }
+          }
         }
         appendTestClass(result, suiteClassName);
       }
@@ -181,6 +209,50 @@ public class JUnit4TestRunnerUtil {
       return Request.aClass(clazz);
     }
     return Request.classes(getArrayOfClasses(result));
+  }
+
+  private static Request getParameterizedRequest(final String parameterString,
+                                                 final String methodName,
+                                                 Class clazz,
+                                                 RunWith clazzAnnotation) {
+    if (clazzAnnotation == null) return null;
+
+    final Class runnerClass = clazzAnnotation.value();
+    if (Parameterized.class.isAssignableFrom(runnerClass)) {
+      try {
+        Class.forName("org.junit.runners.BlockJUnit4ClassRunner"); //ignore for junit4.4 and <
+        final Constructor runnerConstructor = runnerClass.getConstructor(new Class[]{Class.class});
+        return Request.runner((Runner)runnerConstructor.newInstance(new Object[] {clazz})).filterWith(new Filter() {
+          public boolean shouldRun(Description description) {
+            final String descriptionMethodName = description.getMethodName();
+            //filter by params
+            if (parameterString != null && descriptionMethodName != null && !descriptionMethodName.endsWith(parameterString)) {
+              return false;
+            }
+
+            //filter only selected method
+            if (methodName != null && descriptionMethodName != null && !descriptionMethodName.startsWith(methodName + "[")) {
+              return false;
+            }
+            return true;
+          }
+
+          public String describe() {
+            if (parameterString == null) {
+              return methodName + " with any parameter";
+            }
+            if (methodName == null) {
+              return "Parameter " + parameterString + " for any method";
+            }
+            return methodName + " with parameter " + parameterString;
+          }
+        });
+      }
+      catch (Throwable throwable) {
+        //return simple method runner
+      }
+    }
+    return null;
   }
 
   private static Request createIgnoreIgnoredClassRequest(final Class clazz, final boolean recursively) throws ClassNotFoundException {
@@ -277,37 +349,6 @@ public class JUnit4TestRunnerUtil {
       finally {
         eachNotifier.fireTestFinished();
       }
-    }
-  }
-
-  private static class ParameterizedMethodRunner extends Parameterized {
-    private final String myMethodName;
-
-    public ParameterizedMethodRunner(Class clazz, String methodName) throws Throwable {
-      super(clazz);
-      myMethodName = methodName;
-    }
-
-    protected List getChildren() {
-      final List children = super.getChildren();
-      for (int i = 0; i < children.size(); i++) {
-        try {
-          final BlockJUnit4ClassRunner child = (BlockJUnit4ClassRunner)children.get(i);
-          final Method getChildrenMethod = BlockJUnit4ClassRunner.class.getDeclaredMethod("getChildren", new Class[0]);
-          getChildrenMethod.setAccessible(true);
-          final List list = (List)getChildrenMethod.invoke(child, new Object[0]);
-          for (Iterator iterator = list.iterator(); iterator.hasNext(); ) {
-            final FrameworkMethod description = (FrameworkMethod)iterator.next();
-            if (!description.getName().equals(myMethodName)) {
-              iterator.remove();
-            }
-          }
-        }
-        catch (Exception e) {
-         e.printStackTrace();
-        }
-      }
-      return children;
     }
   }
 }

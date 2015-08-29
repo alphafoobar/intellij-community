@@ -18,14 +18,15 @@ package com.intellij.codeInsight.completion;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightClassUtil;
-import com.intellij.codeInsight.lookup.*;
+import com.intellij.codeInsight.lookup.AutoCompletionPolicy;
+import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.codeInsight.lookup.LookupElementDecorator;
+import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.filters.getters.ExpectedTypesGetter;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
-import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.statistics.JavaStatisticsManager;
 import com.intellij.psi.statistics.StatisticsInfo;
 import com.intellij.psi.statistics.StatisticsManager;
@@ -155,24 +156,27 @@ public class JavaInheritorsGetter extends CompletionProvider<CompletionParameter
         final String erasedText = TypeConversionUtil.erasure(psiType).getCanonicalText();
         String canonicalText = psiType.getCanonicalText();
         if (canonicalText.contains("?extends") || canonicalText.contains("?super")) {
-          LOG.error("Malformed canonical text: " + psiType + " of " + psiType.getClass() + "; " +
+          LOG.error("Malformed canonical text: " + canonicalText + "; presentable text: " + psiType + " of " + psiType.getClass() + "; " +
                     (psiType instanceof PsiClassReferenceType ? ((PsiClassReferenceType)psiType).getReference().getClass() : ""));
           return null;
         }
-        final PsiStatement statement = elementFactory
-          .createStatementFromText(canonicalText + " v = new " + erasedText + "<>()", parameters.getOriginalFile());
-        final PsiVariable declaredVar = (PsiVariable)((PsiDeclarationStatement)statement).getDeclaredElements()[0];
-        final PsiNewExpression initializer = (PsiNewExpression)declaredVar.getInitializer();
-        final boolean hasDefaultConstructorOrNoGenericsOne = PsiDiamondTypeImpl.hasDefaultConstructor(psiClass) ||
-                                                             !PsiDiamondTypeImpl.haveConstructorsGenericsParameters(psiClass);
-        if (hasDefaultConstructorOrNoGenericsOne) {
-          final PsiDiamondTypeImpl.DiamondInferenceResult inferenceResult = PsiDiamondTypeImpl.resolveInferredTypes(initializer);
-          if (inferenceResult.getErrorMessage() == null &&
-              !psiClass.hasModifierProperty(PsiModifier.ABSTRACT) &&
-              areInferredTypesApplicable(inferenceResult.getTypes(), parameters.getOriginalPosition())) {
-            psiType = initializer.getType();
+        try {
+          final PsiStatement statement = elementFactory
+            .createStatementFromText(canonicalText + " v = new " + erasedText + "<>()", parameters.getOriginalFile());
+          final PsiVariable declaredVar = (PsiVariable)((PsiDeclarationStatement)statement).getDeclaredElements()[0];
+          final PsiNewExpression initializer = (PsiNewExpression)declaredVar.getInitializer();
+          final boolean hasDefaultConstructorOrNoGenericsOne = PsiDiamondTypeImpl.hasDefaultConstructor(psiClass) ||
+                                                               !PsiDiamondTypeImpl.haveConstructorsGenericsParameters(psiClass);
+          if (hasDefaultConstructorOrNoGenericsOne) {
+            final PsiDiamondTypeImpl.DiamondInferenceResult inferenceResult = PsiDiamondTypeImpl.resolveInferredTypes(initializer);
+            if (inferenceResult.getErrorMessage() == null &&
+                !psiClass.hasModifierProperty(PsiModifier.ABSTRACT) &&
+                areInferredTypesApplicable(inferenceResult.getTypes(), parameters.getPosition())) {
+              psiType = initializer.getType();
+            }
           }
         }
+        catch (IncorrectOperationException ignore) {}
       }
     }
     final PsiTypeLookupItem item = PsiTypeLookupItem.createLookupItem(psiType, position);
@@ -186,18 +190,36 @@ public class JavaInheritorsGetter extends CompletionProvider<CompletionParameter
     return LookupElementDecorator.withInsertHandler(item, myConstructorInsertHandler);
   }
 
-  private static boolean areInferredTypesApplicable(@NotNull PsiType[] types, PsiElement originalPosition) {
-    final PsiMethodCallExpression methodCallExpression = PsiTreeUtil.getParentOfType(originalPosition, PsiMethodCallExpression.class);
+  private static boolean areInferredTypesApplicable(@NotNull PsiType[] types, PsiElement position) {
+    final PsiMethodCallExpression methodCallExpression = PsiTreeUtil.getParentOfType(position, PsiMethodCallExpression.class);
     if (methodCallExpression != null) {
-      final PsiNewExpression newExpression = PsiTreeUtil.getParentOfType(originalPosition, PsiNewExpression.class);
-      if (newExpression != null && ArrayUtil.find(methodCallExpression.getArgumentList().getExpressions(), newExpression) > -1 ||
-          Comparing.equal(originalPosition.getParent(), methodCallExpression.getArgumentList())) {
-        final JavaResolveResult resolveResult = methodCallExpression.resolveMethodGenerics();
-        final PsiMethod method = (PsiMethod)resolveResult.getElement();
-        return method == null ||
-               PsiUtil.getApplicabilityLevel(method, resolveResult.getSubstitutor(), types, PsiUtil.getLanguageLevel(originalPosition))
-               != MethodCandidateInfo.ApplicabilityLevel.NOT_APPLICABLE;
+      if (PsiUtil.isLanguageLevel8OrHigher(methodCallExpression)) {
+        final PsiNewExpression newExpression = PsiTreeUtil.getParentOfType(position, PsiNewExpression.class, false);
+        if (newExpression != null) {
+          PsiElement parent = newExpression;
+          while (parent.getParent() instanceof PsiParenthesizedExpression) {
+            parent = parent.getParent();
+          }
+          final int idx = ArrayUtil.find(methodCallExpression.getArgumentList().getExpressions(), parent);
+          if (idx > -1) {
+            final JavaResolveResult resolveResult = methodCallExpression.resolveMethodGenerics();
+            final PsiMethod method = (PsiMethod)resolveResult.getElement();
+            if (method != null) {
+              final PsiParameter[] parameters = method.getParameterList().getParameters();
+              if (idx < parameters.length) {
+                final PsiType expectedType = resolveResult.getSubstitutor().substitute(parameters[idx].getType());
+                final PsiClass aClass = PsiUtil.resolveClassInType(expectedType);
+                if (aClass != null) {
+                  final PsiClassType inferredArg = JavaPsiFacade.getElementFactory(method.getProject()).createType(aClass, types);
+                  LOG.assertTrue(expectedType != null);
+                  return TypeConversionUtil.isAssignable(expectedType, inferredArg);
+                }
+              }
+            }
+          }
+        }
       }
+      return false;
     }
     return true;
   }
@@ -210,10 +232,7 @@ public class JavaInheritorsGetter extends CompletionProvider<CompletionParameter
 
     //long
     for (final PsiClassType type : expectedClassTypes) {
-      final PsiClass psiClass = type.resolve();
-      if (psiClass != null && !psiClass.hasModifierProperty(PsiModifier.FINAL)) {
-        CodeInsightUtil.processSubTypes(type, parameters.getPosition(), false, matcher, consumer);
-      }
+      CodeInsightUtil.processSubTypes(type, parameters.getPosition(), false, matcher, consumer);
     }
   }
 

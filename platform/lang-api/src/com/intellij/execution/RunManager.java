@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -115,7 +115,7 @@ public abstract class RunManager {
    * Returns the list of all temporary run configurations.
    *
    * @return the list of all temporary run configurations.
-   * @see com.intellij.execution.RunnerAndConfigurationSettings#isTemporary()
+   * @see RunnerAndConfigurationSettings#isTemporary()
    */
   @NotNull
   @Deprecated
@@ -125,7 +125,7 @@ public abstract class RunManager {
    * Returns the list of all temporary run configurations settings.
    *
    * @return the list of all temporary run configurations settings.
-   * @see com.intellij.execution.RunnerAndConfigurationSettings#isTemporary()
+   * @see RunnerAndConfigurationSettings#isTemporary()
    */
   @NotNull
   public abstract List<RunnerAndConfigurationSettings> getTempConfigurationsList();
@@ -134,7 +134,7 @@ public abstract class RunManager {
    * Checks if the specified run configuration is temporary and will be deleted when the temporary configurations limit is exceeded.
    *
    * @return true if the configuration is temporary, false otherwise.
-   * @see com.intellij.execution.RunnerAndConfigurationSettings#isTemporary()
+   * @see RunnerAndConfigurationSettings#isTemporary()
    */
   @Deprecated
   public abstract boolean isTemporary(@NotNull RunConfiguration configuration);
@@ -176,7 +176,7 @@ public abstract class RunManager {
    * @param name the name of the configuration to create (should be unique and not equal to any other existing configuration)
    * @param type the type of the configuration to create.
    * @return the configuration settings object.
-   * @see RunManager#suggestUniqueName(String, java.util.ArrayList)
+   * @see RunManager#suggestUniqueName(String, Collection)
    */
   @NotNull
   public abstract RunnerAndConfigurationSettings createRunConfiguration(@NotNull String name, @NotNull ConfigurationFactory type);
@@ -217,7 +217,8 @@ public abstract class RunManager {
    */
   public abstract void refreshUsagesList(RunProfile profile);
 
-  public static String suggestUniqueName(String str, ArrayList<String> currentNames) {
+  @NotNull
+  public static String suggestUniqueName(@NotNull String str, @NotNull Collection<String> currentNames) {
     if (!currentNames.contains(str)) return str;
 
     final Matcher matcher = Pattern.compile("(.*?)\\s*\\(\\d+\\)").matcher(str);

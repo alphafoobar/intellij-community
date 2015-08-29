@@ -169,8 +169,12 @@ class AnnotationProcessorImportingTest extends MavenImportingTestCase {
       <artifactId>maven-compiler-plugin</artifactId>
       <configuration>
         <compilerArgument>-Aopt1=111 -Xmx512Mb -Aopt2=222</compilerArgument>
+        <compilerArgs>
+            <arg>-Aopt3=333</arg>
+            <arg>-AjustKey</arg>
+        </compilerArgs>
         <compilerArguments>
-          <Aopt3>333</Aopt3>
+          <Aopt4>444</Aopt4>
           <opt>666</opt>
         </compilerArguments>
       </configuration>
@@ -183,7 +187,7 @@ class AnnotationProcessorImportingTest extends MavenImportingTestCase {
 
     assert compilerConfiguration.findModuleProcessorProfile(MavenAnnotationProcessorConfigurer.MAVEN_DEFAULT_ANNOTATION_PROFILE) == null
     def processorOptions = compilerConfiguration.findModuleProcessorProfile(MavenAnnotationProcessorConfigurer.PROFILE_PREFIX + "project").getProcessorOptions()
-    assert new HashMap(processorOptions) == ['opt1': '111', 'opt2': '222', 'opt3': '333']
+    assert new HashMap(processorOptions) == ['opt1': '111', 'opt2': '222', 'opt3': '333', 'opt4': '444', 'justKey': '']
   }
 
   public void testMavenProcessorPlugin() {
@@ -194,6 +198,12 @@ class AnnotationProcessorImportingTest extends MavenImportingTestCase {
 
 <build>
   <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgument>-proc:none</compilerArgument>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.bsc.maven</groupId>
                 <artifactId>maven-processor-plugin</artifactId>
@@ -245,10 +255,9 @@ class AnnotationProcessorImportingTest extends MavenImportingTestCase {
       <artifactId>maven-compiler-plugin</artifactId>
       <configuration>
         <compilerArgument>-Aopt1=111 -Xmx512Mb -Aopt2=222</compilerArgument>
-        <compilerArguments>
-          <proc>none</proc>
-          <compilerArgument>-proc:none</compilerArgument>
-        </compilerArguments>
+        <compilerArgs>
+            <arg>-proc:none</arg>
+        </compilerArgs>
       </configuration>
     </plugin>
 
@@ -299,6 +308,12 @@ class AnnotationProcessorImportingTest extends MavenImportingTestCase {
 
   <build>
     <plugins>
+      <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+              <compilerArgument>-proc:none</compilerArgument>
+          </configuration>
+      </plugin>
       <plugin>
         <groupId>org.bsc.maven</groupId>
         <artifactId>maven-processor-plugin</artifactId>

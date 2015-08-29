@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 package com.intellij.ide.actions;
 
 import com.intellij.idea.ActionsBundle;
-import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.IdeFrameEx;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -31,26 +33,34 @@ import java.awt.*;
 /**
  * @author pegov
  */
-public class ToggleFullScreenAction extends AnAction implements DumbAware {
+public class ToggleFullScreenAction extends ToggleAction implements DumbAware {
   private static final String TEXT_ENTER_FULL_SCREEN = ActionsBundle.message("action.ToggleFullScreen.text.enter");
   private static final String TEXT_EXIT_FULL_SCREEN = ActionsBundle.message("action.ToggleFullScreen.text.exit");
 
   @Override
-  public void actionPerformed(final AnActionEvent e) {
+  public boolean isSelected(AnActionEvent e) {
+    IdeFrameEx frame = getFrame();
+    return frame != null && frame.isInFullScreen();
+  }
+
+  @Override
+  public void setSelected(AnActionEvent e, boolean state) {
     IdeFrameEx frame = getFrame();
     if (frame != null) {
-      frame.toggleFullScreen(!frame.isInFullScreen());
+      frame.toggleFullScreen(state);
     }
   }
 
   @Override
-  public void update(final AnActionEvent e) {
+  public void update(@NotNull final AnActionEvent e) {
     Presentation p = e.getPresentation();
 
     IdeFrameEx frame = null;
     boolean isApplicable = WindowManager.getInstance().isFullScreenSupportedInCurrentOS() && (frame = getFrame()) != null;
 
-    p.setVisible(isApplicable);
+    if (e.getPlace() != ActionPlaces.MAIN_TOOLBAR) {
+      p.setVisible(isApplicable);
+    }
     p.setEnabled(isApplicable);
 
     if (isApplicable) {
@@ -63,6 +73,9 @@ public class ToggleFullScreenAction extends AnAction implements DumbAware {
     Component focusOwner = IdeFocusManager.getGlobalInstance().getFocusOwner();
     if (focusOwner != null) {
       Window window = focusOwner instanceof JFrame ? (Window) focusOwner : SwingUtilities.getWindowAncestor(focusOwner);
+      if (!(window instanceof IdeFrameEx)) {
+        window = SwingUtilities.getWindowAncestor(window);
+      }
       if (window instanceof IdeFrameEx) {
         return (IdeFrameEx)window;
       }

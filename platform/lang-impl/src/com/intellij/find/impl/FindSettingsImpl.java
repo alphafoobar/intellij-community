@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,24 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.find.impl;
 
 import com.intellij.find.FindBundle;
 import com.intellij.find.FindModel;
 import com.intellij.find.FindSettings;
-import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.State;
-import com.intellij.openapi.components.Storage;
-import com.intellij.openapi.components.StoragePathMacros;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.DefaultJDOMExternalizer;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.JDOMExternalizableStringList;
-import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.components.*;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.PlatformUtils;
-import org.jdom.Element;
+import com.intellij.util.xmlb.XmlSerializerUtil;
+import com.intellij.util.xmlb.annotations.AbstractCollection;
+import com.intellij.util.xmlb.annotations.Property;
+import com.intellij.util.xmlb.annotations.Tag;
+import com.intellij.util.xmlb.annotations.Transient;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -40,13 +36,11 @@ import java.util.List;
 @State(
   name = "FindSettings",
   storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/other.xml"
-    )}
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/find.xml"),
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/other.xml", deprecated = true)
+  }
 )
-public class FindSettingsImpl extends FindSettings implements PersistentStateComponent<Element> {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.find.impl.FindSettingsImpl");
-
+public class FindSettingsImpl extends FindSettings implements PersistentStateComponent<FindSettingsImpl> {
   @NonNls private static final String FIND_DIRECTION_FORWARD = "forward";
   @NonNls private static final String FIND_DIRECTION_BACKWARD = "backward";
   @NonNls private static final String FIND_ORIGIN_FROM_CURSOR = "from_cursor";
@@ -58,23 +52,23 @@ public class FindSettingsImpl extends FindSettings implements PersistentStateCom
   private static final int MAX_RECENT_SIZE = 30;
 
   public FindSettingsImpl() {
-    RECENT_FILE_MASKS.add("*.properties");
-    RECENT_FILE_MASKS.add("*.html");
-    RECENT_FILE_MASKS.add("*.jsp");
-    RECENT_FILE_MASKS.add("*.xml");
-    RECENT_FILE_MASKS.add("*.java");
-    RECENT_FILE_MASKS.add("*.js");
-    RECENT_FILE_MASKS.add("*.as");
-    RECENT_FILE_MASKS.add("*.css");
-    RECENT_FILE_MASKS.add("*.mxml");
+    recentFileMasks.add("*.properties");
+    recentFileMasks.add("*.html");
+    recentFileMasks.add("*.jsp");
+    recentFileMasks.add("*.xml");
+    recentFileMasks.add("*.java");
+    recentFileMasks.add("*.js");
+    recentFileMasks.add("*.as");
+    recentFileMasks.add("*.css");
+    recentFileMasks.add("*.mxml");
     if (PlatformUtils.isPyCharm()) {
-      RECENT_FILE_MASKS.add("*.py");
+      recentFileMasks.add("*.py");
     }
     else if (PlatformUtils.isRubyMine()) {
-      RECENT_FILE_MASKS.add("*.rb");
+      recentFileMasks.add("*.rb");
     }
     else if (PlatformUtils.isPhpStorm()) {
-      RECENT_FILE_MASKS.add("*.php");
+      recentFileMasks.add("*.php");
     }
   }
 
@@ -103,40 +97,31 @@ public class FindSettingsImpl extends FindSettings implements PersistentStateCom
   @SuppressWarnings({"WeakerAccess"}) public boolean WHOLE_WORDS_ONLY = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean COMMENTS_ONLY = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean STRING_LITERALS_ONLY = false;
+  @SuppressWarnings({"WeakerAccess"}) public boolean EXCEPT_COMMENTS = false;
+  @SuppressWarnings({"WeakerAccess"}) public boolean EXCEPT_COMMENTS_AND_STRING_LITERALS = false;
+  @SuppressWarnings({"WeakerAccess"}) public boolean EXCEPT_STRING_LITERALS = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean LOCAL_WHOLE_WORDS_ONLY = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean REGULAR_EXPRESSIONS = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean LOCAL_REGULAR_EXPRESSIONS = false;
   @SuppressWarnings({"WeakerAccess"}) public boolean WITH_SUBDIRECTORIES = true;
+  @SuppressWarnings({"WeakerAccess"}) public boolean SHOW_RESULTS_IN_SEPARATE_VIEW = false;
 
   @SuppressWarnings({"WeakerAccess"}) public String SEARCH_SCOPE = DEFAULT_SEARCH_SCOPE;
   @SuppressWarnings({"WeakerAccess"}) public String FILE_MASK;
 
-  @SuppressWarnings({"WeakerAccess"}) public JDOMExternalizableStringList RECENT_FIND_STRINGS = new JDOMExternalizableStringList();
-  @SuppressWarnings({"WeakerAccess"}) public JDOMExternalizableStringList RECENT_REPLACE_STRINGS = new JDOMExternalizableStringList();
-  @SuppressWarnings({"WeakerAccess"}) public JDOMExternalizableStringList RECENT_DIR_STRINGS = new JDOMExternalizableStringList();
-  @SuppressWarnings({"WeakerAccess"}) @NonNls public JDOMExternalizableStringList RECENT_FILE_MASKS = new JDOMExternalizableStringList();
-
+  @Tag("recentFileMasks")
+  @Property(surroundWithTag = false)
+  @AbstractCollection(surroundWithTag = false, elementTag = "mask", elementValueAttribute = "")
+  public List<String> recentFileMasks = new ArrayList<String>();
 
   @Override
-  public void loadState(final Element state) {
-    try {
-      DefaultJDOMExternalizer.readExternal(this, state);
-    }
-    catch (InvalidDataException e) {
-      LOG.info(e);
-    }
+  public void loadState(FindSettingsImpl state) {
+    XmlSerializerUtil.copyBean(state, this);
   }
 
   @Override
-  public Element getState() {
-    Element element = new Element("state");
-    try {
-      DefaultJDOMExternalizer.writeExternal(this, element);
-    }
-    catch (WriteExternalException e) {
-      LOG.info(e);
-    }
-    return element;
+  public FindSettingsImpl getState() {
+    return this;
   }
 
   @Override
@@ -269,80 +254,91 @@ public class FindSettingsImpl extends FindSettings implements PersistentStateCom
   }
 
   @Override
-  public void initModelBySetings(FindModel model){
+  public void initModelBySetings(@NotNull FindModel model){
     model.setCaseSensitive(isCaseSensitive());
     model.setForward(isForward());
     model.setFromCursor(isFromCursor());
     model.setGlobal(isGlobal());
     model.setRegularExpressions(isRegularExpressions());
     model.setWholeWordsOnly(isWholeWordsOnly());
-    model.setInCommentsOnly(isInCommentsOnly());
-    model.setInStringLiteralsOnly(isInStringLiteralsOnly());
+    FindModel.SearchContext searchContext = isInCommentsOnly() ?
+                                      FindModel.SearchContext.IN_COMMENTS :
+                                      isInStringLiteralsOnly() ?
+                                      FindModel.SearchContext.IN_STRING_LITERALS :
+                                      isExceptComments() ?
+                                      FindModel.SearchContext.EXCEPT_COMMENTS :
+                                      isExceptStringLiterals() ?
+                                      FindModel.SearchContext.EXCEPT_STRING_LITERALS :
+                                      isExceptCommentsAndLiterals() ?
+                                      FindModel.SearchContext.EXCEPT_COMMENTS_AND_STRING_LITERALS :
+                                      FindModel.SearchContext.ANY;
+    model.setSearchContext(searchContext);
     model.setWithSubdirectories(isWithSubdirectories());
     model.setFileFilter(FILE_MASK);
 
     model.setCustomScopeName(FIND_SCOPE);
   }
 
-  private static void addStringToList(String str, List<String> list, int maxSize){
-    if(list.contains(str)){
+  private static void addStringToList(@NotNull String str, @NotNull List<String> list, int maxSize) {
+    if (list.contains(str)) {
       list.remove(str);
     }
     list.add(str);
-    while(list.size() > maxSize){
+    while (list.size() > maxSize) {
       list.remove(0);
     }
   }
 
   @Override
-  public void addStringToFind(String s){
-    if (s == null || s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0){
+  public void addStringToFind(@NotNull String s){
+    if (s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0){
       return;
     }
-    addStringToList(s, RECENT_FIND_STRINGS, MAX_RECENT_SIZE);
+    addStringToList(s, FindRecents.getInstance().findStrings, MAX_RECENT_SIZE);
   }
 
   @Override
-  public void addStringToReplace(String s) {
-    if (s == null || s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0){
+  public void addStringToReplace(@NotNull String s) {
+    if (s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0){
       return;
     }
-    addStringToList(s, RECENT_REPLACE_STRINGS, MAX_RECENT_SIZE);
+    addStringToList(s, FindRecents.getInstance().replaceStrings, MAX_RECENT_SIZE);
   }
 
   @Override
-  public void addDirectory(String s) {
-    if (s == null || s.isEmpty()){
+  public void addDirectory(@NotNull String s) {
+    if (s.isEmpty()){
       return;
     }
-    addStringToList(s, RECENT_DIR_STRINGS, MAX_RECENT_SIZE);
+    addStringToList(s, FindRecents.getInstance().dirStrings, MAX_RECENT_SIZE);
   }
 
   @NotNull
   @Override
   public String[] getRecentFindStrings(){
-    return ArrayUtil.toStringArray(RECENT_FIND_STRINGS);
+    return ArrayUtil.toStringArray(FindRecents.getInstance().findStrings);
   }
 
   @NotNull
   @Override
   public String[] getRecentReplaceStrings(){
-    return ArrayUtil.toStringArray(RECENT_REPLACE_STRINGS);
+    return ArrayUtil.toStringArray(FindRecents.getInstance().replaceStrings);
   }
 
   @NotNull
   @Override
   public String[] getRecentFileMasks() {
-    return ArrayUtil.toStringArray(RECENT_FILE_MASKS);
+    return ArrayUtil.toStringArray(recentFileMasks);
   }
 
   @NotNull
   @Override
   public List<String> getRecentDirectories(){
-    return new ArrayList<String>(RECENT_DIR_STRINGS);
+    return new ArrayList<String>(FindRecents.getInstance().dirStrings);
   }
 
   @Override
+  @Transient
   public String getFileMask() {
     return FILE_MASK;
   }
@@ -350,8 +346,8 @@ public class FindSettingsImpl extends FindSettings implements PersistentStateCom
   @Override
   public void setFileMask(String _fileMask) {
     FILE_MASK = _fileMask;
-    if (_fileMask != null && !_fileMask.isEmpty()) {
-      addStringToList(_fileMask, RECENT_FILE_MASKS, MAX_RECENT_SIZE);
+    if (!StringUtil.isEmptyOrSpaces(_fileMask)) {
+      addStringToList(_fileMask, recentFileMasks, MAX_RECENT_SIZE);
     }
   }
 
@@ -383,5 +379,80 @@ public class FindSettingsImpl extends FindSettings implements PersistentStateCom
   @Override
   public void setCustomScope(final String SEARCH_SCOPE) {
     this.SEARCH_SCOPE = SEARCH_SCOPE;
+  }
+
+  @Override
+  public boolean isExceptComments() {
+    return EXCEPT_COMMENTS;
+  }
+
+  @Override
+  public void setExceptCommentsAndLiterals(boolean selected) {
+    EXCEPT_COMMENTS_AND_STRING_LITERALS = selected;
+  }
+
+  @Override
+  public boolean isShowResultsInSeparateView() {
+    return SHOW_RESULTS_IN_SEPARATE_VIEW;
+  }
+
+  @Override
+  public void setShowResultsInSeparateView(boolean optionValue) {
+    SHOW_RESULTS_IN_SEPARATE_VIEW = optionValue;
+  }
+
+  @Override
+  public boolean isExceptCommentsAndLiterals() {
+    return EXCEPT_COMMENTS_AND_STRING_LITERALS;
+  }
+
+  @Override
+  public void setExceptComments(boolean selected) {
+    EXCEPT_COMMENTS = selected;
+  }
+
+  @Override
+  public boolean isExceptStringLiterals() {
+    return EXCEPT_STRING_LITERALS;
+  }
+
+  @Override
+  public void setExceptStringLiterals(boolean selected) {
+    EXCEPT_STRING_LITERALS = selected;
+  }
+
+  @State(
+    name = "FindRecents",
+    storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/find.recents.xml", roamingType = RoamingType.DISABLED)}
+  )
+  static final class FindRecents implements PersistentStateComponent<FindRecents> {
+    public static FindRecents getInstance() {
+      return ServiceManager.getService(FindRecents.class);
+    }
+
+    @Tag("findStrings")
+    @Property(surroundWithTag = false)
+    @AbstractCollection(surroundWithTag = false, elementTag = "find", elementValueAttribute = "")
+    public List<String> findStrings = new ArrayList<String>();
+
+    @Tag("replaceStrings")
+    @Property(surroundWithTag = false)
+    @AbstractCollection(surroundWithTag = false, elementTag = "replace", elementValueAttribute = "")
+    public List<String> replaceStrings = new ArrayList<String>();
+
+    @Tag("dirStrings")
+    @Property(surroundWithTag = false)
+    @AbstractCollection(surroundWithTag = false, elementTag = "dir", elementValueAttribute = "")
+    public List<String> dirStrings = new ArrayList<String>();
+
+    @Override
+    public void loadState(FindRecents state) {
+      XmlSerializerUtil.copyBean(state, this);
+    }
+
+    @Override
+    public FindRecents getState() {
+      return this;
+    }
   }
 }

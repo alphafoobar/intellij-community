@@ -17,9 +17,13 @@ package com.intellij.packageDependencies.actions;
 
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.analysis.PerformAnalysisInBackgroundOption;
+import com.intellij.diagnostic.PerformanceWatcher;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.packageDependencies.DependenciesBuilder;
 import com.intellij.packageDependencies.DependenciesToolWindow;
@@ -95,11 +99,19 @@ public abstract class DependenciesHandlerBase {
   protected abstract DependenciesBuilder createDependenciesBuilder(AnalysisScope scope);
 
   private void perform(List<DependenciesBuilder> builders) {
-    for (AnalysisScope scope : myScopes) {
-      builders.add(createDependenciesBuilder(scope));
+    try {
+      PerformanceWatcher.Snapshot snapshot = PerformanceWatcher.takeSnapshot();
+      for (AnalysisScope scope : myScopes) {
+        builders.add(createDependenciesBuilder(scope));
+      }
+      for (DependenciesBuilder builder : builders) {
+        builder.analyze();
+      }
+      snapshot.logResponsivenessSinceCreation("Dependency analysis");
     }
-    for (DependenciesBuilder builder : builders) {
-      builder.analyze();
+    catch (IndexNotReadyException e) {
+      DumbService.getInstance(myProject).showDumbModeNotification("Analyze dependencies is not available until indices are ready");
+      throw new ProcessCanceledException();
     }
   }
 

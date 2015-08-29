@@ -1,29 +1,39 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.xml;
 
 import com.intellij.codeInsight.actions.OptimizeImportsProcessor;
 import com.intellij.codeInsight.daemon.impl.analysis.XmlUnusedNamespaceInspection;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.htmlInspections.XmlInspectionToolProvider;
+import com.intellij.ide.highlighter.XmlFileType;
 import com.intellij.javaee.ExternalResourceManagerExImpl;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.testFramework.IdeaTestCase;
-import com.intellij.testFramework.fixtures.CodeInsightFixtureTestCase;
+import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Dmitry Avdeev
  */
-public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  public XmlNamespacesTest() {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
+public class XmlNamespacesTest extends LightCodeInsightFixtureTestCase {
   public void testUnusedNamespaces() throws Exception {
     doUnusedDeclarationTest(
       "<all xmlns=\"http://www.w3.org/2001/XMLSchema\" <warning descr=\"Namespace declaration is never used\">xmlns:xsi=\"http://www.w3.org/2001/XMLSc<caret>hema-instance\"</warning>/>",
-      "<all xmlns=\"http://www.w3.org/2001/XMLSchema\"/>", XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME);
+      "<all xmlns=\"http://www.w3.org/2001/XMLSchema\"/>", XmlBundle.message("xml.inspections.unused.schema.remove"));
   }
 
   public void testUnusedDefaultNamespace() throws Exception {
@@ -37,13 +47,13 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                             "<schema:schema\n" +
                             "        xmlns:schema=\"http://www.w3.org/2001/XMLSchema\"\n" +
                             "        xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
-                            "        >\n" +
-                            "</schema:schema>", XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME, false);
+                            ">\n" +
+                            "</schema:schema>", XmlBundle.message("xml.inspections.unused.schema.remove"), false);
 
     doOptimizeImportsTest("<schema:schema \n" +
                           "            xmlns:schema=\"http://www.w3.org/2001/XMLSchema\"\n" +
                           "            xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
-                          "        >\n" +
+                          ">\n" +
                           "</schema:schema>");
   }
 
@@ -56,11 +66,11 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
       "<x:all\n" +
       "        xmlns:x=\"http://www.w3.org/2001/XMLSchema\"\n" +
       "        xmlns:y=\"http://www.w3.org/2001/XMLSchema\"/>",
-      XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME, false);
+      XmlBundle.message("xml.inspections.unused.schema.remove"), false);
 
     doOptimizeImportsTest("<x:all\n" +
                           "        xmlns:x=\"http://www.w3.org/2001/XMLSchema\"\n" +
-                          "        />");
+                          "/>");
   }
 
   public void testUnusedLocation() throws Exception {
@@ -72,7 +82,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                             "<x:all\n" +
                             "        xmlns:x=\"http://www.w3.org/2001/XMLSchema\"\n" +
                             "        xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
-                            "        />",
+                            "/>",
                             XmlUnusedNamespaceInspection.RemoveNamespaceLocationFix.NAME);
   }
 
@@ -87,7 +97,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                             "        xmlns:x=\"http://www.w3.org/2001/XMLSchema\"\n" +
                             "        xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
                             "        xsi:schemaLocation=\"http://www.w3.org/2001/XMLSchema http://www.w3.org/2001/XMLSchema.xsd\"/>",
-                            XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME);
+                            XmlBundle.message("xml.inspections.unused.schema.remove"));
   }
 
   public void testUnusedDefaultLocation() throws Exception {
@@ -98,7 +108,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                             "<x:all\n" +
                             "        xmlns:x=\"http://www.w3.org/2001/XMLSchema\"\n" +
                             "        xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
-                            "        />",
+                            "/>",
                             XmlUnusedNamespaceInspection.RemoveNamespaceLocationFix.NAME);
   }
 
@@ -122,7 +132,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                             "\n" +
                             "  </xs:complexType>\n" +
                             "</xs:schema>",
-                            XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME);
+                            XmlBundle.message("xml.inspections.unused.schema.remove"));
   }
 
   public void testImplicitPrefixUsage() throws Exception {
@@ -156,7 +166,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
 
   public void testPrefixesInTagValues() throws Exception {
     myFixture.configureByText("a.xml",
-                              "<<info descr=\"Namespace '' is not bound\">nodeTypes</info> xmlns:nt=\"<error descr=\"URI is not registered (Settings | Project Settings | Schemas and DTDs)\">http://www.jcp.org/jcr/nt/1.0</error>\" xmlns:customns=\"<error descr=\"URI is not registered (Settings | Project Settings | Schemas and DTDs)\">http://customurl</error>\">\n" +
+                              "<<info descr=\"Namespace '' is not bound\">nodeTypes</info> xmlns:nt=\"<error descr=\"URI is not registered (Settings | Languages & Frameworks | Schemas and DTDs)\">http://www.jcp.org/jcr/nt/1.0</error>\" xmlns:customns=\"<error descr=\"URI is not registered (Settings | Languages & Frameworks | Schemas and DTDs)\">http://customurl</error>\">\n" +
                               "<nodeType name=\"customns:item\" isMixin=\"false\" hasOrderableChildNodes=\"false\">\n" +
                               "   <supertypes>\n" +
                               "      <supertype>nt:folder</supertype>\n" +
@@ -173,18 +183,18 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
                                        "        xsi:schemaLocation=\"http://www.w3.org/2001/XMLSchema http://www.w3.org/2001/XMLSchema.xsd\n" +
                                        "                http://www.w3.org/2001/XInclude http://www.w3.org/2001/XInclude.xsd\">\n" +
                                        "\n" +
-                                       "    <<error descr=\"An 'include' failed, and no 'fallback' element was found.\">include</error> xmlns=\"http://www.w3.org/2001/XInclude\" href=\"<error descr=\"Cannot resolve file 'a.xml'\">a.xml</error>\"/>\n" +
+                                       "    <include xmlns=\"http://www.w3.org/2001/XInclude\" href=\"a.xml\"/>\n" +
                                        "</x:all>");
     myFixture.testHighlighting();
   }
 
   public void testLocallyUsedNamespaceWithPrefix() throws Exception {
-    myFixture.configureByText("a.xml", "<s:foo xmlns:s=\"<error descr=\"URI is not registered (Settings | Project Settings | Schemas and DTDs)\">http://foo</error>\"\n" +
-                                       "       <warning descr=\"Namespace declaration is never used\">xmlns:bar=\"<error descr=\"URI is not registered (Settings | Project Settings | Schemas and DTDs)\">http://bar</error>\"</warning>\n" +
+    myFixture.configureByText("a.xml", "<s:foo xmlns:s=\"<error descr=\"URI is not registered (Settings | Languages & Frameworks | Schemas and DTDs)\">http://foo</error>\"\n" +
+                                       "       <warning descr=\"Namespace declaration is never used\">xmlns:bar=\"<error descr=\"URI is not registered (Settings | Languages & Frameworks | Schemas and DTDs)\">http://bar</error>\"</warning>\n" +
                                        "       xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n" +
                                        "       xsi:schemaLocation=\"http://bar <error descr=\"Cannot resolve file 'bar.xsd'\">bar.xsd</error> http://foo <error descr=\"Cannot resolve file 'foo.xsd'\">foo.xsd</error>\">\n" +
                                        "\n" +
-                                       "    <bar xmlns=\"<error descr=\"URI is not registered (Settings | Project Settings | Schemas and DTDs)\">http://bar</error>\"/>\n" +
+                                       "    <bar xmlns=\"<error descr=\"URI is not registered (Settings | Languages & Frameworks | Schemas and DTDs)\">http://bar</error>\"/>\n" +
                                        "\n" +
                                        "</s:foo>");
     myFixture.testHighlighting();
@@ -210,7 +220,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
 
   public void testUsedInXmlns() throws Exception {
     myFixture.testHighlighting("spring.xml", "spring-beans-2.5.xsd", "spring-batch-2.1.xsd");
-    IntentionAction action = myFixture.getAvailableIntention(XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.NAME);
+    IntentionAction action = myFixture.getAvailableIntention(XmlBundle.message("xml.inspections.unused.schema.remove"));
     assertNotNull(action);
     myFixture.launchAction(action);
     myFixture.checkResultByFile("spring_after.xml");
@@ -220,11 +230,18 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
     myFixture.testHighlighting("import.xml", "import.xsd");
   }
 
+  public void testDoNotOptimizeWhenInspectionDisabled() throws Exception {
+    myFixture.disableInspections(new XmlUnusedNamespaceInspection());
+    String text = "<all xmlns=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>";
+    myFixture.configureByText(XmlFileType.INSTANCE, text);
+    doOptimizeImportsTest(text);
+  }
+
   private void doUnusedDeclarationTest(String text, String after, String name) throws Exception {
     doUnusedDeclarationTest(text, after, name, true);
   }
 
-  private void doUnusedDeclarationTest(String text, String after, String name, boolean testOptimizeImports) throws Exception {
+  private void doUnusedDeclarationTest(String text, String after, String name, boolean testOptimizeImports) {
     myFixture.configureByText("a.xml", text);
     myFixture.testHighlighting();
     IntentionAction action = myFixture.getAvailableIntention(name);
@@ -242,7 +259,7 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
     myFixture.testHighlighting();
     new WriteCommandAction(getProject(), getFile()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         new OptimizeImportsProcessor(getProject(), getFile()).runWithoutProgress();
       }
     }.execute();
@@ -264,10 +281,5 @@ public class XmlNamespacesTest extends CodeInsightFixtureTestCase {
   @Override
   protected String getBasePath() {
     return "/xml/tests/testData/unusedNs";
-  }
-
-  @Override
-  protected boolean isCommunity() {
-    return true;
   }
 }

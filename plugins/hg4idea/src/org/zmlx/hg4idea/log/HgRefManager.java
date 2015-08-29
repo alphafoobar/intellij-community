@@ -18,36 +18,33 @@ package org.zmlx.hg4idea.log;
 import com.intellij.ui.JBColor;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.vcs.log.RefGroup;
-import com.intellij.vcs.log.VcsLogRefManager;
-import com.intellij.vcs.log.VcsRef;
-import com.intellij.vcs.log.VcsRefType;
+import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.impl.SingletonRefGroup;
+import com.intellij.vcs.log.impl.VcsLogUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 
-/**
- * @author Nadya Zabrodina
- */
 public class HgRefManager implements VcsLogRefManager {
-
-  private static final Color HEAD_COLOR = new JBColor(new Color(0xf1ef9e), new Color(113, 111, 64));
-  private static final Color BRANCH_COLOR = new JBColor(new Color(0x75eec7), new Color(0x0D6D4F));
-  private static final Color BOOKMARK_COLOR = new JBColor(new Color(0xbcbcfc), new Color(0xbcbcfc).darker().darker());
-  private static final Color TAG_COLOR = JBColor.WHITE;
+  private static final Color CLOSED_BRANCH_COLOR = new JBColor(new Color(0xee7f8a), new Color(0xee7f8a).darker());
   private static final Color LOCAL_TAG_COLOR = JBColor.CYAN;
+  private static final Color MQ_TAG_COLOR = new JBColor(new Color(0x1764ff), new Color(0x1764ff).darker());
 
-  public static final VcsRefType HEAD = new SimpleRefType(true, HEAD_COLOR);
-  public static final VcsRefType BRANCH = new SimpleRefType(true, BRANCH_COLOR);
-  public static final VcsRefType BOOKMARK = new SimpleRefType(true, BOOKMARK_COLOR);
-  public static final VcsRefType TAG = new SimpleRefType(false, TAG_COLOR);
+  public static final VcsRefType TIP = new SimpleRefType(true, VcsLogStandardColors.Refs.TIP);
+  public static final VcsRefType HEAD = new SimpleRefType(true, VcsLogStandardColors.Refs.LEAF);
+  public static final VcsRefType BRANCH = new SimpleRefType(true, VcsLogStandardColors.Refs.BRANCH);
+  public static final VcsRefType CLOSED_BRANCH = new SimpleRefType(false, CLOSED_BRANCH_COLOR);
+  public static final VcsRefType BOOKMARK = new SimpleRefType(true, VcsLogStandardColors.Refs.BRANCH_REF);
+  public static final VcsRefType TAG = new SimpleRefType(false, VcsLogStandardColors.Refs.TAG);
   public static final VcsRefType LOCAL_TAG = new SimpleRefType(false, LOCAL_TAG_COLOR);
-
+  public static final VcsRefType MQ_APPLIED_TAG = new SimpleRefType(false, MQ_TAG_COLOR);
+  
   // first has the highest priority
-  private static final List<VcsRefType> REF_TYPE_PRIORITIES = Arrays.asList(HEAD, BRANCH, BOOKMARK, TAG);
+  private static final List<VcsRefType> REF_TYPE_PRIORITIES = Arrays.asList(TIP, HEAD, BRANCH, BOOKMARK, TAG);
 
   // -1 => higher priority
   public static final Comparator<VcsRefType> REF_TYPE_COMPARATOR = new Comparator<VcsRefType>() {
@@ -74,32 +71,26 @@ public class HgRefManager implements VcsLogRefManager {
         return typeComparison;
       }
 
-      //noinspection UnnecessaryLocalVariable
-      VcsRefType type = type1; // common type
-      if (type == BRANCH) {
+      if (type1 == BRANCH) {
         if (ref1.getName().equals(DEFAULT)) {
           return -1;
         }
         if (ref2.getName().equals(DEFAULT)) {
           return 1;
         }
-        return ref1.getName().compareTo(ref2.getName());
       }
-      return ref1.getName().compareTo(ref2.getName());
+      int nameComparison = ref1.getName().compareTo(ref2.getName());
+      if (nameComparison != 0) {
+        return nameComparison;
+      }
+      return VcsLogUtil.compareRoots(ref1.getRoot(), ref2.getRoot());
     }
   };
 
-/*
-  public HgRefManager(@NotNull RepositoryManager<HgRepository> repositoryManager) {
-    myRepositoryManager = repositoryManager;
-  }*/
-
   @NotNull
   @Override
-  public List<VcsRef> sort(Collection<VcsRef> refs) {
-    ArrayList<VcsRef> list = new ArrayList<VcsRef>(refs);
-    Collections.sort(list, REF_COMPARATOR);
-    return list;
+  public Comparator<VcsRef> getLabelsOrderComparator() {
+    return REF_COMPARATOR;
   }
 
   @NotNull
@@ -111,6 +102,17 @@ public class HgRefManager implements VcsLogRefManager {
         return new SingletonRefGroup(ref);
       }
     });
+  }
+
+  @NotNull
+  @Override
+  public Comparator<VcsRef> getBranchLayoutComparator() {
+    return REF_COMPARATOR;
+  }
+
+  @NotNull
+  private Collection<VcsRef> sort(@NotNull Collection<VcsRef> refs) {
+    return ContainerUtil.sorted(refs, getLabelsOrderComparator());
   }
 
   private static class SimpleRefType implements VcsRefType {

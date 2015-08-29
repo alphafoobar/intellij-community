@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import java.util.Set;
 
 /**
  * @author peter
+ *
+ * @see com.intellij.codeInsight.completion.PrioritizedLookupElement
  */
 public abstract class LookupElementDecorator<T extends LookupElement> extends LookupElement {
   private final T myDelegate;
@@ -39,7 +41,7 @@ public abstract class LookupElementDecorator<T extends LookupElement> extends Lo
 
   @Override
   public boolean isValid() {
-    return super.isValid() && myDelegate.isValid();
+    return myDelegate.isValid() && super.isValid();
   }
 
   @Override
@@ -62,6 +64,11 @@ public abstract class LookupElementDecorator<T extends LookupElement> extends Lo
   @Override
   public void handleInsert(InsertionContext context) {
     myDelegate.handleInsert(context);
+  }
+
+  @Override
+  public AutoCompletionPolicy getAutoCompletionPolicy() {
+    return myDelegate.getAutoCompletionPolicy();
   }
 
   @Override

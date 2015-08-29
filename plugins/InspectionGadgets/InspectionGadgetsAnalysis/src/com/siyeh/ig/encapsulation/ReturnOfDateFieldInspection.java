@@ -25,6 +25,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -93,7 +94,7 @@ public class ReturnOfDateFieldInspection extends BaseInspection {
       if (type == null) {
         return;
       }
-      replaceExpression(referenceExpression, '(' + type + ')' + referenceExpression.getText() + ".clone()");
+      PsiReplacementUtil.replaceExpression(referenceExpression, '(' + type + ')' + referenceExpression.getText() + ".clone()");
     }
   }
 
@@ -111,8 +112,9 @@ public class ReturnOfDateFieldInspection extends BaseInspection {
       if (!(returnValue instanceof PsiReferenceExpression)) {
         return;
       }
-      final PsiMethod method = PsiTreeUtil.getParentOfType(statement, PsiMethod.class, true, PsiClass.class);
-      if (method == null || (ignorePrivateMethods && method.hasModifierProperty(PsiModifier.PRIVATE))) {
+      final PsiElement containingElement = PsiTreeUtil.getParentOfType(statement, PsiMethod.class, PsiLambdaExpression.class, PsiClass.class);
+      if (containingElement == null || containingElement instanceof PsiClass || 
+          (containingElement instanceof PsiMethod && ignorePrivateMethods && ((PsiMethod)containingElement).hasModifierProperty(PsiModifier.PRIVATE))) {
         return;
       }
       final PsiReferenceExpression fieldReference = (PsiReferenceExpression)returnValue;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,19 +35,19 @@ public interface Property {
    * @return the setter: a method or null if defined, or something else callable if undefined.
    */
   @NotNull
-  Maybe<Callable> getSetter();
+  Maybe<PyCallable> getSetter();
 
   /**
    * @return the getter: a method or null if defined, or something else callable if undefined.
    */
   @NotNull
-  Maybe<Callable> getGetter();
+  Maybe<PyCallable> getGetter();
 
   /**
    * @return the deleter: a method or null if defined, or something else callable if undefined.
    */
   @NotNull
-  Maybe<Callable> getDeleter();
+  Maybe<PyCallable> getDeleter();
 
   /**
    * @return doc string as known to property() call. If null, see getter's doc.
@@ -66,7 +66,7 @@ public interface Property {
    * @return getter, setter, or deleter.
    */
   @NotNull
-  Maybe<Callable> getByDirection(@NotNull AccessDirection direction);
+  Maybe<PyCallable> getByDirection(@NotNull AccessDirection direction);
 
   /**
    * Get the return type of the property getter.

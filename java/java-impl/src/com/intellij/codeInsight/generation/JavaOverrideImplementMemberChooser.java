@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.generation;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -13,7 +28,6 @@ import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.infos.CandidateInfo;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
@@ -23,7 +37,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -37,13 +50,12 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
   @NonNls public static final String PROP_COMBINED_OVERRIDE_IMPLEMENT = "OverrideImplement.combined";
   @NonNls public static final String PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT = "OverrideImplement.overriding.sorted";
 
-  private ToggleAction mySortByOverridingAction;
   private ToggleAction myMergeAction;
   private final PsiMethodMember[] myAllElements;
   private final PsiMethodMember[] myOnlyPrimaryElements;
   private final NotNullLazyValue<PsiMethodWithOverridingPercentMember[]> myLazyElementsWithPercent;
   private final boolean myToImplement;
-  private Project myProject;
+  private final Project myProject;
   private boolean myMerge;
   private boolean mySortedByOverriding;
 
@@ -74,7 +86,7 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
     final JavaOverrideImplementMemberChooser javaOverrideImplementMemberChooser =
       new JavaOverrideImplementMemberChooser(all, onlyPrimary, lazyElementsWithPercent, project, PsiUtil.isLanguageLevel5OrHigher(aClass),
                                              merge, toImplement, PropertiesComponent.getInstance(project)
-        .getBoolean(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, false));
+        .getBoolean(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT));
     javaOverrideImplementMemberChooser.setTitle(getChooserTitle(toImplement, merge));
 
     javaOverrideImplementMemberChooser.setCopyJavadocVisible(true);
@@ -131,17 +143,16 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
 
   @Override
   protected void onAlphabeticalSortingEnabled(final AnActionEvent event) {
+    mySortedByOverriding = false;
     resetElements(myToImplement || myMerge ? myAllElements : myOnlyPrimaryElements, null, true);
-    if (mySortByOverridingAction != null) {
-      mySortByOverridingAction.setSelected(event, false);
-    }
+    restoreTree();
   }
 
   @Override
   protected void doOKAction() {
     super.doOKAction();
-    PropertiesComponent.getInstance(myProject).setValue(PROP_COMBINED_OVERRIDE_IMPLEMENT, String.valueOf(myMerge));
-    PropertiesComponent.getInstance(myProject).setValue(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, String.valueOf(mySortedByOverriding));
+    PropertiesComponent.getInstance(myProject).setValue(PROP_COMBINED_OVERRIDE_IMPLEMENT, myMerge, true);
+    PropertiesComponent.getInstance(myProject).setValue(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, mySortedByOverriding);
   }
 
   @Override
@@ -149,11 +160,11 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
     super.fillToolbarActions(group);
     if (myToImplement) return;
 
-    mySortByOverridingAction = new MySortByOverridingAction();
+    ToggleAction sortByOverridingAction = new MySortByOverridingAction();
     if (mySortedByOverriding) {
       changeSortComparator(PsiMethodWithOverridingPercentMember.COMPARATOR);
     }
-    group.add(mySortByOverridingAction, Constraints.FIRST);
+    group.add(sortByOverridingAction, Constraints.FIRST);
 
     myMergeAction = new MyMergeAction();
     group.add(myMergeAction);
@@ -221,10 +232,11 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
     @Override
     public void setSelected(AnActionEvent e, boolean state) {
       myMerge = state;
-      if (state && mySortByOverridingAction.isSelected(e)) {
-        mySortByOverridingAction.setSelected(e, false);
+      if (state && mySortedByOverriding) {
+        mySortedByOverriding = false;
       }
       resetElements(state ? myAllElements : myOnlyPrimaryElements, null, true);
+      restoreTree();
       setTitle(getChooserTitle(false, myMerge));
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,6 +56,7 @@ public class Divider {
     }
   }
 
+  private static final PsiElement HAVE_TO_GET_CHILDREN = PsiUtilCore.NULL_PSI_ELEMENT;
   private static void divideInsideAndOutside(@NotNull PsiFile root,
                                              int startOffset,
                                              int endOffset,
@@ -76,20 +77,20 @@ public class Divider {
     final Stack<PsiElement> children = new Stack<PsiElement>(STARTING_TREE_HEIGHT);
     PsiElement element = root;
 
-    PsiElement child = PsiUtilCore.NULL_PSI_ELEMENT;
+    PsiElement child = HAVE_TO_GET_CHILDREN;
     while (true) {
       ProgressManager.checkCanceled();
 
       for (Condition<PsiElement> filter : filters) {
         if (!filter.value(element)) {
-          assert child == PsiUtilCore.NULL_PSI_ELEMENT;
+          assert child == HAVE_TO_GET_CHILDREN;
           child = null; // do not want to process children
           break;
         }
       }
 
       boolean startChildrenVisiting;
-      if (child == PsiUtilCore.NULL_PSI_ELEMENT) {
+      if (child == HAVE_TO_GET_CHILDREN) {
         startChildrenVisiting = true;
         child = element.getFirstChild();
       }
@@ -126,7 +127,7 @@ public class Divider {
         starts.push(offset);
         elements.push(element);
         element = child;
-        child = PsiUtilCore.NULL_PSI_ELEMENT;
+        child = HAVE_TO_GET_CHILDREN;
       }
     }
 
@@ -134,7 +135,7 @@ public class Divider {
       PsiElement parent = !outside.isEmpty() ? outside.get(outside.size() - 1) :
                           !inside.isEmpty() ? inside.get(inside.size() - 1) :
                           CollectHighlightsUtil.findCommonParent(root, startOffset, endOffset);
-      while (parent != null && parent != root) {
+      while (parent != null && !(parent instanceof PsiFile)) {
         parent = parent.getParent();
         if (parent != null) {
           outside.add(parent);

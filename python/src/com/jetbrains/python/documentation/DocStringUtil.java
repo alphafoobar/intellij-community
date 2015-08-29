@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,8 +64,8 @@ public class DocStringUtil {
   @Nullable
   public static PyStringLiteralExpression findDocStringExpression(@Nullable PyElement parent) {
     if (parent != null) {
-      PsiElement seeker = PyUtil.getFirstNonCommentAfter(parent.getFirstChild());
-      if (seeker instanceof PyExpressionStatement) seeker = PyUtil.getFirstNonCommentAfter(seeker.getFirstChild());
+      PsiElement seeker = PyPsiUtils.getNextNonCommentSibling(parent.getFirstChild(), false);
+      if (seeker instanceof PyExpressionStatement) seeker = PyPsiUtils.getNextNonCommentSibling(seeker.getFirstChild(), false);
       if (seeker instanceof PyStringLiteralExpression) return (PyStringLiteralExpression)seeker;
     }
     return null;

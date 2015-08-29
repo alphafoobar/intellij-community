@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,24 +20,23 @@
  */
 package org.jetbrains.idea.eclipse;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.StdModuleTypes;
-import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ModuleRootModel;
+import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.IdeaTestCase;
-import junit.framework.Assert;
+import com.intellij.util.Consumer;
 import org.jdom.Document;
 import org.jdom.Element;
 import org.jdom.JDOMException;
@@ -48,8 +47,6 @@ import org.jetbrains.idea.eclipse.conversion.EclipseClasspathWriter;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
 
 public class EclipseClasspathTest extends IdeaTestCase {
   @Override
@@ -73,31 +70,34 @@ public class EclipseClasspathTest extends IdeaTestCase {
     checkModule(path, setUpModule(path, project));
   }
 
-  static Module setUpModule(final String path, @NotNull final Project project)
-    throws IOException, JDOMException, ConversionException, ConfigurationException {
+  static Module setUpModule(final String path, @NotNull final Project project) throws Exception {
     final File classpathFile = new File(path, EclipseXml.DOT_CLASSPATH_EXT);
     String fileText = FileUtil.loadFile(classpathFile).replaceAll("\\$ROOT\\$", project.getBaseDir().getPath());
     if (!SystemInfo.isWindows) {
       fileText = fileText.replaceAll(EclipseXml.FILE_PROTOCOL + "/", EclipseXml.FILE_PROTOCOL);
     }
     final Element classpathElement = JDOMUtil.loadDocument(fileText).getRootElement();
+
     final Module module = WriteCommandAction.runWriteCommandAction(null, new Computable<Module>() {
       @Override
       public Module compute() {
-        return ModuleManager.getInstance(project)
-          .newModule(path + "/" + EclipseProjectFinder.findProjectName(path) + IdeaXml.IML_EXT, StdModuleTypes.JAVA.getId());
+        String imlPath = path + "/" + EclipseProjectFinder.findProjectName(path) + IdeaXml.IML_EXT;
+        return ModuleManager.getInstance(project).newModule(imlPath, StdModuleTypes.JAVA.getId());
       }
     });
-    final ModifiableRootModel rootModel = ModuleRootManager.getInstance(module).getModifiableModel();
-    final EclipseClasspathReader classpathReader = new EclipseClasspathReader(path, project, null);
-    classpathReader.init(rootModel);
-    classpathReader
-      .readClasspath(rootModel, new ArrayList<String>(), new ArrayList<String>(), new HashSet<String>(), new HashSet<String>(), null,
-                     classpathElement);
-    new EclipseClasspathStorageProvider().assertCompatible(rootModel);
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        rootModel.commit();
+
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
+      @Override
+      public void consume(ModifiableRootModel model) {
+        try {
+          EclipseClasspathReader classpathReader = new EclipseClasspathReader(path, project, null);
+          classpathReader.init(model);
+          classpathReader.readClasspath(model, classpathElement);
+          new EclipseClasspathStorageProvider().assertCompatible(model);
+        }
+        catch (Exception e) {
+          throw new RuntimeException(e);
+        }
       }
     });
     return module;
@@ -110,14 +110,14 @@ public class EclipseClasspathTest extends IdeaTestCase {
     if (!SystemInfo.isWindows) {
       fileText1 = fileText1.replaceAll(EclipseXml.FILE_PROTOCOL + "/", EclipseXml.FILE_PROTOCOL);
     }
-    final Element classpathElement1 = JDOMUtil.loadDocument(fileText1).getRootElement();
-    final ModuleRootModel model = ModuleRootManager.getInstance(module);
-    final Element resultClasspathElement = new Element(EclipseXml.CLASSPATH_TAG);
-    new EclipseClasspathWriter(model).writeClasspath(resultClasspathElement, classpathElement1);
+
+    Element classpathElement1 = JDOMUtil.loadDocument(fileText1).getRootElement();
+    ModuleRootModel model = ModuleRootManager.getInstance(module);
+    Element resultClasspathElement = new EclipseClasspathWriter().writeClasspath(classpathElement1, model);
 
     String resulted = new String(JDOMUtil.printDocument(new Document(resultClasspathElement), "\n"));
-    Assert.assertTrue(resulted.replaceAll(StringUtil.escapeToRegexp(module.getProject().getBaseDir().getPath()), "\\$ROOT\\$"),
-                      JDOMUtil.areElementsEqual(classpathElement1, resultClasspathElement));
+    assertTrue(resulted.replaceAll(StringUtil.escapeToRegexp(module.getProject().getBaseDir().getPath()), "\\$ROOT\\$"),
+               JDOMUtil.areElementsEqual(classpathElement1, resultClasspathElement));
   }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,9 @@
  */
 package com.intellij.openapi.fileEditor.impl.text;
 
-import com.intellij.ide.ui.customization.CustomActionsSchema;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataProvider;
+import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -25,8 +26,6 @@ import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
-import com.intellij.openapi.editor.event.EditorMouseEvent;
-import com.intellij.openapi.editor.event.EditorMouseEventArea;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorMarkupModel;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
@@ -36,11 +35,12 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.impl.EditorHistoryManager;
-import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl;
 import com.intellij.openapi.fileTypes.FileTypeEvent;
 import com.intellij.openapi.fileTypes.FileTypeListener;
 import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileAdapter;
 import com.intellij.openapi.vfs.VirtualFileEvent;
@@ -48,14 +48,13 @@ import com.intellij.openapi.vfs.VirtualFilePropertyEvent;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.StatusBarEx;
 import com.intellij.ui.components.JBLoadingPanel;
-import com.intellij.util.EditorPopupHandler;
+import com.intellij.util.FileContentUtilCore;
 import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.MouseEvent;
 
 /**
  * @author Anton Katilin
@@ -72,7 +71,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    */
   private final Document myDocument;
 
-  private final MyEditorMouseListener myEditorMouseListener;
   private final MyDocumentListener myDocumentListener;
   private final MyVirtualFileListener myVirtualFileListener;
   @NotNull private final Editor myEditor;
@@ -99,18 +97,27 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     myDocumentListener = new MyDocumentListener();
     myDocument.addDocumentListener(myDocumentListener);
 
-    myEditorMouseListener = new MyEditorMouseListener();
-
-    myConnection = project.getMessageBus().connect();
-    myConnection.subscribe(FileTypeManager.TOPIC, new MyFileTypeListener());
-
-    myVirtualFileListener = new MyVirtualFileListener();
-    myFile.getFileSystem().addVirtualFileListener(myVirtualFileListener);
     myEditor = createEditor();
     add(myEditor.getComponent(), BorderLayout.CENTER);
     myModified = isModifiedImpl();
     myValid = isEditorValidImpl();
     LOG.assertTrue(myValid);
+
+    myVirtualFileListener = new MyVirtualFileListener();
+    myFile.getFileSystem().addVirtualFileListener(myVirtualFileListener);
+    myConnection = project.getMessageBus().connect();
+    myConnection.subscribe(FileTypeManager.TOPIC, new MyFileTypeListener());
+    myConnection.subscribe(DumbService.DUMB_MODE, new DumbService.DumbModeListener() {
+      @Override
+      public void enteredDumbMode() {
+        updateHighlighters();
+      }
+
+      @Override
+      public void exitDumbMode() {
+        updateHighlighters();
+      }
+    });
   }
 
   /**
@@ -120,8 +127,10 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    */
   void dispose(){
     myDocument.removeDocumentListener(myDocumentListener);
-    EditorHistoryManager.getInstance(myProject).updateHistoryEntry(myFile, false);
-    disposeEditor(myEditor);
+    if (!myProject.isDefault()) { // There's no EditorHistoryManager for default project (which is used in diff command-line application)
+      EditorHistoryManager.getInstance(myProject).updateHistoryEntry(myFile, false);
+    }
+    disposeEditor();
     myConnection.disconnect();
 
     myFile.getFileSystem().removeVirtualFileListener(myVirtualFileListener);
@@ -151,10 +160,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     return myEditor;
   }
 
-  /**
-   * @return created editor. This editor should be released by {@link #disposeEditor(Editor) }
-   * method.
-   */
   @NotNull
   private Editor createEditor(){
     Editor editor = EditorFactory.getInstance().createEditor(myDocument, myProject);
@@ -163,7 +168,7 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     ((EditorEx) editor).setHighlighter(highlighter);
     ((EditorEx) editor).setFile(myFile);
 
-    editor.addEditorMouseListener(myEditorMouseListener);
+    ((EditorEx)editor).setContextMenuGroupId(IdeActions.GROUP_EDITOR_POPUP);
 
     ((EditorImpl) editor).setDropHandler(new FileDropHandler(editor));
 
@@ -171,13 +176,8 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     return editor;
   }
 
-  /**
-   * Disposes resources allocated by the specified editor view and registers all
-   * it's listeners
-   */
-  private void disposeEditor(@NotNull Editor editor){
-    EditorFactory.getInstance().releaseEditor(editor);
-    editor.removeEditorMouseListener(myEditorMouseListener);
+  private void disposeEditor(){
+    EditorFactory.getInstance().releaseEditor(myEditor);
   }
 
   /**
@@ -232,7 +232,7 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    * changes its file type.
    */
   private void updateHighlighters(){
-    if (!myProject.isDisposed()) {
+    if (!myProject.isDisposed() && !myEditor.isDisposed()) {
       final EditorHighlighter highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, myFile);
       ((EditorEx)myEditor).setHighlighter(highlighter);
     }
@@ -263,8 +263,9 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     final Editor e = validateCurrentEditor();
     if (e == null) return null;
 
-    if (!myProject.isDisposed()) {
-      final Object o = ((FileEditorManagerImpl)FileEditorManager.getInstance(myProject)).getData(dataId, e, myFile);
+    // There's no FileEditorManager for default project (which is used in diff command-line application)
+    if (!myProject.isDisposed() && !myProject.isDefault()) {
+      final Object o = FileEditorManager.getInstance(myProject).getData(dataId, e, e.getCaretModel().getCurrentCaret());
       if (o != null) return o;
     }
 
@@ -276,26 +277,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     }
     return null;
   }
-
-  /**
-   * Shows popup menu
-   */
-  private static final class MyEditorMouseListener extends EditorPopupHandler {
-    @Override
-    public void invokePopup(final EditorMouseEvent event) {
-      if (!event.isConsumed() && event.getArea() == EditorMouseEventArea.EDITING_AREA) {
-        ActionGroup group = (ActionGroup)CustomActionsSchema.getInstance().getCorrectedAction(IdeActions.GROUP_EDITOR_POPUP);
-        ActionPopupMenu popupMenu = ActionManager.getInstance().createActionPopupMenu(ActionPlaces.EDITOR_POPUP, group);
-        MouseEvent e = event.getMouseEvent();
-        final Component c = e.getComponent();
-        if (c != null && c.isShowing()) {
-          popupMenu.getComponent().show(c, e.getX(), e.getY());
-        }
-        e.consume();
-      }
-    }
-  }
-
 
   /**
    * Updates "modified" property
@@ -328,7 +309,7 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    */
   private final class MyFileTypeListener extends FileTypeListener.Adapter {
     @Override
-    public void fileTypesChanged(final FileTypeEvent event) {
+    public void fileTypesChanged(@NotNull final FileTypeEvent event) {
       assertThread();
       // File can be invalid after file type changing. The editor should be removed
       // by the FileEditorManager if it's invalid.
@@ -342,17 +323,21 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    */
   private final class MyVirtualFileListener extends VirtualFileAdapter{
     @Override
-    public void propertyChanged(final VirtualFilePropertyEvent e) {
+    public void propertyChanged(@NotNull final VirtualFilePropertyEvent e) {
       if(VirtualFile.PROP_NAME.equals(e.getPropertyName())){
         // File can be invalidated after file changes name (extension also
         // can changes). The editor should be removed if it's invalid.
         updateValidProperty();
-        updateHighlighters();
+        if (Comparing.equal(e.getFile(), myFile) &&
+            (FileContentUtilCore.FORCE_RELOAD_REQUESTOR.equals(e.getRequestor()) ||
+             !Comparing.equal(e.getOldValue(), e.getNewValue()))) {
+          updateHighlighters();
+        }
       }
     }
 
     @Override
-    public void contentsChanged(VirtualFileEvent event){
+    public void contentsChanged(@NotNull VirtualFileEvent event){
       if (event.isFromSave()){ // commit
         assertThread();
         VirtualFile file = event.getFile();

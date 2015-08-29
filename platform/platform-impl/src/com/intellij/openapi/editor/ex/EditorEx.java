@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ui.ButtonlessScrollBarUI;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -52,6 +53,10 @@ public interface EditorEx extends Editor {
   @Override
   DocumentEx getDocument();
 
+  @Override
+  @NotNull
+  MarkupModelEx getMarkupModel();
+
   @NotNull
   EditorGutterComponentEx getGutterComponentEx();
 
@@ -59,6 +64,11 @@ public interface EditorEx extends Editor {
   EditorHighlighter getHighlighter();
 
   JComponent getPermanentHeaderComponent();
+
+  /**
+   * shouldn't be called during Document update
+   */
+  void setViewer(boolean isViewer);
 
   void setPermanentHeaderComponent(JComponent component);
 
@@ -70,8 +80,14 @@ public interface EditorEx extends Editor {
 
   void setColumnMode(boolean val);
 
+  /**
+   * @deprecated To be removed in IDEA 16.
+   */
   void setLastColumnNumber(int val);
 
+  /**
+   * @deprecated To be removed in IDEA 16.
+   */
   int getLastColumnNumber();
 
   int VERTICAL_SCROLLBAR_LEFT = 0;
@@ -98,13 +114,12 @@ public interface EditorEx extends Editor {
 
   void reinitSettings();
 
+  void addPropertyChangeListener(@NotNull PropertyChangeListener listener, @NotNull Disposable parentDisposable);
   void addPropertyChangeListener(@NotNull PropertyChangeListener listener);
 
   void removePropertyChangeListener(@NotNull PropertyChangeListener listener);
 
   int getMaxWidthInRange(int startOffset, int endOffset);
-
-  void stopOptimizedScrolling();
 
   boolean setCaretVisible(boolean b);
 
@@ -161,18 +176,34 @@ public interface EditorEx extends Editor {
   @Override
   ScrollingModelEx getScrollingModel();
 
+  /**
+   * @deprecated This is an internal method, {@link Editor#visualToLogicalPosition(VisualPosition)} should be used instead.
+   * To be removed in IDEA 16.
+   */
   @NotNull
   LogicalPosition visualToLogicalPosition(@NotNull VisualPosition visiblePos, boolean softWrapAware);
 
+  /**
+   * @deprecated This is an internal method, {@link Editor#offsetToLogicalPosition(int)} should be used instead.
+   * To be removed in IDEA 16.
+   */
   @NotNull LogicalPosition offsetToLogicalPosition(int offset, boolean softWrapAware);
 
+  /**
+   * @deprecated This is an internal method, {@link Editor#logicalToVisualPosition(LogicalPosition)} should be used instead.
+   * To be removed in IDEA 16.
+   */
   @NotNull
   VisualPosition logicalToVisualPosition(@NotNull LogicalPosition logicalPos, boolean softWrapAware);
 
   /**
+   * @deprecated This is an internal method, {@link Editor#logicalPositionToOffset(LogicalPosition)} should be used instead.
+   * To be removed in IDEA 16.
+   */
+  int logicalPositionToOffset(@NotNull LogicalPosition logicalPos, boolean softWrapAware);
+
+  /**
    * Creates color scheme delegate which is bound to current editor. E.g. all schema changes will update editor state.
-   * @param customGlobalScheme
-   * @return
    */
   @NotNull
   EditorColorsScheme createBoundColorSchemeDelegate(@Nullable EditorColorsScheme customGlobalScheme);
@@ -188,14 +219,31 @@ public interface EditorEx extends Editor {
 
   /**
    * Allows to define <code>'placeholder text'</code> for the current editor, i.e. virtual text that will be represented until
-   * any user data is entered and current editor is not focused.
-   * <p/>
+   * any user data is entered.
+   *
    * Feel free to see the detailed feature
    * definition <a href="http://dev.w3.org/html5/spec/Overview.html#the-placeholder-attribute">here</a>.
    *
    * @param text    virtual text to show until user data is entered or the editor is focused
    */
   void setPlaceholder(@Nullable CharSequence text);
+
+  /**
+   * Sets text attributes for a placeholder. Font style and color are currently supported. 
+   * <code>null</code> means default values should be used.
+   * 
+   * @see #setPlaceholder(CharSequence)
+   */
+  void setPlaceholderAttributes(@Nullable TextAttributes attributes);
+  
+  /**
+   * Controls whether <code>'placeholder text'</code> is visible when editor is focused.
+   *
+   * @param show   flag indicating whether placeholder is visible when editor is focused.
+   *
+   * @see EditorEx#setPlaceholder(CharSequence)
+   */
+  void setShowPlaceholderWhenFocused(boolean show);
 
   /**
    * Allows to answer if 'sticky selection' is active for the current editor.
@@ -237,11 +285,13 @@ public interface EditorEx extends Editor {
   /**
    * We often re-use the logic encapsulated at the editor. For example, every time we show editor fragment (folding, preview etc) we
    * create a dedicated graphics object and ask the editor to paint into it.
-   * <p/>
+   * <p>
    * The thing is that the editor itself may change its state if any postponed operation is triggered by the painting request
    * (e.g. soft wraps recalculation is triggered by the paint request and newly calculated soft wraps cause caret to change its position).
-   * <p/>
+   * <p>
    * This method allows to inform the editor that all subsequent painting request should not change the editor state.
+   * <p>
+   * In 'pure painting mode' editor also behaves as if soft wraps were not enabled.
    *
    * @param enabled  'pure painting mode' status to use
    */
@@ -252,13 +302,34 @@ public interface EditorEx extends Editor {
    * This is needed to allow a parent component draw above the scrollbar components (e.g. in the merge tool),
    * otherwise the drawings are cleared once the scrollbar gets repainted (which may happen suddenly, because the scrollbar UI uses the
    * {@link com.intellij.util.ui.Animator} to draw itself.
-   * @param callback  callback which will be called from the {@link javax.swing.JComponent#paint(java.awt.Graphics)} method of
+   * @param callback  callback which will be called from the {@link JComponent#paint(Graphics)} method of
    *                  the editor vertical scrollbar.
    */
-  void registerScrollBarRepaintCallback(@Nullable RepaintCallback callback);
+  void registerScrollBarRepaintCallback(@Nullable ButtonlessScrollBarUI.ScrollbarRepaintCallback callback);
 
-  interface RepaintCallback {
-    void call(Graphics g);
-  }
+  /**
+   * @return the offset that the caret is expected to be but maybe not yet.
+   * E.g. when user right-clicks the mouse the caret is not immediately jumps there but the click-handler wants to know that location already.
+   *
+   * When no mouse-clicks happened return the regular caret offset.
+   */
+  int getExpectedCaretOffset();
 
+  /**
+   * Sets id of action group what will be used to construct context menu displayed on mouse right button's click. Setting this to 
+   * <code>null</code> disables built-in logic for showing context menu (it can still be achieved by implementing corresponding mouse
+   * event listener).
+   * 
+   * @see #getContextMenuGroupId() 
+   */
+  void setContextMenuGroupId(@Nullable String groupId);
+
+  /**
+   * Returns id of action group what will be used to construct context menu displayed on mouse right button's click. <code>null</code>
+   * value means built-in logic for showing context menu is disabled.
+   * 
+   * @see #setContextMenuGroupId(String)
+   */
+  @Nullable
+  String getContextMenuGroupId();
 }

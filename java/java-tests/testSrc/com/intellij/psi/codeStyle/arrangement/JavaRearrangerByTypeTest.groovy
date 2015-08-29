@@ -388,4 +388,266 @@ class Test {
 }'''
     )
   }
+
+  void "test IDEA-124077 Enum code reformat destroys enum"() {
+    doTest(
+      initial: '''
+public enum ErrorResponse {
+
+    UNHANDLED_EXCEPTION,
+    UNHANDLED_BUSINESS,
+    ACCOUNT_NOT_VALID,
+    ACCOUNT_LATE_CREATION;
+
+    public void test() {}
+    public int t;
+
+    public long l;
+    private void q() {}
+}
+''',
+      expected: '''
+public enum ErrorResponse {
+
+    UNHANDLED_EXCEPTION,
+    UNHANDLED_BUSINESS,
+    ACCOUNT_NOT_VALID,
+    ACCOUNT_LATE_CREATION;
+
+    public void test() {}
+    private void q() {}
+    public int t;
+    public long l;
+}
+''',
+      rules: [
+        rule(METHOD),
+        rule(FIELD)
+      ]
+    )
+  }
+
+  void "test parameterized class"() {
+    doTest(
+      initial: '''\
+public class Seq<T> {
+
+    public Seq(T x) {
+    }
+
+    public Seq() {}
+
+    static <T> Seq<T> nil() {
+        return new Seq<T>();
+    }
+
+    static <V> Seq<V> cons(V x) {
+        return new Seq<V>(x);
+    }
+
+    int filed;
+}
+''',
+      expected: '''\
+public class Seq<T> {
+
+    int filed;
+
+    public Seq(T x) {
+    }
+
+    public Seq() {}
+    static <T> Seq<T> nil() {
+        return new Seq<T>();
+    }
+    static <V> Seq<V> cons(V x) {
+        return new Seq<V>(x);
+    }
+}
+''',
+      rules: [
+        rule(FIELD)
+      ]
+    )
+  }
+
+  void "test overridden method is matched by overridden rule"() {
+    doTest(
+      initial: '''\
+class A {
+  public void test() {}
+  public void run() {}
+}
+
+class B extends A {
+
+  public void infer() {}
+
+  @Override
+  public void test() {}
+
+  private void fail() {}
+
+  @Override
+  public void run() {}
+
+  private void compute() {}
+
+  public void adjust() {}
+
+}
+''',
+      expected: '''\
+class A {
+  public void test() {}
+  public void run() {}
+}
+
+class B extends A {
+
+  public void infer() {}
+  public void adjust() {}
+  private void fail() {}
+  private void compute() {}
+  @Override
+  public void test() {}
+  @Override
+  public void run() {}
+
+}
+''',
+      rules: [rule(PUBLIC, METHOD), rule(PRIVATE, METHOD), rule(OVERRIDDEN)]
+    )
+  }
+
+  void "test overridden method is matched by method rule if no overridden rule found"() {
+    doTest(
+      initial: '''\
+class A {
+  public void test() {}
+  public void run() {}
+}
+
+class B extends A {
+
+  public void infer() {}
+
+  @Override
+  public void test() {}
+
+  private void fail() {}
+
+  @Override
+  public void run() {}
+
+  private void compute() {}
+
+  public void adjust() {}
+
+}
+''',
+      expected: '''\
+class A {
+  public void test() {}
+  public void run() {}
+}
+
+class B extends A {
+
+  public void infer() {}
+
+  @Override
+  public void test() {}
+  @Override
+  public void run() {}
+  public void adjust() {}
+  private void fail() {}
+  private void compute() {}
+
+}
+''',
+      rules: [rule(PUBLIC, METHOD), rule(PRIVATE, METHOD)]
+    )
+  }
+
+  void "test initializer block after fields"() {
+    doTest(
+      initial: '''\
+public class NewOneClass {
+
+    {
+        a = 1;
+    }
+
+    int a;
+
+    {
+        b = 5;
+    }
+
+    int b;
+
+}
+''',
+      expected: '''\
+public class NewOneClass {
+
+    int a;
+    int b;
+
+    {
+        a = 1;
+    }
+
+    {
+        b = 5;
+    }
+
+}
+''',
+      rules: [rule(FIELD), rule(INIT_BLOCK)]
+    )
+  }
+
+  void "test static initializer block"() {
+    doTest(
+      initial: '''\
+public class NewOneClass {
+
+    static {
+        a = 1;
+    }
+
+    static int a;
+
+    {
+        b = 5;
+    }
+
+    int b;
+
+}
+''',
+      expected: '''\
+public class NewOneClass {
+
+    static int a;
+
+    static {
+        a = 1;
+    }
+
+    int b;
+
+    {
+        b = 5;
+    }
+
+}
+''',
+      rules: [rule(STATIC, FIELD), rule(STATIC, INIT_BLOCK), rule(FIELD), rule(INIT_BLOCK)]
+    )
+  }
+
+
 }

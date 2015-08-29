@@ -16,33 +16,46 @@
 
 package com.intellij.execution.junit;
 
-import com.intellij.execution.JavaExecutionUtil;
+import com.intellij.execution.testframework.AbstractPatternBasedConfigurationProducer;
 import com.intellij.execution.actions.ConfigurationContext;
-import com.intellij.execution.configurations.ModuleBasedConfiguration;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.execution.actions.ConfigurationFromContext;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
-public class PatternConfigurationProducer extends JUnitConfigurationProducer {
+public class PatternConfigurationProducer extends AbstractPatternBasedConfigurationProducer<JUnitConfiguration> {
+  protected PatternConfigurationProducer() {
+    super(JUnitConfigurationType.getInstance());
+  }
+
+  @Override
+  protected boolean isTestClass(PsiClass psiClass) {
+    return JUnitUtil.isTestClass(psiClass);
+  }
+
+  @Override
+  protected boolean isTestMethod(boolean checkAbstract, PsiElement psiElement) {
+    return JUnitUtil.getTestMethod(psiElement, checkAbstract) != null;
+  }
+
+  @Override
+  public boolean isPreferredConfiguration(ConfigurationFromContext self, ConfigurationFromContext other) {
+    return !other.isProducedBy(TestMethodConfigurationProducer.class);
+  }
+
   @Override
   protected boolean setupConfigurationFromContext(JUnitConfiguration configuration,
                                                   ConfigurationContext context,
                                                   Ref<PsiElement> sourceElement) {
     final LinkedHashSet<String> classes = new LinkedHashSet<String>();
-    PsiElement[] elements = collectPatternElements(context, classes);
-    if (classes.size() <= 1) return false;
-    sourceElement.set(elements[0]);
+    final PsiElement element = checkPatterns(context, classes);
+    if (element == null) {
+      return false;
+    }
+    sourceElement.set(element);
     final JUnitConfiguration.Data data = configuration.getPersistentData();
     data.setPatterns(classes);
     data.TEST_OBJECT = JUnitConfiguration.TEST_PATTERN;
@@ -57,102 +70,12 @@ public class PatternConfigurationProducer extends JUnitConfigurationProducer {
     return findModule(configuration, contextModule, patterns);
   }
 
-  public static Module findModule(ModuleBasedConfiguration configuration, Module contextModule, Set<String> patterns) {
-    return JavaExecutionUtil.findModule(contextModule, patterns, configuration.getProject(), new Condition<PsiClass>() {
-      @Override
-      public boolean value(PsiClass psiClass) {
-        return JUnitUtil.isTestClass(psiClass);
-      }
-    });
-  }
-
-  static Set<PsiElement> collectTestMembers(PsiElement[] psiElements) {
-    final Set<PsiElement> foundMembers = new LinkedHashSet<PsiElement>();
-    for (PsiElement psiElement : psiElements) {
-      if (psiElement instanceof PsiClassOwner) {
-        final PsiClass[] classes = ((PsiClassOwner)psiElement).getClasses();
-        for (PsiClass aClass : classes) {
-          if (JUnitUtil.isTestClass(aClass)) {
-            foundMembers.add(aClass);
-          }
-        }
-      } else if (psiElement instanceof PsiClass) {
-        if (JUnitUtil.isTestClass((PsiClass)psiElement)) {
-          foundMembers.add(psiElement);
-        }
-      } else if (psiElement instanceof PsiMethod) {
-        if (JUnitUtil.getTestMethod(psiElement) != null) {
-          foundMembers.add(psiElement);
-        }
-      } else if (psiElement instanceof PsiDirectory) {
-        final PsiPackage aPackage = JavaDirectoryService.getInstance().getPackage((PsiDirectory)psiElement);
-        if (aPackage != null) {
-          foundMembers.add(aPackage);
-        }
-      }
-    }
-    return foundMembers;
-  }
-
-  public static boolean isMultipleElementsSelected(ConfigurationContext context) {
-    final LinkedHashSet<String> classes = new LinkedHashSet<String>();
-    final PsiElement[] elements = collectPatternElements(context, classes);
-    if (elements != null && collectTestMembers(elements).size() > 1) {
-      return true;
-    }
-    return false;
-  }
-  
-  private static PsiElement[] collectPatternElements(ConfigurationContext context, LinkedHashSet<String> classes) {
-    final DataContext dataContext = context.getDataContext();
-    PsiElement[] elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext);
-    if (elements != null) {
-      for (PsiElement psiClass : collectTestMembers(elements)) {
-        classes.add(getQName(psiClass));
-      }
-      return elements;
-    } else {
-      final VirtualFile[] files = CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
-      if (files != null) {
-        final List<PsiFile> psiFiles = new ArrayList<PsiFile>();
-        final PsiManager psiManager = PsiManager.getInstance(context.getProject());
-        for (VirtualFile file : files) {
-          final PsiFile psiFile = psiManager.findFile(file);
-          if (psiFile instanceof PsiClassOwner) {
-            for (PsiElement psiMember : collectTestMembers(((PsiClassOwner)psiFile).getClasses())) {
-              classes.add(((PsiClass)psiMember).getQualifiedName());
-            }
-            psiFiles.add(psiFile);
-          }
-        }
-        return psiFiles.toArray(new PsiElement[psiFiles.size()]);
-      }
-    }
-    return null;
-  }
-
-  public static String getQName(PsiElement psiMember) {
-    if (psiMember instanceof PsiClass) {
-      return ((PsiClass)psiMember).getQualifiedName();
-    }
-    else if (psiMember instanceof PsiMember) {
-      return ((PsiMember)psiMember).getContainingClass().getQualifiedName() + "," + ((PsiMember)psiMember).getName();
-    } else if (psiMember instanceof PsiPackage) {
-      return ((PsiPackage)psiMember).getQualifiedName();
-    }
-    assert false;
-    return null;
-  }
-
   @Override
   public boolean isConfigurationFromContext(JUnitConfiguration unitConfiguration, ConfigurationContext context) {
-    final LinkedHashSet<String> classes = new LinkedHashSet<String>();
-    collectPatternElements(context, classes);
     final TestObject testobject = unitConfiguration.getTestObject();
     if (testobject instanceof TestsPattern) {
-      if (Comparing.equal(classes, unitConfiguration.getPersistentData().getPatterns())) {
-        return true;
-      }
+      final Set<String> patterns = unitConfiguration.getPersistentData().getPatterns();
+      if (isConfiguredFromContext(context, patterns)) return true;
     }
     return false;
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,24 +22,22 @@ import com.intellij.codeInspection.ex.ScopeToolState;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.util.gotoByName.SimpleChooseByNameModel;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.util.ArrayUtil;
 
 import javax.swing.*;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * @author Konstantin Bulenkov
  */
 public class GotoInspectionModel extends SimpleChooseByNameModel {
+  private static final InspectionToolWrapper[] EMPTY_WRAPPERS_ARRAY = new InspectionToolWrapper[0];
   private final Map<String, InspectionToolWrapper> myToolNames = new HashMap<String, InspectionToolWrapper>();
-  private final Map<String, Set<InspectionToolWrapper>> myGroupNames = new HashMap<String, Set<InspectionToolWrapper>>();
-  private final Map<String, InspectionToolWrapper> myToolShortNames = new HashMap<String, InspectionToolWrapper>();
   private final String[] myNames;
-  private final ListCellRenderer myListCellRenderer = new InspectionListCellRenderer();
+  private final InspectionListCellRenderer myListCellRenderer = new InspectionListCellRenderer();
 
 
   public GotoInspectionModel(Project project) {
@@ -47,28 +45,13 @@ public class GotoInspectionModel extends SimpleChooseByNameModel {
     final InspectionProfileImpl rootProfile = (InspectionProfileImpl)InspectionProfileManager.getInstance().getRootProfile();
     for (ScopeToolState state : rootProfile.getAllTools(project)) {
       InspectionToolWrapper tool = state.getTool();
-      InspectionToolWrapper workingTool = tool;
-      if (tool instanceof LocalInspectionToolWrapper) {
-        workingTool = LocalInspectionToolWrapper.findTool2RunInBatch(project, null, tool.getShortName());
-        if (workingTool == null) {
-          continue;
-        }
+      if (tool instanceof LocalInspectionToolWrapper && ((LocalInspectionToolWrapper)tool).isUnfair()) {
+        continue;
       }
-      myToolNames.put(tool.getDisplayName(), workingTool);
-      final String groupName = tool.getGroupDisplayName();
-      Set<InspectionToolWrapper> toolsInGroup = myGroupNames.get(groupName);
-      if (toolsInGroup == null) {
-        toolsInGroup = new HashSet<InspectionToolWrapper>();
-        myGroupNames.put(groupName, toolsInGroup);
-      }
-      toolsInGroup.add(workingTool);
-      myToolShortNames.put(tool.getShortName(), workingTool);
+      final String name = tool.getDisplayName() + " " + StringUtil.join(tool.getGroupPath(), " ");
+      myToolNames.put(name, tool);
     }
-
-    final Set<String> nameIds = new HashSet<String>();
-    nameIds.addAll(myToolNames.keySet());
-    nameIds.addAll(myGroupNames.keySet());
-    myNames = ArrayUtil.toStringArray(nameIds);
+    myNames = ArrayUtil.toStringArray(myToolNames.keySet());
   }
 
   @Override
@@ -82,28 +65,19 @@ public class GotoInspectionModel extends SimpleChooseByNameModel {
   }
 
   @Override
-  public Object[] getElementsByName(final String id, final String pattern) {
-    final Set<InspectionToolWrapper> result = new HashSet<InspectionToolWrapper>();
-    InspectionToolWrapper e = myToolNames.get(id);
-    if (e != null) {
-      result.add(e);
+  public Object[] getElementsByName(final String name, final String pattern) {
+    final InspectionToolWrapper tool = myToolNames.get(name);
+    if (tool == null) {
+      return EMPTY_WRAPPERS_ARRAY;
     }
-    e = myToolShortNames.get(id);
-    if (e != null) {
-      result.add(e);
-    }
-    final Set<InspectionToolWrapper> entries = myGroupNames.get(id);
-    if (entries != null) {
-      result.addAll(entries);
-    }
-    return result.toArray(new InspectionToolWrapper[result.size()]);
+    return new InspectionToolWrapper[] {tool};
   }
 
   @Override
   public String getElementName(final Object element) {
     if (element instanceof InspectionToolWrapper) {
       InspectionToolWrapper entry = (InspectionToolWrapper)element;
-      return entry.getDisplayName() + " " + entry.getGroupDisplayName();
+      return entry.getDisplayName() + " " + StringUtil.join(entry.getGroupPath(), " ");
     }
     return null;
   }

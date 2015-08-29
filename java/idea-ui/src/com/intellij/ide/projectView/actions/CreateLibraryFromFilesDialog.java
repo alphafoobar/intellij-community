@@ -19,6 +19,8 @@ import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.ModuleRootManager;
@@ -26,7 +28,7 @@ import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.roots.impl.libraries.LibraryTypeServiceImpl;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.ui.OrderRoot;
-import com.intellij.openapi.roots.ui.configuration.ModulesCombobox;
+import com.intellij.application.options.ModulesComboBox;
 import com.intellij.openapi.roots.ui.configuration.libraryEditor.LibraryNameAndLevelPanel;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.LibrariesContainer;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.LibrariesContainerFactory;
@@ -50,7 +52,7 @@ import java.util.List;
  */
 public class CreateLibraryFromFilesDialog extends DialogWrapper {
   private final LibraryNameAndLevelPanel myNameAndLevelPanel;
-  private final ModulesCombobox myModulesCombobox;
+  private final ModulesComboBox myModulesComboBox;
   private final Project myProject;
   private final List<OrderRoot> myRoots;
   private final JPanel myPanel;
@@ -67,10 +69,10 @@ public class CreateLibraryFromFilesDialog extends DialogWrapper {
     myNameAndLevelPanel = new LibraryNameAndLevelPanel(builder, myDefaultName, Arrays.asList(LibrariesContainer.LibraryLevel.values()),
                                                        LibrariesContainer.LibraryLevel.PROJECT);
     myNameAndLevelPanel.setDefaultName(myDefaultName);
-    myModulesCombobox = new ModulesCombobox();
-    myModulesCombobox.fillModules(myProject);
-    myModulesCombobox.setSelectedModule(findModule(roots));
-    builder.addLabeledComponent("&Add to module:", myModulesCombobox);
+    myModulesComboBox = new ModulesComboBox();
+    myModulesComboBox.fillModules(myProject);
+    myModulesComboBox.setSelectedModule(findModule(roots));
+    builder.addLabeledComponent("&Add to module:", myModulesComboBox);
     myPanel = builder.getPanel();
     myNameAndLevelPanel.getLibraryNameField().selectAll();
     myNameAndLevelPanel.getLevelComboBox().addActionListener(new ActionListener() {
@@ -131,10 +133,20 @@ public class CreateLibraryFromFilesDialog extends DialogWrapper {
 
   @Override
   protected void doOKAction() {
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+      @Override
+      public void run() {
+        addLibrary();
+      }
+    });
+    super.doOKAction();
+  }
+
+  private void addLibrary() {
     final LibrariesContainer.LibraryLevel level = myNameAndLevelPanel.getLibraryLevel();
     AccessToken token = WriteAction.start();
     try {
-      final Module module = myModulesCombobox.getSelectedModule();
+      final Module module = myModulesComboBox.getSelectedModule();
       final String libraryName = myNameAndLevelPanel.getLibraryName();
       if (level == LibrariesContainer.LibraryLevel.MODULE) {
         final ModifiableRootModel modifiableModel = ModuleRootManager.getInstance(module).getModifiableModel();
@@ -151,7 +163,6 @@ public class CreateLibraryFromFilesDialog extends DialogWrapper {
     finally {
       token.finish();
     }
-    super.doOKAction();
   }
 
   @Override

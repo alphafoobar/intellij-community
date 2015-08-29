@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,9 +26,9 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.LanguageFileType;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.util.Key;
@@ -37,12 +37,15 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.ClassUtil;
 import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.sun.jdi.*;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -211,7 +214,8 @@ public abstract class DebuggerUtils {
     }
   }
 
-  protected static ArrayClass getArrayClass(String className) {
+  @Nullable
+  protected static ArrayClass getArrayClass(@NotNull String className) {
     boolean searchBracket = false;
     int dims = 0;
     int pos;
@@ -241,7 +245,7 @@ public abstract class DebuggerUtils {
     return new ArrayClass(className.substring(0, pos + 1), dims);
   }
 
-  public static boolean instanceOf(String subType, String superType, Project project) {
+  public static boolean instanceOf(@NotNull String subType ,@NotNull String superType, @Nullable Project project) {
     if(project == null) {
       return subType.equals(superType);
     }
@@ -274,40 +278,55 @@ public abstract class DebuggerUtils {
     return getSuperTypeInt(subType, superType);
   }
 
+  private static boolean typeEquals(Type type, String typeName) {
+    int genericPos = typeName.indexOf('<');
+    if (genericPos > -1) {
+      typeName = typeName.substring(0, genericPos);
+    }
+    return type.name().replace('$', '.').equals(typeName.replace('$', '.'));
+  }
+
   private static Type getSuperTypeInt(Type subType, String superType) {
     Type result;
     if (subType == null) {
       return null;
     }
 
-    if (subType.name().equals(superType)) {
+    if (typeEquals(subType, superType)) {
       return subType;
     }
 
     if (subType instanceof ClassType) {
-      result = getSuperType(((ClassType)subType).superclass(), superType);
-      if (result != null) {
-        return result;
-      }
-
-      List ifaces = ((ClassType)subType).allInterfaces();
-      for (Object iface : ifaces) {
-        InterfaceType interfaceType = (InterfaceType)iface;
-        if (interfaceType.name().equals(superType)) {
-          return interfaceType;
+      try {
+        final ClassType clsType = (ClassType)subType;
+        result = getSuperType(clsType.superclass(), superType);
+        if (result != null) {
+          return result;
         }
+
+        for (InterfaceType iface : clsType.allInterfaces()) {
+          if (typeEquals(iface, superType)) {
+            return iface;
+          }
+        }
+      }
+      catch (ClassNotPreparedException e) {
+        LOG.info(e);
       }
       return null;
     }
 
     if (subType instanceof InterfaceType) {
-      List ifaces = ((InterfaceType)subType).superinterfaces();
-      for (Object iface : ifaces) {
-        InterfaceType interfaceType = (InterfaceType)iface;
-        result = getSuperType(interfaceType, superType);
-        if (result != null) {
-          return result;
+      try {
+        for (InterfaceType iface : ((InterfaceType)subType).superinterfaces()) {
+          result = getSuperType(iface, superType);
+          if (result != null) {
+            return result;
+          }
         }
+      }
+      catch (ClassNotPreparedException e) {
+        LOG.info(e);
       }
     }
     else if (subType instanceof ArrayType) {
@@ -318,7 +337,7 @@ public abstract class DebuggerUtils {
           return instanceOf(subTypeItem, superTypeItem) ? subType : null;
         }
         catch (ClassNotLoadedException e) {
-          LOG.debug(e);
+          LOG.info(e);
         }
       }
     }
@@ -344,40 +363,35 @@ public abstract class DebuggerUtils {
   }
 
   @Nullable
-  public static PsiClass findClass(final String className, Project project, final GlobalSearchScope scope) {
+  public static PsiClass findClass(@NotNull final String className, @NotNull Project project, final GlobalSearchScope scope) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
-    final PsiManager psiManager = PsiManager.getInstance(project);
-    final JavaPsiFacade javaPsiFacade = JavaPsiFacade.getInstance(psiManager.getProject());
-    if (getArrayClass(className) != null) {
-      return javaPsiFacade.getElementFactory().getArrayClass(LanguageLevelProjectExtension.getInstance(psiManager.getProject()).getLanguageLevel());
-    }
-    if(project.isDefault()) {
-      return null;
-    }
-    final String _className = className.replace('$', '.');
-    PsiClass aClass = javaPsiFacade.findClass(_className, scope);
-    if (aClass == null) {
-      if (!_className.equals(className)) {
-        // try original name if it differs from the normalized name
-        aClass = javaPsiFacade.findClass(className, scope);
+    try {
+      if (getArrayClass(className) != null) {
+        return JavaPsiFacade.getInstance(project).getElementFactory()
+          .getArrayClass(LanguageLevelProjectExtension.getInstance(project).getLanguageLevel());
       }
-    }
-    if (aClass == null) {
-      final GlobalSearchScope globalScope = GlobalSearchScope.allScope(project);
-      if (!globalScope.equals(scope)) {
-        aClass = javaPsiFacade.findClass(_className, globalScope);
-        if (aClass == null) {
-          if (!_className.equals(className)) {
-            // try original name with global scope if the original differs from the normalized name
-            aClass = javaPsiFacade.findClass(className, globalScope);
-          }
+      if (project.isDefault()) {
+        return null;
+      }
+
+      PsiManager psiManager = PsiManager.getInstance(project);
+      PsiClass psiClass = ClassUtil.findPsiClass(psiManager, className, null, true, scope);
+      if (psiClass == null) {
+        GlobalSearchScope globalScope = GlobalSearchScope.allScope(project);
+        if (!globalScope.equals(scope)) {
+          psiClass = ClassUtil.findPsiClass(psiManager, className, null, true, globalScope);
         }
       }
+
+      return psiClass;
     }
-    return aClass;
+    catch (IndexNotReadyException ignored) {
+      return null;
+    }
   }
 
-  public static PsiType getType(String className, Project project) {
+  @Nullable
+  public static PsiType getType(@NotNull String className, @NotNull Project project) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
 
     final PsiManager psiManager = PsiManager.getInstance(project);
@@ -390,7 +404,9 @@ public abstract class DebuggerUtils {
       }
       final PsiClass aClass =
         JavaPsiFacade.getInstance(psiManager.getProject()).findClass(className.replace('$', '.'), GlobalSearchScope.allScope(project));
-      return JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory().createType(aClass);
+      if (aClass != null) {
+        return JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory().createType(aClass);
+      }
     }
     catch (IncorrectOperationException e) {
       LOG.error(e);
@@ -480,48 +496,32 @@ public abstract class DebuggerUtils {
     if (typeComponent == null) {
       return false;
     }
-    VirtualMachine machine = typeComponent.virtualMachine();
-    return machine != null && machine.canGetSyntheticAttribute() && typeComponent.isSynthetic();
+    for (SyntheticTypeComponentProvider provider : SyntheticTypeComponentProvider.EP_NAME.getExtensions()) {
+      if (provider.isSynthetic(typeComponent)) return true;
+    }
+    return false;
   }
 
-  public static boolean isSimpleGetter(PsiMethod method){
-    final PsiCodeBlock body = method.getBody();
-    if(body == null){
-      return false;
+  /**
+   * @deprecated use {@link #isInsideSimpleGetter(PsiElement)} instead
+   */
+  @Deprecated
+  public static boolean isSimpleGetter(PsiMethod method) {
+    for (SimpleGetterProvider provider : SimpleGetterProvider.EP_NAME.getExtensions()) {
+      if (provider.isSimpleGetter(method)) return true;
     }
+    return false;
+  }
 
-    final PsiStatement[] statements = body.getStatements();
-    if(statements.length != 1){
-      return false;
+  public static boolean isInsideSimpleGetter(@NotNull PsiElement contextElement) {
+    for (SimpleGetterProvider provider : SimpleGetterProvider.EP_NAME.getExtensions()) {
+      PsiMethod psiMethod = PsiTreeUtil.getParentOfType(contextElement, PsiMethod.class);
+      if (psiMethod != null && provider.isSimpleGetter(psiMethod)) return true;
     }
-    
-    final PsiStatement statement = statements[0];
-    if(!(statement instanceof PsiReturnStatement)){
-      return false;
+    for (SimplePropertyGetterProvider provider : SimplePropertyGetterProvider.EP_NAME.getExtensions()) {
+      if (provider.isInsideSimpleGetter(contextElement)) return true;
     }
-    
-    final PsiExpression value = ((PsiReturnStatement)statement).getReturnValue();
-    if(!(value instanceof PsiReferenceExpression)){
-      return false;
-    }
-    
-    final PsiReferenceExpression reference = (PsiReferenceExpression)value;
-    final PsiExpression qualifier = reference.getQualifierExpression();
-    //noinspection HardCodedStringLiteral
-    if(qualifier != null && !"this".equals(qualifier.getText())) {
-      return false;
-    }
-    
-    final PsiElement referent = reference.resolve();
-    if(referent == null) {
-      return false;
-    }
-    
-    if(!(referent instanceof PsiField)) {
-      return false;
-    }
-    
-    return ((PsiField)referent).getContainingClass().equals(method.getContainingClass());
+    return false;
   }
 
   public static boolean isPrimitiveType(final String typeName) {
@@ -558,14 +558,27 @@ public abstract class DebuggerUtils {
 
   public abstract PsiClass chooseClassDialog(String title, Project project);
 
-  public static boolean supportsJVMDebugging(FileType type) {
-    return type instanceof LanguageFileType && ((LanguageFileType)type).isJVMDebuggingSupported();
+  /**
+   * IDEA-122113
+   * Will be removed when Java debugger will be moved to XDebugger API
+   */
+  public static boolean isDebugActionAware(@NotNull PsiFile file) {
+    return isDebugAware(file, false);
   }
 
-  public static boolean supportsJVMDebugging(PsiFile file) {
-    final JVMDebugProvider[] providers = Extensions.getExtensions(JVMDebugProvider.EP_NAME);
-    for (JVMDebugProvider provider : providers) {
-      if (provider.supportsJVMDebugging(file)) {
+  public static boolean isBreakpointAware(@NotNull PsiFile file) {
+    return isDebugAware(file, true);
+  }
+
+  private static boolean isDebugAware(@NotNull PsiFile file, boolean breakpointAware) {
+    FileType fileType = file.getFileType();
+    //noinspection deprecation
+    if (fileType instanceof LanguageFileType && ((LanguageFileType)fileType).isJVMDebuggingSupported()) {
+      return true;
+    }
+
+    for (JavaDebugAware provider : JavaDebugAware.EP_NAME.getExtensions()) {
+      if (breakpointAware ? provider.isBreakpointAware(file) : provider.isActionAware(file)) {
         return true;
       }
     }

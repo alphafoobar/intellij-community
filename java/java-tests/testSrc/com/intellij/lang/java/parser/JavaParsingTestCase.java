@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,10 +33,10 @@ import com.intellij.psi.impl.source.tree.FileElement;
 import com.intellij.psi.impl.source.tree.JavaASTFactory;
 import com.intellij.psi.tree.IFileElementType;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.testFramework.IdeaTestCase;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.testFramework.ParsingTestCase;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 
@@ -46,7 +46,6 @@ public abstract class JavaParsingTestCase extends ParsingTestCase {
   @SuppressWarnings({"JUnitTestCaseWithNonTrivialConstructors"})
   public JavaParsingTestCase(@NonNls final String dataPath) {
     super("psi/"+dataPath, "java", new JavaParserDefinition());
-    IdeaTestCase.initPlatformPrefix();
   }
 
   @Override
@@ -71,6 +70,10 @@ public abstract class JavaParsingTestCase extends ParsingTestCase {
 
   protected interface TestParser {
     void parse(PsiBuilder builder);
+  }
+
+  protected void setLanguageLevel(@NotNull LanguageLevel languageLevel) {
+    myLanguageLevel = languageLevel;
   }
 
   protected void doParserTest(final String text, final TestParser parser) {
@@ -98,8 +101,9 @@ public abstract class JavaParsingTestCase extends ParsingTestCase {
     final LightVirtualFile virtualFile = new LightVirtualFile(name + '.' + myFileExt, StdFileTypes.JAVA, text, -1);
     final FileViewProvider viewProvider = new SingleRootFileViewProvider(PsiManager.getInstance(getProject()), virtualFile, true);
     return new PsiJavaFileImpl(viewProvider) {
+      @NotNull
       @Override
-      protected FileElement createFileElement(final CharSequence text) {
+      protected FileElement createFileElement(@NotNull final CharSequence text) {
         return new FileElement(TEST_FILE_ELEMENT_TYPE, text);
       }
     };

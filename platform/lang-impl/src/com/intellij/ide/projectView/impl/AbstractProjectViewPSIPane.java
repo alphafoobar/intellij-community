@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.PsiCopyPasteManager;
 import com.intellij.ide.projectView.BaseProjectTreeBuilder;
 import com.intellij.ide.projectView.impl.nodes.PsiDirectoryNode;
-import com.intellij.ide.ui.UISettings;
-import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.ide.ui.customization.CustomizationUtil;
 import com.intellij.ide.util.treeView.AbstractTreeBuilder;
 import com.intellij.ide.util.treeView.AbstractTreeUpdater;
@@ -57,7 +55,7 @@ import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.StringTokenizer;
 
-public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane implements UISettingsListener {
+public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane {
   private JScrollPane myComponent;
 
   protected AbstractProjectViewPSIPane(Project project) {
@@ -79,16 +77,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     installComparator();
     initTree();
 
-    UISettings.getInstance().addUISettingsListener(this, this);
     return myComponent;
-  }
-
-  @Override
-  public void uiSettingsChanged(UISettings source) {
-//    myTree.setRowHeight(-1);
-    myTree.setFont(UIUtil.getTreeFont());
-    myTree.invalidate();
-    myTree.repaint();
   }
 
   @Override
@@ -167,6 +156,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     CustomizationUtil.installPopupHandler(myTree, IdeActions.GROUP_PROJECT_VIEW_POPUP, ActionPlaces.PROJECT_VIEW_POPUP);
   }
 
+  @NotNull
   @Override
   public final ActionCallback updateFromRoot(boolean restoreExpandedPaths) {
     final ArrayList<Object> pathsToExpand = new ArrayList<Object>();
@@ -201,11 +191,12 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     selectCB(element, file, requestFocus);
   }
 
+  @NotNull
   public ActionCallback selectCB(Object element, VirtualFile file, boolean requestFocus) {
     if (file != null) {
       return ((BaseProjectTreeBuilder)getTreeBuilder()).select(element, file, requestFocus);
     }
-    return new ActionCallback.Done(); 
+    return ActionCallback.DONE;
   }
 
   @NotNull

@@ -18,6 +18,8 @@ package org.jetbrains.idea.maven.importing;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
@@ -121,6 +123,43 @@ public class MavenModuleImporter {
   }
 
   public void configFacets(final List<MavenProjectsProcessorTask> postTasks) {
+    MavenUtil.smartInvokeAndWait(myModule.getProject(), ModalityState.defaultModalityState(), new Runnable() {
+      public void run() {
+        if (myModule.isDisposed()) return;
+
+        final ModuleType moduleType = ModuleType.get(myModule);
+
+        ApplicationManager.getApplication().runWriteAction(new Runnable() {
+          @Override
+          public void run() {
+            for (final MavenImporter importer : getSuitableImporters()) {
+              final MavenProjectChanges changes;
+              if (myMavenProjectChanges == null) {
+                if (importer.processChangedModulesOnly()) continue;
+                changes = MavenProjectChanges.NONE;
+              }
+              else {
+                changes = myMavenProjectChanges;
+              }
+
+              if (importer.getModuleType() == moduleType) {
+                importer.process(myModifiableModelsProvider,
+                                 myModule,
+                                 myRootModelAdapter,
+                                 myMavenTree,
+                                 myMavenProject,
+                                 changes,
+                                 myMavenProjectToModuleName,
+                                 postTasks);
+              }
+            }
+          }
+        });
+      }
+    });
+  }
+
+  public void postConfigFacets() {
     MavenUtil.invokeAndWaitWriteAction(myModule.getProject(), new Runnable() {
       public void run() {
         if (myModule.isDisposed()) return;
@@ -138,14 +177,7 @@ public class MavenModuleImporter {
           }
 
           if (importer.getModuleType() == moduleType) {
-            importer.process(myModifiableModelsProvider,
-                             myModule,
-                             myRootModelAdapter,
-                             myMavenTree,
-                             myMavenProject,
-                             changes,
-                             myMavenProjectToModuleName,
-                             postTasks);
+            importer.postProcess(myModule, myMavenProject, changes, myModifiableModelsProvider);
           }
         }
       }
@@ -294,9 +326,7 @@ public class MavenModuleImporter {
         if (file == null) continue;
 
         if (libraryModel == null) {
-          String libraryName = artifact.getLibraryName();
-          assert libraryName.startsWith(MavenArtifact.MAVEN_LIB_PREFIX);
-          libraryName = MavenArtifact.MAVEN_LIB_PREFIX + "ATTACHED-JAR: " + libraryName.substring(MavenArtifact.MAVEN_LIB_PREFIX.length());
+          String libraryName = getAttachedJarsLibName(artifact);
 
           Library library = myModifiableModelsProvider.getLibraryByName(libraryName);
           if (library == null) {
@@ -311,6 +341,14 @@ public class MavenModuleImporter {
         libraryModel.addRoot(file, rootType);
       }
     }
+  }
+
+  @NotNull
+  public static String getAttachedJarsLibName(@NotNull MavenArtifact artifact) {
+    String libraryName = artifact.getLibraryName();
+    assert libraryName.startsWith(MavenArtifact.MAVEN_LIB_PREFIX);
+    libraryName = MavenArtifact.MAVEN_LIB_PREFIX + "ATTACHED-JAR: " + libraryName.substring(MavenArtifact.MAVEN_LIB_PREFIX.length());
+    return libraryName;
   }
 
   @NotNull
@@ -333,6 +371,11 @@ public class MavenModuleImporter {
 
     if (level == null) {
       level = LanguageLevel.parse(myMavenProject.getSourceLevel());
+    }
+
+    // default source and target settings of maven-compiler-plugin is 1.5, see details at http://maven.apache.org/plugins/maven-compiler-plugin
+    if (level == null) {
+      level = LanguageLevel.JDK_1_5;
     }
 
     myRootModelAdapter.setLanguageLevel(level);

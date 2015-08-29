@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,9 +41,10 @@ import com.intellij.psi.tree.ChildRoleBase;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.xml.*;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xml.Html5SchemaProvider;
 import com.intellij.xml.XmlExtension;
 import com.intellij.xml.XmlNSDescriptor;
@@ -57,6 +58,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author Mike
@@ -82,6 +84,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     super(type);
   }
 
+  @Override
   public void accept(@NotNull PsiElementVisitor visitor) {
     if (visitor instanceof XmlElementVisitor) {
       ((XmlElementVisitor)visitor).visitXmlDocument(this);
@@ -91,6 +94,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     }
   }
 
+  @Override
   public int getChildRole(ASTNode child) {
     LOG.assertTrue(child.getTreeParent() == this);
     IElementType i = child.getElementType();
@@ -105,55 +109,66 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     }
   }
 
+  @Override
   public XmlProlog getProlog() {
     XmlProlog prolog = myProlog;
 
     if (prolog == null) {
+      prolog = (XmlProlog)findElementByTokenType(XmlElementType.XML_PROLOG);
       synchronized (PsiLock.LOCK) {
-        prolog = myProlog;
-        if (prolog == null) {
-          prolog = (XmlProlog)findElementByTokenType(XmlElementType.XML_PROLOG);
+        if (myProlog == null) {
           myProlog = prolog;
+        } else {
+          prolog = myProlog;
         }
       }
     }
 
-    return myProlog;
+    return prolog;
   }
 
+  @Override
   public XmlTag getRootTag() {
     XmlTag rootTag = myRootTag;
 
     if (rootTag == null) {
+      rootTag = (XmlTag)findElementByTokenType(XmlElementType.XML_TAG);
       synchronized (PsiLock.LOCK) {
-        rootTag = myRootTag;
-        if (rootTag == null) {
-          rootTag = (XmlTag)findElementByTokenType(XmlElementType.XML_TAG);
+        if (myRootTag == null) {
           myRootTag = rootTag;
+        } else {
+          rootTag = myRootTag;
         }
       }
     }
 
-    return myRootTag;
+    return rootTag;
   }
 
+  @Override
   @SuppressWarnings("ConstantConditions")
   public XmlNSDescriptor getRootTagNSDescriptor() {
     XmlTag rootTag = getRootTag();
     return rootTag != null ? rootTag.getNSDescriptor(rootTag.getNamespace(), false) : null;
   }
 
-  private ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>> myDefaultDescriptorsCacheStrict = new ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>>();
-  private ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>> myDefaultDescriptorsCacheNotStrict = new ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>>();
+  private ConcurrentMap<String, CachedValue<XmlNSDescriptor>> myDefaultDescriptorsCacheStrict =
+    ContainerUtil.newConcurrentMap();
+  private ConcurrentMap<String, CachedValue<XmlNSDescriptor>> myDefaultDescriptorsCacheNotStrict =
+    ContainerUtil.newConcurrentMap();
 
+  @Override
   public void clearCaches() {
     myDefaultDescriptorsCacheStrict.clear();
     myDefaultDescriptorsCacheNotStrict.clear();
-    myProlog = null;
-    myRootTag = null;
+    synchronized (PsiLock.LOCK) {
+      myProlog = null;
+      myRootTag = null;
+    }
     super.clearCaches();
   }
 
+  @Override
   public XmlNSDescriptor getDefaultNSDescriptor(final String namespace, final boolean strict) {
     long curExtResourcesModCount = ExternalResourceManagerEx.getInstanceEx().getModificationCount(getProject());
     if (myExtResourcesModCount != curExtResourcesModCount) {
@@ -162,7 +177,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
       myExtResourcesModCount = curExtResourcesModCount;
     }
 
-    final ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>> defaultDescriptorsCache;
+    final ConcurrentMap<String, CachedValue<XmlNSDescriptor>> defaultDescriptorsCache;
     if (strict) {
       defaultDescriptorsCache = myDefaultDescriptorsCacheStrict;
     }
@@ -173,6 +188,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     CachedValue<XmlNSDescriptor> cachedValue = defaultDescriptorsCache.get(namespace);
     if (cachedValue == null) {
       defaultDescriptorsCache.put(namespace, cachedValue = new PsiCachedValueImpl<XmlNSDescriptor>(getManager(), new CachedValueProvider<XmlNSDescriptor>() {
+        @Override
         public Result<XmlNSDescriptor> compute() {
           final XmlNSDescriptor defaultNSDescriptorInner = getDefaultNSDescriptorInner(namespace, strict);
 
@@ -221,6 +237,17 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
           htmlns = Html5SchemaProvider.getHtml5SchemaLocation();
         }
         nsDescriptor = getDefaultNSDescriptor(htmlns, false);
+      }
+      final XmlFile descriptorFile = nsDescriptor.getDescriptorFile();
+      if (descriptorFile != null) {
+        final XmlNSDescriptor finalNsDescriptor = nsDescriptor;
+        return CachedValuesManager.getCachedValue(descriptorFile, new CachedValueProvider<XmlNSDescriptor>() {
+          @Nullable
+          @Override
+          public Result<XmlNSDescriptor> compute() {
+            return Result.<XmlNSDescriptor>create(new HtmlNSDescriptorImpl(finalNsDescriptor), descriptorFile);
+          }
+        });
       }
       return new HtmlNSDescriptorImpl(nsDescriptor);
     }
@@ -339,6 +366,8 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     return descriptor;
   }
 
+  @NotNull
+  @Override
   public CompositePsiElement clone() {
     HashMap<String, CachedValue<XmlNSDescriptor>> cacheStrict = new HashMap<String, CachedValue<XmlNSDescriptor>>(
       myDefaultDescriptorsCacheStrict
@@ -351,6 +380,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     return copy;
   }
 
+  @Override
   public PsiElement copy() {
     HashMap<String, CachedValue<XmlNSDescriptor>> cacheStrict = new HashMap<String, CachedValue<XmlNSDescriptor>>(
       myDefaultDescriptorsCacheStrict
@@ -365,8 +395,8 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
 
   private void updateSelfDependentDtdDescriptors(XmlDocumentImpl copy, HashMap<String,
     CachedValue<XmlNSDescriptor>> cacheStrict, HashMap<String, CachedValue<XmlNSDescriptor>> cacheNotStrict) {
-    copy.myDefaultDescriptorsCacheNotStrict = new ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>>();
-    copy.myDefaultDescriptorsCacheStrict = new ConcurrentHashMap<String, CachedValue<XmlNSDescriptor>>();
+    copy.myDefaultDescriptorsCacheNotStrict = ContainerUtil.newConcurrentMap();
+    copy.myDefaultDescriptorsCacheStrict = ContainerUtil.newConcurrentMap();
 
     for(Map.Entry<String, CachedValue<XmlNSDescriptor>> e:cacheStrict.entrySet()) {
       if (e.getValue().hasUpToDateValue()) {
@@ -383,6 +413,7 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     }
   }
 
+  @Override
   public PsiMetaData getMetaData() {
     return MetaRegistry.getMeta(this);
   }
@@ -418,12 +449,14 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     }
   }
 
+  @Override
   public TreeElement addInternal(final TreeElement first, final ASTNode last, final ASTNode anchor, final Boolean before) {
     final PomModel model = PomManager.getModel(getProject());
     final XmlAspect aspect = model.getModelAspect(XmlAspect.class);
     final TreeElement[] holder = new TreeElement[1];
     try{
       model.runTransaction(new PomTransactionBase(this, aspect) {
+        @Override
         public PomModelEvent runInner() {
           holder[0] = XmlDocumentImpl.super.addInternal(first, last, anchor, before);
           return XmlDocumentChangedImpl.createXmlDocumentChanged(model, XmlDocumentImpl.this);
@@ -434,11 +467,13 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     return holder[0];
   }
 
+  @Override
   public void deleteChildInternal(@NotNull final ASTNode child) {
     final PomModel model = PomManager.getModel(getProject());
     final XmlAspect aspect = model.getModelAspect(XmlAspect.class);
     try{
       model.runTransaction(new PomTransactionBase(this, aspect) {
+        @Override
         public PomModelEvent runInner() {
           XmlDocumentImpl.super.deleteChildInternal(child);
           return XmlDocumentChangedImpl.createXmlDocumentChanged(model, XmlDocumentImpl.this);
@@ -448,11 +483,13 @@ public class XmlDocumentImpl extends XmlElementImpl implements XmlDocument {
     catch(IncorrectOperationException ignored){}
   }
 
+  @Override
   public void replaceChildInternal(@NotNull final ASTNode child, @NotNull final TreeElement newElement) {
     final PomModel model = PomManager.getModel(getProject());
     final XmlAspect aspect = model.getModelAspect(XmlAspect.class);
     try{
       model.runTransaction(new PomTransactionBase(this, aspect) {
+        @Override
         public PomModelEvent runInner() {
           XmlDocumentImpl.super.replaceChildInternal(child, newElement);
           return XmlDocumentChangedImpl.createXmlDocumentChanged(model, XmlDocumentImpl.this);

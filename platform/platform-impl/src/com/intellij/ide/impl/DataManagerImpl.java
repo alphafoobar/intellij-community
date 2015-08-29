@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.impl.dataRules.*;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.extensions.Extensions;
@@ -31,7 +30,9 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
+import com.intellij.openapi.wm.impl.FloatingDecorator;
 import com.intellij.util.KeyedLazyInstanceEP;
 import com.intellij.util.containers.WeakValueHashMap;
 import gnu.trove.THashMap;
@@ -48,7 +49,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public class DataManagerImpl extends DataManager implements ApplicationComponent {
+public class DataManagerImpl extends DataManager {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.impl.DataManagerImpl");
   private final Map<String, GetDataRule> myDataConstantToRuleMap = new THashMap<String, GetDataRule>();
   private WindowManagerEx myWindowManager;
@@ -57,18 +58,10 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
     registerRules();
   }
 
-  @Override
-  public void initComponent() {
-  }
-
-  @Override
-  public void disposeComponent() {
-  }
-
   @Nullable
   private Object getData(@NotNull String dataId, final Component focusedComponent) {
     for (Component c = focusedComponent; c != null; c = c.getParent()) {
-      final DataProvider dataProvider = getDataProvider(c);
+      final DataProvider dataProvider = getDataProviderEx(c);
       if (dataProvider == null) continue;
       Object data = getDataFromProvider(dataProvider, dataId, null);
       if (data != null) return data;
@@ -107,7 +100,7 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
   }
 
   @Nullable
-  private static DataProvider getDataProvider(Object component) {
+  public static DataProvider getDataProviderEx(Object component) {
     DataProvider dataProvider = null;
     if (component instanceof DataProvider) {
       dataProvider = (DataProvider)component;
@@ -257,6 +250,21 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
       }
     }
 
+    // In case we have an active floating toolwindow and some component in another window focused,
+    // we want this other component to receive key events.
+    // Walking up the window ownership hierarchy from the floating toolwindow would have led us to the main IdeFrame
+    // whereas we want to be able to type in other frames as well.
+    if (activeWindow instanceof FloatingDecorator) {
+      IdeFocusManager ideFocusManager = IdeFocusManager.findInstanceByComponent(activeWindow);
+      IdeFrame lastFocusedFrame = ideFocusManager.getLastFocusedFrame();
+      JComponent frameComponent = lastFocusedFrame != null ? lastFocusedFrame.getComponent() : null;
+      Window lastFocusedWindow = frameComponent != null ? SwingUtilities.getWindowAncestor(frameComponent) : null;
+      boolean toolWindowIsNotFocused = myWindowManager.getFocusedComponent(activeWindow) == null;
+      if (toolWindowIsNotFocused && lastFocusedWindow != null) {
+        activeWindow = lastFocusedWindow;
+      }
+    }
+
     // try to find first parent window that has focus
     Window window = activeWindow;
     Component focusedComponent = null;
@@ -285,12 +293,6 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
   }
 
   @Override
-  @NotNull
-  public String getComponentName() {
-    return "DataManager";
-  }
-
-  @Override
   public <T> void saveInDataContext(DataContext dataContext, @NotNull Key<T> dataKey, @Nullable T data) {
     if (dataContext instanceof UserDataHolder) {
       ((UserDataHolder)dataContext).putUserData(dataKey, data);
@@ -301,6 +303,17 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
   @Nullable
   public <T> T loadFromDataContext(@NotNull DataContext dataContext, @NotNull Key<T> dataKey) {
     return dataContext instanceof UserDataHolder ? ((UserDataHolder)dataContext).getUserData(dataKey) : null;
+  }
+
+  @Nullable
+  public static Editor validateEditor(Editor editor) {
+    Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+    if (focusOwner instanceof JComponent) {
+      final JComponent jComponent = (JComponent)focusOwner;
+      if (jComponent.getClientProperty("AuxEditorComponent") != null) return null; // Hack for EditorSearchComponent
+    }
+
+    return editor;
   }
 
   private static class NullResult {
@@ -366,7 +379,7 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
         if (component == null) {
           return null;
         }
-        return IdeKeyEventDispatcher.isModalContext(component) ? Boolean.TRUE : Boolean.FALSE;
+        return IdeKeyEventDispatcher.isModalContext(component);
       }
       if (PlatformDataKeys.CONTEXT_COMPONENT.is(dataId)) {
         return component;
@@ -379,17 +392,6 @@ public class DataManagerImpl extends DataManager implements ApplicationComponent
         return validateEditor(editor);
       }
       return ((DataManagerImpl)DataManager.getInstance()).getData(dataId, component);
-    }
-
-    @Nullable
-    private static Editor validateEditor(Editor editor) {
-      Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-      if (focusOwner instanceof JComponent) {
-        final JComponent jComponent = (JComponent)focusOwner;
-        if (jComponent.getClientProperty("AuxEditorComponent") != null) return null; // Hack for EditorSearchComponent
-      }
-
-      return editor;
     }
 
     @NonNls

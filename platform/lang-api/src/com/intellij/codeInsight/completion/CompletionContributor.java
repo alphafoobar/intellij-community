@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.KeyedExtensionCollector;
 import com.intellij.openapi.util.Pair;
@@ -38,6 +39,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Completion FAQ:<p>
@@ -128,7 +130,8 @@ public abstract class CompletionContributor {
   private final MultiMap<CompletionType, Pair<ElementPattern<? extends PsiElement>, CompletionProvider<CompletionParameters>>> myMap =
       new MultiMap<CompletionType, Pair<ElementPattern<? extends PsiElement>, CompletionProvider<CompletionParameters>>>();
 
-  public final void extend(@Nullable CompletionType type, final ElementPattern<? extends PsiElement> place, CompletionProvider<CompletionParameters> provider) {
+  public final void extend(@Nullable CompletionType type,
+                           @NotNull final ElementPattern<? extends PsiElement> place, CompletionProvider<CompletionParameters> provider) {
     myMap.putValue(type, new Pair<ElementPattern<? extends PsiElement>, CompletionProvider<CompletionParameters>>(place, provider));
   }
 
@@ -144,11 +147,8 @@ public abstract class CompletionContributor {
    * is of your favourite kind. This method is run inside a read action. If you do any long activity non-related to PSI in it, please
    * ensure you call {@link com.intellij.openapi.progress.ProgressManager#checkCanceled()} often enough so that the completion process 
    * can be cancelled smoothly when the user begins to type in the editor. 
-   *
-   * @param parameters
-   * @param result
    */
-  public void fillCompletionVariants(final CompletionParameters parameters, CompletionResultSet result) {
+  public void fillCompletionVariants(@NotNull final CompletionParameters parameters, @NotNull CompletionResultSet result) {
     for (final Pair<ElementPattern<? extends PsiElement>, CompletionProvider<CompletionParameters>> pair : myMap.get(parameters.getCompletionType())) {
       final ProcessingContext context = new ProcessingContext();
       if (pair.first.accepts(parameters.getPosition(), context)) {
@@ -171,13 +171,11 @@ public abstract class CompletionContributor {
 
   /**
    * Invoked before completion is started. Is used mainly for determining custom offsets in editor, and to change default dummy identifier.
-   * @param context
    */
   public void beforeCompletion(@NotNull CompletionInitializationContext context) {
   }
 
   /**
-   * @param parameters
    * @deprecated use {@link com.intellij.codeInsight.completion.CompletionResultSet#addLookupAdvertisement(String)}
    * @return text to be shown at the bottom of lookup list
    */
@@ -188,8 +186,6 @@ public abstract class CompletionContributor {
 
   /**
    *
-   * @param parameters
-   * @param editor
    * @return hint text to be shown if no variants are found, typically "No suggestions"
    */
   @Nullable
@@ -201,7 +197,7 @@ public abstract class CompletionContributor {
    * Called when the completion is finished quickly, lookup hasn't been shown and gives possibility to autoinsert some item (typically - the only one).
    */
   @Nullable
-  public AutoCompletionDecision handleAutoCompletionPossibility(AutoCompletionContext context) {
+  public AutoCompletionDecision handleAutoCompletionPossibility(@NotNull AutoCompletionContext context) {
     return null;
   }
 
@@ -226,23 +222,27 @@ public abstract class CompletionContributor {
   }
   
   /**
-   * @param actionId
    * @return String representation of action shortcut. Useful while advertising something
    * @see #advertise(CompletionParameters)
    */
-  protected static String getActionShortcut(@NonNls final String actionId) {
+  @NotNull
+  protected static String getActionShortcut(@NonNls @NotNull final String actionId) {
     return KeymapUtil.getFirstKeyboardShortcutText(ActionManager.getInstance().getAction(actionId));
   }
 
-  public static List<CompletionContributor> forParameters(final CompletionParameters parameters) {
+  @NotNull
+  public static List<CompletionContributor> forParameters(@NotNull final CompletionParameters parameters) {
     return ApplicationManager.getApplication().runReadAction(new Computable<List<CompletionContributor>>() {
       @Override
       public List<CompletionContributor> compute() {
-        return forLanguage(PsiUtilCore.getLanguageAtOffset(parameters.getPosition().getContainingFile(), parameters.getOffset()));
+        PsiElement position = parameters.getPosition();
+        List<CompletionContributor> all = forLanguage(PsiUtilCore.getLanguageAtOffset(position.getContainingFile(), parameters.getOffset()));
+        return DumbService.getInstance(position.getProject()).filterByDumbAwareness(all);
       }
     });
   }
 
+  @NotNull
   public static List<CompletionContributor> forLanguage(@NotNull Language language) {
     return MyExtensionPointManager.INSTANCE.forKey(language);
   }
@@ -254,9 +254,10 @@ public abstract class CompletionContributor {
       super("com.intellij.completion.contributor");
     }
 
+    @NotNull
     @Override
-    protected List<CompletionContributor> buildExtensions(String stringKey, Language key) {
-      final THashSet<String> allowed = new THashSet<String>();
+    protected List<CompletionContributor> buildExtensions(@NotNull String stringKey, @NotNull Language key) {
+      Set<String> allowed = new THashSet<String>();
       while (key != null) {
         allowed.add(keyToString(key));
         key = key.getBaseLanguage();
@@ -265,8 +266,9 @@ public abstract class CompletionContributor {
       return buildExtensions(allowed);
     }
 
+    @NotNull
     @Override
-    protected String keyToString(Language key) {
+    protected String keyToString(@NotNull Language key) {
       return key.getID();
     }
   }

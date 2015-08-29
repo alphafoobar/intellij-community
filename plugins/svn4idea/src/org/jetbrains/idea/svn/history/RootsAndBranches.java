@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,15 +23,13 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MultiLineLabelUI;
-import com.intellij.openapi.util.Getter;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.vcs.RepositoryLocation;
 import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
 import com.intellij.openapi.vcs.changes.committed.*;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.ui.ScrollPaneFactory;
-import com.intellij.util.Consumer;
-import com.intellij.util.NullableFunction;
+import com.intellij.util.NotNullFunction;
 import com.intellij.util.messages.Topic;
 import icons.SvnIcons;
 import org.jetbrains.annotations.NotNull;
@@ -39,17 +37,14 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnBundle;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.actions.AbstractIntegrateChangesAction;
-import org.jetbrains.idea.svn.actions.ChangeListsMergerFactory;
-import org.jetbrains.idea.svn.actions.RecordOnlyMergerFactory;
 import org.jetbrains.idea.svn.actions.ShowSvnMapAction;
 import org.jetbrains.idea.svn.dialogs.WCInfoWithBranches;
-import org.jetbrains.idea.svn.integrate.*;
+import org.jetbrains.idea.svn.integrate.ChangeListsMergerFactory;
+import org.jetbrains.idea.svn.integrate.MergerFactory;
+import org.jetbrains.idea.svn.integrate.SelectedChangeListsChecker;
+import org.jetbrains.idea.svn.integrate.SelectedCommittedStuffChecker;
 import org.jetbrains.idea.svn.mergeinfo.ListMergeStatus;
 import org.jetbrains.idea.svn.mergeinfo.MergeInfoHolder;
-import org.jetbrains.idea.svn.update.UpdateEventHandler;
-import org.tmatesoft.svn.core.SVNURL;
-import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNRevisionRange;
 
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
@@ -63,7 +58,9 @@ import java.util.Map;
 
 public class RootsAndBranches implements CommittedChangeListDecorator {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.idea.svn.history.RootsAndBranches");
-  private final Project myProject;
+
+  @NotNull private final SvnVcs myVcs;
+  @NotNull private final Project myProject;
   private final DecoratorManager myManager;
   private final RepositoryLocation myLocation;
   private JPanel myPanel;
@@ -71,14 +68,13 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
   private final Map<String, MergeInfoHolder> myHolders;
 
   private boolean myHighlightingOn;
-  private boolean myFromHereDirection;
   private JPanel myPanelWrapper;
   private final MergePanelFiltering myStrategy;
   private final FilterOutMerged myFilterMerged;
   private final FilterOutNotMerged myFilterNotMerged;
   private final FilterOutAlien myFilterAlien;
   private final IntegrateChangeListsAction myIntegrateAction;
-  private final UndoIntegrateChangeListsAction myUndoIntegrateChangeListsAction;
+  private final IntegrateChangeListsAction myUndoIntegrateChangeListsAction;
   private JComponent myToolbarComponent;
 
   private boolean myDisposed;
@@ -102,13 +98,14 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     }
     return myMergePanels.get(key.endsWith(File.separator) ? key.substring(0, key.length() - 1) : key + File.separator);
   }
-  
-  public RootsAndBranches(final Project project, final DecoratorManager manager, final RepositoryLocation location) {
-    myProject = project;
+
+  public RootsAndBranches(@NotNull SvnVcs vcs, @NotNull DecoratorManager manager, final RepositoryLocation location) {
+    myVcs = vcs;
+    myProject = vcs.getProject();
     myManager = manager;
     myLocation = location;
 
-    myDataLoader = new WcInfoLoader(myProject, myLocation);
+    myDataLoader = new WcInfoLoader(myVcs, myLocation);
 
     myMergePanels = new HashMap<String, SvnMergeInfoRootPanelManual>();
     myHolders = new HashMap<String, MergeInfoHolder>();
@@ -116,11 +113,10 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     myFilterMerged = new FilterOutMerged();
     myFilterNotMerged = new FilterOutNotMerged();
     myFilterAlien = new FilterOutAlien();
-    myIntegrateAction = new IntegrateChangeListsAction();
-    myUndoIntegrateChangeListsAction = new UndoIntegrateChangeListsAction();
+    myIntegrateAction = new IntegrateChangeListsAction(true);
+    myUndoIntegrateChangeListsAction = new IntegrateChangeListsAction(false);
 
     myPanel = new JPanel(new GridBagLayout());
-    myFromHereDirection = true;
     createToolbar();
     final GridBagConstraints gb =
       new GridBagConstraints(0, 0, 1, 1, 1, 0, GridBagConstraints.NORTH, GridBagConstraints.NONE, new Insets(1, 1, 1, 1), 0, 0);
@@ -130,7 +126,6 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     myPanel.setPreferredSize(new Dimension(200, 60));
 
     myManager.install(this);
-    setDirectionToPanels();
 
     myStrategy = new MergePanelFiltering(getPanel());
   }
@@ -139,23 +134,27 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     return myIntegrateAction;
   }
 
-  public UndoIntegrateChangeListsAction getUndoIntegrateAction() {
+  public IntegrateChangeListsAction getUndoIntegrateAction() {
     return myUndoIntegrateChangeListsAction;
   }
 
+  public boolean isHighlightingOn() {
+    return myHighlightingOn;
+  }
+
   public void reloadPanels() {
-    final Map<Pair<String, String>, SvnMergeInfoRootPanelManual.InfoHolder> states = new HashMap<Pair<String, String>, SvnMergeInfoRootPanelManual.InfoHolder>();
+    final Map<Couple<String>, SvnMergeInfoRootPanelManual.InfoHolder> states = new HashMap<Couple<String>, SvnMergeInfoRootPanelManual.InfoHolder>();
     for (Map.Entry<String, SvnMergeInfoRootPanelManual> entry : myMergePanels.entrySet()) {
       final String localPath = entry.getKey();
       final WCInfoWithBranches wcInfo = entry.getValue().getWcInfo();
-      states.put(new Pair<String, String>(localPath, wcInfo.getUrl().toString()), entry.getValue().getInfo());
+      states.put(Couple.of(localPath, wcInfo.getUrl().toString()), entry.getValue().getInfo());
     }
     createPanels(myLocation, new Runnable() {
       public void run() {
         for (Map.Entry<String, SvnMergeInfoRootPanelManual> entry : myMergePanels.entrySet()) {
           final String localPath = entry.getKey();
           final WCInfoWithBranches wcInfo = entry.getValue().getWcInfo();
-          final Pair<String, String> key = new Pair<String, String>(localPath, wcInfo.getUrl().toString());
+          final Couple<String> key = Couple.of(localPath, wcInfo.getUrl().toString());
           final SvnMergeInfoRootPanelManual.InfoHolder infoHolder = states.get(key);
           if (infoHolder !=  null) {
             entry.getValue().initSelection(infoHolder);
@@ -167,27 +166,11 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
 
   public void turnFromHereHighlighting() {
     myHighlightingOn = true;
-    myFromHereDirection = true;
-    setDirectionToPanels();
     for (MergeInfoHolder holder : myHolders.values()) {
       holder.updateMixedRevisionsForPanel();
     }
 
     myManager.repaintTree();
-  }
-
-  public void turnFromThereHighlighting() {
-    myHighlightingOn = true;
-    myFromHereDirection = false;
-    setDirectionToPanels();
-
-    myManager.repaintTree();
-  }
-
-  private void setDirectionToPanels() {
-    for (SvnMergeInfoRootPanelManual panel : myMergePanels.values()) {
-      panel.setDirection(myFromHereDirection);
-    }
   }
 
   public void turnOff() {
@@ -286,9 +269,9 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
           continue;
         }
         final SvnMergeInfoRootPanelManual panel = new SvnMergeInfoRootPanelManual(myProject,
-                                                                                  new NullableFunction<WCInfoWithBranches, WCInfoWithBranches>() {
-                                                                                    public WCInfoWithBranches fun(final WCInfoWithBranches wcInfoWithBranches) {
-
+                                                                                  new NotNullFunction<WCInfoWithBranches, WCInfoWithBranches>() {
+                                                                                    @NotNull
+                                                                                    public WCInfoWithBranches fun(@NotNull WCInfoWithBranches wcInfoWithBranches) {
                                                                                       final WCInfoWithBranches newInfo =
                                                                                         myDataLoader.reloadInfo(wcInfoWithBranches);
                                                                                       if (newInfo == null) {
@@ -327,8 +310,8 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     svnGroup.add(new HighlightFrom());
     svnGroup.add(myIntegrateAction);
     svnGroup.add(myUndoIntegrateChangeListsAction);
-    svnGroup.add(new MarkAsMerged());
-    svnGroup.add(new MarkAsNotMerged());
+    svnGroup.add(new MarkAsMerged(true));
+    svnGroup.add(new MarkAsMerged(false));
     svnGroup.add(myFilterMerged);
     svnGroup.add(myFilterNotMerged);
     svnGroup.add(myFilterAlien);
@@ -337,43 +320,9 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     return svnGroup;
   }
 
-  private MergeInfoHolder createHolder(final SvnMergeInfoRootPanelManual panel) {
-    return new MergeInfoHolder(myProject, myManager, new Getter<WCInfoWithBranches>() {
-      public WCInfoWithBranches get() {
-        if (myFromHereDirection) {
-          return panel.getWcInfo();
-        } else {
-          // actually not used
-          return null;
-        }
-      }
-    }, new Getter<WCInfoWithBranches.Branch>() {
-      public WCInfoWithBranches.Branch get() {
-        if (myFromHereDirection) {
-          return panel.getBranch();
-        } else {
-          final WCInfoWithBranches wcInfo = panel.getWcInfo();
-          return new WCInfoWithBranches.Branch(wcInfo.getUrl().toString());
-        }
-      }
-    }, new Getter<String>() {
-      public String get() {
-        if (myFromHereDirection) {
-          return panel.getLocalBranch();
-        } else {
-          final WCInfoWithBranches wcInfo = panel.getWcInfo();
-          return wcInfo.getPath();
-        }
-      }
-    }, new Getter<Boolean>() {
-      public Boolean get() {
-        return myHighlightingOn && panel.isEnabled();
-      }
-    }, new Consumer<Boolean>() {
-      public void consume(final Boolean aBoolean) {
-        panel.setMixedRevisions(aBoolean);
-      }
-    });
+  @NotNull
+  private MergeInfoHolder createHolder(@NotNull SvnMergeInfoRootPanelManual panel) {
+    return new MergeInfoHolder(myProject, myManager, this, panel);
   }
 
   public JComponent getPanel() {
@@ -464,27 +413,6 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     }
   }
 
-  private class HighlightTo extends ToggleAction {
-    @Override
-    public void update(final AnActionEvent e) {
-      super.update(e);
-      final Presentation presentation = e.getPresentation();
-      presentation.setIcon(SvnIcons.ShowIntegratedTo);
-    }
-
-    public boolean isSelected(final AnActionEvent e) {
-      return myHighlightingOn && (! myFromHereDirection);
-    }
-
-    public void setSelected(final AnActionEvent e, final boolean state) {
-      if (state) {
-        turnFromThereHighlighting();
-      } else {
-        turnOff();
-      }
-    }
-  }
-
   private class HighlightFrom extends ToggleAction {
     @Override
     public void update(final AnActionEvent e) {
@@ -496,7 +424,7 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     }
 
     public boolean isSelected(final AnActionEvent e) {
-      return myHighlightingOn && myFromHereDirection;
+      return myHighlightingOn;
     }
 
     public void setSelected(final AnActionEvent e, final boolean state) {
@@ -582,16 +510,18 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
   private class MarkAsMerged extends AbstractIntegrateChangesAction<SelectedChangeListsChecker> {
     private final String myText;
     private final String myDescription;
+    private final boolean myMarkAsMerged;
 
-    private MarkAsMerged() {
+    private MarkAsMerged(boolean markAsMerged) {
       super(false);
-      myText = SvnBundle.message("action.mark.list.as.merged.text");
-      myDescription = SvnBundle.message("action.mark.list.as.merged.description");
+      myMarkAsMerged = markAsMerged;
+      myText = message("action.mark.list.as.%s.text");
+      myDescription = message("action.mark.list.as.%s.description");
     }
 
     @NotNull
     protected MergerFactory createMergerFactory(SelectedChangeListsChecker checker) {
-      return new RecordOnlyMergerFactory(checker.getSelectedLists(), false);
+      return new ChangeListsMergerFactory(checker.getSelectedLists(), true, !myMarkAsMerged, false);
     }
 
     @NotNull
@@ -602,10 +532,10 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     @Override
     protected void updateWithChecker(AnActionEvent e, SelectedCommittedStuffChecker checker) {
       final Presentation presentation = e.getPresentation();
-      presentation.setIcon(SvnIcons.MarkAsMerged);
+      presentation.setIcon(myMarkAsMerged ? SvnIcons.MarkAsMerged : SvnIcons.MarkAsNotMerged);
       presentation.setText(myText);
       presentation.setDescription(myDescription);
-      presentation.setEnabled(presentation.isEnabled() && mergeEnabled(checker.getSelectedLists(), true));
+      presentation.setEnabled(presentation.isEnabled() && mergeEnabled(checker.getSelectedLists(), myMarkAsMerged));
     }
     
     @Nullable
@@ -629,111 +559,24 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     protected String getDialogTitle() {
       return myText;
     }
-  }
-
-  private class MarkAsNotMerged extends AbstractIntegrateChangesAction<SelectedChangeListsChecker> {
-    private final String myText;
-    private final String myDescription;
-
-    private MarkAsNotMerged() {
-      super(false);
-      myText = SvnBundle.message("action.mark.list.as.not.merged.title");
-      myDescription = SvnBundle.message("action.mark.list.as.not.merged.descrition");
-    }
 
     @NotNull
-    protected MergerFactory createMergerFactory(SelectedChangeListsChecker checker) {
-      return new RecordOnlyMergerFactory(checker.getSelectedLists(), true);
-    }
-
-    @NotNull
-    protected SelectedChangeListsChecker createChecker() {
-      return new SelectedChangeListsChecker();
-    }
-
-    @Override
-    protected void updateWithChecker(AnActionEvent e, SelectedCommittedStuffChecker checker) {
-      final Presentation presentation = e.getPresentation();
-      presentation.setIcon(SvnIcons.MarkAsNotMerged);
-      presentation.setText(myText);
-      presentation.setDescription(myDescription);
-      presentation.setEnabled(presentation.isEnabled() && mergeEnabled(checker.getSelectedLists(), false));
-    }
-
-    @Nullable
-    protected String getSelectedBranchUrl(SelectedCommittedStuffChecker checker) {
-      final SvnMergeInfoRootPanelManual data = getPanelData(checker.getSelectedLists());
-      if (data != null) {
-        return data.getBranch().getUrl();
-      }
-      return null;
-    }
-
-    @Nullable
-    protected String getSelectedBranchLocalPath(SelectedCommittedStuffChecker checker) {
-      final SvnMergeInfoRootPanelManual data = getPanelData(checker.getSelectedLists());
-      if (data != null) {
-        return data.getLocalBranch();
-      }
-      return null;
-    }
-
-    protected String getDialogTitle() {
-      return myText;
-    }
-  }
-
-  private class UndoIntegrateChangeListsAction extends IntegrateChangeListsAction {
-    private UndoIntegrateChangeListsAction() {
-      super(false);
-    }
-
-    @Override
-    protected void updateWithChecker(AnActionEvent e, SelectedCommittedStuffChecker checker) {
-      e.getPresentation().setIcon(SvnIcons.UndoIntegrateToBranch);
-      e.getPresentation().setText(SvnBundle.message("undo.integrate.to.branch"));
-      e.getPresentation().setDescription(SvnBundle.message("undo.integrate.to.branch.description"));
-    }
-
-    @Override
-    protected String getDialogTitle() {
-      return SvnBundle.message("undo.integrate.to.branch.dialog.title");
+    private String message(@NotNull String key) {
+      return SvnBundle.message(String.format(key, myMarkAsMerged ? "merged" : "not.merged"));
     }
   }
 
   private class IntegrateChangeListsAction extends AbstractIntegrateChangesAction<SelectedChangeListsChecker> {
-    private final boolean myDirect;
+    private final boolean myIntegrate;
 
-    public IntegrateChangeListsAction() {
-      this(true);
-    }
-
-    protected IntegrateChangeListsAction(final boolean direct) {
+    public IntegrateChangeListsAction(boolean integrate) {
       super(false);
-      myDirect = direct;
+      myIntegrate = integrate;
     }
 
     @NotNull
     protected MergerFactory createMergerFactory(final SelectedChangeListsChecker checker) {
-      return new ChangeListsMergerFactory(checker.getSelectedLists()) {
-            @Override
-            public IMerger createMerger(final SvnVcs vcs,
-                                        final File target,
-                                        final UpdateEventHandler handler,
-                                        final SVNURL currentBranchUrl,
-                                        String branchName) {
-              return new Merger(vcs, myChangeListsList, target, handler, currentBranchUrl, branchName) {
-                @Override
-                protected SVNRevisionRange createRange() {
-                  if (myDirect) {
-                    return super.createRange();
-                  } else {
-                    return new SVNRevisionRange(SVNRevision.create(myLatestProcessed.getNumber()), SVNRevision.create(myLatestProcessed.getNumber() - 1));
-                  }
-                }
-              };
-            }
-          };
+      return new ChangeListsMergerFactory(checker.getSelectedLists(), false, !myIntegrate, false);
     }
 
     @NotNull
@@ -743,7 +586,14 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
 
     @Override
     protected void updateWithChecker(AnActionEvent e, SelectedCommittedStuffChecker checker) {
-      e.getPresentation().setIcon(SvnIcons.IntegrateToBranch);
+      if (myIntegrate) {
+        e.getPresentation().setIcon(SvnIcons.IntegrateToBranch);
+      }
+      else {
+        e.getPresentation().setIcon(SvnIcons.UndoIntegrateToBranch);
+        e.getPresentation().setText(SvnBundle.message("undo.integrate.to.branch"));
+        e.getPresentation().setDescription(SvnBundle.message("undo.integrate.to.branch.description"));
+      }
     }
 
     protected String getSelectedBranchUrl(SelectedCommittedStuffChecker checker) {
@@ -763,7 +613,7 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     }
 
     protected String getDialogTitle() {
-      return null;
+      return !myIntegrate ? SvnBundle.message("undo.integrate.to.branch.dialog.title") : null;
     }
   }
 
@@ -803,7 +653,7 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
       holder = getHolder(wcPath);
     }
     if (holder != null) {
-      return holder.getDecorator().check(list, ignoreEnabled);
+      return holder.check(list, ignoreEnabled);
     }
     return null;
   }

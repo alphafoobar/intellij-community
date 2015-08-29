@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.sdk.skeletons;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
@@ -28,8 +29,12 @@ import com.intellij.util.Consumer;
 import com.jetbrains.python.PythonHelpersLocator;
 import com.jetbrains.python.sdk.InvalidSdkException;
 import com.jetbrains.python.sdk.PySdkUtil;
+import com.jetbrains.python.sdk.PythonEnvUtil;
 import com.jetbrains.python.sdk.PythonSdkType;
+import com.jetbrains.python.sdk.flavors.IronPythonSdkFlavor;
+import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.*;
@@ -40,13 +45,21 @@ import static com.jetbrains.python.sdk.skeletons.SkeletonVersionChecker.fromVers
  * @author traff
  */
 public class PySkeletonGenerator {
+
+  // Some flavors need current folder to be passed as param. Here are they.
+  private static final Map<Class<? extends PythonSdkFlavor>, String> ENV_PATH_PARAM =
+    new HashMap<Class<? extends PythonSdkFlavor>, String>();
+
+  static {
+    ENV_PATH_PARAM.put(IronPythonSdkFlavor.class, "IRONPYTHONPATH"); // TODO: Make strategy and move to PythonSdkFlavor?
+  }
+
   protected static final Logger LOG = Logger.getInstance("#" + PySkeletonGenerator.class.getName());
-
-  protected final static int MINUTE = 60 * 1000;
-
-  protected final static String GENERATOR3 = "generator3.py";
+  protected static final int MINUTE = 60 * 1000;
+  protected static final String GENERATOR3 = "generator3.py";
 
   private final String mySkeletonsPath;
+  @NotNull private final Map<String, String> myEnv;
 
   public void finishSkeletonsGeneration() {
   }
@@ -65,8 +78,20 @@ public class PySkeletonGenerator {
     }
   }
 
-  public PySkeletonGenerator(String skeletonPath) {
+  /**
+   * @param skeletonPath path where skeletons should be generated
+   * @param pySdk SDK
+   * @param currentFolder current folder (some flavors may search for binary files there) or null if unknown
+   */
+  public PySkeletonGenerator(String skeletonPath, @NotNull final Sdk pySdk, @Nullable final String currentFolder) {
     mySkeletonsPath = skeletonPath;
+    final PythonSdkFlavor flavor = PythonSdkFlavor.getFlavor(pySdk);
+    if (currentFolder != null && flavor != null && ENV_PATH_PARAM.containsKey(flavor.getClass())) {
+      myEnv = ImmutableMap.of(ENV_PATH_PARAM.get(flavor.getClass()), currentFolder);
+    }
+    else {
+      myEnv = Collections.emptyMap();
+    }
   }
 
   public String getSkeletonsPath() {
@@ -139,18 +164,17 @@ public class PySkeletonGenerator {
       commandLine.add(modfilename);
     }
 
-    return getProcessOutput(parent_dir, ArrayUtil.toStringArray(commandLine), PythonSdkType.getVirtualEnvAdditionalEnv(binaryPath),
-                            MINUTE * 10
-    );
+    final Map<String, String> extraEnv = PythonSdkType.getVirtualEnvExtraEnv(binaryPath);
+    final Map<String, String> env = extraEnv != null ? PySdkUtil.mergeEnvVariables(myEnv, extraEnv) : myEnv;
+
+    return getProcessOutput(parent_dir, ArrayUtil.toStringArray(commandLine), env, MINUTE * 10);
   }
 
-  protected ProcessOutput getProcessOutput(String homePath, String[] commandLine, String[] env, int timeout) throws InvalidSdkException {
-    return PySdkUtil.getProcessOutput(
-      homePath,
-      commandLine,
-      env,
-      timeout
-    );
+  protected ProcessOutput getProcessOutput(String homePath, String[] commandLine, Map<String, String> extraEnv,
+                                           int timeout) throws InvalidSdkException {
+    final Map<String, String> env = extraEnv != null ? new HashMap<String, String>(extraEnv) : new HashMap<String, String>();
+    PythonEnvUtil.setPythonDontWriteBytecode(env);
+    return PySdkUtil.getProcessOutput(homePath, commandLine, env, timeout);
   }
 
   public void generateBuiltinSkeletons(@NotNull Sdk sdk) throws InvalidSdkException {
@@ -168,7 +192,7 @@ public class PySkeletonGenerator {
         "-d", mySkeletonsPath, // output dir
         "-b", // for builtins
       },
-      PythonSdkType.getVirtualEnvAdditionalEnv(binaryPath), MINUTE * 5
+      PythonSdkType.getVirtualEnvExtraEnv(binaryPath), MINUTE * 5
     );
     runResult.checkSuccess(LOG);
     LOG.info("Rebuilding builtin skeletons took " + (System.currentTimeMillis() - startTime) + " ms");
@@ -189,7 +213,7 @@ public class PySkeletonGenerator {
 
     final ProcessOutput process = getProcessOutput(parentDir,
                                                    ArrayUtil.toStringArray(cmd),
-                                                   PythonSdkType.getVirtualEnvAdditionalEnv(homePath),
+                                                   PythonSdkType.getVirtualEnvExtraEnv(homePath),
                                                    MINUTE * 4); // see PY-3898
 
     LOG.info("Retrieving binary module list took " + (System.currentTimeMillis() - startTime) + " ms");

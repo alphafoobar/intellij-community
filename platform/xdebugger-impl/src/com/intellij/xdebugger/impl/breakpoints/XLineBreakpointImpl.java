@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,17 +23,18 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.ex.MarkupModelEx;
+import com.intellij.openapi.editor.ex.RangeHighlighterEx;
 import com.intellij.openapi.editor.impl.DocumentMarkupModel;
-import com.intellij.openapi.editor.markup.GutterDraggableObject;
-import com.intellij.openapi.editor.markup.RangeHighlighter;
-import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.editor.markup.*;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.util.DocumentUtil;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerUtil;
 import com.intellij.xdebugger.XSourcePosition;
@@ -53,7 +54,8 @@ import java.util.List;
 /**
  * @author nik
  */
-public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreakpointBase<XLineBreakpoint<P>, P, LineBreakpointState<P>> implements XLineBreakpoint<P> {
+public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreakpointBase<XLineBreakpoint<P>, P, LineBreakpointState<P>>
+  implements XLineBreakpoint<P> {
   @Nullable private RangeHighlighter myHighlighter;
   private final XLineBreakpointType<P> myType;
   private XSourcePosition mySourcePosition;
@@ -74,25 +76,67 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   }
 
   public void updateUI() {
-    if (myDisposed) return;
-    if (ApplicationManager.getApplication().isUnitTestMode()) return;
+    if (myDisposed || ApplicationManager.getApplication().isUnitTestMode()) {
+      return;
+    }
 
     Document document = getDocument();
-    if (document == null) return;
+    if (document == null) {
+      return;
+    }
 
     EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
     TextAttributes attributes = scheme.getAttributes(DebuggerColors.BREAKPOINT_ATTRIBUTES);
 
-    removeHighlighter();
-    MarkupModelEx markupModel = (MarkupModelEx)DocumentMarkupModel.forDocument(document, getProject(), true);
-    RangeHighlighter highlighter = markupModel.addPersistentLineHighlighter(getLine(), DebuggerColors.BREAKPOINT_HIGHLIGHTER_LAYER,
-                                                                            attributes);
-    if (highlighter != null) {
-      updateIcon();
+    RangeHighlighter highlighter = myHighlighter;
+    if (highlighter != null &&
+        (!highlighter.isValid()
+         || !DocumentUtil.isValidOffset(highlighter.getStartOffset(), document)
+         || !Comparing.equal(highlighter.getTextAttributes(), attributes)
+         // it seems that this check is not needed - we always update line number from the highlighter
+         // and highlighter is removed on line and file change anyway
+         /*|| document.getLineNumber(highlighter.getStartOffset()) != getLine()*/)) {
+      removeHighlighter();
+      highlighter = null;
+    }
+
+    MarkupModelEx markupModel;
+    if (highlighter == null) {
+      markupModel = (MarkupModelEx)DocumentMarkupModel.forDocument(document, getProject(), true);
+      TextRange range = myType.getHighlightRange(this);
+      if (range != null && !range.isEmpty()) {
+        range = range.intersection(DocumentUtil.getLineTextRange(document, getLine()));
+        if (range != null && !range.isEmpty()) {
+          highlighter = markupModel.addRangeHighlighter(range.getStartOffset(), range.getEndOffset(),
+                                                        DebuggerColors.BREAKPOINT_HIGHLIGHTER_LAYER, attributes,
+                                                        HighlighterTargetArea.EXACT_RANGE);
+        }
+      }
+      if (highlighter == null) {
+        highlighter = markupModel.addPersistentLineHighlighter(getLine(), DebuggerColors.BREAKPOINT_HIGHLIGHTER_LAYER, attributes);
+      }
+      if (highlighter == null) {
+        return;
+      }
+
       highlighter.setGutterIconRenderer(createGutterIconRenderer());
       highlighter.putUserData(DebuggerColors.BREAKPOINT_HIGHLIGHTER_KEY, Boolean.TRUE);
+      highlighter.setEditorFilter(MarkupEditorFilterFactory.createIsNotDiffFilter());
+      myHighlighter = highlighter;
     }
-    myHighlighter = highlighter;
+    else {
+      markupModel = null;
+    }
+
+    updateIcon();
+
+    if (markupModel == null) {
+      markupModel = (MarkupModelEx)DocumentMarkupModel.forDocument(document, getProject(), false);
+      if (markupModel != null) {
+        // renderersChanged false - we don't change gutter size
+        markupModel.fireAttributesChanged((RangeHighlighterEx)highlighter, false);
+      }
+    }
   }
 
   @Nullable
@@ -149,7 +193,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     if (mySourcePosition == null) {
       new ReadAction() {
         @Override
-        protected void run(final Result result) {
+        protected void run(@NotNull Result result) {
           mySourcePosition = XDebuggerUtil.getInstance().createPosition(getFile(), getLine());
         }
       }.execute();
@@ -182,7 +226,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
       public boolean copy(int line, VirtualFile file) {
         if (canMoveTo(line, file)) {
           setFileUrl(file.getUrl());
-          setLine(line);
+          setLine(line, true);
           return true;
         }
         return false;
@@ -196,13 +240,14 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   }
 
   private boolean canMoveTo(int line, VirtualFile file) {
-    return file != null && myType.canPutAt(file, line, getProject()) && getBreakpointManager().findBreakpointAtLine(myType, file, line) == null;
+    return file != null &&
+           myType.canPutAt(file, line, getProject()) &&
+           getBreakpointManager().findBreakpointAtLine(myType, file, line) == null;
   }
 
   public void updatePosition() {
     if (myHighlighter != null && myHighlighter.isValid()) {
-      Document document = myHighlighter.getDocument();
-      setLine(document.getLineNumber(myHighlighter.getStartOffset()));
+      setLine(myHighlighter.getDocument().getLineNumber(myHighlighter.getStartOffset()), false);
     }
   }
 
@@ -210,14 +255,18 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     if (!Comparing.equal(getFileUrl(), newUrl)) {
       myState.setFileUrl(newUrl);
       mySourcePosition = null;
+      removeHighlighter();
       fireBreakpointChanged();
     }
   }
 
-  private void setLine(final int line) {
+  private void setLine(final int line, boolean removeHighlighter) {
     if (getLine() != line) {
       myState.setLine(line);
       mySourcePosition = null;
+      if (removeHighlighter) {
+        removeHighlighter();
+      }
       fireBreakpointChanged();
     }
   }
@@ -248,5 +297,10 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
       return;
     }
     setIcon(isTemporary() ? myType.getTemporaryIcon() : myType.getEnabledIcon());
+  }
+
+  @Override
+  public String toString() {
+    return "XLineBreakpointImpl(" + myType.getId() + " at " + getShortFilePath() + ":" + getLine() + ")";
   }
 }

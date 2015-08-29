@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleUtil;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
@@ -42,6 +41,7 @@ import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.util.PathsList;
@@ -56,7 +56,10 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.*;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author Eugene Zhuravlev
@@ -83,6 +86,7 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
   private AnalysisScope myGenerationScope;
   private static final Logger LOGGER = Logger.getInstance("#" + JavadocConfiguration.class.getName());
   public boolean OPTION_INCLUDE_LIBS = false;
+  public boolean OPTION_LINK_TO_JDK_DOCS = false;
 
   public void setGenerationScope(AnalysisScope generationScope) {
     myGenerationScope = generationScope;
@@ -126,6 +130,14 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
   public void writeExternal(Element element) throws WriteExternalException {
     DefaultJDOMExternalizer.writeExternal(this, element);
   }
+  
+  public boolean sdkHasJavadocUrls() {
+    return getSdk(myProject).getRootProvider().getFiles(JavadocOrderRootType.getInstance()).length > 0;
+  }
+
+  public static Sdk getSdk(@NotNull Project project) {
+    return PathUtilEx.getAnyJdk(project);
+  }
 
   private class MyJavaCommandLineState extends CommandLineState {
     private final AnalysisScope myGenerationOptions;
@@ -142,7 +154,7 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
 
     protected GeneralCommandLine createCommandLine() throws ExecutionException {
       final GeneralCommandLine cmdLine = new GeneralCommandLine();
-      final Sdk jdk = PathUtilEx.getAnyJdk(myProject);
+      final Sdk jdk = getSdk(myProject);
       setupExeParams(jdk, cmdLine);
       setupProgramParameters(jdk, cmdLine);
       return cmdLine;
@@ -287,6 +299,14 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
       }
       catch (IOException e) {
         LOGGER.error(e);
+      }
+
+      if (OPTION_LINK_TO_JDK_DOCS) {
+        VirtualFile[] docUrls = jdk.getRootProvider().getFiles(JavadocOrderRootType.getInstance());
+        for (VirtualFile docUrl : docUrls) {
+          parameters.add("-link");
+          parameters.add(VfsUtil.toUri(docUrl).toString());
+        }
       }
 
       final PathsList classPath;

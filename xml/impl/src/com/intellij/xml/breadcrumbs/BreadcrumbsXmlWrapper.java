@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,19 +15,27 @@
  */
 package com.intellij.xml.breadcrumbs;
 
-import com.intellij.application.options.editor.WebEditorOptions;
+import com.intellij.codeInsight.daemon.impl.tagTreeHighlighting.XmlTagTreeHighlightingUtil;
+import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.lang.Language;
-import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.colors.EditorColors;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorFontType;
+import com.intellij.openapi.editor.event.CaretAdapter;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
+import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
+import com.intellij.openapi.editor.impl.EditorImpl;
+import com.intellij.openapi.editor.markup.RangeHighlighter;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
@@ -35,10 +43,13 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vcs.FileStatusListener;
 import com.intellij.openapi.vcs.FileStatusManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.ui.Gray;
+import com.intellij.util.BitUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.UiNotifyConnector;
@@ -51,10 +62,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.PriorityQueue;
+import java.util.*;
 
 /**
  * @author spleaner
@@ -63,6 +71,7 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
   private final BreadcrumbsComponent<BreadcrumbsPsiItem> myComponent;
   private final Project myProject;
   private Editor myEditor;
+  private Collection<RangeHighlighter> myHighlighed;
   private final VirtualFile myFile;
   private boolean myUserCaretChange;
   private final MergingUpdateQueue myQueue;
@@ -85,10 +94,12 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
 
     final FileStatusManager manager = FileStatusManager.getInstance(project);
     manager.addFileStatusListener(new FileStatusListener() {
+      @Override
       public void fileStatusesChanged() {
         updateCrumbs();
       }
 
+      @Override
       public void fileStatusChanged(@NotNull final VirtualFile virtualFile) {
       }
     }, this);
@@ -103,7 +114,8 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
 
     myInfoProvider = findInfoProvider(findViewProvider(myFile, myProject));
 
-    final CaretListener caretListener = new CaretListener() {
+    final CaretListener caretListener = new CaretAdapter() {
+      @Override
       public void caretPositionChanged(final CaretEvent e) {
         if (myUserCaretChange) {
           queueUpdate(editor);
@@ -115,6 +127,7 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
 
     editor.getCaretModel().addCaretListener(caretListener);
     Disposer.register(this, new Disposable() {
+      @Override
       public void dispose() {
         editor.getCaretModel().removeCaretListener(caretListener);
       }
@@ -161,35 +174,41 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
     final Font editorFont = editor.getColorsScheme().getFont(EditorFontType.PLAIN);
     myComponent.setFont(editorFont.deriveFont(Font.PLAIN, editorFont.getSize2D()));
 
+    final EditorGutterComponentEx gutterComponent = ((EditorImpl)editor).getGutterComponentEx();
     final ComponentAdapter resizeListener = new ComponentAdapter() {
+      @Override
       public void componentResized(final ComponentEvent e) {
+        myComponent.setOffset(gutterComponent.getWhitespaceSeparatorOffset());
         queueUpdate(editor);
       }
     };
 
     myComponent.addComponentListener(resizeListener);
+    gutterComponent.addComponentListener(resizeListener);
     Disposer.register(this, new Disposable() {
+      @Override
       public void dispose() {
         myComponent.removeComponentListener(resizeListener);
+        gutterComponent.removeComponentListener(resizeListener);
       }
     });
 
     myQueue = new MergingUpdateQueue("Breadcrumbs.Queue", 200, true, myComponent);
-    myQueue.queue(new MyUpdate(this, editor));
 
     Disposer.register(this, new UiNotifyConnector(myComponent, myQueue));
     Disposer.register(this, myQueue);
 
     myWrapperPanel = new JPanel();
     myWrapperPanel.setLayout(new BorderLayout());
-    myWrapperPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 1, 2));
+    myWrapperPanel.setBorder(BorderFactory.createEmptyBorder(2, 0, 1, 2));
     myWrapperPanel.setOpaque(false);
 
     myWrapperPanel.add(myComponent, BorderLayout.CENTER);
+    queueUpdate(editor);
   }
 
   private void updateCrumbs() {
-    if (myComponent != null && myEditor != null) {
+    if (myComponent != null && myEditor != null && !myEditor.isDisposed()) {
       final Font editorFont = myEditor.getColorsScheme().getFont(EditorFontType.PLAIN);
       myComponent.setFont(editorFont.deriveFont(Font.PLAIN, editorFont.getSize2D()));
       updateCrumbs(myEditor.getCaretModel().getLogicalPosition());
@@ -298,6 +317,7 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
     if (file == null || !file.isValid()) return null;
 
     PriorityQueue<PsiElement> leafs = new PriorityQueue<PsiElement>(3, new Comparator<PsiElement>() {
+      @Override
       public int compare(final PsiElement o1, final PsiElement o2) {
         return o2.getTextRange().getStartOffset() - o1.getTextRange().getStartOffset();
       }
@@ -330,47 +350,70 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
   }
 
   private void updateCrumbs(final LogicalPosition position) {
-    if (myFile != null && myEditor != null) {
+    if (myFile != null && myEditor != null && !myEditor.isDisposed() && !myProject.isDisposed()) {
       if (PsiDocumentManager.getInstance(myProject).isUncommited(myEditor.getDocument())) {
         return;
       }
-
       myComponent.setItems(getPresentableLineElements(position, myFile, myEditor, myProject, myInfoProvider));
     }
   }
 
   @Nullable
   public static BreadcrumbsInfoProvider findInfoProvider(@Nullable FileViewProvider viewProvider) {
-    BreadcrumbsInfoProvider provider = null;
-    if (viewProvider != null) {
-      final WebEditorOptions webEditorOptions = WebEditorOptions.getInstance();
+    if (EditorSettingsExternalizable.getInstance().isBreadcrumbsShown() && viewProvider != null) {
       final Language baseLang = viewProvider.getBaseLanguage();
-      provider = getInfoProvider(baseLang);
-      if (!webEditorOptions.isBreadcrumbsEnabledInXml() && baseLang == XMLLanguage.INSTANCE) return null;
-      if (!webEditorOptions.isBreadcrumbsEnabled() && baseLang != XMLLanguage.INSTANCE) return null;
-      if (provider == null) {
-        for (final Language language : viewProvider.getLanguages()) {
-          provider = getInfoProvider(language);
-          if (provider != null) {
-            break;
-          }
+      BreadcrumbsInfoProvider provider = getInfoProvider(baseLang);
+      if (provider != null) {
+        return provider;
+      }
+      for (final Language language : viewProvider.getLanguages()) {
+        provider = getInfoProvider(language);
+        if (provider != null) {
+          return provider;
         }
       }
     }
-    return provider;
+    return null;
   }
 
   public JComponent getComponent() {
     return myWrapperPanel;
   }
 
+  @Override
   public void itemSelected(@NotNull final BreadcrumbsPsiItem item, final int modifiers) {
     final PsiElement psiElement = item.getPsiElement();
     moveEditorCaretTo(psiElement);
 
-    if ((modifiers & Event.SHIFT_MASK) == Event.SHIFT_MASK || (modifiers & Event.META_MASK) == Event.META_MASK) {
+    if (BitUtil.isSet(modifiers, Event.SHIFT_MASK) || BitUtil.isSet(modifiers, Event.META_MASK)) {
       final TextRange range = psiElement.getTextRange();
       myEditor.getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
+    }
+  }
+
+  @Override
+  public void itemHovered(@Nullable BreadcrumbsPsiItem item) {
+    if (!Registry.is("editor.breadcrumbs.highlight.on.hover")) {
+      return;
+    }
+
+    HighlightManager hm = HighlightManager.getInstance(myProject);
+    if (myHighlighed != null) {
+      for (RangeHighlighter highlighter : myHighlighed) {
+        hm.removeSegmentHighlighter(myEditor, highlighter);
+      }
+      myHighlighed = null;
+    }
+    if (item != null) {
+      final TextRange range = item.getPsiElement().getTextRange();
+      final TextAttributes attributes = new TextAttributes();
+      final CrumbPresentation p = item.getPresentation();
+      final Color color = p != null ? p.getBackgroundColor(false, false, false) : BreadcrumbsComponent.ButtonSettings.DEFAULT_BG_COLOR;
+      final Color background = EditorColorsManager.getInstance().getGlobalScheme().getColor(EditorColors.CARET_ROW_COLOR);
+      attributes.setBackgroundColor(XmlTagTreeHighlightingUtil.makeTransparent(color, background != null ? background : Gray._200, 0.3));
+      myHighlighed = new ArrayList<RangeHighlighter>(1);
+      int flags = HighlightManager.HIDE_BY_ESCAPE | HighlightManager.HIDE_BY_TEXT_CHANGE | HighlightManager.HIDE_BY_ANY_KEY;
+      hm.addOccurrenceHighlight(myEditor, range.getStartOffset(), range.getEndOffset(), attributes, flags, myHighlighed, null);
     }
   }
 
@@ -379,8 +422,11 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
     return editor.getUserData(BREADCRUMBS_COMPONENT_KEY);
   }
 
+  @Override
   public void dispose() {
-    myEditor.putUserData(BREADCRUMBS_COMPONENT_KEY, null);
+    if (myEditor != null) {
+      myEditor.putUserData(BREADCRUMBS_COMPONENT_KEY, null);
+    }
     myEditor = null;
   }
 
@@ -397,7 +443,7 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
     return null;
   }
 
-  private class MyUpdate extends Update {
+  private static class MyUpdate extends Update {
     private final BreadcrumbsXmlWrapper myBreadcrumbsComponent;
     private final Editor myEditor;
 
@@ -408,10 +454,12 @@ public class BreadcrumbsXmlWrapper implements BreadcrumbsItemListener<Breadcrumb
       myEditor = editor;
     }
 
+    @Override
     public void run() {
       myBreadcrumbsComponent.updateCrumbs(myEditor.getCaretModel().getLogicalPosition());
     }
 
+    @Override
     public boolean canEat(final Update update) {
       return true;
     }

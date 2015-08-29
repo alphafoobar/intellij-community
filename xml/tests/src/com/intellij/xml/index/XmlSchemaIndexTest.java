@@ -6,10 +6,11 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.testFramework.IdeaTestCase;
-import com.intellij.testFramework.fixtures.CodeInsightFixtureTestCase;
+import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.xml.util.XmlUtil;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -18,34 +19,25 @@ import java.util.*;
 /**
  * @author Dmitry Avdeev
  */
-@SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
-public class XmlSchemaIndexTest extends CodeInsightFixtureTestCase {
+@SuppressWarnings({"IOResourceOpenedButNotSafelyClosed", "ConstantConditions"})
+public class XmlSchemaIndexTest extends LightCodeInsightFixtureTestCase {
 
   private static final String NS = "http://java.jb.com/xml/ns/javaee";
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  public XmlSchemaIndexTest() {
-    IdeaTestCase.initPlatformPrefix();
-  }
 
   public void testBuilder() throws IOException {
 
     VirtualFile file = myFixture.copyFileToProject("spring-beans-2.0.xsd");
-    assert file != null;
     final Collection<String> tags = XsdTagNameBuilder.computeTagNames(file.getInputStream());
-    assert tags != null;
     assertEquals(22, tags.size());
 
     final String ns = XsdNamespaceBuilder.computeNamespace(file.getInputStream());
     assertEquals("http://www.springframework.org/schema/beans", ns);
 
     final VirtualFile xsd = myFixture.copyFileToProject("XMLSchema.xsd");
-    assert xsd != null;
-    final String xsns = XsdNamespaceBuilder.computeNamespace(xsd.getInputStream());
-    assertEquals("http://www.w3.org/2001/XMLSchema", xsns);
+    final String namespace = XsdNamespaceBuilder.computeNamespace(xsd.getInputStream());
+    assertEquals("http://www.w3.org/2001/XMLSchema", namespace);
 
     final Collection<String> xstags = XsdTagNameBuilder.computeTagNames(xsd.getInputStream());
-    assert xstags != null;
     assertEquals(69, xstags.size());
     assertTrue(xstags.contains("schema"));
   }
@@ -55,7 +47,16 @@ public class XmlSchemaIndexTest extends CodeInsightFixtureTestCase {
     final XsdNamespaceBuilder builder = XsdNamespaceBuilder.computeNamespace(new InputStreamReader(file.getInputStream()));
     assertEquals(NS, builder.getNamespace());
     assertEquals("2.5", builder.getVersion());
-    assertEquals(Arrays.asList("web-app"), builder.getTags());
+    assertEquals(Collections.singletonList("web-app"), builder.getTags());
+  }
+
+  public void testRootTags() throws Exception {
+    VirtualFile file = myFixture.copyFileToProject("XMLSchema.xsd");
+    final XsdNamespaceBuilder builder = XsdNamespaceBuilder.computeNamespace(new InputStreamReader(file.getInputStream()));
+    assertEquals(XmlUtil.XML_SCHEMA_URI, builder.getNamespace());
+    assertEquals("1.0", builder.getVersion());
+    assertEquals(Collections.singletonList("schema"), builder.getRootTags());
+    assertEquals(41, builder.getTags().size());
   }
 
   public void testTagNameIndex() {
@@ -94,19 +95,22 @@ public class XmlSchemaIndexTest extends CodeInsightFixtureTestCase {
     assertEquals(2, files.size());
 
     IndexedRelevantResource<String, XsdNamespaceBuilder>
-      resource = XmlNamespaceIndex.guessSchema(NS, "web-app", "3.0", myModule, getProject());
+      resource = XmlNamespaceIndex.guessSchema(NS, "web-app", "3.0", null, myModule, getProject());
     assertNotNull(resource);
     XsdNamespaceBuilder builder = resource.getValue();
     assertEquals(NS, builder.getNamespace());
     assertEquals("3.0", builder.getVersion());
-    assertEquals(Arrays.asList("web-app"), builder.getTags());
+    assertEquals(Collections.singletonList("web-app"), builder.getTags());
 
-    resource = XmlNamespaceIndex.guessSchema(NS, "web-app", "2.5", myModule, getProject());
+    resource = XmlNamespaceIndex.guessSchema(NS, "web-app", "2.5", null, myModule, getProject());
     assertNotNull(resource);
     builder = resource.getValue();
     assertEquals(NS, builder.getNamespace());
     assertEquals("2.5", builder.getVersion());
-    assertEquals(Arrays.asList("web-app"), builder.getTags());
+    assertEquals(Collections.singletonList("web-app"), builder.getTags());
+
+    resource = XmlNamespaceIndex.guessSchema(NS, "foo-bar", "2.5", null, myModule, getProject());
+    assertNull(resource);
   }
 
   public void testGuessDTD() throws Exception {
@@ -122,13 +126,22 @@ public class XmlSchemaIndexTest extends CodeInsightFixtureTestCase {
     assertTrue(XmlNamespaceIndex.guessDtd("foo://bar/2/foo.dtd", file).getVirtualFile().getPath().endsWith("/2/foo.dtd"));
   }
 
-  @Override
-  protected String getBasePath() {
-    return "/xml/tests/testData/index";
+  public void testGuessByLocation() throws Exception {
+    myFixture.copyDirectoryToProject("", "");
+    String namespace = "http://www.liquibase.org/xml/ns/dbchangelog";
+    List<IndexedRelevantResource<String, XsdNamespaceBuilder>> resources =
+      XmlNamespaceIndex.getResourcesByNamespace(namespace, getProject(), myModule);
+    assertEquals(2, resources.size());
+    assertEquals("dbchangelog-3.3.xsd", XmlNamespaceIndex
+      .guessSchema(namespace, null, null, "http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.3.xsd", myModule, getProject())
+      .getFile().getName());
+    assertEquals("dbchangelog-3.1.xsd", XmlNamespaceIndex
+      .guessSchema(namespace, null, null, "http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.1.xsd", myModule, getProject())
+      .getFile().getName());
   }
 
   @Override
-  protected boolean isCommunity() {
-    return true;
+  protected String getBasePath() {
+    return "/xml/tests/testData/index";
   }
 }

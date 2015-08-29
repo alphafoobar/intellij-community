@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@ public class PyExceptPartImpl extends PyBaseElementImpl<PyExceptPartStub> implem
   }
 
   public PyElement getElementNamed(final String the_name) {
+    // Requires switching from stubs to AST in getTarget()
     return IterHelper.findName(iterateNames(), the_name);
   }
 

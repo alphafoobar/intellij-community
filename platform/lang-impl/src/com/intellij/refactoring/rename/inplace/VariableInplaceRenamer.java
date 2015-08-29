@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
+import com.intellij.refactoring.listeners.RefactoringEventData;
+import com.intellij.refactoring.listeners.RefactoringEventListener;
 import com.intellij.refactoring.rename.*;
 import com.intellij.refactoring.rename.naming.AutomaticRenamer;
 import com.intellij.refactoring.rename.naming.AutomaticRenamerFactory;
@@ -137,6 +139,10 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
   protected boolean shouldCreateSnapshot() {
     return true;
   }
+  
+  protected String getRefactoringId() {
+    return "refactoring.rename";
+  }
 
   @Override
   protected void beforeTemplateStart() {
@@ -204,35 +210,50 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
 
   protected void performRefactoringRename(final String newName,
                                           final StartMarkAction markAction) {
+    final String refactoringId = getRefactoringId();
     try {
+      PsiNamedElement elementToRename = getVariable();
+      if (refactoringId != null) {
+        final RefactoringEventData beforeData = new RefactoringEventData();
+        beforeData.addElement(elementToRename);
+        beforeData.addStringProperties(myOldName);
+        myProject.getMessageBus()
+          .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(refactoringId, beforeData);
+      }
       if (!isIdentifier(newName, myLanguage)) {
         return;
       }
-      PsiNamedElement elementToRename = getVariable();
       if (elementToRename != null) {
         new WriteCommandAction(myProject, getCommandName()) {
           @Override
-          protected void run(Result result) throws Throwable {
+          protected void run(@NotNull Result result) throws Throwable {
             renameSynthetic(newName);
           }
         }.execute();
       }
-      for (AutomaticRenamerFactory renamerFactory : Extensions.getExtensions(AutomaticRenamerFactory.EP_NAME)) {
-        if (renamerFactory.isApplicable(elementToRename)) {
+      AutomaticRenamerFactory[] factories = Extensions.getExtensions(AutomaticRenamerFactory.EP_NAME);
+      for (AutomaticRenamerFactory renamerFactory : factories) {
+        if (elementToRename != null && renamerFactory.isApplicable(elementToRename)) {
           final List<UsageInfo> usages = new ArrayList<UsageInfo>();
           final AutomaticRenamer renamer =
             renamerFactory.createRenamer(elementToRename, newName, new ArrayList<UsageInfo>());
           if (renamer.hasAnythingToRename()) {
             if (!ApplicationManager.getApplication().isUnitTestMode()) {
               final AutomaticRenamingDialog renamingDialog = new AutomaticRenamingDialog(myProject, renamer);
-              renamingDialog.show();
-              if (!renamingDialog.isOK()) return;
+              if (!renamingDialog.showAndGet()) {
+                return;
+              }
             }
 
             final Runnable runnable = new Runnable() {
               @Override
               public void run() {
-                renamer.findUsages(usages, false, false);
+                ApplicationManager.getApplication().runReadAction(new Runnable() {
+                  @Override
+                  public void run() {
+                    renamer.findUsages(usages, false, false);
+                  }
+                });
               }
             };
 
@@ -259,7 +280,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
             };
             final WriteCommandAction writeCommandAction = new WriteCommandAction(myProject, getCommandName()) {
               @Override
-              protected void run(Result result) throws Throwable {
+              protected void run(@NotNull Result result) throws Throwable {
                 performAutomaticRename.run();
               }
             };
@@ -278,6 +299,15 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
       }
     }
     finally {
+
+      if (refactoringId != null) {
+        final RefactoringEventData afterData = new RefactoringEventData();
+        afterData.addElement(getVariable());
+        afterData.addStringProperties(newName);
+        myProject.getMessageBus()
+          .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(refactoringId, afterData);
+      }
+
       try {
         ((EditorImpl)InjectedLanguageUtil.getTopLevelEditor(myEditor)).stopDumbLater();
       }

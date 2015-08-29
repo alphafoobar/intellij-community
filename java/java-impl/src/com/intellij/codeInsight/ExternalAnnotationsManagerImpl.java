@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.projectRoots.SdkModificator;
@@ -63,6 +64,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.impl.PsiModificationTrackerImpl;
 import com.intellij.psi.xml.XmlDocument;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
@@ -115,10 +117,12 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
 
   private void notifyAfterAnnotationChanging(@NotNull PsiModifierListOwner owner, @NotNull String annotationFQName, boolean successful) {
     myBus.syncPublisher(TOPIC).afterExternalAnnotationChanging(owner, annotationFQName, successful);
+    ((PsiModificationTrackerImpl)myPsiManager.getModificationTracker()).incCounter();
   }
 
   private void notifyChangedExternally() {
     myBus.syncPublisher(TOPIC).externalAnnotationsChangedExternally();
+    ((PsiModificationTrackerImpl)myPsiManager.getModificationTracker()).incCounter();
   }
 
   @Override
@@ -158,7 +162,12 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
         application.invokeLater(new Runnable() {
           @Override
           public void run() {
-            setupRootAndAnnotateExternally(entry, project, listOwner, annotationFQName, fromFile, packageName, value);
+            DumbService.getInstance(project).withAlternativeResolveEnabled(new Runnable() {
+              @Override
+              public void run() {
+                setupRootAndAnnotateExternally(entry, project, listOwner, annotationFQName, fromFile, packageName, value);
+              }
+            });
           }
         }, project.getDisposed());
       }
@@ -198,7 +207,7 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
     }
     new WriteCommandAction(project) {
       @Override
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         appendChosenAnnotationsRoot(entry, newRoot);
         XmlFile xmlFileInRoot = findXmlFileInRoot(findExternalAnnotationsXmlFiles(listOwner), newRoot);
         if (xmlFileInRoot != null) { //file already exists under appeared content root
@@ -302,7 +311,7 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
 
     new WriteCommandAction(project) {
       @Override
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         if (existingXml != null) {
           annotateExternally(listOwner, annotationFQName, existingXml, fromFile, value);
         }
@@ -506,11 +515,9 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
     if (entry instanceof LibraryOrderEntry) {
       Library library = ((LibraryOrderEntry)entry).getLibrary();
       LOG.assertTrue(library != null);
-      final ModifiableRootModel rootModel = ModuleRootManager.getInstance(entry.getOwnerModule()).getModifiableModel();
       final Library.ModifiableModel model = library.getModifiableModel();
       model.addRoot(vFile, AnnotationOrderRootType.getInstance());
       model.commit();
-      rootModel.commit();
     }
     else if (entry instanceof ModuleSourceOrderEntry) {
       final ModifiableRootModel model = ModuleRootManager.getInstance(entry.getOwnerModule()).getModifiableModel();
@@ -535,53 +542,60 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
       notifyAfterAnnotationChanging(listOwner, annotationFQName, false);
       return;
     }
-    CommandProcessor.getInstance().executeCommand(myPsiManager.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        try {
-          final XmlDocument document = xmlFile.getDocument();
-          if (document != null) {
-            final XmlTag rootTag = document.getRootTag();
-            final String externalName = getExternalName(listOwner, false);
-            if (rootTag != null) {
-              for (XmlTag item : rootTag.getSubTags()) {
-                if (Comparing.strEqual(StringUtil.unescapeXml(item.getAttributeValue("name")), externalName)) {
-                  for (XmlTag annotation : item.getSubTags()) {
-                    if (Comparing.strEqual(annotation.getAttributeValue("name"), annotationFQName)) {
-                      annotation.delete();
-                      break;
-                    }
-                  }
-                  XmlTag newTag = XmlElementFactory.getInstance(myPsiManager.getProject()).createTagFromText(
-                    createAnnotationTag(annotationFQName, values));
-                  item.add(newTag);
-                  commitChanges(xmlFile);
-                  notifyAfterAnnotationChanging(listOwner, annotationFQName, true);
-                  return;
+    try {
+      final XmlDocument document = xmlFile.getDocument();
+      if (document != null) {
+        final XmlTag rootTag = document.getRootTag();
+        final String externalName = getExternalName(listOwner, false);
+        if (externalName == null) {
+          LOG.info("member without external name: " + listOwner);
+        }
+        if (rootTag != null && externalName != null) {
+          XmlTag anchor = null;
+          for (XmlTag item : rootTag.getSubTags()) {
+            int compare = Comparing.compare(externalName, StringUtil.unescapeXml(item.getAttributeValue("name")));
+            if (compare == 0) {
+              anchor = null;
+              for (XmlTag annotation : item.getSubTags()) {
+                compare = Comparing.compare(annotationFQName, annotation.getAttributeValue("name"));
+                if (compare == 0) {
+                  annotation.delete();
+                  break;
                 }
+                anchor = annotation;
               }
-              @NonNls String text =
-                "<item name=\'" + StringUtil.escapeXml(externalName) + "\'>\n";
-              text += createAnnotationTag(annotationFQName, values);
-              text += "</item>";
-              rootTag.add(XmlElementFactory.getInstance(myPsiManager.getProject()).createTagFromText(text));
+              XmlTag newTag = XmlElementFactory.getInstance(myPsiManager.getProject()).createTagFromText(
+                createAnnotationTag(annotationFQName, values));
+              item.addAfter(newTag, anchor);
+              commitChanges(xmlFile);
+              notifyAfterAnnotationChanging(listOwner, annotationFQName, true);
+              return;
             }
+            if (compare < 0) break;
+            anchor = item;
           }
+          @NonNls String text =
+            "<item name=\'" + StringUtil.escapeXml(externalName) + "\'>\n";
+          text += createAnnotationTag(annotationFQName, values);
+          text += "</item>";
+          rootTag.addAfter(XmlElementFactory.getInstance(myPsiManager.getProject()).createTagFromText(text), anchor);
           commitChanges(xmlFile);
           notifyAfterAnnotationChanging(listOwner, annotationFQName, true);
-        }
-        catch (IncorrectOperationException e) {
-          LOG.error(e);
-          notifyAfterAnnotationChanging(listOwner, annotationFQName, false);
-        }
-        finally {
-          dropCache();
-          if (codeUsageFile.getVirtualFile().isInLocalFileSystem()) {
-            UndoUtil.markPsiFileForUndo(codeUsageFile);
-          }
+          return;
         }
       }
-    }, ExternalAnnotationsManagerImpl.class.getName(), null);
+      notifyAfterAnnotationChanging(listOwner, annotationFQName, false);
+    }
+    catch (IncorrectOperationException e) {
+      LOG.error(e);
+      notifyAfterAnnotationChanging(listOwner, annotationFQName, false);
+    }
+    finally {
+      dropCache();
+      if (codeUsageFile.getVirtualFile().isInLocalFileSystem()) {
+        UndoUtil.markPsiFileForUndo(codeUsageFile);
+      }
+    }
   }
 
   private static void sortItems(@NotNull XmlFile xmlFile) {
@@ -604,7 +618,8 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
       }
     }
 
-    Collections.sort(itemTags, new Comparator<XmlTag>() {
+    List<XmlTag> sorted = new ArrayList<XmlTag>(itemTags);
+    Collections.sort(sorted, new Comparator<XmlTag>() {
       @Override
       public int compare(XmlTag item1, XmlTag item2) {
         String externalName1 = item1.getAttributeValue("name");
@@ -613,16 +628,20 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
         return externalName1.compareTo(externalName2);
       }
     });
-    for (XmlTag item : itemTags) {
-      rootTag.addAfter(item, null);
-      item.delete();
+    if (!sorted.equals(itemTags)) {
+      for (XmlTag item : sorted) {
+        rootTag.addAfter(item, null);
+        item.delete();
+      }
     }
   }
 
   private void commitChanges(XmlFile xmlFile) {
     sortItems(xmlFile);
-    Document doc = PsiDocumentManager.getInstance(myPsiManager.getProject()).getDocument(xmlFile);
+    PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myPsiManager.getProject());
+    Document doc = documentManager.getDocument(xmlFile);
     assert doc != null;
+    documentManager.doPostponedOperationsAndUnblockDocument(doc);
     FileDocumentManager.getInstance().saveDocument(doc);
   }
 
@@ -766,27 +785,27 @@ public class ExternalAnnotationsManagerImpl extends ReadableExternalAnnotationsM
     }
 
     @Override
-    public void contentsChanged(VirtualFileEvent event) {
+    public void contentsChanged(@NotNull VirtualFileEvent event) {
       processEvent(event);
     }
 
     @Override
-    public void fileCreated(VirtualFileEvent event) {
+    public void fileCreated(@NotNull VirtualFileEvent event) {
       processEvent(event);
     }
 
     @Override
-    public void fileDeleted(VirtualFileEvent event) {
+    public void fileDeleted(@NotNull VirtualFileEvent event) {
       processEvent(event);
     }
 
     @Override
-    public void fileMoved(VirtualFileMoveEvent event) {
+    public void fileMoved(@NotNull VirtualFileMoveEvent event) {
       processEvent(event);
     }
 
     @Override
-    public void fileCopied(VirtualFileCopyEvent event) {
+    public void fileCopied(@NotNull VirtualFileCopyEvent event) {
       processEvent(event);
     }
   }

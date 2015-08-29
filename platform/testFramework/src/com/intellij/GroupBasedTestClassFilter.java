@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
  */
 package com.intellij;
 
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.containers.MultiMap;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -30,7 +31,7 @@ import java.util.regex.Pattern;
  * <code>'problem tests'</code> etc.
  * <p/>
  * I.e. assumed usage scenario is to create object of this class with necessary filtering criteria and use it's
- * {@link #matches(String)} method for determining if particular test should be executed.
+ * {@link TestClassesFilter#matches(String, String)} method for determining if particular test should be executed.
  * <p/>
  * The filtering is performed by fully-qualified test class name. There are two ways to define the criteria at the moment:
  * <ul>
@@ -39,7 +40,7 @@ import java.util.regex.Pattern;
  *     {@link PatternListTestClassFilter#PatternListTestClassFilter(List) PatternListTestClassFilter};
  *   </li>
  *   <li>
- *     Read class name filters (at regexp format) from the given stream - see {@link #createOn(Reader, String)};
+ *     Read class name filters (at regexp format) from the given stream - see {@link #createOn(java.io.Reader, java.util.List)};
  *   </li>
  * </ul>
  */
@@ -47,29 +48,29 @@ public class GroupBasedTestClassFilter extends TestClassesFilter {
   /**
    * Holds reserved test group name that serves as a negation of matching result.
    *
-   * @see #matches(String)
+   * @see TestClassesFilter#matches(String, String)
    */
   public static final String ALL_EXCLUDE_DEFINED = "ALL_EXCLUDE_DEFINED";
 
-  private final Map<String, List<Pattern>> myPatterns = new HashMap<String, List<Pattern>>();
+  private final MultiMap<String, Pattern> myPatterns = MultiMap.create();
   private final List<Pattern> myAllPatterns = new ArrayList<Pattern>();
   private final List<Pattern> myTestGroupPatterns;
-  private final String myTestGroupName;
+  private boolean myContainsAllExcludeDefinedGroup;
 
-  private GroupBasedTestClassFilter(Map<String, List<String>> filters, String testGroupName) {
-    myTestGroupName = testGroupName;
+  public GroupBasedTestClassFilter(MultiMap<String, String> filters, List<String> testGroupNames) {
+    //empty group means all patterns from each defined group should be excluded
+    myContainsAllExcludeDefinedGroup = containsAllExcludeDefinedGroup(testGroupNames);
 
     for (String groupName : filters.keySet()) {
-      List<String> filterList = filters.get(groupName);
-      addPatterns(groupName, filterList);
+      addPatterns(groupName, filters.get(groupName));
     }
 
-    myTestGroupPatterns = collectPatternsFor(myTestGroupName);
+    myTestGroupPatterns = collectPatternsFor(testGroupNames);
   }
 
-  private void addPatterns(String groupName, List<String> filterList) {
+  private void addPatterns(String groupName, Collection<String> filterList) {
     List<Pattern> patterns = compilePatterns(filterList);
-    myPatterns.put(groupName, patterns);
+    myPatterns.putValues(groupName, patterns);
     myAllPatterns.addAll(patterns);
   }
 
@@ -113,12 +114,17 @@ public class GroupBasedTestClassFilter extends TestClassesFilter {
    *
    *
    * @param reader   reader that points to the target test groups config
-   * @param testGroupName
+   * @param testGroupNames
    * @return newly created {@link GroupBasedTestClassFilter} object with the data contained at the given reader
-   * @see #matches(String)
+   * @see TestClassesFilter#matches(String, String)
    */
-  public static TestClassesFilter createOn(Reader reader, String testGroupName) throws IOException {
-    Map<String, List<String>> groupNameToPatternsMap = new HashMap<String, List<String>>();
+  @NotNull
+  public static TestClassesFilter createOn(@NotNull Reader reader, @NotNull List<String> testGroupNames) throws IOException {
+    return new GroupBasedTestClassFilter(readGroups(reader), testGroupNames);
+  }
+
+  public static MultiMap<String, String> readGroups(Reader reader) throws IOException {
+    MultiMap<String, String> groupNameToPatternsMap = MultiMap.createLinked();
     String currentGroupName = "";
 
     @SuppressWarnings({"IOResourceOpenedButNotSafelyClosed"}) BufferedReader bufferedReader = new BufferedReader(reader);
@@ -129,14 +135,10 @@ public class GroupBasedTestClassFilter extends TestClassesFilter {
         currentGroupName = line.substring(1, line.length() - 1);
       }
       else {
-        if (!groupNameToPatternsMap.containsKey(currentGroupName)) {
-          groupNameToPatternsMap.put(currentGroupName, new ArrayList<String>());
-        }
-        groupNameToPatternsMap.get(currentGroupName).add(line);
+        groupNameToPatternsMap.putValue(currentGroupName, line);
       }
     }
-
-    return new GroupBasedTestClassFilter(groupNameToPatternsMap, testGroupName);
+    return groupNameToPatternsMap;
   }
 
   /**
@@ -148,6 +150,7 @@ public class GroupBasedTestClassFilter extends TestClassesFilter {
    * returns <code>true</code> only if all registered patterns (for all test groups) don't match given test class name.
    *
    * @param className   target test class name to check
+   * @param moduleName
    * @return            <code>true</code> if given test group name is defined (not <code>null</code>) and test class with given
    *                    name belongs to the test group with given name;
    *                    <code>true</code> if given group if undefined or equal to {@link #ALL_EXCLUDE_DEFINED} and given test
@@ -155,30 +158,25 @@ public class GroupBasedTestClassFilter extends TestClassesFilter {
    *                    <code>false</code> otherwise
    */
   @Override
-  public boolean matches(String className) {
-    boolean result = matchesAnyPattern(myTestGroupPatterns, className);
-    //null group means all patterns from each defined group should be excluded
-    if (isAllExcludeDefinedGroup(myTestGroupName)) {
-      return !result;
+  public boolean matches(String className, String moduleName) {
+    if (matchesAnyPattern(myTestGroupPatterns, className)) {
+      return true;
     }
-    else {
-      return result;
+    if (myContainsAllExcludeDefinedGroup && !matchesAnyPattern(myAllPatterns, className)) {
+      return true;
     }
+    return false;
   }
 
-  private static boolean isAllExcludeDefinedGroup(String groupName) {
-    return StringUtil.isEmpty(groupName) || ALL_EXCLUDE_DEFINED.equalsIgnoreCase(groupName.trim());
+  private static boolean containsAllExcludeDefinedGroup(List<String> groupNames) {
+    return groupNames.isEmpty() || groupNames.contains(ALL_EXCLUDE_DEFINED);
   }
 
-  private List<Pattern> collectPatternsFor(String groupName) {
-    if (isAllExcludeDefinedGroup(groupName)) {
-      return myAllPatterns;
+  private List<Pattern> collectPatternsFor(List<String> groupNames) {
+    List<Pattern> patterns = new ArrayList<Pattern>();
+    for (String groupName : groupNames) {
+      patterns.addAll(myPatterns.get(groupName));
     }
-    else if (myPatterns.containsKey(groupName)) {
-      return myPatterns.get(groupName);
-    }
-    else {
-      return Collections.emptyList();
-    }
+    return patterns;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.openapi.util.io.win32;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.util.SystemProperties;
 import com.intellij.util.lang.UrlClassLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -35,14 +36,14 @@ public class IdeaWin32 {
 
   static {
     IdeaWin32 instance = null;
-    if (SystemInfo.isWin2kOrNewer) {
+    if (SystemInfo.isWin2kOrNewer && SystemProperties.getBooleanProperty("idea.use.native.fs.for.win", true)) {
       try {
         UrlClassLoader.loadPlatformLibrary("IdeaWin32");
         instance = new IdeaWin32();
         LOG.info("Native filesystem for Windows is operational");
       }
       catch (Throwable t) {
-        LOG.error("Failed to initialize native filesystem for Windows", t);
+        LOG.warn("Failed to initialize native filesystem for Windows", t);
       }
     }
     ourInstance = instance;
@@ -70,10 +71,11 @@ public class IdeaWin32 {
   public FileInfo getInfo(@NotNull String path) {
     path = path.replace('/', '\\');
     if (DEBUG_ENABLED) {
+      LOG.debug("getInfo(" + path + ")");
       long t = System.nanoTime();
-      final FileInfo result = getInfo0(path);
+      FileInfo result = getInfo0(path);
       t = (System.nanoTime() - t) / 1000;
-      LOG.debug("getInfo(" + path + "): " + t + " mks");
+      LOG.debug("  " + t + " mks");
       return result;
     }
     else {
@@ -85,10 +87,11 @@ public class IdeaWin32 {
   public String resolveSymLink(@NotNull String path) {
     path = path.replace('/', '\\');
     if (DEBUG_ENABLED) {
+      LOG.debug("resolveSymLink(" + path + ")");
       long t = System.nanoTime();
-      final String result = resolveSymLink0(path);
+      String result = resolveSymLink0(path);
       t = (System.nanoTime() - t) / 1000;
-      LOG.debug("resolveSymLink(" + path + "): " + t + " mks");
+      LOG.debug("  " + t + " mks");
       return result;
     }
     else {
@@ -100,10 +103,11 @@ public class IdeaWin32 {
   public FileInfo[] listChildren(@NotNull String path) {
     path = path.replace('/', '\\');
     if (DEBUG_ENABLED) {
+      LOG.debug("list(" + path + ")");
       long t = System.nanoTime();
       FileInfo[] children = listChildren0(path);
       t = (System.nanoTime() - t) / 1000;
-      LOG.debug("list(" + path + "): " + children.length + " children, " + t + " mks");
+      LOG.debug("  " + (children == null ? -1 : children.length) + " children, " + t + " mks");
       return children;
     }
     else {

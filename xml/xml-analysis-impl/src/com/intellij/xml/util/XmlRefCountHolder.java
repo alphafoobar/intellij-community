@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,9 +73,8 @@ public class XmlRefCountHolder {
   private final Set<String> myUsedNamespaces = new HashSet<String>();
 
   @Nullable
-  public static XmlRefCountHolder getRefCountHolder(final XmlElement element) {
-    PsiFile file = element.getContainingFile();
-    return file instanceof XmlFile ? CACHE.get(xmlRefCountHolderKey, (XmlFile)file, null).getValue() : null;
+  public static XmlRefCountHolder getRefCountHolder(@NotNull XmlFile file) {
+    return CACHE.get(xmlRefCountHolderKey, file, null).getValue();
   }
 
   private XmlRefCountHolder() {
@@ -105,10 +104,24 @@ public class XmlRefCountHolder {
       myId2AttributeListMap.put(id, list);
     }
     else if (!soft) {
+      final boolean html = HtmlUtil.isHtmlFile(attributeValue);
+      final boolean html5 = HtmlUtil.isHtml5Context(attributeValue);
+
       // mark as duplicate
       List<XmlAttributeValue> notSoft = ContainerUtil.mapNotNull(list, new NullableFunction<Pair<XmlAttributeValue, Boolean>, XmlAttributeValue>() {
         @Override
         public XmlAttributeValue fun(Pair<XmlAttributeValue, Boolean> pair) {
+          if (html5 && !"id".equalsIgnoreCase(((XmlAttribute)pair.first.getParent()).getName())) {
+            // according to HTML 5 (http://www.w3.org/TR/html5/dom.html#the-id-attribute) spec
+            // only id attribute is unique identifier
+            return null;
+          }
+          if (html && pair.first.getParent().getParent() == attributeValue.getParent().getParent()) {
+            // according to HTML 4 (http://www.w3.org/TR/html401/struct/global.html#adef-id,
+            // http://www.w3.org/TR/html401/struct/links.html#h-12.2.3) spec id and name occupy
+            // same namespace, but having same values on one tag is ok
+            return null;
+          }
           return pair.second ? null : pair.first;
         }
       });
@@ -147,7 +160,7 @@ public class XmlRefCountHolder {
     return myUsedNamespaces.contains(ns);
   }
 
-  private static class IdGatheringRecursiveVisitor extends XmlRecursiveElementVisitor {
+  private static class IdGatheringRecursiveVisitor extends XmlRecursiveElementWalkingVisitor {
     private final XmlRefCountHolder myHolder;
 
     private IdGatheringRecursiveVisitor(@NotNull XmlRefCountHolder holder) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,55 +25,69 @@
 package com.intellij;
 
 import com.intellij.idea.Bombed;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.TestRunnerUtil;
+import com.intellij.util.containers.MultiMap;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.util.*;
-import java.util.List;
 
 @SuppressWarnings({"HardCodedStringLiteral", "UseOfSystemOutOrSystemErr", "CallToPrintStackTrace", "TestOnlyProblems"})
 public class TestCaseLoader {
-  /** Holds name of JVM property that is assumed to define target test group name. */
-  private static final String TARGET_TEST_GROUP = "idea.test.group";
-
-  /** Holds name of JVM property that is assumed to define filtering rules for test classes. */
-  private static final String TARGET_TEST_PATTERNS = "idea.test.patterns";
-
+  public static final String TARGET_TEST_GROUP = "idea.test.group";
+  public static final String TARGET_TEST_PATTERNS = "idea.test.patterns";
   public static final String PERFORMANCE_TESTS_ONLY_FLAG = "idea.performance.tests";
+  public static final String INCLUDE_PERFORMANCE_TESTS_FLAG = "idea.include.performance.tests";
+  public static final String INCLUDE_UNCONVENTIONALLY_NAMED_TESTS_FLAG = "idea.include.unconventionally.named.tests";
   public static final String SKIP_COMMUNITY_TESTS = "idea.skip.community.tests";
 
   private final List<Class> myClassList = new ArrayList<Class>();
+  private final List<Throwable> myClassLoadingErrors = new ArrayList<Throwable>();
   private Class myFirstTestClass;
   private Class myLastTestClass;
   private final TestClassesFilter myTestClassesFilter;
-  private final boolean myIsPerformanceTestsRun;
+  private final boolean myForceLoadPerformanceTests;
 
-  public TestCaseLoader(String classFilterName, boolean isPerformanceTestsRun) {
-    myIsPerformanceTestsRun = isPerformanceTestsRun;
-
+  public TestCaseLoader(String classFilterName) {
+    this(classFilterName, false);
+  }
+  
+  public TestCaseLoader(String classFilterName, boolean forceLoadPerformanceTests) {
+    myForceLoadPerformanceTests = forceLoadPerformanceTests;
     String patterns = System.getProperty(TARGET_TEST_PATTERNS);
     if (patterns != null) {
       myTestClassesFilter = new PatternListTestClassFilter(StringUtil.split(patterns, ";"));
       System.out.println("Using patterns: [" + patterns +"]");
     }
     else {
-      URL excludedStream = StringUtil.isEmpty(classFilterName) ? null : getClass().getClassLoader().getResource(classFilterName);
-      if (excludedStream != null) {
-        TestClassesFilter filter;
+      List<URL> groupingFileUrls = Collections.emptyList();
+      if (!StringUtil.isEmpty(classFilterName)) {
         try {
-          String testGroupName = System.getProperty(TARGET_TEST_GROUP, "").trim();
-          InputStreamReader reader = new InputStreamReader(excludedStream.openStream());
+          groupingFileUrls = Collections.list(getClass().getClassLoader().getResources(classFilterName));
+        }
+        catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+
+      List<String> testGroupNames = StringUtil.split(System.getProperty(TARGET_TEST_GROUP, "").trim(), ";");
+      MultiMap<String, String> groups = MultiMap.createLinked();
+
+      for (URL fileUrl : groupingFileUrls) {
+        try {
+          InputStreamReader reader = new InputStreamReader(fileUrl.openStream());
           try {
-            filter = GroupBasedTestClassFilter.createOn(reader, testGroupName);
-            System.out.println("Using test group: [" + testGroupName +"]");
+            groups.putAllValues(GroupBasedTestClassFilter.readGroups(reader));
           }
           finally {
             reader.close();
@@ -81,25 +95,23 @@ public class TestCaseLoader {
         }
         catch (IOException e) {
           e.printStackTrace();
-          filter = TestClassesFilter.ALL_CLASSES;
-          System.out.println("Using all classes");
+          System.err.println("Failed to load test groups from " + fileUrl);
         }
-        myTestClassesFilter = filter;
+      }
+
+      if (groups.isEmpty()) {
+        System.out.println("Using all classes");
+        myTestClassesFilter = TestClassesFilter.ALL_CLASSES;
       }
       else {
-        myTestClassesFilter = TestClassesFilter.ALL_CLASSES;
-        System.out.println("Using all classes");
+        System.out.println("Using test groups: " + testGroupNames);
+        myTestClassesFilter = new GroupBasedTestClassFilter(groups, testGroupNames);
       }
     }
   }
 
-  /*
-   * Adds <code>testCaseClass</code> to the list of classes
-   * if the class is a test case we wish to load. Calls
-   * <code>shouldLoadTestCase ()</code> to determine that.
-   */
-  void addClassIfTestCase(Class testCaseClass) {
-    if (shouldAddTestCase(testCaseClass, true) &&
+  void addClassIfTestCase(Class testCaseClass, String moduleName) {
+    if (shouldAddTestCase(testCaseClass, moduleName, true) &&
         testCaseClass != myFirstTestClass && testCaseClass != myLastTestClass &&
         PlatformTestUtil.canRunTest(testCaseClass)) {
       myClassList.add(testCaseClass);
@@ -108,22 +120,19 @@ public class TestCaseLoader {
 
   void addFirstTest(Class aClass) {
     assert myFirstTestClass == null : "already added: "+aClass;
-    assert shouldAddTestCase(aClass, false) : "not a test: "+aClass;
+    assert shouldAddTestCase(aClass, null, false) : "not a test: "+aClass;
     myFirstTestClass = aClass;
   }
 
   void addLastTest(Class aClass) {
     assert myLastTestClass == null : "already added: "+aClass;
-    assert shouldAddTestCase(aClass, false) : "not a test: "+aClass;
+    assert shouldAddTestCase(aClass, null, false) : "not a test: "+aClass;
     myLastTestClass = aClass;
   }
 
-  /**
-   * Determine if we should load this test case.
-   */
-  private boolean shouldAddTestCase(final Class<?> testCaseClass, boolean testForExcluded) {
+  private boolean shouldAddTestCase(final Class<?> testCaseClass, String moduleName, boolean testForExcluded) {
     if ((testCaseClass.getModifiers() & Modifier.ABSTRACT) != 0) return false;
-    if (testForExcluded && shouldExcludeTestClass(testCaseClass)) return false;
+    if (testForExcluded && shouldExcludeTestClass(moduleName, testCaseClass)) return false;
 
     if (TestCase.class.isAssignableFrom(testCaseClass) || TestSuite.class.isAssignableFrom(testCaseClass)) {
       return true;
@@ -131,99 +140,57 @@ public class TestCaseLoader {
     try {
       final Method suiteMethod = testCaseClass.getMethod("suite");
       if (Test.class.isAssignableFrom(suiteMethod.getReturnType()) && (suiteMethod.getModifiers() & Modifier.STATIC) != 0) {
-        //System.out.println("testCaseClass = " + testCaseClass);
         return true;
       }
     }
-    catch (NoSuchMethodException e) {
-      // can't be
-    }
+    catch (NoSuchMethodException ignored) { }
 
     return TestRunnerUtil.isJUnit4TestClass(testCaseClass);
   }
 
-  /*
-   * Determine if we should exclude this test case.
-   */
-  private boolean shouldExcludeTestClass(Class testCaseClass) {
+  private boolean shouldExcludeTestClass(String moduleName, Class testCaseClass) {
+    if (!myForceLoadPerformanceTests && !TestAll.shouldIncludePerformanceTestCase(testCaseClass)) return true;
     String className = testCaseClass.getName();
-    if (className.toLowerCase().contains("performance") && !myIsPerformanceTestsRun) return true;
 
-    return !myTestClassesFilter.matches(className) || isBombed(testCaseClass);
+    return !myTestClassesFilter.matches(className, moduleName) || isBombed(testCaseClass);
   }
 
-  public static boolean isBombed(final Method method) {
-    final Bombed bombedAnnotation = method.getAnnotation(Bombed.class);
+  public static boolean isBombed(final AnnotatedElement element) {
+    final Bombed bombedAnnotation = element.getAnnotation(Bombed.class);
     if (bombedAnnotation == null) return false;
-    if (PlatformTestUtil.isRotten(bombedAnnotation)) {
-      String message = "Disarm the stale bomb for '" + method + "' in class '" + method.getDeclaringClass() + "'";
-      System.err.println(message);
-      //Assert.fail(message);
-    }
     return !PlatformTestUtil.bombExplodes(bombedAnnotation);
   }
-
-  public static boolean isBombed(final Class<?> testCaseClass) {
-    final Bombed bombedAnnotation = testCaseClass.getAnnotation(Bombed.class);
-    if (bombedAnnotation == null) return false;
-    if (PlatformTestUtil.isRotten(bombedAnnotation)) {
-      String message = "Disarm the stale bomb for '" + testCaseClass + "'";
-      System.err.println(message);
-     // Assert.fail(message);
-    }
-    return !PlatformTestUtil.bombExplodes(bombedAnnotation);
-  }
-
-  public void loadTestCases(final Collection<String> classNamesIterator) {
+  
+  public void loadTestCases(final String moduleName, final Collection<String> classNamesIterator) {
     for (String className : classNamesIterator) {
       try {
-        Class candidateClass = Class.forName(className);
-        addClassIfTestCase(candidateClass);
+        Class candidateClass = Class.forName(className, false, getClass().getClassLoader());
+        addClassIfTestCase(candidateClass, moduleName);
       }
-      catch (ClassNotFoundException e) {
-        System.err.println("Cannot load class " + className + ": " + e.getMessage());
-        e.printStackTrace();
-      }
-      catch (ExceptionInInitializerError e) {
-        System.err.println("Cannot initialize class " + className + ": " + e.getException().getMessage());
-        e.printStackTrace();
-        System.err.println("Root cause:");
-        e.getException().printStackTrace();
-      }
-      catch (LinkageError e) {
-        System.err.println("Cannot load class " + className + ": " + e.getMessage());
-        e.printStackTrace();
+      catch (Throwable e) {
+        String message = "Cannot load class " + className + ": " + e.getMessage();
+        System.err.println(message);
+        myClassLoadingErrors.add(new Throwable(message, e));
       }
     }
+  }
+
+  public List<Throwable> getClassLoadingErrors() {
+    return myClassLoadingErrors;
   }
 
   private static final List<String> ourRankList = getTeamCityRankList();
 
   private static List<String> getTeamCityRankList() {
-    final String filePath = System.getProperty("teamcity.tests.recentlyFailedTests.file", null);
-    if (filePath == null) {
-      return Collections.emptyList();
+    String filePath = System.getProperty("teamcity.tests.recentlyFailedTests.file", null);
+    if (filePath != null) {
+      try {
+        return FileUtil.loadLines(filePath);
+      }
+      catch (IOException ignored) { }
     }
 
-    try {
-      final List<String> result = new ArrayList<String>();
-      final BufferedReader reader = new BufferedReader(new FileReader(filePath));
-      try {
-        do {
-          final String className = reader.readLine();
-          if (className == null) break;
-          result.add(className);
-        }
-        while (true);
-        return result;
-      }
-      finally {
-        reader.close();
-      }
-    }
-    catch (IOException e) {
-      return Collections.emptyList();
-    }
+    return Collections.emptyList();
   }
 
   private int getRank(Class aClass) {

@@ -16,102 +16,97 @@
 package com.intellij.vcs.log.ui.filter;
 
 import com.intellij.openapi.actionSystem.ActionGroup;
-import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
-import com.intellij.openapi.project.DumbAwareAction;
-import com.intellij.openapi.ui.popup.JBPopup;
-import com.intellij.openapi.ui.popup.JBPopupAdapter;
-import com.intellij.openapi.ui.popup.LightweightWindowEvent;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.vcs.log.VcsLogFilter;
+import com.intellij.vcs.log.VcsLogUserFilter;
 import com.intellij.vcs.log.VcsUser;
 import com.intellij.vcs.log.data.VcsLogDataHolder;
 import com.intellij.vcs.log.data.VcsLogUiProperties;
-import com.intellij.vcs.log.data.VcsLogUserFilter;
-import com.intellij.vcs.log.ui.PopupWithTextFieldWithAutoCompletion;
+import com.intellij.vcs.log.impl.VcsUserImpl;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 
 /**
  * Show a popup to select a user or enter the user name.
  */
-class UserFilterPopupComponent extends FilterPopupComponent {
+class UserFilterPopupComponent extends MultipleValueFilterPopupComponent<VcsLogUserFilter> {
 
   private static final String ME = "me";
-  private final VcsLogDataHolder myDataHolder;
-  private final VcsLogUiProperties myUiProperties;
 
-  UserFilterPopupComponent(VcsLogClassicFilterUi filterUi, VcsLogDataHolder dataHolder, VcsLogUiProperties uiProperties) {
-    super(filterUi, "User");
+  @NotNull private final VcsLogDataHolder myDataHolder;
+  @NotNull private final VcsLogUiProperties myUiProperties;
+
+  UserFilterPopupComponent(@NotNull VcsLogUiProperties uiProperties,
+                           @NotNull VcsLogDataHolder dataHolder,
+                           @NotNull FilterModel<VcsLogUserFilter> filterModel) {
+    super("User", uiProperties, filterModel);
     myDataHolder = dataHolder;
     myUiProperties = uiProperties;
+  }
+
+  @NotNull
+  @Override
+  protected String getText(@NotNull VcsLogUserFilter filter) {
+    return displayableText(getTextValues(filter));
+  }
+
+  @Nullable
+  @Override
+  protected String getToolTip(@NotNull VcsLogUserFilter filter) {
+    return tooltip(getTextValues(filter));
   }
 
   @Override
   protected ActionGroup createActionGroup() {
     DefaultActionGroup group = new DefaultActionGroup();
     group.add(createAllAction());
-    group.add(new SetValueAction(ME, this));
-
-    List<String> recentlyFilteredUsers = myUiProperties.getRecentlyFilteredUsers();
-    if (!recentlyFilteredUsers.isEmpty()) {
-      group.addSeparator("Recently searched");
-      for (String recentUser : recentlyFilteredUsers) {
-        group.add(new SetValueAction(recentUser, this));
-      }
+    group.add(createSelectMultipleValuesAction());
+    if (!myDataHolder.getCurrentUser().isEmpty()) {
+      group.add(createPredefinedValueAction(Collections.singleton(VcsLogUserFilterImpl.ME)));
     }
-    group.addSeparator();
-    group.add(new SelectUserAction());
+    group.addAll(createRecentItemsActionGroup());
     return group;
   }
 
-  @Nullable
+  @NotNull
   @Override
-  protected VcsLogFilter getFilter() {
-    String value = getValue();
-    if (value == ALL) {
-      return null;
+  protected Collection<String> getTextValues(@Nullable VcsLogUserFilter filter) {
+    if (filter == null) {
+      return Collections.emptySet();
     }
-    if (value == ME) {
-      return new VcsLogUserFilter.Me(myDataHolder.getCurrentUser());
-    }
-    myUiProperties.addRecentlyFilteredUser(value);
-    return new VcsLogUserFilter.ByName(value);
+    return ContainerUtil.newHashSet(((VcsLogUserFilterImpl)filter).getUserNamesForPresentation());
   }
 
-  private class SelectUserAction extends DumbAwareAction {
+  @NotNull
+  @Override
+  protected List<List<String>> getRecentValuesFromSettings() {
+    return myUiProperties.getRecentlyFilteredUserGroups();
+  }
 
-    SelectUserAction() {
-      super("Select...");
-    }
+  @Override
+  protected void rememberValuesInSettings(@NotNull Collection<String> values) {
+    myUiProperties.addRecentlyFilteredUserGroup(new ArrayList<String>(values));
+  }
 
-    @Override
-    public void actionPerformed(AnActionEvent e) {
-      Collection<String> users = ContainerUtil.map(myDataHolder.getAllUsers(), new Function<VcsUser, String>() {
-        @Override
-        public String fun(VcsUser user) {
-          return user.getName();
-        }
-      });
+  @NotNull
+  @Override
+  protected List<String> getAllValues() {
+    return ContainerUtil.map(myDataHolder.getAllUsers(), new Function<VcsUser, String>() {
+      @Override
+      public String fun(VcsUser user) {
+        return user.getName();
+      }
+    });
+  }
 
-      final PopupWithTextFieldWithAutoCompletion textField = new PopupWithTextFieldWithAutoCompletion(e.getProject(), users);
-      JBPopup popup = textField.createPopup();
-
-      popup.addListener(new JBPopupAdapter() {
-        @Override
-        public void onClosed(LightweightWindowEvent event) {
-          if (event.isOk()) {
-            String user = textField.getText();
-            setValue(user);
-            applyFilters();
-          }
-        }
-      });
-      popup.showUnderneathOf(UserFilterPopupComponent.this);
-    }
-
+  @NotNull
+  @Override
+  protected VcsLogUserFilter createFilter(@NotNull Collection<String> values) {
+    return new VcsLogUserFilterImpl(values, myDataHolder.getCurrentUser(), myDataHolder.getAllUsers());
   }
 }

@@ -15,14 +15,19 @@
  */
 package com.intellij.codeInsight.daemon.quickFix;
 
-import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 
 /**
  * @author Danila Ponomarenko
  */
-public class CreateGetterOrSetterTest extends LightQuickFixTestCase {
+public class CreateGetterOrSetterTest extends LightQuickFixParameterizedTestCase {
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    enableInspectionTool(new UnusedDeclarationInspection());
+  }
+
   public void test() throws Exception {
-    enableInspectionTool(new UnusedSymbolLocalInspection());
     doAllTests();
   }
 

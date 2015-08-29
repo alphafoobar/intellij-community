@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,27 @@
 
 package com.intellij.openapi.roots.ui.configuration;
 
+import com.intellij.core.JavaCoreBundle;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.ide.util.BrowseFilesListener;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.project.ex.ProjectEx;
+import com.intellij.openapi.projectRoots.JavaSdk;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.CompilerProjectExtension;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.impl.LanguageLevelProjectExtensionImpl;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectStructureElementConfigurable;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.StructureConfigurableContext;
@@ -39,18 +46,23 @@ import com.intellij.openapi.ui.DetailsComponent;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.FieldPanel;
 import com.intellij.ui.InsertPathAction;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.IOException;
 
 /**
@@ -108,7 +120,7 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
 
   @Override
   public JComponent createOptionsPanel() {
-    myDetailsComponent = new DetailsComponent();
+    myDetailsComponent = new DetailsComponent(!Registry.is("ide.new.project.settings"), !Registry.is("ide.new.project.settings"));
     myDetailsComponent.setContent(myPanel);
     myDetailsComponent.setText(getBannerSlogan());
 
@@ -119,9 +131,9 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
 
   private void init(final ProjectSdksModel model) {
     myPanel = new JPanel(new GridBagLayout());
-    myPanel.setPreferredSize(new Dimension(700, 500));
+    myPanel.setPreferredSize(JBUI.size(700, 500));
 
-    if (((ProjectEx)myProject).getStateStore().getStorageScheme().equals(StorageScheme.DIRECTORY_BASED)) {
+    if (ProjectUtil.isDirectoryBased(myProject)) {
       final JPanel namePanel = new JPanel(new BorderLayout());
       final JLabel label =
         new JLabel("<html><body><b>Project name:</b></body></html>", SwingConstants.LEFT);
@@ -136,7 +148,7 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
       nameFieldPanel.add(myProjectName);
 
       namePanel.add(nameFieldPanel, BorderLayout.CENTER);
-      final JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT));
+      final JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
       wrapper.add(namePanel);
       wrapper.setAlignmentX(0);
       myPanel.add(wrapper, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 0.0, 0.0,
@@ -147,17 +159,30 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
     myProjectJdkConfigurable = new ProjectJdkConfigurable(myProject, model);
     myPanel.add(myProjectJdkConfigurable.createComponent(), new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 0.0, 0.0,
                                                                                    GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL,
-                                                                                   new Insets(4, 4, 0, 0), 0, 0));
+                                                                                   new Insets(4, 0, 0, 0), 0, 0));
 
     myPanel.add(myWholePanel, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 1.0, 1.0, GridBagConstraints.NORTHWEST,
                                                      GridBagConstraints.NONE, new Insets(4, 0, 0, 0), 0, 0));
 
-
+    myPanel.setBorder(new EmptyBorder(0, 10, 0, 10));
     myProjectCompilerOutput.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
       @Override
       protected void textChanged(DocumentEvent e) {
         if (myFreeze) return;
         myModulesConfigurator.processModuleCompilerOutputChanged(getCompilerOutputUrl());
+      }
+    });
+    myProjectJdkConfigurable.addChangeListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        myLanguageLevelCombo.sdkUpdated(myProjectJdkConfigurable.getSelectedProjectJdk());
+        LanguageLevelProjectExtensionImpl.getInstanceImpl(myProject).setCurrentLevel(myLanguageLevelCombo.getSelectedLevel());
+      }
+    });
+    myLanguageLevelCombo.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        LanguageLevelProjectExtensionImpl.getInstanceImpl(myProject).setCurrentLevel(myLanguageLevelCombo.getSelectedLevel());
       }
     });
   }
@@ -176,7 +201,7 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
       myProjectJdkConfigurable.reset();
       final String compilerOutput = getOriginalCompilerOutputUrl();
       if (compilerOutput != null) {
-        myProjectCompilerOutput.setText(FileUtil.toSystemDependentName(VfsUtil.urlToPath(compilerOutput)));
+        myProjectCompilerOutput.setText(FileUtil.toSystemDependentName(VfsUtilCore.urlToPath(compilerOutput)));
       }
       myLanguageLevelCombo.reset(myProject);
 
@@ -201,34 +226,39 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
       throw new ConfigurationException("Please, specify project name!");
     }
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
       public void run() {
-        // set the output path first so that handlers of RootsChanged event sent after JDK is set
-        // would see the updated path
-        String canonicalPath = myProjectCompilerOutput.getText();
-        if (canonicalPath != null && canonicalPath.length() > 0) {
-          try {
-            canonicalPath = FileUtil.resolveShortWindowsName(canonicalPath);
-          }
-          catch (IOException e) {
-            //file doesn't exist yet
-          }
-          canonicalPath = FileUtil.toSystemIndependentName(canonicalPath);
-          compilerProjectExtension.setCompilerOutputUrl(VfsUtil.pathToUrl(canonicalPath));
-        }
-        else {
-          compilerProjectExtension.setCompilerOutputPointer(null);
-        }
+        ApplicationManager.getApplication().runWriteAction(new Runnable() {
+          @Override
+          public void run() {
+            // set the output path first so that handlers of RootsChanged event sent after JDK is set
+            // would see the updated path
+            String canonicalPath = myProjectCompilerOutput.getText();
+            if (canonicalPath != null && canonicalPath.length() > 0) {
+              try {
+                canonicalPath = FileUtil.resolveShortWindowsName(canonicalPath);
+              }
+              catch (IOException e) {
+                //file doesn't exist yet
+              }
+              canonicalPath = FileUtil.toSystemIndependentName(canonicalPath);
+              compilerProjectExtension.setCompilerOutputUrl(VfsUtilCore.pathToUrl(canonicalPath));
+            }
+            else {
+              compilerProjectExtension.setCompilerOutputPointer(null);
+            }
 
-        final LanguageLevel newLevel = (LanguageLevel)myLanguageLevelCombo.getSelectedItem();
-        LanguageLevelProjectExtension.getInstance(myProject).setLanguageLevel(newLevel);
-        myProjectJdkConfigurable.apply();
+            LanguageLevelProjectExtension extension = LanguageLevelProjectExtension.getInstance(myProject);
+            extension.setLanguageLevel(myLanguageLevelCombo.getSelectedLevel());
+            extension.setDefault(myLanguageLevelCombo.isDefault());
+            myProjectJdkConfigurable.apply();
 
-        if (myProjectName != null) {
-          ((ProjectEx)myProject).setProjectName(myProjectName.getText().trim());
-          if (myDetailsComponent != null) myDetailsComponent.setText(getBannerSlogan());
-        }
+            if (myProjectName != null) {
+              ((ProjectEx)myProject).setProjectName(myProjectName.getText().trim());
+              if (myDetailsComponent != null) myDetailsComponent.setText(getBannerSlogan());
+            }
+          }
+        });
       }
     });
   }
@@ -270,11 +300,11 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
   @Override
   @SuppressWarnings({"SimplifiableIfStatement"})
   public boolean isModified() {
-    if (!LanguageLevelProjectExtension.getInstance(myProject).getLanguageLevel().equals(myLanguageLevelCombo.getSelectedItem())) {
+    if (!LanguageLevelProjectExtension.getInstance(myProject).getLanguageLevel().equals(myLanguageLevelCombo.getSelectedLevel())) {
       return true;
     }
     final String compilerOutput = getOriginalCompilerOutputUrl();
-    if (!Comparing.strEqual(FileUtil.toSystemIndependentName(VfsUtil.urlToPath(compilerOutput)),
+    if (!Comparing.strEqual(FileUtil.toSystemIndependentName(VfsUtilCore.urlToPath(compilerOutput)),
                             FileUtil.toSystemIndependentName(myProjectCompilerOutput.getText()))) return true;
     if (myProjectJdkConfigurable.isModified()) return true;
     if (myProjectName != null) {
@@ -291,7 +321,15 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
   }
 
   private void createUIComponents() {
-    myLanguageLevelCombo = new LanguageLevelCombo();
+    myLanguageLevelCombo = new LanguageLevelCombo(JavaCoreBundle.message("default.language.level.description")) {
+      @Override
+      protected LanguageLevel getDefaultLevel() {
+        Sdk sdk = myProjectJdkConfigurable.getSelectedProjectJdk();
+        if (sdk == null) return null;
+        JavaSdkVersion version = JavaSdk.getInstance().getVersion(sdk);
+        return version == null ? null : version.getMaxLanguageLevel();
+      }
+    };
     final JTextField textField = new JTextField();
     final FileChooserDescriptor outputPathsChooserDescriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
     InsertPathAction.addTo(textField, outputPathsChooserDescriptor);
@@ -302,6 +340,6 @@ public class ProjectConfigurable extends ProjectStructureElementConfigurable<Pro
   }
 
   public String getCompilerOutputUrl() {
-    return VfsUtil.pathToUrl(myProjectCompilerOutput.getText().trim());
+    return VfsUtilCore.pathToUrl(myProjectCompilerOutput.getText().trim());
   }
 }

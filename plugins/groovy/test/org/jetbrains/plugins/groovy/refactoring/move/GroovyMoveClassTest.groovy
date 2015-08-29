@@ -15,12 +15,8 @@
  */
 
 package org.jetbrains.plugins.groovy.refactoring.move
-
 import com.intellij.ide.fileTemplates.FileTemplate
 import com.intellij.ide.fileTemplates.FileTemplateManager
-import com.intellij.openapi.application.Application
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
@@ -41,7 +37,7 @@ public class GroovyMoveClassTest extends GroovyMoveTestBase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    final FileTemplateManager templateManager = FileTemplateManager.instance
+    final FileTemplateManager templateManager = FileTemplateManager.getInstance(getProject())
     FileTemplate temp = templateManager.getTemplate("GroovyClass.groovyForTest");
     if (temp != null) templateManager.removeTemplate(temp);
 
@@ -65,7 +61,7 @@ class ${NAME} {
 
   @Override
   protected void tearDown() throws Exception {
-    final FileTemplateManager templateManager = FileTemplateManager.getInstance();
+    final FileTemplateManager templateManager = FileTemplateManager.getInstance(getProject());
     FileTemplate temp = templateManager.getTemplate(GroovyTemplates.GROOVY_CLASS);
     templateManager.removeTemplate(temp);
 
@@ -130,21 +126,10 @@ class ${NAME} {
     assertNotNull("Package " + newPackageName + " not found", aPackage);
     final PsiDirectory[] dirs = aPackage.getDirectories();
 
-    final Application application = ApplicationManager.getApplication();
-    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        application.runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            final PsiDirectory dir = dirs[dirs.length - 1];
-            final SingleSourceRootMoveDestination moveDestination =
-              new SingleSourceRootMoveDestination(PackageWrapper.create(JavaDirectoryService.getInstance().getPackage(dir)), dir);
-            new MoveClassesOrPackagesProcessor(getProject(), classes, moveDestination, true, true, null).run();
-          }
-        });
-      }
-    }, "", null);
+    final PsiDirectory dir = dirs[dirs.length - 1];
+    final SingleSourceRootMoveDestination moveDestination =
+      new SingleSourceRootMoveDestination(PackageWrapper.create(JavaDirectoryService.getInstance().getPackage(dir)), dir);
+    new MoveClassesOrPackagesProcessor(getProject(), classes, moveDestination, true, true, null).run();
 
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     FileDocumentManager.getInstance().saveAllDocuments();

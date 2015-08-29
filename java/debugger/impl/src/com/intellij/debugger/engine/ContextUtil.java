@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.debugger.engine;
 
 import com.intellij.debugger.SourcePosition;
+import com.intellij.debugger.engine.evaluation.DefaultCodeFragmentFactory;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.jdi.StackFrameProxy;
 import com.intellij.debugger.jdi.LocalVariableProxyImpl;
@@ -26,7 +27,6 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.*;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.sun.jdi.Location;
 import org.jetbrains.annotations.Nullable;
 
@@ -37,7 +37,7 @@ public class ContextUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.impl.PositionUtil");
 
   @Nullable
-  public static SourcePosition getSourcePosition(final StackFrameContext context) {
+  public static SourcePosition getSourcePosition(@Nullable final StackFrameContext context) {
     if (context == null) {
       return null;
     }
@@ -53,8 +53,8 @@ public class ContextUtil {
     try {
       location = frameProxy.location();
     }
-    catch (Throwable th) {
-      LOG.debug(th);
+    catch (Throwable e) {
+      LOG.debug(e);
     }
     final CompoundPositionManager positionManager = debugProcess.getPositionManager();
     if (positionManager == null) {
@@ -63,7 +63,8 @@ public class ContextUtil {
     }
     try {
       return positionManager.getSourcePosition(location);
-    } catch (IndexNotReadyException e) {
+    }
+    catch (IndexNotReadyException ignored) {
       return null;
     }
   }
@@ -86,29 +87,37 @@ public class ContextUtil {
       return null;
     }
 
+    // further code is java specific, actually
+    if (element.getLanguage().getAssociatedFileType() != DefaultCodeFragmentFactory.getInstance().getFileType()) {
+      return element;
+    }
+
     final StackFrameProxyImpl frameProxy = (StackFrameProxyImpl)context.getFrameProxy();
 
     if(frameProxy == null) {
       return element;
     }
 
-    final StringBuilder buf = StringBuilderSpinAllocator.alloc();
     try {
       List<LocalVariableProxyImpl> list = frameProxy.visibleVariables();
 
       PsiResolveHelper resolveHelper = JavaPsiFacade.getInstance(element.getProject()).getResolveHelper();
-      buf.append('{');
+      StringBuilder buf = null;
       for (LocalVariableProxyImpl localVariable : list) {
         final String varName = localVariable.name();
         if (resolveHelper.resolveReferencedVariable(varName, element) == null) {
+          if (buf == null) {
+            buf = new StringBuilder("{");
+          }
           buf.append(localVariable.getVariable().typeName()).append(" ").append(varName).append(";");
         }
       }
-      buf.append('}');
-
-      if (buf.length() <= 2) {
+      if (buf == null) {
         return element;
       }
+
+      buf.append('}');
+
       final PsiElementFactory elementFactory = JavaPsiFacade.getInstance(element.getProject()).getElementFactory();
       final PsiCodeBlock codeBlockFromText = elementFactory.createCodeBlockFromText(buf.toString(), element);
 
@@ -124,20 +133,17 @@ public class ContextUtil {
       }
       return codeBlockFromText;
     }
-    catch (IncorrectOperationException e) {
+    catch (IncorrectOperationException ignored) {
       return element;
     }
-    catch (EvaluateException e) {
+    catch (EvaluateException ignored) {
       return element;
-    }
-    finally {
-      StringBuilderSpinAllocator.dispose(buf);
     }
   }
 
   @Nullable
-  public static PsiElement getContextElement(final SourcePosition position) {
-    return position == null ? null :position.getElementAt();
+  public static PsiElement getContextElement(@Nullable SourcePosition position) {
+    return position == null ? null : position.getElementAt();
   }
 
   public static boolean isJspImplicit(PsiElement element) {

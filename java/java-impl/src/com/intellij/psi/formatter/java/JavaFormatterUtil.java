@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,12 @@
  */
 package com.intellij.psi.formatter.java;
 
+import com.intellij.formatting.WrapType;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionList;
 import com.intellij.psi.PsiPolyadicExpression;
 import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
@@ -41,8 +42,7 @@ public class JavaFormatterUtil {
     JavaElementType.ASSIGNMENT_EXPRESSION, JavaElementType.LOCAL_VARIABLE, JavaElementType.FIELD
   ));
 
-  private JavaFormatterUtil() {
-  }
+  private JavaFormatterUtil() { }
 
   /**
    * Allows to answer if given node wraps assignment operation.
@@ -75,10 +75,7 @@ public class JavaFormatterUtil {
     return expression1.getOperationTokenType() == expression2.getOperationTokenType();
   }
 
-
-  public static boolean hasMultilineArguments(@NotNull PsiExpressionList list) {
-    PsiExpression[] arguments = list.getExpressions();
-
+  public static boolean hasMultilineArguments(@NotNull PsiExpression[] arguments) {
     for (PsiExpression argument: arguments) {
       ASTNode node = argument.getNode();
       if (node.textContains('\n'))
@@ -88,9 +85,7 @@ public class JavaFormatterUtil {
     return false;
   }
 
-  public static boolean isMultilineExceptArguments(@NotNull PsiExpressionList list) {
-    PsiExpression[] arguments = list.getExpressions();
-
+  public static boolean isMultilineExceptArguments(@NotNull PsiExpression[] arguments) {
     for (PsiExpression argument : arguments) {
       ASTNode beforeArgument = argument.getNode().getTreePrev();
       if (isWhiteSpaceWithLineFeed(beforeArgument))
@@ -107,4 +102,17 @@ public class JavaFormatterUtil {
            && node.textContains('\n');
   }
 
+  @NotNull
+  public static WrapType getWrapType(int wrap) {
+    switch (wrap) {
+      case CommonCodeStyleSettings.WRAP_ALWAYS:
+        return WrapType.ALWAYS;
+      case CommonCodeStyleSettings.WRAP_AS_NEEDED:
+        return WrapType.NORMAL;
+      case CommonCodeStyleSettings.DO_NOT_WRAP:
+        return WrapType.NONE;
+      default:
+        return WrapType.CHOP_DOWN_IF_LONG;
+    }
+  }
 }

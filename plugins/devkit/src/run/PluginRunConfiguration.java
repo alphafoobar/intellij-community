@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@ import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.JetBrainsProtocolHandler;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdkType;
+import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkModificator;
 import com.intellij.openapi.roots.ModuleRootManager;
@@ -37,8 +39,11 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.devkit.DevKitBundle;
+import org.jetbrains.idea.devkit.module.PluginModuleType;
 import org.jetbrains.idea.devkit.projectRoots.IdeaJdk;
+import org.jetbrains.idea.devkit.projectRoots.IntelliJPlatformProduct;
 import org.jetbrains.idea.devkit.projectRoots.Sandbox;
+import org.jetbrains.idea.devkit.util.DescriptorUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -69,18 +74,19 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
 
   @Override
   public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
-    if (getModule() == null){
+    final Module module = getModule();
+    if (module == null) {
       throw new ExecutionException(DevKitBundle.message("run.configuration.no.module.specified"));
     }
-    final ModuleRootManager rootManager = ModuleRootManager.getInstance(getModule());
+    final ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
     final Sdk jdk = rootManager.getSdk();
     if (jdk == null) {
-      throw CantRunException.noJdkForModule(getModule());
+      throw CantRunException.noJdkForModule(module);
     }
 
     final Sdk ideaJdk = IdeaJdk.findIdeaJdk(jdk);
     if (ideaJdk == null) {
-      throw new ExecutionException(DevKitBundle.message("jdk.type.incorrect.common"));
+      throw new ExecutionException(DevKitBundle.message("sdk.type.incorrect.common"));
     }
     String sandboxHome = ((Sandbox)ideaJdk.getSdkAdditionalData()).getSandboxHome();
 
@@ -97,7 +103,7 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
     final String canonicalSandbox = sandboxHome;
 
     //copy license from running instance of idea
-    IdeaLicenseHelper.copyIDEALicense(sandboxHome, ideaJdk);
+    IdeaLicenseHelper.copyIDEALicense(sandboxHome);
 
     final JavaCommandLineState state = new JavaCommandLineState(env) {
       @Override
@@ -110,16 +116,23 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
         fillParameterList(vm, VM_PARAMETERS);
         fillParameterList(params.getProgramParametersList(), PROGRAM_PARAMETERS);
         Sdk usedIdeaJdk = ideaJdk;
-        if (isAlternativeJreEnabled() && !StringUtil.isEmptyOrSpaces(getAlternativeJrePath())) {
-          try {
-            usedIdeaJdk = (Sdk)usedIdeaJdk.clone();
+        String alternativeIdePath = getAlternativeJrePath();
+        if (isAlternativeJreEnabled() && !StringUtil.isEmptyOrSpaces(alternativeIdePath)) {
+          final Sdk configuredJdk = ProjectJdkTable.getInstance().findJdk(alternativeIdePath);
+          if (configuredJdk != null) {
+            usedIdeaJdk = configuredJdk;
           }
-          catch (CloneNotSupportedException e) {
-            throw new ExecutionException(e.getMessage());
+          else {
+            try {
+              usedIdeaJdk = (Sdk)usedIdeaJdk.clone();
+            }
+            catch (CloneNotSupportedException e) {
+              throw new ExecutionException(e.getMessage());
+            }
+            final SdkModificator sdkToSetUp = usedIdeaJdk.getSdkModificator();
+            sdkToSetUp.setHomePath(alternativeIdePath);
+            sdkToSetUp.commitChanges();
           }
-          final SdkModificator sdkToSetUp = usedIdeaJdk.getSdkModificator();
-          sdkToSetUp.setHomePath(getAlternativeJrePath());
-          sdkToSetUp.commitChanges();
         }
         @NonNls String libPath = usedIdeaJdk.getHomePath() + File.separator + "lib";
         vm.add("-Xbootclasspath/a:" + libPath + File.separator + "boot.jar");
@@ -127,6 +140,14 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
         vm.defineProperty("idea.config.path", canonicalSandbox + File.separator + "config");
         vm.defineProperty("idea.system.path", canonicalSandbox + File.separator + "system");
         vm.defineProperty("idea.plugins.path", canonicalSandbox + File.separator + "plugins");
+        vm.defineProperty("idea.classpath.index.enabled", "false");
+
+        if (!vm.hasProperty(JetBrainsProtocolHandler.REQUIRED_PLUGINS_KEY) && PluginModuleType.isOfType(module)) {
+          final String id = DescriptorUtil.getPluginId(module);
+          if (id != null) {
+            vm.defineProperty(JetBrainsProtocolHandler.REQUIRED_PLUGINS_KEY, id);
+          }
+        }
 
         if (SystemInfo.isMac) {
           vm.defineProperty("idea.smooth.progress", "false");
@@ -141,28 +162,12 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
 
         if (!vm.hasProperty(PlatformUtils.PLATFORM_PREFIX_KEY)) {
           String buildNumber = IdeaJdk.getBuildNumber(usedIdeaJdk.getHomePath());
-          if (buildNumber != null) {
-            String prefix = null;
 
-            if (buildNumber.startsWith("IC")) {
-              prefix = PlatformUtils.COMMUNITY_PREFIX;
+          if (buildNumber != null) {
+            String prefix = IntelliJPlatformProduct.fromBuildNumber(buildNumber).getPlatformPrefix();
+            if (prefix != null) {
+              vm.defineProperty(PlatformUtils.PLATFORM_PREFIX_KEY, prefix);
             }
-            else if (buildNumber.startsWith("PY")) {
-              prefix = PlatformUtils.PYCHARM_PREFIX;
-            }
-            else if (buildNumber.startsWith("RM")) {
-              prefix = PlatformUtils.RUBY_PREFIX;
-            }
-            else if (buildNumber.startsWith("PS")) {
-              prefix = PlatformUtils.PHP_PREFIX;
-            }
-            else if (buildNumber.startsWith("WS")) {
-              prefix = PlatformUtils.WEB_PREFIX;
-            }
-            else if (buildNumber.startsWith("OC")) {
-              prefix = buildNumber.contains("121") ? "CIDR" : PlatformUtils.APPCODE_PREFIX;
-            }
-            if (prefix != null) vm.defineProperty(PlatformUtils.PLATFORM_PREFIX_KEY, prefix);
           }
         }
 
@@ -231,12 +236,12 @@ public class PluginRunConfiguration extends RunConfigurationBase implements Modu
       throw new RuntimeConfigurationException(DevKitBundle.message("run.configuration.no.module.specified"));
     }
     final ModuleRootManager rootManager = ModuleRootManager.getInstance(getModule());
-    final Sdk jdk = rootManager.getSdk();
-    if (jdk == null) {
-      throw new RuntimeConfigurationException(DevKitBundle.message("jdk.no.specified", moduleName));
+    final Sdk sdk = rootManager.getSdk();
+    if (sdk == null) {
+      throw new RuntimeConfigurationException(DevKitBundle.message("sdk.no.specified", moduleName));
     }
-    if (IdeaJdk.findIdeaJdk(jdk) == null) {
-      throw new RuntimeConfigurationException(DevKitBundle.message("jdk.type.incorrect", moduleName));
+    if (IdeaJdk.findIdeaJdk(sdk) == null) {
+      throw new RuntimeConfigurationException(DevKitBundle.message("sdk.type.incorrect", moduleName));
     }
   }
 

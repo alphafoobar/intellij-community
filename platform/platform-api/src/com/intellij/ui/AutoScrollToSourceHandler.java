@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,7 @@ package com.intellij.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
-import com.intellij.openapi.actionSystem.ToggleAction;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.fileTypes.INativeFileType;
@@ -34,6 +30,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.pom.Navigatable;
 import com.intellij.util.Alarm;
 import com.intellij.util.OpenSourceUtil;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -55,7 +52,7 @@ public abstract class AutoScrollToSourceHandler {
     myAutoScrollAlarm = new Alarm();
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (clickCount > 1) return false;
 
         TreePath location = tree.getPathForLocation(e.getPoint().x, e.getPoint().y);
@@ -86,7 +83,7 @@ public abstract class AutoScrollToSourceHandler {
     myAutoScrollAlarm = new Alarm();
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (clickCount >= 2) return false;
 
         Component location = table.getComponentAt(e.getPoint());
@@ -117,7 +114,7 @@ public abstract class AutoScrollToSourceHandler {
     myAutoScrollAlarm = new Alarm();
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (clickCount >= 2) return false;
         final Object source = e.getSource();
         final int index = jList.locationToIndex(SwingUtilities.convertPoint(source instanceof Component ? (Component)source : null, e.getPoint(), jList));
@@ -213,6 +210,7 @@ public abstract class AutoScrollToSourceHandler {
     });
   }
 
+  @NotNull
   public ToggleAction createToggleAction() {
     return new AutoscrollToSourceAction();
   }
@@ -234,7 +232,7 @@ public abstract class AutoScrollToSourceHandler {
 
   private ActionCallback getReady(DataContext context) {
     ToolWindow toolWindow = PlatformDataKeys.TOOL_WINDOW.getData(context);
-    return toolWindow != null ? toolWindow.getReady(this) : new ActionCallback.Done();
+    return toolWindow != null ? toolWindow.getReady(this) : ActionCallback.DONE;
   }
 }
 

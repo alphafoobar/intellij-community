@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@ import com.intellij.codeInspection.LocalInspectionToolSession;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiPolyVariantReference;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.inspections.quickfix.PyAddExceptionSuperClassQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.types.PyClassLikeType;
 import org.jetbrains.annotations.Nls;
@@ -60,7 +62,9 @@ public class PyExceptionInheritInspection extends PyInspection {
       if (expression instanceof PyCallExpression) {
         PyExpression callee = ((PyCallExpression)expression).getCallee();
         if (callee instanceof PyReferenceExpression) {
-          PsiElement psiElement = ((PyReferenceExpression)callee).getReference(resolveWithoutImplicits()).resolve();
+          final PsiPolyVariantReference reference = ((PyReferenceExpression)callee).getReference(getResolveContext());
+          if (reference == null) return;
+          PsiElement psiElement = reference.resolve();
           if (psiElement instanceof PyClass) {
             PyClass aClass = (PyClass) psiElement;
             for (PyClassLikeType type : aClass.getAncestorTypes(myTypeEvalContext)) {
@@ -72,7 +76,7 @@ public class PyExceptionInheritInspection extends PyInspection {
                 return;
               }
             }
-            registerProblem(expression, "Exception doesn't inherit from base \'Exception\' class");
+            registerProblem(expression, "Exception doesn't inherit from base \'Exception\' class", new PyAddExceptionSuperClassQuickFix());
           }
         }
       }

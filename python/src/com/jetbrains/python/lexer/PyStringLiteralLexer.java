@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,7 +57,6 @@ public class PyStringLiteralLexer extends LexerBase {
    */
   public PyStringLiteralLexer(final IElementType originalLiteralToken) {
     myOriginalLiteralToken = originalLiteralToken;
-    myIsTriple = PyTokenTypes.TRIPLE_NODES.contains(myOriginalLiteralToken);
   }
 
   public void start(@NotNull CharSequence buffer, int startOffset, int endOffset, int initialState) {
@@ -84,6 +83,8 @@ public class PyStringLiteralLexer extends LexerBase {
     char c = buffer.charAt(i);
     assert (c == '"') || (c == '\'') : "String must be quoted by single or double quote. Found '" + c + "' in string " + buffer;
     myQuoteChar = c;
+
+    myIsTriple = (buffer.length() > i + 2) && (buffer.charAt(i + 1) == c) && (buffer.charAt(i + 2) == c);
 
     // calculate myEnd at last
     myEnd = locateToken(myStart);

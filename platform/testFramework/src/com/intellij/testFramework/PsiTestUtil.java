@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 package com.intellij.testFramework;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
+import com.intellij.openapi.application.RunResult;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.module.ModifiableModuleModel;
 import com.intellij.openapi.module.Module;
@@ -23,6 +26,7 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.projectRoots.SdkModificator;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.impl.ContentEntryImpl;
 import com.intellij.openapi.roots.impl.libraries.ProjectLibraryTable;
@@ -30,6 +34,7 @@ import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.psi.PsiDocumentManager;
@@ -39,21 +44,17 @@ import com.intellij.psi.impl.DebugUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
-import junit.framework.Assert;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.JpsElement;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
+import org.junit.Assert;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 
-import static com.intellij.openapi.roots.ModuleRootModificationUtil.updateModel;
 
 @NonNls
 public class PsiTestUtil {
@@ -95,6 +96,7 @@ public class PsiTestUtil {
 
     final VirtualFile vDir =
       LocalFileSystem.getInstance().refreshAndFindFileByPath(dir.getCanonicalPath().replace(File.separatorChar, '/'));
+    PlatformTestCase.synchronizeTempDirVfs(vDir);
     assert vDir != null && vDir.isDirectory() : dir;
 
     Project project = module != null ? module.getProject() : null;
@@ -119,7 +121,7 @@ public class PsiTestUtil {
   }
 
   public static void removeAllRoots(Module module, final Sdk jdk) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         model.clear();
@@ -133,7 +135,7 @@ public class PsiTestUtil {
   }
 
   public static void addSourceContentToRoots(Module module, @NotNull final VirtualFile vDir, final boolean testSource) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         model.addContentEntry(vDir).addSourceFolder(vDir, testSource);
@@ -157,7 +159,7 @@ public class PsiTestUtil {
 
   public static <P extends JpsElement> void addSourceRoot(Module module, final VirtualFile vDir,
                                                           @NotNull final JpsModuleSourceRootType<P> rootType, final P properties) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @SuppressWarnings("unchecked")
       @Override
       public void consume(ModifiableRootModel model) {
@@ -180,7 +182,7 @@ public class PsiTestUtil {
   }
 
   public static ContentEntry addContentRoot(Module module, final VirtualFile vDir) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         model.addContentEntry(vDir);
@@ -198,10 +200,15 @@ public class PsiTestUtil {
   }
 
   public static void addExcludedRoot(Module module, final VirtualFile dir) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
-      public void consume(ModifiableRootModel model) {
-        findContentEntryWithAssertion(model, dir).addExcludeFolder(dir);
+      public void consume(final ModifiableRootModel model) {
+        ApplicationManager.getApplication().runReadAction(new Runnable() {
+          @Override
+          public void run() {
+            findContentEntryWithAssertion(model, dir).addExcludeFolder(dir);
+          }
+        });
       }
     });
   }
@@ -215,17 +222,17 @@ public class PsiTestUtil {
     return entry;
   }
 
-  public static void removeContentEntry(Module module, final ContentEntry e) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+  public static void removeContentEntry(Module module, final VirtualFile contentRoot) {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
-        model.removeContentEntry(e);
+        model.removeContentEntry(findContentEntryWithAssertion(model, contentRoot));
       }
     });
   }
 
   public static void removeSourceRoot(Module module, final VirtualFile root) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         ContentEntry entry = findContentEntryWithAssertion(model, root);
@@ -240,7 +247,7 @@ public class PsiTestUtil {
   }
 
   public static void removeExcludedRoot(Module module, final VirtualFile root) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         ContentEntry entry = findContentEntryWithAssertion(model, root);
@@ -256,8 +263,14 @@ public class PsiTestUtil {
     Assert.assertEquals(reparsedTree, originalTree);
   }
 
+  public static void addLibrary(final Module module, final String libPath) {
+    File file = new File(libPath);
+    String libName = file.getName();
+    addLibrary(module, libName, file.getParent(), libName);
+  }
+
   public static void addLibrary(final Module module, final String libName, final String libPath, final String... jarArr) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         addLibrary(module, model, libName, libPath, jarArr);
@@ -266,27 +279,38 @@ public class PsiTestUtil {
   }
 
   public static void addProjectLibrary(final Module module, final String libName, final VirtualFile... classesRoots) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
-      @Override
-      public void consume(ModifiableRootModel model) {
-        addProjectLibrary(module, model, libName, classesRoots);
-      }
-    });
+    addProjectLibrary(module, libName, Arrays.asList(classesRoots), Collections.<VirtualFile>emptyList());
   }
 
-  private static void addProjectLibrary(final Module module,
-                                        final ModifiableRootModel model,
-                                        final String libName,
-                                        final VirtualFile... classesRoots) {
-    new WriteCommandAction.Simple(module.getProject()) {
+  public static Library addProjectLibrary(final Module module, final String libName, final List<VirtualFile> classesRoots,
+                                       final List<VirtualFile> sourceRoots) {
+    final Ref<Library> result = Ref.create();
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
-      protected void run() throws Throwable {
-        LibraryTable libraryTable = ProjectLibraryTable.getInstance(module.getProject());
+      public void consume(ModifiableRootModel model) {
+        result.set(addProjectLibrary(module, model, libName, classesRoots, sourceRoots));
+      }
+    });
+    return result.get();
+  }
+
+  private static Library addProjectLibrary(final Module module,
+                                           final ModifiableRootModel model,
+                                           final String libName,
+                                           final List<VirtualFile> classesRoots,
+                                           final List<VirtualFile> sourceRoots) {
+    final LibraryTable libraryTable = ProjectLibraryTable.getInstance(module.getProject());
+    RunResult<Library> result = new WriteAction<Library>() {
+      @Override
+      protected void run(@NotNull Result<Library> result) throws Throwable {
         Library library = libraryTable.createLibrary(libName);
         Library.ModifiableModel libraryModel = library.getModifiableModel();
         try {
           for (VirtualFile root : classesRoots) {
             libraryModel.addRoot(root, OrderRootType.CLASSES);
+          }
+          for (VirtualFile root : sourceRoots) {
+            libraryModel.addRoot(root, OrderRootType.SOURCES);
           }
           libraryModel.commit();
         }
@@ -302,8 +326,11 @@ public class PsiTestUtil {
         System.arraycopy(orderEntries, 0, orderEntries, 1, orderEntries.length - 1);
         orderEntries[0] = last;
         model.rearrangeOrderEntries(orderEntries);
+        result.setResult(library);
       }
-    }.execute().throwException();
+    }.execute();
+    result.throwException();
+    return result.getResultObject();
   }
 
   public static void addLibrary(final Module module,
@@ -327,7 +354,7 @@ public class PsiTestUtil {
       assert root != null : "Library root folder not found: " + path + "!/";
       classesRoots.add(root);
     }
-    addProjectLibrary(module, model, libName, VfsUtilCore.toVirtualFileArray(classesRoots));
+    addProjectLibrary(module, model, libName, classesRoots, Collections.<VirtualFile>emptyList());
   }
 
   public static void addLibrary(final Module module,
@@ -350,7 +377,7 @@ public class PsiTestUtil {
   public static Module addModule(final Project project, final ModuleType type, final String name, final VirtualFile root) {
     return new WriteCommandAction<Module>(project) {
       @Override
-      protected void run(Result<Module> result) throws Throwable {
+      protected void run(@NotNull Result<Module> result) throws Throwable {
         String moduleName;
         ModifiableModuleModel moduleModel = ModuleManager.getInstance(project).getModifiableModel();
         try {
@@ -381,7 +408,7 @@ public class PsiTestUtil {
   }
 
   public static void setCompilerOutputPath(Module module, final String url, final boolean forTests) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         CompilerModuleExtension extension = model.getModuleExtension(CompilerModuleExtension.class);
@@ -397,11 +424,31 @@ public class PsiTestUtil {
   }
 
   public static void setExcludeCompileOutput(Module module, final boolean exclude) {
-    updateModel(module, new Consumer<ModifiableRootModel>() {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
       @Override
       public void consume(ModifiableRootModel model) {
         model.getModuleExtension(CompilerModuleExtension.class).setExcludeOutput(exclude);
       }
     });
+  }
+
+  public static void setJavadocUrls(Module module, final String... urls) {
+    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
+      @Override
+      public void consume(ModifiableRootModel model) {
+        model.getModuleExtension(JavaModuleExternalPaths.class).setJavadocUrls(urls);
+      }
+    });
+  }
+
+  public static Sdk addJdkAnnotations(Sdk sdk) {
+    VirtualFile root = LocalFileSystem.getInstance().findFileByPath(
+      FileUtil.toSystemIndependentName(PlatformTestUtil.getCommunityPath()) + "/java/jdkAnnotations");
+    if (root != null) {
+      SdkModificator sdkModificator = sdk.getSdkModificator();
+      sdkModificator.addRoot(root, AnnotationOrderRootType.getInstance());
+      sdkModificator.commitChanges();
+    }
+    return sdk;
   }
 }

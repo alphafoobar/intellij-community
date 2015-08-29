@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.roots.ui.configuration.artifacts;
 
+import com.intellij.CommonBundle;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
@@ -22,9 +23,7 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.DumbAwareAction;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectBundle;
+import com.intellij.openapi.project.*;
 import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.impl.libraries.LibraryTableImplUtil;
 import com.intellij.openapi.roots.libraries.Library;
@@ -35,6 +34,7 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.*;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.daemon.ProjectStructureElement;
 import com.intellij.openapi.ui.MasterDetailsState;
 import com.intellij.openapi.ui.NamedConfigurable;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.packaging.artifacts.*;
 import com.intellij.packaging.impl.artifacts.ArtifactUtil;
 import com.intellij.packaging.impl.artifacts.InvalidArtifact;
@@ -286,44 +286,33 @@ public class ArtifactsStructureConfigurable extends BaseStructureConfigurable {
   }
 
   private void addArtifact(@NotNull ArtifactType type, @NotNull ArtifactTemplate artifactTemplate) {
-    final ArtifactTemplate.NewArtifactConfiguration configuration = artifactTemplate.createArtifact();
-    if (configuration == null) {
-      return;
-    }
-
-    final String baseName = configuration.getArtifactName();
-    String name = baseName;
-    int i = 2;
-    while (myPackagingEditorContext.getArtifactModel().findArtifact(name) != null) {
-      name = baseName + i;
-      i++;
-    }
-
-    ArtifactType actualType = configuration.getArtifactType();
-    if (actualType == null) {
-      actualType = type;
-    }
-    final ModifiableArtifact artifact = myPackagingEditorContext.getOrCreateModifiableArtifactModel().addArtifact(name, actualType, configuration.getRootElement());
-    artifactTemplate.setUpArtifact(artifact, configuration);
+    Artifact artifact = ArtifactUtil.addArtifact(myPackagingEditorContext.getOrCreateModifiableArtifactModel(), type, artifactTemplate);
     selectNodeInTree(findNodeByObject(myRoot, artifact));
   }
 
   @Override
   public void apply() throws ConfigurationException {
     myPackagingEditorContext.saveEditorSettings();
+    checkForEmptyAndDuplicatedNames("Artifact", CommonBundle.getErrorTitle(), ArtifactConfigurableBase.class);
     super.apply();
 
-    myPackagingEditorContext.getManifestFilesInfo().saveManifestFiles();
-    final ModifiableArtifactModel modifiableModel = myPackagingEditorContext.getActualModifiableModel();
-    if (modifiableModel != null) {
-      new WriteAction() {
-        @Override
-        protected void run(final Result result) {
-          modifiableModel.commit();
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+      @Override
+      public void run() {
+        myPackagingEditorContext.getManifestFilesInfo().saveManifestFiles();
+        final ModifiableArtifactModel modifiableModel = myPackagingEditorContext.getActualModifiableModel();
+        if (modifiableModel != null) {
+          new WriteAction() {
+            @Override
+            protected void run(@NotNull final Result result) {
+              modifiableModel.commit();
+            }
+          }.execute();
+          myPackagingEditorContext.resetModifiableModel();
         }
-      }.execute();
-      myPackagingEditorContext.resetModifiableModel();
-    }
+      }
+    });
+    
 
     reset(); // TODO: fix to not reset on apply!
   }
@@ -333,6 +322,24 @@ public class ArtifactsStructureConfigurable extends BaseStructureConfigurable {
     myPackagingEditorContext.saveEditorSettings();
     super.disposeUIResources();
     myPackagingEditorContext.disposeUIResources();
+  }
+
+  @Override
+  protected void updateSelection(@Nullable NamedConfigurable configurable) {
+    boolean selectionChanged = !Comparing.equal(myCurrentConfigurable, configurable);
+    if (selectionChanged && myCurrentConfigurable instanceof ArtifactConfigurable) {
+      ArtifactEditorImpl editor = myPackagingEditorContext.getArtifactEditor(((ArtifactConfigurable)myCurrentConfigurable).getArtifact());
+      if (editor != null) {
+        editor.getLayoutTreeComponent().saveElementProperties();
+      }
+    }
+    super.updateSelection(configurable);
+    if (selectionChanged && configurable instanceof ArtifactConfigurable) {
+      ArtifactEditorImpl editor = myPackagingEditorContext.getArtifactEditor(((ArtifactConfigurable)configurable).getArtifact());
+      if (editor != null) {
+        editor.getLayoutTreeComponent().resetElementProperties();
+      }
+    }
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,11 +65,13 @@ public class PythonUnitTestCommandLineState extends
         specs.add(scriptName + "::" + myConfig.getClassName() + "::" + myConfig.getMethodName());
         break;
       case TEST_FOLDER:
+        final String folderName = FileUtil.toSystemDependentName(myConfig.getFolderName() + "/");
         if (!StringUtil.isEmpty(myConfig.getPattern()) && myConfig.usePattern()) {
-          specs.add(myConfig.getFolderName() + "/" + ";" + myConfig.getPattern());
+          // ";" can't be used with bash, so we use "_args_separator_"
+          specs.add(folderName + "_args_separator_" + myConfig.getPattern());
         }
         else {
-          specs.add(myConfig.getFolderName() + "/");
+          specs.add(folderName);
         }
         break;
       case TEST_FUNCTION:

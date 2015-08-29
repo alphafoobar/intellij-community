@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,15 @@
 
 package org.jetbrains.idea.svn;
 
-import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.ide.DataManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.ex.Settings;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.SystemInfo;
@@ -36,19 +36,30 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.ui.MultiLineTooltipUI;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBRadioButton;
+import com.intellij.ui.components.labels.LinkLabel;
+import com.intellij.ui.components.labels.LinkListener;
 import com.intellij.util.Consumer;
+import com.intellij.util.net.HttpProxyConfigurable;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.svn.auth.SvnAuthenticationNotifier;
 import org.jetbrains.idea.svn.config.SvnConfigureProxiesDialog;
+import org.jetbrains.idea.svn.dialogs.SshSettingsPanel;
+import org.jetbrains.idea.svn.svnkit.SvnKitManager;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
 import java.io.File;
 
 public class SvnConfigurable implements Configurable {
+
+  public static final String DISPLAY_NAME = SvnVcs.VCS_DISPLAY_NAME;
 
   private final Project myProject;
   private JCheckBox myUseDefaultCheckBox;
@@ -65,22 +76,33 @@ public class SvnConfigurable implements Configurable {
   private JCheckBox myIgnoreWhitespaceDifferenciesInCheckBox;
   private JCheckBox myShowMergeSourceInAnnotate;
   private JBCheckBox myWithCommandLineClient;
+  private JBCheckBox myRunUnderTerminal;
   private JSpinner myNumRevsInAnnotations;
   private JCheckBox myMaximumNumberOfRevisionsCheckBox;
   private JSpinner mySSHConnectionTimeout;
   private JSpinner mySSHReadTimeout;
   private TextFieldWithBrowseButton myCommandLineClient;
+  private JPanel myCommandLineClientOptions;
   private JSpinner myHttpTimeout;
   private JBRadioButton mySSLv3RadioButton;
   private JBRadioButton myTLSv1RadioButton;
   private JBRadioButton myAllRadioButton;
   private JLabel mySSLExplicitly;
+  private SshSettingsPanel mySshSettingsPanel;
+  private LinkLabel<Object> myNavigateToCommonProxyLink;
 
   @NonNls private static final String HELP_ID = "project.propSubversion";
 
   public SvnConfigurable(Project project) {
     myProject = project;
 
+    myWithCommandLineClient.addItemListener(new ItemListener() {
+      @Override
+      public void itemStateChanged(ItemEvent e) {
+        enableCommandLineClientOptions();
+      }
+    });
+    enableCommandLineClientOptions();
     myUseDefaultCheckBox.addActionListener(new ActionListener() {
       public void actionPerformed(final ActionEvent e) {
         boolean enabled = !myUseDefaultCheckBox.isSelected();
@@ -98,11 +120,11 @@ public class SvnConfigurable implements Configurable {
       }
     });
     myCommandLineClient.addBrowseFolderListener("Subversion", "Select path to Subversion executable (1.7+)", project,
-                                       FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor());
+                                                FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor());
 
     myClearAuthButton.addActionListener(new ActionListener(){
       public void actionPerformed(final ActionEvent e) {
-        clearAuthenticationCache(myProject, myComponent, myConfigurationDirectoryText.getText());
+        SvnAuthenticationNotifier.clearAuthenticationCache(myProject, myComponent, myConfigurationDirectoryText.getText());
       }
     });
 
@@ -111,7 +133,7 @@ public class SvnConfigurable implements Configurable {
     myConfigurationDirectoryText.addActionListener(new ActionListener() {
       public void actionPerformed(ActionEvent e) {
         @NonNls String path = myConfigurationDirectoryText.getText().trim();
-        selectConfigirationDirectory(path, new Consumer<String>() {
+        selectConfigurationDirectory(path, new Consumer<String>() {
           @Override
           public void consume(String s) {
             myConfigurationDirectoryText.setText(s);
@@ -123,6 +145,16 @@ public class SvnConfigurable implements Configurable {
     myConfigurationDirectoryLabel.setLabelFor(myConfigurationDirectoryText);
 
     myUseCommonProxy.setText(SvnBundle.message("use.idea.proxy.as.default", ApplicationNamesInfo.getInstance().getProductName()));
+    myNavigateToCommonProxyLink.setListener(new LinkListener<Object>() {
+      @Override
+      public void linkSelected(LinkLabel aSource, Object aLinkData) {
+        Settings settings = Settings.KEY.getData(DataManager.getInstance().getDataContext(myComponent));
+
+        if (settings != null) {
+          settings.select(settings.find(HttpProxyConfigurable.class));
+        }
+      }
+    }, null);
     myEditProxiesButton.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
@@ -143,12 +175,12 @@ public class SvnConfigurable implements Configurable {
     bg.add(mySSLv3RadioButton);
     bg.add(myTLSv1RadioButton);
     bg.add(myAllRadioButton);
-    if (SvnVcs.isSSLProtocolExplicitlySet()) {
+    if (SvnKitManager.isSSLProtocolExplicitlySet()) {
       mySSLv3RadioButton.setEnabled(false);
       myTLSv1RadioButton.setEnabled(false);
       myAllRadioButton.setEnabled(false);
       mySSLExplicitly.setVisible(true);
-      mySSLExplicitly.setText("Set explicitly to: " + System.getProperty(SvnVcs.SVNKIT_HTTP_SSL_PROTOCOLS));
+      mySSLExplicitly.setText("Set explicitly to: " + SvnKitManager.getExplicitlySetSslProtocols());
     } else {
       mySSLv3RadioButton.setEnabled(true);
       myTLSv1RadioButton.setEnabled(true);
@@ -161,18 +193,29 @@ public class SvnConfigurable implements Configurable {
         mySSLExplicitly.setText("Setting 'All' value in this JDK version (" + version + ") is not recommended.");
       }
     }
+
+    mySshSettingsPanel.load(SvnConfiguration.getInstance(myProject));
   }
 
-  public static void selectConfigirationDirectory(@NotNull String path, @NotNull final Consumer<String> dirConsumer,
-                                                   final Project project, @Nullable final Component component) {
-    final FileChooserDescriptor descriptor = createFileDescriptor();
+  public void enableCommandLineClientOptions() {
+    UIUtil.setEnabled(myCommandLineClientOptions, myWithCommandLineClient.isSelected(), true);
+  }
+
+  public static void selectConfigurationDirectory(@NotNull String path,
+                                                  @NotNull final Consumer<String> dirConsumer,
+                                                  final Project project,
+                                                  @Nullable final Component component) {
+    FileChooserDescriptor descriptor =  FileChooserDescriptorFactory.createSingleFolderDescriptor()
+      .withTitle(SvnBundle.message("dialog.title.select.configuration.directory"))
+      .withDescription(SvnBundle.message("dialog.description.select.configuration.directory"))
+      .withShowFileSystemRoots(true)
+      .withHideIgnored(false)
+      .withShowHiddenFiles(true);
+
     path = "file://" + path.replace(File.separatorChar, '/');
     VirtualFile root = VirtualFileManager.getInstance().findFileByUrl(path);
 
-    String oldValue = PropertiesComponent.getInstance().getValue("FileChooser.showHiddens");
-    PropertiesComponent.getInstance().setValue("FileChooser.showHiddens", Boolean.TRUE.toString());
     VirtualFile file = FileChooser.chooseFile(descriptor, component, project, root);
-    PropertiesComponent.getInstance().setValue("FileChooser.showHiddens", oldValue);
     if (file == null) {
       return;
     }
@@ -180,41 +223,12 @@ public class SvnConfigurable implements Configurable {
     dirConsumer.consume(resultPath);
   }
 
-  public static void clearAuthenticationCache(@NotNull final Project project, final Component component, final String configDirPath) {
-    if (configDirPath != null) {
-      int result;
-      if (component == null) {
-        result = Messages.showYesNoDialog(project, SvnBundle.message("confirmation.text.delete.stored.authentication.information"),
-                                          SvnBundle.message("confirmation.title.clear.authentication.cache"),
-                                          Messages.getWarningIcon());
-      } else {
-        result = Messages.showYesNoDialog(component, SvnBundle.message("confirmation.text.delete.stored.authentication.information"),
-                                          SvnBundle.message("confirmation.title.clear.authentication.cache"),
-                                          Messages.getWarningIcon());
-      }
-      if (result == Messages.YES) {
-        SvnConfiguration.RUNTIME_AUTH_CACHE.clear();
-        SvnConfiguration.getInstance(project).clearAuthenticationDirectory(project);
-      }
-    }
-  }
-
-  private static FileChooserDescriptor createFileDescriptor() {
-    final FileChooserDescriptor descriptor =  FileChooserDescriptorFactory.createSingleFolderDescriptor();
-    descriptor.setShowFileSystemRoots(true);
-    descriptor.setTitle(SvnBundle.message("dialog.title.select.configuration.directory"));
-    descriptor.setDescription(SvnBundle.message("dialog.description.select.configuration.directory"));
-    descriptor.setHideIgnored(false);
-    return descriptor;
-  }
-
   public JComponent createComponent() {
-
     return myComponent;
   }
 
   public String getDisplayName() {
-    return SvnVcs.VCS_DISPLAY_NAME;
+    return DISPLAY_NAME;
   }
 
   public String getHelpTopic() {
@@ -239,19 +253,20 @@ public class SvnConfigurable implements Configurable {
     if (configuration.isIsUseDefaultProxy() != myUseCommonProxy.isSelected()) {
       return true;
     }
-    if (configuration.UPDATE_LOCK_ON_DEMAND != myLockOnDemand.isSelected()) {
+    if (configuration.isUpdateLockOnDemand() != myLockOnDemand.isSelected()) {
       return true;
     }
-    if (configuration.CHECK_NESTED_FOR_QUICK_MERGE != myCheckNestedInQuickMerge.isSelected()) {
+    if (configuration.isCheckNestedForQuickMerge() != myCheckNestedInQuickMerge.isSelected()) {
       return true;
     }
-    if (configuration.IGNORE_SPACES_IN_ANNOTATE != myIgnoreWhitespaceDifferenciesInCheckBox.isSelected()) {
+    if (configuration.isIgnoreSpacesInAnnotate() != myIgnoreWhitespaceDifferenciesInCheckBox.isSelected()) {
       return true;
     }
-    if (configuration.SHOW_MERGE_SOURCES_IN_ANNOTATE != myShowMergeSourceInAnnotate.isSelected()) {
+    if (configuration.isShowMergeSourcesInAnnotate() != myShowMergeSourceInAnnotate.isSelected()) {
       return true;
     }
-    if (! configuration.myUseAcceleration.equals(acceleration())) return true;
+    if (! configuration.getUseAcceleration().equals(acceleration())) return true;
+    if (configuration.isRunUnderTerminal() != myRunUnderTerminal.isSelected()) return true;
     final int annotateRevisions = configuration.getMaxAnnotateRevisions();
     final boolean useMaxInAnnot = annotateRevisions != -1;
     if (useMaxInAnnot != myMaximumNumberOfRevisionsCheckBox.isSelected()) {
@@ -262,21 +277,22 @@ public class SvnConfigurable implements Configurable {
         return true;
       }
     }
-    if (configuration.mySSHConnectionTimeout/1000 != ((SpinnerNumberModel) mySSHConnectionTimeout.getModel()).getNumber().longValue()) {
+    if (configuration.getSshConnectionTimeout() /1000 != ((SpinnerNumberModel) mySSHConnectionTimeout.getModel()).getNumber().longValue()) {
       return true;
     }
-    if (configuration.mySSHReadTimeout/1000 != ((SpinnerNumberModel) mySSHReadTimeout.getModel()).getNumber().longValue()) {
+    if (configuration.getSshReadTimeout() /1000 != ((SpinnerNumberModel) mySSHReadTimeout.getModel()).getNumber().longValue()) {
       return true;
     }
     if (configuration.getHttpTimeout()/1000 != ((SpinnerNumberModel) myHttpTimeout.getModel()).getNumber().longValue()) {
       return true;
     }
-    if (! getSelectedSSL().equals(configuration.SSL_PROTOCOLS)) return true;
+    if (! getSelectedSSL().equals(configuration.getSslProtocols())) return true;
     final SvnApplicationSettings applicationSettings17 = SvnApplicationSettings.getInstance();
     if (! Comparing.equal(applicationSettings17.getCommandLinePath(), myCommandLineClient.getText().trim())) return true;
-    return !configuration.getConfigurationDirectory().equals(myConfigurationDirectoryText.getText().trim());
+    if (!configuration.getConfigurationDirectory().equals(myConfigurationDirectoryText.getText().trim())) return true;
+    return mySshSettingsPanel.isModified(configuration);
   }
-  
+
   private SvnConfiguration.UseAcceleration acceleration() {
     if (myWithCommandLineClient.isSelected()) return SvnConfiguration.UseAcceleration.commandLine;
     return SvnConfiguration.UseAcceleration.nothing;
@@ -288,24 +304,25 @@ public class SvnConfigurable implements Configurable {
 
     configuration.setIsUseDefaultProxy(myUseCommonProxy.isSelected());
     final SvnVcs vcs17 = SvnVcs.getInstance(myProject);
-    configuration.CHECK_NESTED_FOR_QUICK_MERGE = myCheckNestedInQuickMerge.isSelected();
-    configuration.UPDATE_LOCK_ON_DEMAND = myLockOnDemand.isSelected();
+    configuration.setCheckNestedForQuickMerge(myCheckNestedInQuickMerge.isSelected());
+    configuration.setUpdateLockOnDemand(myLockOnDemand.isSelected());
     configuration.setIgnoreSpacesInAnnotate(myIgnoreWhitespaceDifferenciesInCheckBox.isSelected());
-    configuration.SHOW_MERGE_SOURCES_IN_ANNOTATE = myShowMergeSourceInAnnotate.isSelected();
+    configuration.setShowMergeSourcesInAnnotate(myShowMergeSourceInAnnotate.isSelected());
     if (! myMaximumNumberOfRevisionsCheckBox.isSelected()) {
       configuration.setMaxAnnotateRevisions(-1);
     } else {
       configuration.setMaxAnnotateRevisions(((SpinnerNumberModel) myNumRevsInAnnotations.getModel()).getNumber().intValue());
     }
-    configuration.mySSHConnectionTimeout = ((SpinnerNumberModel) mySSHConnectionTimeout.getModel()).getNumber().longValue() * 1000;
-    configuration.mySSHReadTimeout = ((SpinnerNumberModel) mySSHReadTimeout.getModel()).getNumber().longValue() * 1000;
+    configuration.setSshConnectionTimeout(((SpinnerNumberModel)mySSHConnectionTimeout.getModel()).getNumber().longValue() * 1000);
+    configuration.setSshReadTimeout(((SpinnerNumberModel)mySSHReadTimeout.getModel()).getNumber().longValue() * 1000);
 
     final SvnApplicationSettings applicationSettings17 = SvnApplicationSettings.getInstance();
-    boolean reloadWorkingCopies = !acceleration().equals(configuration.myUseAcceleration) ||
+    boolean reloadWorkingCopies = !acceleration().equals(configuration.getUseAcceleration()) ||
                                   !StringUtil.equals(applicationSettings17.getCommandLinePath(), myCommandLineClient.getText().trim());
-    configuration.myUseAcceleration = acceleration();
-    configuration.SSL_PROTOCOLS = getSelectedSSL();
-    SvnVcs.getInstance(myProject).refreshSSLProperty();
+    configuration.setUseAcceleration(acceleration());
+    configuration.setRunUnderTerminal(myRunUnderTerminal.isSelected());
+    configuration.setSslProtocols(getSelectedSSL());
+    SvnVcs.getInstance(myProject).getSvnKitManager().refreshSSLProperty();
 
     applicationSettings17.setCommandLinePath(myCommandLineClient.getText().trim());
     boolean isClientValid = vcs17.checkCommandLineVersion();
@@ -314,6 +331,8 @@ public class SvnConfigurable implements Configurable {
       VcsDirtyScopeManager.getInstance(myProject).markEverythingDirty();
     }
     configuration.setHttpTimeout(((SpinnerNumberModel) myHttpTimeout.getModel()).getNumber().longValue() * 1000);
+
+    mySshSettingsPanel.apply(configuration);
   }
 
   public void reset() {
@@ -325,15 +344,15 @@ public class SvnConfigurable implements Configurable {
     myConfigurationDirectoryText.setText(path);
     myUseDefaultCheckBox.setSelected(configuration.isUseDefaultConfiguation());
     myUseCommonProxy.setSelected(configuration.isIsUseDefaultProxy());
-    myCheckNestedInQuickMerge.setSelected(configuration.CHECK_NESTED_FOR_QUICK_MERGE);
+    myCheckNestedInQuickMerge.setSelected(configuration.isCheckNestedForQuickMerge());
 
     boolean enabled = !myUseDefaultCheckBox.isSelected();
     myConfigurationDirectoryText.setEnabled(enabled);
     myConfigurationDirectoryText.setEditable(enabled);
     myConfigurationDirectoryLabel.setEnabled(enabled);
-    myLockOnDemand.setSelected(configuration.UPDATE_LOCK_ON_DEMAND);
-    myIgnoreWhitespaceDifferenciesInCheckBox.setSelected(configuration.IGNORE_SPACES_IN_ANNOTATE);
-    myShowMergeSourceInAnnotate.setSelected(configuration.SHOW_MERGE_SOURCES_IN_ANNOTATE);
+    myLockOnDemand.setSelected(configuration.isUpdateLockOnDemand());
+    myIgnoreWhitespaceDifferenciesInCheckBox.setSelected(configuration.isIgnoreSpacesInAnnotate());
+    myShowMergeSourceInAnnotate.setSelected(configuration.isShowMergeSourcesInAnnotate());
 
     final int annotateRevisions = configuration.getMaxAnnotateRevisions();
     if (annotateRevisions == -1) {
@@ -344,20 +363,23 @@ public class SvnConfigurable implements Configurable {
       myNumRevsInAnnotations.setValue(annotateRevisions);
     }
     myNumRevsInAnnotations.setEnabled(myMaximumNumberOfRevisionsCheckBox.isSelected());
-    mySSHConnectionTimeout.setValue(Long.valueOf(configuration.mySSHConnectionTimeout / 1000));
-    mySSHReadTimeout.setValue(Long.valueOf(configuration.mySSHReadTimeout / 1000));
+    mySSHConnectionTimeout.setValue(Long.valueOf(configuration.getSshConnectionTimeout() / 1000));
+    mySSHReadTimeout.setValue(Long.valueOf(configuration.getSshReadTimeout() / 1000));
     myHttpTimeout.setValue(Long.valueOf(configuration.getHttpTimeout() / 1000));
     myWithCommandLineClient.setSelected(configuration.isCommandLine());
+    myRunUnderTerminal.setSelected(configuration.isRunUnderTerminal());
     final SvnApplicationSettings applicationSettings17 = SvnApplicationSettings.getInstance();
     myCommandLineClient.setText(applicationSettings17.getCommandLinePath());
 
-    if (SvnConfiguration.SSLProtocols.sslv3.equals(configuration.SSL_PROTOCOLS)) {
+    if (SvnConfiguration.SSLProtocols.sslv3.equals(configuration.getSslProtocols())) {
       mySSLv3RadioButton.setSelected(true);
-    } else if (SvnConfiguration.SSLProtocols.tlsv1.equals(configuration.SSL_PROTOCOLS)) {
+    } else if (SvnConfiguration.SSLProtocols.tlsv1.equals(configuration.getSslProtocols())) {
       myTLSv1RadioButton.setSelected(true);
     } else {
       myAllRadioButton.setSelected(true);
     }
+
+    mySshSettingsPanel.reset(configuration);
   }
 
   public void disposeUIResources() {
@@ -380,9 +402,11 @@ public class SvnConfigurable implements Configurable {
     value = (value == -1) ? SvnConfiguration.ourMaxAnnotateRevisionsDefault : value;
     myNumRevsInAnnotations = new JSpinner(new SpinnerNumberModel(value, 10, 100000, 100));
 
+    myNavigateToCommonProxyLink = new LinkLabel<Object>(SvnBundle.message("navigate.to.idea.proxy.settings"), null);
+
     final Long maximum = 30 * 60 * 1000L;
-    final long connection = configuration.mySSHConnectionTimeout <= maximum ? configuration.mySSHConnectionTimeout : maximum;
-    final long read = configuration.mySSHReadTimeout <= maximum ? configuration.mySSHReadTimeout : maximum;
+    final long connection = configuration.getSshConnectionTimeout() <= maximum ? configuration.getSshConnectionTimeout() : maximum;
+    final long read = configuration.getSshReadTimeout() <= maximum ? configuration.getSshReadTimeout() : maximum;
     mySSHConnectionTimeout = new JSpinner(new SpinnerNumberModel(Long.valueOf(connection / 1000), Long.valueOf(0L), maximum, Long.valueOf(10L)));
     mySSHReadTimeout = new JSpinner(new SpinnerNumberModel(Long.valueOf(read / 1000), Long.valueOf(0L), maximum, Long.valueOf(10L)));
     myHttpTimeout = new JSpinner(new SpinnerNumberModel(Long.valueOf(read / 1000), Long.valueOf(0L), maximum, Long.valueOf(10L)));

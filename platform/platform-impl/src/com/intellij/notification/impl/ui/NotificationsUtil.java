@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,10 @@ package com.intellij.notification.impl.ui;
 
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.MessageType;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -32,16 +35,35 @@ import java.awt.*;
  * @author spleaner
  */
 public class NotificationsUtil {
-
-  private NotificationsUtil() {
-  }
+  private static final Logger LOG = Logger.getInstance("#com.intellij.notification.impl.ui.NotificationsUtil");
+  private static final int TITLE_LIMIT = 1000;
+  private static final int CONTENT_LIMIT = 10000;
 
   public static String buildHtml(@NotNull final Notification notification, @Nullable String style) {
+    String title = notification.getTitle();
+    String content = notification.getContent();
+    if (title.length() > TITLE_LIMIT || content.length() > CONTENT_LIMIT) {
+      LOG.info("Too large notification " + notification + " of " + notification.getClass() +
+               "\nListener=" + notification.getListener() +
+               "\nTitle=" + title +
+               "\nContent=" + content);
+      title = StringUtil.trimLog(title, TITLE_LIMIT);
+      content = StringUtil.trimLog(content, CONTENT_LIMIT);
+    }
+    return buildHtml(title, content, style, "#" + ColorUtil.toHex(getMessageType(notification).getTitleForeground()));
+  }
+
+  public static String buildHtml(@NotNull final String title, @NotNull final String content, @Nullable String style) {
+    return buildHtml(title, content, style, null);
+  }
+
+  @NotNull
+  private static String buildHtml(@NotNull String title, @NotNull String content, @Nullable String style, @Nullable String color) {
     String result = "";
     if (style != null) {
       result += "<div style=\"" + style + "\">";
     }
-    result += "<b>" + notification.getTitle() + "</b><p>" + notification.getContent() + "</p>";
+    result += "<b" + (color == null ? ">" : " color=\"" + color + "\">") + title + "</b><p>" + content + "</p>";
     if (style != null) {
       result += "</div>";
     }
@@ -66,32 +88,21 @@ public class NotificationsUtil {
   }
 
   public static Icon getIcon(@NotNull final Notification notification) {
-    final Icon icon = notification.getIcon();
-    if (icon != null) {
-      return icon;
-    }
+    Icon icon = notification.getIcon();
+    return icon != null ? icon : getMessageType(notification).getDefaultIcon();
+  }
 
+  public static MessageType getMessageType(@NotNull Notification notification) {
     switch (notification.getType()) {
-      case ERROR:
-        return MessageType.ERROR.getDefaultIcon();
-      case WARNING:
-        return MessageType.WARNING.getDefaultIcon();
+      case WARNING: return MessageType.WARNING;
+      case ERROR: return MessageType.ERROR;
       case INFORMATION:
-      default:
-        return MessageType.INFO.getDefaultIcon();
+      default: return MessageType.INFO;
     }
   }
 
   public static Color getBackground(@NotNull final Notification notification) {
-    switch (notification.getType()) {
-      case ERROR:
-        return MessageType.ERROR.getPopupBackground();
-      case WARNING:
-        return MessageType.WARNING.getPopupBackground();
-      case INFORMATION:
-      default:
-        return MessageType.INFO.getPopupBackground();
-    }
+    return getMessageType(notification).getPopupBackground();
   }
 
   public static Color getBorderColor(Notification notification) {

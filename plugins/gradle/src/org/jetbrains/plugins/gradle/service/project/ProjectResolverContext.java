@@ -19,8 +19,10 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListener;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.idea.IdeaModule;
+import org.gradle.tooling.model.idea.IdeaProject;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.gradle.model.ProjectImportAction;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings;
 
 import java.util.Collection;
@@ -92,7 +94,12 @@ public class ProjectResolverContext {
   }
 
   @Nullable
-  public <T> T getExtraProject(@NotNull IdeaModule module, Class<T> modelClazz) {
+  public <T> T getExtraProject(Class<T> modelClazz) {
+    return myModels.getExtraProject(null, modelClazz);
+  }
+
+  @Nullable
+  public <T> T getExtraProject(@Nullable IdeaModule module, Class<T> modelClazz) {
     return myModels.getExtraProject(module, modelClazz);
   }
 

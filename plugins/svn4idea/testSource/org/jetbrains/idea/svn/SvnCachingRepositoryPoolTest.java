@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,12 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.impl.ProgressManagerImpl;
 import com.intellij.testFramework.vcs.FileBasedTest;
 import com.intellij.util.ThrowableConvertor;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.Semaphore;
 import junit.framework.Assert;
-import org.jetbrains.idea.svn.lowLevel.ApplicationLevelNumberConnectionsGuardImpl;
-import org.jetbrains.idea.svn.lowLevel.CachingSvnRepositoryPool;
-import org.jetbrains.idea.svn.lowLevel.SvnIdeaRepositoryPoolManager;
+import org.jetbrains.idea.svn.svnkit.lowLevel.ApplicationLevelNumberConnectionsGuardImpl;
+import org.jetbrains.idea.svn.svnkit.lowLevel.CachingSvnRepositoryPool;
+import org.jetbrains.idea.svn.svnkit.lowLevel.SvnIdeaRepositoryPoolManager;
 import org.junit.Test;
 import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.SVNURL;
@@ -55,11 +56,7 @@ public class SvnCachingRepositoryPoolTest extends FileBasedTest {
     guard.setDelay(20);
     ((CachingSvnRepositoryPool) poolManager.getPool()).setConnectionTimeout(20);
     testBigFlow(poolManager, false);
-    try {
-      Thread.sleep(50);
-    } catch (InterruptedException e) {
-      //
-    }
+    TimeoutUtil.sleep(50);
     Assert.assertEquals(0, guard.getCurrentlyActiveConnections());
     final CachingSvnRepositoryPool pool = (CachingSvnRepositoryPool) poolManager.getPool();
     Map<String,CachingSvnRepositoryPool.RepoGroup> groups = pool.getGroups();
@@ -107,26 +104,16 @@ public class SvnCachingRepositoryPoolTest extends FileBasedTest {
         }
       }
     };
-    final EmptyProgressIndicator indicator = new EmptyProgressIndicator() {
-      @Override
-      public void cancel() {
-        super.cancel();
-        ProgressManagerImpl.canceled();
-      }
-    };
+    final EmptyProgressIndicator indicator = new EmptyProgressIndicator();
     Thread thread = new Thread(new Runnable() {
       @Override
       public void run() {
         ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(target, indicator);
       }
-    });
+    }, "svn cache repo");
     thread.start();
 
-    try {
-      Thread.sleep(10);
-    } catch (InterruptedException e) {
-      //
-    }
+    TimeoutUtil.sleep(10);
     Assert.assertTrue(thread.isAlive());
     indicator.cancel();
     final Object obj = new Object();
@@ -190,19 +177,14 @@ public class SvnCachingRepositoryPoolTest extends FileBasedTest {
             return;
           }
           repository.fireConnectionOpened();
-          try {
-            Thread.sleep(random.nextInt(10));
-          }
-          catch (InterruptedException e) {
-            //
-          }
+          TimeoutUtil.sleep(random.nextInt(10));
           repository.fireConnectionClosed();
           synchronized (cnt) {
             -- cnt[0];
           }
         }
       };
-      Thread thread = new Thread(target);
+      Thread thread = new Thread(target, "svn cache");
       thread.start();
     }
 

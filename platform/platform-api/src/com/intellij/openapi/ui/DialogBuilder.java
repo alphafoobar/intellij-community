@@ -21,6 +21,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NonNls;
@@ -42,6 +43,7 @@ public class DialogBuilder implements Disposable {
   @NonNls public static final String REQUEST_FOCUS_ENABLED = "requestFocusEnabled";
 
   private JComponent myCenterPanel;
+  private JComponent myNorthPanel;
   private String myTitle;
   private JComponent myPreferedFocusComponent;
   private String myDimensionServiceKey;
@@ -54,18 +56,26 @@ public class DialogBuilder implements Disposable {
     return showImpl(true).getExitCode();
   }
 
+  public boolean showAndGet() {
+    return showImpl(true).isOK();
+  }
+
   public void showNotModal() {
     showImpl(false);
   }
 
-  public DialogBuilder(Project project) {
+  public DialogBuilder(@Nullable Project project) {
     myDialogWrapper = new MyDialogWrapper(project, true);
     Disposer.register(myDialogWrapper.getDisposable(), this);
   }
 
-  public DialogBuilder(Component parent) {
+  public DialogBuilder(@Nullable Component parent) {
     myDialogWrapper = new MyDialogWrapper(parent, true);
     Disposer.register(myDialogWrapper.getDisposable(), this);
+  }
+
+  public DialogBuilder() {
+    this(((Project)null));
   }
 
   @Override
@@ -73,7 +83,7 @@ public class DialogBuilder implements Disposable {
   }
 
   private MyDialogWrapper showImpl(boolean isModal) {
-    LOG.assertTrue(myTitle != null && myTitle.trim().length() != 0,
+    LOG.assertTrue(!StringUtil.isEmptyOrSpaces(myTitle),
                    String.format("Dialog title shouldn't be empty or null: [%s]", myTitle));
     myDialogWrapper.setTitle(myTitle);
     myDialogWrapper.init();
@@ -89,10 +99,23 @@ public class DialogBuilder implements Disposable {
     myCenterPanel = centerPanel;
   }
 
+  @NotNull
+  public DialogBuilder centerPanel(@NotNull JComponent centerPanel) {
+    myCenterPanel = centerPanel;
+    return this;
+  }
+
+  @NotNull
+  public DialogBuilder setNorthPanel(@NotNull JComponent northPanel) {
+    myNorthPanel = northPanel;
+    return this;
+  }
+
   public void setTitle(String title) {
     myTitle = title;
   }
 
+  @NotNull
   public DialogBuilder title(@NotNull String title) {
     myTitle = title;
     return this;
@@ -189,6 +212,18 @@ public class DialogBuilder implements Disposable {
     myDialogWrapper.setOKActionEnabled(isEnabled);
   }
 
+  @NotNull
+  public DialogBuilder okActionEnabled(boolean isEnabled) {
+    myDialogWrapper.setOKActionEnabled(isEnabled);
+    return this;
+  }
+
+  @NotNull
+  public DialogBuilder resizable(boolean resizable) {
+    myDialogWrapper.setResizable(resizable);
+    return this;
+  }
+
   public CustomizableAction getOkAction() {
     return get(getActionDescriptors(), OkActionDescriptor.class);
   }
@@ -260,7 +295,7 @@ public class DialogBuilder implements Disposable {
     protected Action createAction(final DialogWrapper dialogWrapper) {
       return new AbstractAction(){
         @Override
-        public void actionPerformed(ActionEvent e) {
+        public void actionPerformed(@NotNull ActionEvent e) {
           dialogWrapper.close(myExitCode);
         }
       };
@@ -318,7 +353,7 @@ public class DialogBuilder implements Disposable {
 
   private class MyDialogWrapper extends DialogWrapper {
     private String myHelpId = null;
-    private MyDialogWrapper(Project project, boolean canBeParent) {
+    private MyDialogWrapper(@Nullable Project project, boolean canBeParent) {
       super(project, canBeParent);
     }
 
@@ -347,6 +382,9 @@ public class DialogBuilder implements Disposable {
 
     @Override
     protected JComponent createCenterPanel() { return myCenterPanel; }
+
+    @Override
+    protected JComponent createNorthPanel() { return myNorthPanel; }
 
     @Override
     public void dispose() {
@@ -425,5 +463,9 @@ public class DialogBuilder implements Disposable {
       if (myHelpId != null) actions.add(getHelpAction());
       return actions.toArray(new Action[actions.size()]);
     }
+  }
+
+  public void setErrorText(@Nullable final String text) {
+    myDialogWrapper.setErrorText(text);
   }
 }

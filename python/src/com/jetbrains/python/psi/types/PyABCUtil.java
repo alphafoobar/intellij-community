@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,16 +83,30 @@ public class PyABCUtil {
     return false;
   }
 
-  public static boolean isSubtype(@NotNull PyType type, @NotNull String superClassName) {
+  public static boolean isSubtype(@NotNull PyType type, @NotNull String superClassName, @NotNull TypeEvalContext context) {
+    if (type instanceof PyStructuralType) {
+      // TODO: Convert abc types to structural types and check them properly
+      return true;
+    }
     if (type instanceof PyClassType) {
-      final PyClass pyClass = ((PyClassType)type).getPyClass();
-      return isSubclass(pyClass, superClassName, true);
+      final PyClassType classType = (PyClassType)type;
+      final PyClass pyClass = classType.getPyClass();
+      if (classType.isDefinition()) {
+        final PyClassLikeType metaClassType = classType.getMetaClassType(context, true);
+        if (metaClassType instanceof PyClassType) {
+          final PyClassType metaClass = (PyClassType)metaClassType;
+          return isSubclass(metaClass.getPyClass(), superClassName, true);
+        }
+      }
+      else {
+        return isSubclass(pyClass, superClassName, true);
+      }
     }
     if (type instanceof PyUnionType) {
       final PyUnionType unionType = (PyUnionType)type;
       for (PyType m : unionType.getMembers()) {
         if (m != null) {
-          if (!isSubtype(m, superClassName)) {
+          if (!isSubtype(m, superClassName, context)) {
             return false;
           }
         }

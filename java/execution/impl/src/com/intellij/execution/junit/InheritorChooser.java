@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,16 +17,17 @@ package com.intellij.execution.junit;
 
 import com.intellij.execution.Location;
 import com.intellij.execution.actions.ConfigurationContext;
+import com.intellij.execution.junit2.PsiMemberParameterizedLocation;
 import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.ide.util.PsiClassListCellRenderer;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiClassUtil;
@@ -36,7 +37,10 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 
 import javax.swing.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * User: anna
@@ -56,14 +60,30 @@ public class InheritorChooser {
                                           final Runnable performRunnable,
                                           final PsiMethod psiMethod,
                                           final PsiClass containingClass) {
-    if (containingClass != null && containingClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
+    return runMethodInAbstractClass(context, performRunnable, psiMethod, containingClass, new Condition<PsiClass>() {
+      @Override
+      public boolean value(PsiClass psiClass) {
+        return psiClass.hasModifierProperty(PsiModifier.ABSTRACT);
+      }
+    });
+  }
+
+  public boolean runMethodInAbstractClass(final ConfigurationContext context,
+                                          final Runnable performRunnable,
+                                          final PsiMethod psiMethod,
+                                          final PsiClass containingClass,
+                                          final Condition<PsiClass> acceptAbstractCondition) {
+    if (containingClass != null && acceptAbstractCondition.value(containingClass)) {
       final Location location = context.getLocation();
       if (location instanceof MethodLocation) {
         final PsiClass aClass = ((MethodLocation)location).getContainingClass();
         if (aClass != null && !aClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
           return false;
         }
+      } else if (location instanceof PsiMemberParameterizedLocation) {
+        return false;
       }
+
       final List<PsiClass> classes = new ArrayList<PsiClass>();
       if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
         @Override
@@ -100,6 +120,7 @@ public class InheritorChooser {
           }
         }
       }
+      final int numberOfInheritors = classes.size();
       final PsiClassListCellRenderer renderer = new PsiClassListCellRenderer() {
         @Override
         protected boolean customizeNonPsiElementLeftRenderer(ColoredListCellRenderer renderer,
@@ -109,7 +130,7 @@ public class InheritorChooser {
                                                              boolean selected,
                                                              boolean hasFocus) {
           if (value == null) {
-            renderer.append("All");
+            renderer.append("All (" + numberOfInheritors + ")");
             return true;
           }
           return super.customizeNonPsiElementLeftRenderer(renderer, list, value, index, selected, hasFocus);

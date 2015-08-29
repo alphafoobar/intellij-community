@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-import os, sys
+import os
+import sys
 
 from django.core.management import ManagementUtility
 
@@ -15,7 +16,6 @@ try:
 except:
     pass
 
-import django_test_runner
 project_directory = sys.argv.pop()
 
 from django.core import management
@@ -46,6 +46,11 @@ settings_file = os.getenv('DJANGO_SETTINGS_MODULE')
 if not settings_file:
   settings_file = 'settings'
 
+import django
+if django.VERSION[0:2] >= (1, 7):
+    if not settings.configured:
+        settings.configure()
+    django.setup()
 
 class PycharmTestCommand(Command):
   def get_runner(self):
@@ -83,7 +88,7 @@ class PycharmTestCommand(Command):
     TestRunner = self.get_runner()
 
     if not inspect.ismethod(TestRunner):
-      failures = TestRunner(test_labels, verbosity=verbosity, interactive=interactive, failfast=failfast)
+      failures = TestRunner(test_labels, verbosity=verbosity, interactive=interactive, failfast=failfast, keepdb='--keepdb' in sys.argv)
     else:
       test_runner = TestRunner(verbosity=verbosity, interactive=interactive, failfast=failfast)
       failures = test_runner.run_tests(test_labels)

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.jetbrains.plugins.groovy.mvc;
 
-import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.module.Module;
 import org.jetbrains.annotations.NotNull;
@@ -28,19 +27,13 @@ public class MvcRunTarget extends MvcActionBase {
   @Override
   protected void actionPerformed(@NotNull AnActionEvent e, @NotNull Module module, @NotNull MvcFramework framework) {
     MvcRunTargetDialog dialog = new MvcRunTargetDialog(module, framework);
-    dialog.show();
-    if (!dialog.isOK()) {
+    if (!dialog.showAndGet()) {
       return;
     }
 
     Module selectedModule = dialog.getSelectedModule();
-
     MvcCommand cmd = MvcCommand.parse(dialog.getTargetArguments());
-
-    final GeneralCommandLine commandLine = framework.createCommandAndShowErrors(dialog.getVmOptions(), selectedModule, cmd);
-    if (commandLine == null) return;
-
-    MvcConsole.executeProcess(selectedModule, commandLine, null, false);
+    MvcCommandExecutor.run(selectedModule, framework, cmd, null, false);
   }
 
 }

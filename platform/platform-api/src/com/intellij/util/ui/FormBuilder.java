@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ public class FormBuilder {
 
   private int myVerticalGap;
   private int myHorizontalGap;
+  private int myFormLeftIndent;
 
   public FormBuilder() {
     myPanel = new JPanel(new GridBagLayout());
@@ -49,6 +50,7 @@ public class FormBuilder {
     myAlignLabelOnRight = false;
     myVerticalGap = DEFAULT_VGAP;
     myHorizontalGap = DEFAULT_HGAP;
+    myFormLeftIndent = 0;
   }
 
   public static FormBuilder createFormBuilder() {
@@ -80,14 +82,20 @@ public class FormBuilder {
   }
 
   public FormBuilder addLabeledComponent(@NotNull String labelText, @NotNull JComponent component, final int topInset, boolean labelOnTop) {
+    JLabel label = createLabelForComponent(labelText, component);
+    return addLabeledComponent(label, component, topInset, labelOnTop);
+  }
+
+  @NotNull
+  private static JLabel createLabelForComponent(@NotNull String labelText, @NotNull JComponent component) {
     JLabel label = new JLabel(UIUtil.removeMnemonic(labelText));
     final int index = UIUtil.getDisplayMnemonicIndex(labelText);
     if (index != -1) {
       label.setDisplayedMnemonic(labelText.charAt(index + 1));
+      label.setDisplayedMnemonicIndex(index);
     }
     label.setLabelFor(component);
-
-    return addLabeledComponent(label, component, topInset, labelOnTop);
+    return label;
   }
 
   public FormBuilder addComponent(@NotNull JComponent component) {
@@ -96,6 +104,11 @@ public class FormBuilder {
 
   public FormBuilder addComponent(@NotNull JComponent component, final int topInset) {
     return addLabeledComponent((JLabel)null, component, topInset, false);
+  }
+
+  @NotNull
+  public FormBuilder addComponentFillVertically(@NotNull JComponent component, int topInset) {
+    return addLabeledComponent(null, component, topInset, false, true);
   }
 
   public FormBuilder addSeparator(final int topInset) {
@@ -107,6 +120,11 @@ public class FormBuilder {
   }
 
   public FormBuilder addVerticalGap(final int height) {
+    if (height == -1) {
+      myPanel.add(new JLabel(), new GridBagConstraints(0, myLineCount++, 2, 1, 0, 1, CENTER, NONE, new Insets(0, 0, 0, 0), 0, 0));
+      return this;
+    }
+
     return addLabeledComponent((JLabel)null,
                                new Box.Filler(new Dimension(0, height), new Dimension(0, height), new Dimension(Short.MAX_VALUE, height)));
   }
@@ -125,7 +143,20 @@ public class FormBuilder {
     return addLabeledComponent(new JLabel(), component, topInset);
   }
 
-  public FormBuilder addLabeledComponent(@Nullable JComponent label, @NotNull JComponent component, int topInset, boolean labelOnTop) {
+  public FormBuilder addLabeledComponent(@Nullable JComponent label,
+                                         @NotNull JComponent component,
+                                         int topInset,
+                                         boolean labelOnTop) {
+    boolean fillVertically = component instanceof JScrollPane;
+    return addLabeledComponent(label, component, topInset, labelOnTop, fillVertically);
+  }
+
+  public FormBuilder addLabeledComponentFillVertically(@NotNull String labelText, @NotNull JComponent component) {
+    JLabel label = createLabelForComponent(labelText, component);
+    return addLabeledComponent(label, component, myVerticalGap, true, true);
+  }
+
+  private FormBuilder addLabeledComponent(@Nullable JComponent label, @NotNull JComponent component, int topInset, boolean labelOnTop, boolean fillVertically) {
     GridBagConstraints c = new GridBagConstraints();
     topInset = myLineCount > 0 ? topInset : 0;
 
@@ -136,18 +167,18 @@ public class FormBuilder {
       c.weightx = 0;
       c.weighty = 0;
       c.fill = NONE;
-      c.anchor = getLabelAnchor(component, false);
-      c.insets = new Insets(topInset, myIndent, DEFAULT_VGAP, 0);
+      c.anchor = getLabelAnchor(false, fillVertically);
+      c.insets = new Insets(topInset, myIndent + myFormLeftIndent, DEFAULT_VGAP, 0);
 
       if (label != null) myPanel.add(label, c);
 
       c.gridx = 0;
       c.gridy = myLineCount + 1;
       c.weightx = 1.0;
-      c.weighty = getWeightY(component);
-      c.fill = getFill(component);
+      c.weighty = getWeightY(fillVertically);
+      c.fill = getFill(component, fillVertically);
       c.anchor = WEST;
-      c.insets = new Insets(label == null ? topInset : 0, myIndent, 0, 0);
+      c.insets = new Insets(label == null ? topInset : 0, myIndent + myFormLeftIndent, 0, 0);
 
       myPanel.add(component, c);
 
@@ -160,15 +191,15 @@ public class FormBuilder {
       c.weightx = 0;
       c.weighty = 0;
       c.fill = NONE;
-      c.anchor = getLabelAnchor(component, true);
-      c.insets = new Insets(topInset, myIndent, 0, myHorizontalGap);
+      c.anchor = getLabelAnchor(true, fillVertically);
+      c.insets = new Insets(topInset, myIndent + myFormLeftIndent, 0, myHorizontalGap);
 
       myPanel.add(label, c);
 
       c.gridx = 1;
       c.weightx = 1;
-      c.weighty = getWeightY(component);
-      c.fill = getFill(component);
+      c.weighty = getWeightY(fillVertically);
+      c.fill = getFill(component, fillVertically);
       c.anchor = WEST;
       c.insets = new Insets(topInset, myIndent, 0, 0);
 
@@ -180,27 +211,29 @@ public class FormBuilder {
     return this;
   }
 
-  private  int getLabelAnchor(JComponent component, boolean honorAlignment) {
-    if (component instanceof JScrollPane) return honorAlignment && myAlignLabelOnRight ? NORTHEAST : NORTHWEST;
+  private int getLabelAnchor(boolean honorAlignment, boolean fillVertically) {
+    if (fillVertically) return honorAlignment && myAlignLabelOnRight ? NORTHEAST : NORTHWEST;
     return honorAlignment && myAlignLabelOnRight ? EAST : WEST;
   }
 
   protected int getFill(JComponent component) {
-    if (component instanceof JComboBox || component instanceof JSpinner) {
-      return NONE;
-    }
-    else if (component instanceof JScrollPane) {
-      return BOTH;
-    }
-    else if (component instanceof JTextField && ((JTextField)component).getColumns() != 0) {
+    if (component instanceof JComboBox ||
+        component instanceof JSpinner ||
+        component instanceof JTextField && ((JTextField)component).getColumns() != 0) {
       return NONE;
     }
     return HORIZONTAL;
   }
 
-  private static int getWeightY(JComponent component) {
-    if (component instanceof JScrollPane) return 1;
-    return 0;
+  private int getFill(JComponent component, boolean fillVertically) {
+    if (fillVertically) {
+      return BOTH;
+    }
+    return getFill(component);
+  }
+
+  private static int getWeightY(boolean fillVertically) {
+    return fillVertically ? 1 : 0;
   }
 
   public JPanel getPanel() {
@@ -231,8 +264,17 @@ public class FormBuilder {
     return this;
   }
 
+  /**
+   * @deprecated use {@link #setHorizontalGap} or {@link #setFormLeftIndent}, to be removed in IDEA 16
+   */
+  @Deprecated
   public FormBuilder setIndent(int indent) {
     myIndent = indent;
+    return this;
+  }
+
+  public FormBuilder setFormLeftIndent(int formLeftIndent) {
+    myFormLeftIndent = formLeftIndent;
     return this;
   }
 }

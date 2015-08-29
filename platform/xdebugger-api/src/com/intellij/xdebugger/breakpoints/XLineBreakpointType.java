@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.intellij.xdebugger.breakpoints;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerBundle;
@@ -99,5 +100,50 @@ public abstract class XLineBreakpointType<P extends XBreakpointProperties> exten
 
   public Icon getTemporaryIcon() {
     return AllIcons.Debugger.Db_temporary_breakpoint;
+  }
+
+  /**
+   * Priority is considered when several breakpoint types can be set on the same code line,
+   * in this case we choose type with the highest priority
+   */
+  public int getPriority() {
+    return 0;
+  }
+
+  /**
+   * Return true if this breakpoint could be hit on lines other than the one specified,
+   * an example is method breakpoint in java - it could be hit on any method overriding the one specified
+   */
+  public boolean canBeHitInOtherPlaces() {
+    return false;
+  }
+
+  /**
+   * @return range to highlight on the line, null to highlight the whole line
+   */
+  @Nullable
+  public TextRange getHighlightRange(XLineBreakpoint<P> breakpoint) {
+    return null;
+  }
+
+  /**
+   * Return a list of variants if there can be more than one breakpoint on the line
+   */
+  @NotNull
+  public List<? extends XLineBreakpointVariant> computeVariants(@NotNull Project project, @NotNull XSourcePosition position) {
+    return Collections.emptyList();
+  }
+
+  public abstract class XLineBreakpointVariant {
+    public abstract String getText();
+
+    @Nullable
+    public abstract Icon getIcon();
+
+    @Nullable
+    public abstract TextRange getHighlightRange();
+
+    @Nullable
+    public abstract P createProperties();
   }
 }

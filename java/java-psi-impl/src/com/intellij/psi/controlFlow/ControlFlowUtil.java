@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import com.intellij.psi.impl.source.DummyHolder;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.ReflectionCache;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.containers.IntArrayList;
 import gnu.trove.THashSet;
 import gnu.trove.TIntHashSet;
@@ -213,6 +213,7 @@ public class ControlFlowUtil {
 
   public static List<PsiVariable> getUsedVariables(ControlFlow flow, int start, int end) {
     ArrayList<PsiVariable> array = new ArrayList<PsiVariable>();
+    if (start < 0) return array;
     List<Instruction> instructions = flow.getInstructions();
     for (int i = start; i < end; i++) {
       Instruction instruction = instructions.get(i);
@@ -351,7 +352,7 @@ public class ControlFlowUtil {
   private static boolean isElementOfClass(PsiElement element, Class[] classesFilter) {
     if (classesFilter == null) return true;
     for (Class aClassesFilter : classesFilter) {
-      if (ReflectionCache.isAssignable(aClassesFilter, element.getClass())) {
+      if (ReflectionUtil.isAssignable(aClassesFilter, element.getClass())) {
         return true;
       }
     }
@@ -377,7 +378,8 @@ public class ControlFlowUtil {
     return PsiTreeUtil.getParentOfType(element, PsiStatement.class, false);
   }
 
-  public static PsiElement findCodeFragment(PsiElement element) {
+  @NotNull
+  public static PsiElement findCodeFragment(@NotNull PsiElement element) {
     PsiElement codeFragment = element;
     PsiElement parent = codeFragment.getParent();
     while (parent != null) {
@@ -724,9 +726,35 @@ public class ControlFlowUtil {
         if (nextOffset > flow.getSize()) nextOffset = flow.getSize();
         if (offset > endOffset) return;
         int throwToOffset = instruction.offset;
-        boolean isNormal;
+        boolean isNormal = false;
         if (throwToOffset == nextOffset) {
-          isNormal = throwToOffset <= endOffset && !isLeaf(nextOffset) && canCompleteNormally[nextOffset];
+
+          if (nextOffset == endOffset) {
+            int lastOffset = endOffset - 1;
+            Instruction lastInstruction = flow.getInstructions().get(lastOffset);
+            while (lastInstruction instanceof GoToInstruction &&
+                ((GoToInstruction)lastInstruction).role == BranchingInstruction.Role.END &&
+                !((GoToInstruction)lastInstruction).isReturn) {
+              if (((GoToInstruction)lastInstruction).offset == startOffset) {
+                lastOffset = -1;
+                break;
+              } 
+              else {
+                lastOffset--;
+                if (lastOffset < 0) {
+                  break;
+                }
+                lastInstruction = flow.getInstructions().get(lastOffset);
+              }
+            }
+
+            if (lastOffset >= 0) {
+              isNormal = !(lastInstruction instanceof GoToInstruction && ((GoToInstruction)lastInstruction).isReturn) &&
+                         !(lastInstruction instanceof ThrowToInstruction);
+            }
+          }
+
+          isNormal |= throwToOffset <= endOffset && !isLeaf(nextOffset) && canCompleteNormally[nextOffset];
         }
         else {
           isNormal = canCompleteNormally[nextOffset];
@@ -833,6 +861,7 @@ public class ControlFlowUtil {
 
   private static PsiReferenceExpression findReferenceTo(PsiElement element, PsiVariable variable) {
     if (element instanceof PsiReferenceExpression
+        && !((PsiReferenceExpression)element).isQualified()
         && ((PsiReferenceExpression)element).resolve() == variable) {
       return (PsiReferenceExpression)element;
     }
@@ -845,7 +874,7 @@ public class ControlFlowUtil {
   }
 
 
-  public static boolean isVariableDefinitelyAssigned(final PsiVariable variable, final ControlFlow flow) {
+  public static boolean isVariableDefinitelyAssigned(@NotNull final PsiVariable variable, @NotNull final ControlFlow flow) {
     class MyVisitor extends InstructionClientVisitor<Boolean> {
       // true if from this point below there may be branch with no variable assignment
       final boolean[] maybeUnassigned = new boolean[flow.getSize() + 1];
@@ -1475,7 +1504,7 @@ public class ControlFlowUtil {
     return visitor.getResult().booleanValue();
   }
 
-  public static boolean isVariableAssignedInLoop(PsiReferenceExpression expression, PsiElement resolved) {
+  public static boolean isVariableAssignedInLoop(@NotNull PsiReferenceExpression expression, PsiElement resolved) {
     if (!(expression.getParent() instanceof PsiAssignmentExpression)
         || ((PsiAssignmentExpression)expression.getParent()).getLExpression() != expression) {
       return false;

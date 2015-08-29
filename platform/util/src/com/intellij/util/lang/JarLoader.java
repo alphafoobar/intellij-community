@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,125 +17,39 @@ package com.intellij.util.lang;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.util.TimedComputable;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import sun.misc.Resource;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.lang.ref.SoftReference;
 import java.net.URL;
 import java.util.Enumeration;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 class JarLoader extends Loader {
-  private final URL myURL;
+  private final File myCanonicalFile;
+  private final boolean myCanLockJar; // true implies that the zipfile will not be modified in the lifetime of the JarLoader
   private SoftReference<JarMemoryLoader> myMemoryLoader;
-  private final boolean myCanLockJar;
-  private static final boolean myDebugTime = false;
-  private static int misses;
-  private static int hits;
+  private volatile SoftReference<ZipFile> myZipFileSoftReference; // Used only when myCanLockJar==true
 
-  private static final Logger LOG = Logger.getInstance(JarLoader.class);
+  JarLoader(URL url, @SuppressWarnings("unused") boolean canLockJar, int index, boolean preloadJarContents) throws IOException {
+    super(new URL("jar", "", -1, url + "!/"), index);
 
-  private final TimedComputable<ZipFile> myZipFileRef = new TimedComputable<ZipFile>(null) {
-    @Override
-    @NotNull
-    protected ZipFile calc() {
-      try {
-        final ZipFile zipFile = doGetZipFile();
-        if (zipFile == null) throw new RuntimeException("Can't load zip file");
-        return zipFile;
-      }
-      catch (IOException e) {
-        throw new RuntimeException(e);
-      }
-    }
-  };
-
-  @NonNls private static final String JAR_PROTOCOL = "jar";
-  @NonNls private static final String FILE_PROTOCOL = "file";
-  private static final long NS_THRESHOLD = 10000000;
-
-  JarLoader(URL url, boolean canLockJar, int index) throws IOException {
-    super(new URL(JAR_PROTOCOL, "", -1, url + "!/"), index);
-    myURL = url;
+    myCanonicalFile = new File(FileUtil.unquote(url.getFile())).getCanonicalFile();
     myCanLockJar = canLockJar;
-  }
 
-  void preLoadClasses() {
-    ZipFile zipFile = null;
+    ZipFile zipFile = getZipFile(); // IOException from opening is propagated to caller if zip file isn't valid,
     try {
-      zipFile = acquireZipFile();
-      if (zipFile == null) return;
-      try {
-        File file = new File(zipFile.getName());
-        myMemoryLoader = new SoftReference<JarMemoryLoader>(JarMemoryLoader.load(file, getBaseURL()));
-      }
-      catch (Exception e) {
-        LOG.error(e);
-      }
-    }
-    catch (Exception e) {
-      // it happens :) eg tools.jar under MacOS
-    }
-    finally {
-      try {
-        releaseZipFile(zipFile);
-      }
-      catch (IOException ignore) {
-
-      }
-    }
-  }
-
-  @Nullable
-  private ZipFile acquireZipFile() throws IOException {
-    if (myCanLockJar) {
-      return myZipFileRef.acquire();
-    }
-    return doGetZipFile();
-  }
-
-  private void releaseZipFile(final ZipFile zipFile) throws IOException {
-    if (myCanLockJar) {
-      myZipFileRef.release();
-    }
-    else if (zipFile != null) {
-      zipFile.close();
-    }
-  }
-
-  @Nullable
-  private ZipFile doGetZipFile() throws IOException {
-    if (FILE_PROTOCOL.equals(myURL.getProtocol())) {
-      String s = FileUtil.unquote(myURL.getFile());
-      if (!new File(s).exists()) {
-        throw new FileNotFoundException(s);
-      }
-      else {
-        return new ZipFile(s);
-      }
-    }
-
-    return null;
-  }
-
-  @Override
-  void buildCache(final ClasspathCache cache) throws IOException {
-    ZipFile zipFile = null;
-    try {
-      zipFile = acquireZipFile();
-      if (zipFile == null) return;
-      final Enumeration<? extends ZipEntry> entries = zipFile.entries();
-
-      while (entries.hasMoreElements()) {
-        ZipEntry zipEntry = entries.nextElement();
-        String name = zipEntry.getName();
-        cache.addResourceEntry(name, this);
-        cache.addNameEntry(name, this);
+      if (preloadJarContents) {
+        JarMemoryLoader loader = JarMemoryLoader.load(zipFile, getBaseURL());
+        if (loader != null) {
+          myMemoryLoader = new SoftReference<JarMemoryLoader>(loader);
+        }
       }
     }
     finally {
@@ -143,123 +57,120 @@ class JarLoader extends Loader {
     }
   }
 
+  @NotNull
+  @Override
+  public ClasspathCache.LoaderData buildData() throws IOException {
+    ZipFile zipFile = getZipFile();
+    try {
+      ClasspathCache.LoaderData loaderData = new ClasspathCache.LoaderData();
+      Enumeration<? extends ZipEntry> entries = zipFile.entries();
+      while (entries.hasMoreElements()) {
+        ZipEntry entry = entries.nextElement();
+        String name = entry.getName();
+        loaderData.addResourceEntry(name);
+        loaderData.addNameEntry(name);
+      }
+      return loaderData;
+    }
+    finally {
+      releaseZipFile(zipFile);
+    }
+  }
+
+  private static final AtomicInteger myGetResourceRequests = new AtomicInteger();
+  private static final AtomicLong myOpenTime = new AtomicLong();
+  private static final AtomicLong myCloseTime = new AtomicLong();
+
   @Override
   @Nullable
   Resource getResource(String name, boolean flag) {
-    final long started = myDebugTime ? System.nanoTime():0;
-    JarMemoryLoader loader = com.intellij.reference.SoftReference.dereference(myMemoryLoader);
+    JarMemoryLoader loader = myMemoryLoader != null? myMemoryLoader.get() : null;
     if (loader != null) {
       Resource resource = loader.getResource(name);
       if (resource != null) return resource;
     }
-    ZipFile file = null;
-    try {
-      file = acquireZipFile();
-      if (file == null) return null;
-      ZipEntry entry = file.getEntry(name);
-      if (entry != null) {
-        ++hits;
-        if (hits % 1000 == 0 && ClasspathCache.doDebug) {
-          ClasspathCache.LOG.debug("Exists jar loader: misses:" + misses + ", hits:" + hits);
-        }
-        return new MyResource(entry, new URL(getBaseURL(), name));
-      }
 
-      if (misses % 1000 == 0 && ClasspathCache.doDebug) {
-        ClasspathCache.LOG.debug("Missed " + name + " from jar:" + myURL);
+    try {
+      ZipFile zipFile = getZipFile();
+      try {
+        ZipEntry entry = zipFile.getEntry(name);
+        if (entry != null) {
+          return MemoryResource.load(getBaseURL(), zipFile, entry);
+        }
       }
-      ++misses;
+      finally {
+        releaseZipFile(zipFile);
+      }
     }
     catch (Exception e) {
-      return null;
-    }
-    finally {
-      try {
-        releaseZipFile(file);
-      }
-      catch (IOException ignored) {
-      }
-      final long doneFor = myDebugTime ? System.nanoTime() - started :0;
-      if (doneFor > NS_THRESHOLD) {
-        ClasspathCache.LOG.debug(doneFor/1000000 + " ms for jar loader get resource:"+name);
-      }
+      error("file: " + myCanonicalFile, e);
     }
 
     return null;
   }
 
-  private class MyResource extends Resource {
-    private final ZipEntry myEntry;
-    private final URL myUrl;
+  protected void error(String message, Throwable t) {
+    //Logger.getLogger(JarLoader.class.getName()).log(Level.SEVERE, message, t);
+    Logger.getInstance(JarLoader.class).error(message, t);
+  }
 
-    public MyResource(ZipEntry name, URL url) {
-      myEntry = name;
-      myUrl = url;
+  private void releaseZipFile(ZipFile zipFile) throws IOException {
+    long started = System.nanoTime();
+    try {
+      // Closing of zip file when myCanLockJar=true happens in ZipFile.finalize
+      if (!myCanLockJar) {
+        zipFile.close();
+      }
+    } finally {
+      myCloseTime.addAndGet(System.nanoTime() - started);
     }
+  }
 
-    @Override
-    public String getName() {
-      return myEntry.getName();
-    }
+  @NotNull
+  private ZipFile getZipFile() throws IOException {
+    @SuppressWarnings("unused") int requests = myGetResourceRequests.incrementAndGet();
 
-    @Override
-    public URL getURL() {
-      return myUrl;
-    }
+    long started = System.nanoTime();
+    try {
 
-    @Override
-    public URL getCodeSourceURL() {
-      return myURL;
-    }
-
-    @Override
-    @Nullable
-    public InputStream getInputStream() throws IOException {
-      final boolean[] wasReleased = {false};
-      ZipFile file = null;
-
-      try {
-        file = acquireZipFile();
-        if (file == null) {
-          releaseZipFile(file);
-          return null;
+      // This code is executed at least 100K times (O(number of classes needed to load)) and it takes considerable time to open ZipFile's
+      // such number of times so we store reference to ZipFile if we allowed to lock the file (assume it isn't changed)
+      if (myCanLockJar) {
+        SoftReference<ZipFile> zipFileSoftReference = myZipFileSoftReference;
+        if (zipFileSoftReference != null) {
+          ZipFile existingZipFile = zipFileSoftReference.get();
+          if (existingZipFile != null) return existingZipFile;
         }
-
-        final InputStream inputStream = file.getInputStream(myEntry);
-        if (inputStream == null) {
-          releaseZipFile(file);
-          return null; // if entry was not found
-        }
-        final ZipFile finalFile = file;
-        return new FilterInputStream(inputStream) {
-          private boolean myClosed = false;
-          @Override
-          public void close() throws IOException {
-            super.close();
-            if (!myClosed) {
-              releaseZipFile(finalFile);
-            }
-            myClosed = true;
-            wasReleased[0] = true;
+        synchronized (ourLock) {
+          zipFileSoftReference = myZipFileSoftReference;
+          if (zipFileSoftReference != null) {
+            ZipFile existingZipFile = zipFileSoftReference.get();
+            if (existingZipFile != null) return existingZipFile;
           }
-        };
+          // ZipFile's native implementation (ZipFile.c, zip_util.c) has path -> file descriptor cache
+          ZipFile zipFile = new ZipFile(myCanonicalFile);
+          myZipFileSoftReference = new SoftReference<ZipFile>(zipFile);
+          return zipFile;
+        }
       }
-      catch (IOException e) {
-        e.printStackTrace();
-        releaseZipFile(file);
-        assert !wasReleased[0];
-        return null;
+      else {
+        return new ZipFile(myCanonicalFile);
       }
-    }
-
-    @Override
-    public int getContentLength() {
-      return (int)myEntry.getSize();
+    } finally {
+      myOpenTime.addAndGet(System.nanoTime() - started);
+      //if (requests % 1000 == 0) {
+      //  int factor = 1000000;
+      //  System.out.println(
+      //    "Jar loading :" + getClass().getClassLoader() + "," + requests + ", ot:" + (myOpenTime.get() / factor) + ", ct:" +
+      //    (myCloseTime.get() / factor));
+      //}
     }
   }
 
-  @NonNls
+  @Override
   public String toString() {
-    return "JarLoader [" + myURL + "]";
+    return "JarLoader [" + myCanonicalFile + "]";
   }
+
+  private static final Object ourLock = new Object();
 }

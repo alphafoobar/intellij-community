@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import com.intellij.ui.tabs.impl.table.TableLayout;
 import com.intellij.util.PairConsumer;
 import com.intellij.util.ui.Centerizer;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -52,7 +53,7 @@ public class TabLabel extends JPanel {
   private boolean myCentered;
 
   private final Wrapper myLabelPlaceholder = new Wrapper(false);
-  private final JBTabsImpl myTabs;
+  protected final JBTabsImpl myTabs;
 
   private BufferedImage myInactiveStateImage;
   private Rectangle myLastPaintedInactiveImageBounds;
@@ -103,7 +104,7 @@ public class TabLabel extends JPanel {
     });
   }
 
-  private SimpleColoredComponent createLabel(JBTabsImpl tabs) {
+  private SimpleColoredComponent createLabel(final JBTabsImpl tabs) {
     SimpleColoredComponent label = new SimpleColoredComponent() {
       @Override
       protected boolean shouldDrawMacShadow() {
@@ -122,10 +123,41 @@ public class TabLabel extends JPanel {
         }
         return UIUtil.getLabelFont(UIUtil.FontSize.SMALL);
       }
+
+      @Override
+      protected void doPaint(Graphics2D g) {
+        Rectangle clip = getVisibleRect();
+        if (getPreferredSize().width <= clip.width + 2) {
+          super.doPaint(g);
+          return;
+        }
+        int dimSize = 10;
+        int dimStep = 2;
+        Composite oldComposite = g.getComposite();
+        Shape oldClip = g.getClip();
+        try {
+          g.setClip(clip.x, clip.y, Math.max(0, clip.width - dimSize), clip.height);
+          super.doPaint(g);
+
+          for (int x = clip.x + clip.width - dimSize; x < clip.x + clip.width; x+=dimStep) {
+            g.setClip(x, clip.y, dimStep, clip.height);
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1 - ((float)x - (clip.x + clip.width - dimSize)) / dimSize));
+            super.doPaint(g);
+          }
+        } finally {
+          g.setComposite(oldComposite);
+          g.setClip(oldClip);
+        }
+      }
+
+      @Override
+      protected void applyAdditionalHints(@NotNull Graphics2D g) {
+        UISettings.setupAntialiasing(g);
+      }
     };
     label.setOpaque(false);
     label.setBorder(null);
-    label.setIconTextGap(tabs.isEditorTabs() ? 2 : new JLabel().getIconTextGap());
+    label.setIconTextGap(tabs.isEditorTabs() ? (!UISettings.getInstance().HIDE_TABS_IF_NEED ? 4 : 2) : new JLabel().getIconTextGap());
     label.setIconOpaque(false);
     label.setIpad(new Insets(0, 0, 0, 0));
 
@@ -135,12 +167,9 @@ public class TabLabel extends JPanel {
   @Override
   public Insets getInsets() {
     Insets insets = super.getInsets();
-    if (myTabs.isEditorTabs()) {
-      if (UISettings.getInstance().SHOW_CLOSE_BUTTON) {
-        return new Insets(insets.top, insets.left, insets.bottom, 3);
-      }
+    if (myTabs.isEditorTabs() && UISettings.getInstance().SHOW_CLOSE_BUTTON) {
+        insets.right = 3;
     }
-
     return insets;
   }
 
@@ -240,7 +269,12 @@ public class TabLabel extends JPanel {
       }
     });
 
+    final Composite oldComposite = ((Graphics2D)g).getComposite();
+    //if (myTabs instanceof JBEditorTabs && !myTabs.isSingleRow() && myTabs.getSelectedInfo() != myInfo) {
+    //  ((Graphics2D)g).setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.9f));
+    //}
     super.paint(g);
+    ((Graphics2D)g).setComposite(oldComposite);
 
     doTranslate(new PairConsumer<Integer, Integer>() {
       @Override
@@ -252,7 +286,7 @@ public class TabLabel extends JPanel {
 
   protected int getNonSelectedOffset() {
     if (myTabs.isEditorTabs() && (myTabs.isSingleRow() || ((TableLayout)myTabs.getEffectiveLayout()).isLastRow(getInfo()))) {
-      return -TabsUtil.ACTIVE_TAB_UNDERLINE_HEIGHT / 2 + 1;
+      return -myTabs.getActiveTabUnderlineHeight() / 2 + 1;
     }
     return 1;
   }
@@ -274,7 +308,7 @@ public class TabLabel extends JPanel {
     switch (pos) {
       case top:
       case bottom:
-        if (myTabs.hasUnderline()) size.height += TabsUtil.ACTIVE_TAB_UNDERLINE_HEIGHT - 1;
+        if (myTabs.hasUnderline()) size.height += myTabs.getActiveTabUnderlineHeight() - 1;
         break;
       case left:
       case right:

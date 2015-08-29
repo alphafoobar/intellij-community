@@ -31,12 +31,14 @@
         <keyboard-shortcut keymap="$default" first-keystroke="alt shift W"/>
       </action>
       <separator/>
+      <action id="tasks.edit" class="com.intellij.tasks.actions.EditTaskAction" text="Edit Task..."/>
       <action id="tasks.create.changelist" class="com.intellij.tasks.actions.CreateChangelistAction" text="Create Change_list..."/>
       <action id="tasks.show.task.description" class="com.intellij.tasks.actions.ShowTaskDescription" text="Show Description"/>
       <action id="tasks.open.in.browser" class="com.intellij.tasks.actions.OpenTaskInBrowserAction" text="Open in _Browser">
         <keyboard-shortcut keymap="$default" first-keystroke="alt shift B"/>
       </action>
-      <action id="tasks.analyze.stacktrace" class="com.intellij.tasks.actions.AnalyzeTaskStacktraceAction" text="Analyze _Stacktrace From Task..."/>
+      <action id="tasks.analyze.stacktrace" class="com.intellij.tasks.actions.AnalyzeTaskStacktraceAction"
+              text="Analyze _Stacktrace From Task..."/>
       <separator/>
       <action id="tasks.configure.servers" class="com.intellij.tasks.actions.ConfigureServersAction" text="Configure Servers..."/>
     </group>
@@ -54,9 +56,12 @@
       </action>
     </group>
 
-    <!-- <group id="tasks.util" text="_Tasks utility actions">
-      <action id="show.certificate" class="com.intellij.tasks.actions.ShowCertificateInfoAction" text="_Show certificate..."/>
-    </group> -->
+    <group id="tasks.internal" text="_Tasks" internal="true" popup="true">
+      <action id="show.certificate" class="com.intellij.tasks.actions.ShowCertificateInfoAction" text="_Show certificate dialog"/>
+      <action id="deadlock.with.certificate.dialog" class="com.intellij.tasks.actions.DeadlockWithCertificateDialogAction"
+              text="_Deadlock IDE with certificate dialog"/>
+      <add-to-group group-id="Internal"/>
+    </group>
 
     <group id="tasks.and.contexts" text="_Tasks &amp; Contexts" popup="true">
       <reference ref="task.actions"/>
@@ -99,7 +104,7 @@
   <extensions defaultExtensionNs="com.intellij">
     <errorHandler implementation="com.intellij.diagnostic.ITNReporter"/>
 
-    <projectConfigurable instance="com.intellij.tasks.config.TaskConfigurable" id="tasks" displayName="Tasks" nonDefaultProject="true">
+    <projectConfigurable groupId="tools" instance="com.intellij.tasks.config.TaskConfigurable" id="tasks" displayName="Tasks" nonDefaultProject="true">
       <configurable instance="com.intellij.tasks.config.TaskRepositoriesConfigurable" displayName="Servers" id="tasks.servers"/>
     </projectConfigurable>
 
@@ -117,6 +122,7 @@
     <tasks.contextProvider implementation="com.intellij.tasks.context.ProjectViewContextProvider"/>
     <tasks.contextProvider implementation="com.intellij.tasks.context.RunConfigurationsContextProvider"/>
     <tasks.contextProvider implementation="com.intellij.tasks.context.XDebuggerBreakpointsContextProvider"/>
+    <tasks.contextProvider implementation="com.intellij.tasks.context.XDebuggerWatchesProvider"/>
 
     <tasks.repositoryType implementation="com.intellij.tasks.jira.JiraRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.youtrack.YouTrackRepositoryType"/>
@@ -129,12 +135,13 @@
     <tasks.repositoryType implementation="com.intellij.tasks.generic.GenericRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.trello.TrelloRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.gitlab.GitlabRepositoryType"/>
+    <tasks.repositoryType implementation="com.intellij.tasks.bugzilla.BugzillaRepositoryType"/>
 
     <!-- JQL support -->
     <fileTypeFactory implementation="com.intellij.tasks.jira.jql.JqlFileTypeFactory"/>
     <lang.parserDefinition language="JQL"
                            implementationClass="com.intellij.tasks.jira.jql.JqlParserDefinition"/>
-    <lang.syntaxHighlighterFactory key="JQL" implementationClass="com.intellij.tasks.jira.jql.JqlHighlighterFactory"/>
+    <lang.syntaxHighlighterFactory language="JQL" implementationClass="com.intellij.tasks.jira.jql.JqlHighlighterFactory"/>
     <lang.braceMatcher language="JQL" implementationClass="com.intellij.tasks.jira.jql.JqlBraceMatcher"/>
     <completion.contributor language="JQL"
                             implementationClass="com.intellij.tasks.jira.jql.codeinsight.JqlCompletionContributor"/>

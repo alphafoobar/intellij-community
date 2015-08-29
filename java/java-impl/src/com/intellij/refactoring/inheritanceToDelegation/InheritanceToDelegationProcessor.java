@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -118,7 +118,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
 
     myFieldName = fieldName;
     final String propertyName = JavaCodeStyleManager.getInstance(myProject).variableNameToPropertyName(myFieldName, VariableKind.FIELD);
-    myGetterName = PropertyUtil.suggestGetterName(propertyName, myBaseClassType);
+    myGetterName = GenerateMembersUtil.suggestGetterName(propertyName, myBaseClassType, myProject);
     myGenerateGetter = generateGetter;
 
     myDelegatedInterfaces = new LinkedHashSet<PsiClass>();
@@ -148,7 +148,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new InheritanceToDelegationViewDescriptor(myClass);
   }
 
@@ -186,7 +186,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
     return FieldAccessibility.INVISIBLE;
   }
 
-  protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull Ref<UsageInfo[]> refUsages) {
     final UsageInfo[] usagesIn = refUsages.get();
     ArrayList<UsageInfo> oldUsages = new ArrayList<UsageInfo>();
     addAll(oldUsages, usagesIn);
@@ -204,8 +204,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
       analyzeConflicts(usagesIn, conflicts);
       if (!conflicts.isEmpty()) {
         ConflictsDialog conflictsDialog = prepareConflictsDialog(conflicts, usagesIn);
-        conflictsDialog.show();
-        if (!conflictsDialog.isOK()){
+        if (!conflictsDialog.showAndGet()) {
           if (conflictsDialog.isShowConflicts()) prepareSuccessful();
           return false;
         }
@@ -353,7 +352,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
     }
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     try {
       for (UsageInfo aUsage : usages) {
         InheritanceToDelegationUsageInfo usage = (InheritanceToDelegationUsageInfo)aUsage;
@@ -518,14 +517,14 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
     final PsiModifierList modifierList = methodToAdd.getModifierList();
     final NullableNotNullManager manager = NullableNotNullManager.getInstance(myProject);
     modifierList.setModifierProperty(PsiModifier.ABSTRACT, false);
-    final String nullable = manager.getNullable(method);
+    final PsiAnnotation nullable = manager.copyNullableAnnotation(method);
     if (nullable != null) {
-      modifierList.addAfter(myFactory.createAnnotationFromText("@" + nullable, methodToAdd), null);
+      modifierList.addAfter(nullable, null);
     }
     else {
-      final String notNull = manager.getNotNull(method);
+      final PsiAnnotation notNull = manager.copyNotNullAnnotation(method);
       if (notNull != null) {
-        modifierList.addAfter(myFactory.createAnnotationFromText("@" + notNull, methodToAdd), null);
+        modifierList.addAfter(notNull, null);
       }
     }
 
@@ -851,7 +850,7 @@ public class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
     UsageViewManager manager = UsageViewManager.getInstance(myProject);
     manager.showUsages(
       new UsageTarget[]{new PsiElement2UsageTargetAdapter(myClass)},
-      UsageInfoToUsageConverter.convert(new UsageInfoToUsageConverter.TargetElementsDescriptor(myClass), usages),
+      UsageInfoToUsageConverter.convert(new PsiElement[]{myClass}, usages),
       presentation
     );
 

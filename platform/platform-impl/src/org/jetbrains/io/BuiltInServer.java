@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,114 +15,88 @@
  */
 package org.jetbrains.io;
 
-import com.intellij.ide.XmlRpcServer;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.SystemInfo;
+import com.intellij.util.NotNullProducer;
 import com.intellij.util.net.NetUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.QueryStringDecoder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.ide.CustomPortServerManager;
 import org.jetbrains.ide.PooledThreadExecutor;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
-import java.util.Map;
 
 public class BuiltInServer implements Disposable {
   static final Logger LOG = Logger.getInstance(BuiltInServer.class);
 
+  // Some antiviral software detect viruses by the fact of accessing these ports so we should not touch them to appear innocent.
+  private static final int[] FORBIDDEN_PORTS = {6953, 6969, 6970};
+
   private final ChannelRegistrar channelRegistrar = new ChannelRegistrar();
+  private final boolean isOwnerOfEventLoopGroup;
+
+  private final EventLoopGroup eventLoopGroup;
+  private final int port;
 
   public boolean isRunning() {
     return !channelRegistrar.isEmpty();
   }
 
-  public void start(int port) {
-    start(1, port, 1, false);
+  private BuiltInServer(@NotNull EventLoopGroup eventLoopGroup, int port, boolean isOwnerOfEventLoopGroup) {
+    this.eventLoopGroup = eventLoopGroup;
+    this.port = port;
+    this.isOwnerOfEventLoopGroup = isOwnerOfEventLoopGroup;
   }
 
-  public int start(int workerCount, int firstPort, int portsCount, boolean tryAnyPort) {
-    if (isRunning()) {
-      throw new IllegalStateException("server already started");
-    }
+  @NotNull
+  public static BuiltInServer start(int workerCount, int firstPort, int portsCount, boolean tryAnyPort, @Nullable NotNullProducer<ChannelHandler> channelHandler) throws Throwable {
+    return start(new NioEventLoopGroup(workerCount, PooledThreadExecutor.INSTANCE), true, firstPort, portsCount, tryAnyPort, channelHandler);
+  }
 
-    NioEventLoopGroup eventLoopGroup = new NioEventLoopGroup(workerCount, PooledThreadExecutor.INSTANCE);
-    ServerBootstrap bootstrap = createServerBootstrap(eventLoopGroup, channelRegistrar, null);
-    int port = bind(firstPort, portsCount, tryAnyPort, bootstrap);
-    bindCustomPorts(firstPort, port, eventLoopGroup);
+  @NotNull
+  public static BuiltInServer start(@NotNull EventLoopGroup eventLoopGroup, boolean isOwnerOfEventLoopGroup, int firstPort, int portsCount, boolean tryAnyPort, @Nullable NotNullProducer<ChannelHandler> channelHandler) throws Throwable {
+    ChannelRegistrar channelRegistrar = new ChannelRegistrar();
+    ServerBootstrap bootstrap = NettyUtil.nioServerBootstrap(eventLoopGroup);
+    configureChildHandler(bootstrap, channelRegistrar, channelHandler);
+    return new BuiltInServer(eventLoopGroup, bind(firstPort, portsCount, tryAnyPort, bootstrap, channelRegistrar), isOwnerOfEventLoopGroup);
+  }
+
+  public int getPort() {
     return port;
   }
 
-  static ServerBootstrap createServerBootstrap(EventLoopGroup eventLoopGroup, final ChannelRegistrar channelRegistrar, @Nullable Map<String, Object> xmlRpcHandlers) {
-    ServerBootstrap bootstrap = NettyUtil.nioServerBootstrap(eventLoopGroup);
-    if (xmlRpcHandlers == null) {
-      final PortUnificationServerHandler portUnificationServerHandler = new PortUnificationServerHandler();
-      bootstrap.childHandler(new ChannelInitializer() {
-        @Override
-        protected void initChannel(Channel channel) throws Exception {
-          channel.pipeline().addLast(channelRegistrar, portUnificationServerHandler, ChannelExceptionHandler.getInstance());
-        }
-      });
-    }
-    else {
-      final XmlRpcDelegatingHttpRequestHandler handler = new XmlRpcDelegatingHttpRequestHandler(xmlRpcHandlers);
-      bootstrap.childHandler(new ChannelInitializer() {
-        @Override
-        protected void initChannel(Channel channel) throws Exception {
-          channel.pipeline().addLast(channelRegistrar);
-          NettyUtil.initHttpHandlers(channel.pipeline());
-          channel.pipeline().addLast(handler, ChannelExceptionHandler.getInstance());
-        }
-      });
-    }
-    return bootstrap;
+  @NotNull
+  public EventLoopGroup getEventLoopGroup() {
+    return eventLoopGroup;
   }
 
-  private void bindCustomPorts(int firstPort, int port, NioEventLoopGroup eventLoopGroup) {
-    for (CustomPortServerManager customPortServerManager : CustomPortServerManager.EP_NAME.getExtensions()) {
-      try {
-        int customPortServerManagerPort = customPortServerManager.getPort();
-        SubServer subServer = new SubServer(customPortServerManager, eventLoopGroup);
-        Disposer.register(this, subServer);
-        if (customPortServerManager.isAvailableExternally() || (customPortServerManagerPort != firstPort && customPortServerManagerPort != port)) {
-          subServer.bind(customPortServerManagerPort);
-        }
+  static void configureChildHandler(@NotNull ServerBootstrap bootstrap, @NotNull final ChannelRegistrar channelRegistrar, final @Nullable NotNullProducer<ChannelHandler> channelHandler) {
+    final PortUnificationServerHandler portUnificationServerHandler = channelHandler == null ? new PortUnificationServerHandler() : null;
+    bootstrap.childHandler(new ChannelInitializer() {
+      @Override
+      protected void initChannel(Channel channel) throws Exception {
+        channel.pipeline().addLast(channelRegistrar, channelHandler == null ? portUnificationServerHandler : channelHandler.produce());
       }
-      catch (Throwable e) {
-        LOG.error(e);
-      }
-    }
+    });
   }
 
-  private int bind(int firstPort, int portsCount, boolean tryAnyPort, ServerBootstrap bootstrap) {
+  public static boolean isPortForbidden(int port) {
+    for (int forbiddenPort : FORBIDDEN_PORTS) {
+      if (port == forbiddenPort) return true;
+    }
+    return false;
+  }
+
+  private static int bind(int firstPort, int portsCount, boolean tryAnyPort, @NotNull ServerBootstrap bootstrap, @NotNull ChannelRegistrar channelRegistrar) throws Throwable {
     InetAddress loopbackAddress = NetUtils.getLoopbackAddress();
     for (int i = 0; i < portsCount; i++) {
       int port = firstPort + i;
 
-      // we check if any port free too
-      if (!SystemInfo.isLinux && (!SystemInfo.isWindows || SystemInfo.isWinVistaOrNewer)) {
-        try {
-          ServerSocket serverSocket = new ServerSocket();
-          try {
-            serverSocket.bind(new InetSocketAddress(port), 1);
-          }
-          finally {
-            serverSocket.close();
-          }
-        }
-        catch (IOException ignored) {
-          continue;
-        }
+      if (isPortForbidden(i)) {
+        continue;
       }
 
       ChannelFuture future = bootstrap.bind(loopbackAddress, port).awaitUninterruptibly();
@@ -131,8 +105,7 @@ public class BuiltInServer implements Disposable {
         return port;
       }
       else if (!tryAnyPort && i == (portsCount - 1)) {
-        LOG.error(future.cause());
-        return -1;
+        throw future.cause();
       }
     }
 
@@ -143,33 +116,17 @@ public class BuiltInServer implements Disposable {
       return ((InetSocketAddress)future.channel().localAddress()).getPort();
     }
     else {
-      LOG.error(future.cause());
-      return -1;
+      throw future.cause();
     }
   }
 
   @Override
   public void dispose() {
-    channelRegistrar.close();
+    channelRegistrar.close(isOwnerOfEventLoopGroup);
     LOG.info("web server stopped");
   }
 
-  public static void replaceDefaultHandler(@NotNull ChannelHandlerContext context, @NotNull SimpleChannelInboundHandler messageChannelHandler) {
-    context.pipeline().replace(DelegatingHttpRequestHandler.class, "replacedDefaultHandler", messageChannelHandler);
-  }
-
-  @ChannelHandler.Sharable
-  private static final class XmlRpcDelegatingHttpRequestHandler extends DelegatingHttpRequestHandlerBase {
-    private final Map<String, Object> handlers;
-
-    public XmlRpcDelegatingHttpRequestHandler(Map<String, Object> handlers) {
-      this.handlers = handlers;
-    }
-
-    @Override
-    protected boolean process(ChannelHandlerContext context, FullHttpRequest request, QueryStringDecoder urlDecoder) throws IOException {
-      return (request.getMethod() == HttpMethod.POST || request.getMethod() == HttpMethod.OPTIONS) &&
-             XmlRpcServer.SERVICE.getInstance().process(urlDecoder.path(), request, context, handlers);
-    }
+  public static void replaceDefaultHandler(@NotNull ChannelHandlerContext context, @NotNull ChannelHandler channelHandler) {
+    context.pipeline().replace(DelegatingHttpRequestHandler.class, "replacedDefaultHandler", channelHandler);
   }
 }

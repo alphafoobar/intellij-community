@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ import java.util.Map;
  */
 class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
   private PsiMethod mySuperMethod;
-  private String[] myModifiers;
+  private final String[] myModifiers;
 
   DetectedJavaChangeInfo(@PsiModifier.ModifierConstant String newVisibility,
                          PsiMethod method,
@@ -188,7 +188,7 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
       }
     }) {
       @Override
-      protected void performRefactoring(UsageInfo[] usages) {
+      protected void performRefactoring(@NotNull UsageInfo[] usages) {
         super.performRefactoring(usages);
         final PsiElementFactory elementFactory = JavaPsiFacade.getElementFactory(method.getProject());
         final PsiParameter[] parameters = method.getParameterList().getParameters();
@@ -261,8 +261,8 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
     final PsiMethod currentMethod = (PsiMethod)initialChangeInfo.getMethod();
     if (silently || ApplicationManager.getApplication().isUnitTestMode()) {
       final TextRange signatureRange = JavaChangeSignatureDetector.getSignatureRange(currentMethod);
-     final String currentSignature = currentMethod.getContainingFile().getText().substring(signatureRange.getStartOffset(),
-                                                                                           signatureRange.getEndOffset());
+      final String currentSignature = currentMethod.getContainingFile().getText().substring(signatureRange.getStartOffset(),
+                                                                                            signatureRange.getEndOffset());
       temporallyRevertChanges(currentMethod, oldText);
       createChangeSignatureProcessor(method).run();
       temporallyRevertChanges(currentMethod, currentSignature, JavaChangeSignatureDetector.getSignatureRange(currentMethod));
@@ -295,8 +295,7 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
           super.invokeRefactoring(processor);
         }
       };
-    dialog.show();
-    return dialog.isOK();
+    return dialog.showAndGet();
   }
 
   private static void temporallyRevertChanges(final PsiElement psiElement, final String oldText) {

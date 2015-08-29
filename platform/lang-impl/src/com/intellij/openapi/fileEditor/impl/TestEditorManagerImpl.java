@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.ide.highlighter.HighlighterFactory;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.components.ApplicationComponent;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -38,6 +38,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.HashMap;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -51,13 +52,13 @@ import java.util.List;
 import java.util.Map;
 
 @NonNls
-public class TestEditorManagerImpl extends FileEditorManagerEx implements ApplicationComponent, ProjectComponent {
+public class TestEditorManagerImpl extends FileEditorManagerEx implements ProjectComponent {
   private static final Logger LOG = Logger.getInstance("#com.intellij.idea.test.TestEditorManagerImpl");
 
   private final Project myProject;
 
   private final Map<VirtualFile, Editor> myVirtualFile2Editor = new HashMap<VirtualFile,Editor>();
-  private VirtualFile myActiveFile = null;
+  private VirtualFile myActiveFile;
   private static final LightVirtualFile LIGHT_VIRTUAL_FILE = new LightVirtualFile("Dummy.java");
 
   public TestEditorManagerImpl(Project project) {
@@ -67,9 +68,21 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
 
   @Override
   @NotNull
-  public Pair<FileEditor[], FileEditorProvider[]> openFileWithProviders(@NotNull VirtualFile file,
-                                                                        boolean focusEditor,
+  public Pair<FileEditor[], FileEditorProvider[]> openFileWithProviders(@NotNull final VirtualFile file,
+                                                                        final boolean focusEditor,
                                                                         boolean searchForSplitter) {
+    final Ref<Pair<FileEditor[], FileEditorProvider[]>> result = new Ref<Pair<FileEditor[], FileEditorProvider[]>>();
+    CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
+      @Override
+      public void run() {
+        result.set(openFileImpl3(file, focusEditor));
+      }
+    }, "", null);
+    return result.get();
+
+  }
+
+  private Pair<FileEditor[], FileEditorProvider[]> openFileImpl3(VirtualFile file, boolean focusEditor) {
     // for non-text editors. uml, etc
     final FileEditorProvider provider = file.getUserData(FileEditorProvider.KEY);
     if (provider != null && provider.accept(getProject(), file)) {
@@ -78,8 +91,9 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
 
     //text editor
     Editor editor = openTextEditor(new OpenFileDescriptor(myProject, file), focusEditor);
+    assert editor != null;
     final FileEditor fileEditor = TextEditorProvider.getInstance().getTextEditor(editor);
-    return Pair.create (new FileEditor[] {fileEditor}, new FileEditorProvider[] {getProvider (fileEditor)});
+    return Pair.create (new FileEditor[] {fileEditor}, new FileEditorProvider[] {getProvider ()});
   }
 
   @NotNull
@@ -99,7 +113,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
   @Override
   public ActionCallback notifyPublisher(@NotNull Runnable runnable) {
     runnable.run();
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override
@@ -191,11 +205,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
     }
   }
 
-  public Editor openTextEditorEnsureNoFocus(@NotNull OpenFileDescriptor descriptor) {
-    return openTextEditor(descriptor, false);
-  }
-
-  private FileEditorProvider getProvider(FileEditor editor) {
+  private static FileEditorProvider getProvider() {
     return new FileEditorProvider() {
       @Override
       public boolean accept(@NotNull Project project, @NotNull VirtualFile file) {
@@ -205,18 +215,17 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
       @Override
       @NotNull
       public FileEditor createEditor(@NotNull Project project, @NotNull VirtualFile file) {
-        return null;
+        throw new IncorrectOperationException();
       }
 
       @Override
       public void disposeEditor(@NotNull FileEditor editor) {
-        //Disposer.dispose(editor);
       }
 
       @Override
       @NotNull
       public FileEditorState readState(@NotNull Element sourceElement, @NotNull Project project, @NotNull VirtualFile file) {
-        return null;
+        throw new IncorrectOperationException();
       }
 
       @Override
@@ -233,7 +242,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
       @Override
       @NotNull
       public FileEditorPolicy getPolicy() {
-        return null;
+        throw new IncorrectOperationException();
       }
     };
   }
@@ -330,9 +339,13 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
   public void closeFile(@NotNull VirtualFile file) {
     Editor editor = myVirtualFile2Editor.remove(file);
     if (editor != null){
+      TextEditorProvider editorProvider = TextEditorProvider.getInstance();
+      editorProvider.disposeEditor(editorProvider.getTextEditor(editor));
       EditorFactory.getInstance().releaseEditor(editor);
     }
-    if (Comparing.equal(file, myActiveFile)) myActiveFile = null;
+    if (Comparing.equal(file, myActiveFile)) {
+      myActiveFile = null;
+    }
   }
 
   @Override
@@ -391,11 +404,6 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
 
   @Override
   public void removeEditorAnnotation(@NotNull FileEditor editor, @NotNull JComponent annotationComoponent) {
-  }
-
-  public void registerFileAsOpened(VirtualFile file, Editor editor) {
-    myVirtualFile2Editor.put(file, editor);
-    myActiveFile = file;
   }
 
   @Override
@@ -482,15 +490,16 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Applic
   @NotNull
   @Override
   public EditorsSplitters getSplitters() {
-    return null;
+    throw new IncorrectOperationException();
   }
 
+  @NotNull
   @Override
   public ActionCallback getReady(@NotNull Object requestor) {
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override
-  public void setSelectedEditor(@NotNull VirtualFile file, String fileEditorProviderId) {
+  public void setSelectedEditor(@NotNull VirtualFile file, @NotNull String fileEditorProviderId) {
   }
 }

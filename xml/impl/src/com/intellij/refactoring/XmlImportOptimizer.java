@@ -15,6 +15,7 @@
  */
 package com.intellij.refactoring;
 
+import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInsight.daemon.impl.analysis.XmlUnusedNamespaceInspection;
 import com.intellij.codeInspection.InspectionManager;
 import com.intellij.codeInspection.ProblemDescriptor;
@@ -23,6 +24,7 @@ import com.intellij.codeInspection.QuickFix;
 import com.intellij.lang.ImportOptimizer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
 import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlFile;
@@ -30,6 +32,7 @@ import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,12 +61,16 @@ public class XmlImportOptimizer implements ImportOptimizer {
 
   @NotNull
   @Override
-  public Runnable processFile(final PsiFile file) {
-    return new Runnable() {
+  public CollectingInfoRunnable processFile(final PsiFile file) {
+    return new CollectingInfoRunnable() {
+      int myRemovedNameSpaces = 0;
+
       @Override
       public void run() {
         XmlFile xmlFile = (XmlFile)file;
         Project project = xmlFile.getProject();
+        HighlightDisplayKey key = HighlightDisplayKey.find(myInspection.getShortName());
+        if (!InspectionProjectProfileManager.getInstance(project).getInspectionProfile().isToolEnabled(key, xmlFile)) return;
         ProblemsHolder holder = new ProblemsHolder(InspectionManager.getInstance(project), xmlFile, false);
         final XmlElementVisitor visitor = (XmlElementVisitor)myInspection.buildVisitor(holder, false);
         new PsiRecursiveElementVisitor() {
@@ -93,10 +100,19 @@ public class XmlImportOptimizer implements ImportOptimizer {
         SmartPsiElementPointer<XmlTag> pointer = null;
         for (Map.Entry<XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix, ProblemDescriptor> fix : fixes.entrySet()) {
           pointer = fix.getKey().doFix(project, fix.getValue(), false);
+          myRemovedNameSpaces++;
         }
         if (pointer != null) {
           XmlUnusedNamespaceInspection.RemoveNamespaceDeclarationFix.reformatStartTag(project, pointer);
         }
+      }
+
+      @Nullable
+      @Override
+      public String getUserNotificationInfo() {
+        return myRemovedNameSpaces > 0
+               ? "Removed " + myRemovedNameSpaces + " namespace" + (myRemovedNameSpaces > 1 ? "s" : "")
+               : null;
       }
     };
   }

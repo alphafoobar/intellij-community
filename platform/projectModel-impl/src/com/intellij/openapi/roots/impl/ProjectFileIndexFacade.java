@@ -21,6 +21,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.FileIndexFacade;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -65,7 +66,12 @@ public class ProjectFileIndexFacade extends FileIndexFacade {
 
   @Override
   public boolean isExcludedFile(@NotNull final VirtualFile file) {
-    return myFileIndex.isIgnored(file);
+    return myFileIndex.isExcluded(file);
+  }
+
+  @Override
+  public boolean isUnderIgnored(@NotNull VirtualFile file) {
+    return myFileIndex.isUnderIgnored(file);
   }
 
   @Nullable
@@ -82,8 +88,14 @@ public class ProjectFileIndexFacade extends FileIndexFacade {
     while (true) {
       if (childDir == null) return false;
       if (childDir.equals(baseDir)) return true;
-      if (myDirectoryIndex.getInfoForDirectory(childDir) == null) return false;
+      if (!myDirectoryIndex.getInfoForFile(childDir).isInProject()) return false;
       childDir = childDir.getParent();
     }
+  }
+
+  @NotNull
+  @Override
+  public ModificationTracker getRootModificationTracker() {
+    return ProjectRootManager.getInstance(myProject);
   }
 }

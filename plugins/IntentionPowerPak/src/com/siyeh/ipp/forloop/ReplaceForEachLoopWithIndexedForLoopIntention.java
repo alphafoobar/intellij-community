@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2012 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.*;
-import com.intellij.util.IncorrectOperationException;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ipp.base.Intention;
 import com.siyeh.ipp.base.PsiElementPredicate;
 import org.jetbrains.annotations.NonNls;
@@ -35,7 +35,7 @@ public class ReplaceForEachLoopWithIndexedForLoopIntention extends Intention {
   }
 
   @Override
-  public void processIntention(@NotNull PsiElement element) throws IncorrectOperationException {
+  public void processIntention(@NotNull PsiElement element) {
     final PsiForeachStatement statement = (PsiForeachStatement)element.getParent();
     if (statement == null) {
       return;
@@ -100,7 +100,7 @@ public class ReplaceForEachLoopWithIndexedForLoopIntention extends Intention {
       newStatement.append(body.getText());
     }
     newStatement.append('}');
-    replaceStatementAndShorten(newStatement.toString(), statement);
+    PsiReplacementUtil.replaceStatementAndShortenClassNames(statement, newStatement.toString());
   }
 
   protected void createForLoopDeclaration(PsiForeachStatement statement,
@@ -133,6 +133,7 @@ public class ReplaceForEachLoopWithIndexedForLoopIntention extends Intention {
     newStatement.append("{ ");
   }
 
+  @Nullable
   private static String getVariableName(PsiExpression expression) {
     if (expression instanceof PsiMethodCallExpression) {
       final PsiMethodCallExpression methodCallExpression =
@@ -164,7 +165,8 @@ public class ReplaceForEachLoopWithIndexedForLoopIntention extends Intention {
         (PsiArrayAccessExpression)expression;
       final PsiExpression arrayExpression =
         arrayAccessExpression.getArrayExpression();
-      return StringUtil.unpluralize(getVariableName(arrayExpression));
+      final String name = getVariableName(arrayExpression);
+      return (name == null) ? null : StringUtil.unpluralize(name);
     }
     else if (expression instanceof PsiParenthesizedExpression) {
       final PsiParenthesizedExpression parenthesizedExpression =
@@ -232,7 +234,8 @@ public class ReplaceForEachLoopWithIndexedForLoopIntention extends Intention {
     final PsiDeclarationStatement declarationStatement =
       elementFactory.createVariableDeclarationStatement(variableName,
                                                         iteratedValueType, iteratedValue);
-    context.getParent().addBefore(declarationStatement, context);
+    final PsiElement newElement = context.getParent().addBefore(declarationStatement, context);
+    JavaCodeStyleManager.getInstance(project).shortenClassReferences(newElement);
     return variableName;
   }
 

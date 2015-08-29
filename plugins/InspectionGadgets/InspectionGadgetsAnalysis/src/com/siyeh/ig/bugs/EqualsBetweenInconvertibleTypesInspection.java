@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.siyeh.ig.bugs;
 
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.TypeConversionUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -60,20 +59,51 @@ public class EqualsBetweenInconvertibleTypesInspection
     extends BaseInspectionVisitor {
 
     @Override
-    public void visitMethodCallExpression(
-      @NotNull PsiMethodCallExpression expression) {
+    public void visitMethodCallExpression(@NotNull PsiMethodCallExpression expression) {
       super.visitMethodCallExpression(expression);
-      if (!MethodCallUtils.isEqualsCall(expression)) {
-        return;
-      }
       final PsiReferenceExpression methodExpression = expression.getMethodExpression();
+      final boolean staticEqualsCall;
+      if (MethodCallUtils.isEqualsCall(expression)) {
+        staticEqualsCall = false;
+      }
+      else {
+        final String name = methodExpression.getReferenceName();
+        if (!"equals".equals(name) && !"equal".equals(name)) {
+          return;
+        }
+        final PsiMethod method = expression.resolveMethod();
+        if (method == null) {
+          return;
+        }
+        final PsiClass aClass = method.getContainingClass();
+        if (aClass == null) {
+          return;
+        }
+        final String qualifiedName = aClass.getQualifiedName();
+        if (!"java.util.Objects".equals(qualifiedName) && !"com.google.common.base.Objects".equals(qualifiedName)) {
+          return;
+        }
+        staticEqualsCall = true;
+      }
       final PsiExpressionList argumentList = expression.getArgumentList();
       final PsiExpression[] arguments = argumentList.getExpressions();
-      if (arguments.length != 1) {
-        return;
+      final PsiExpression expression1;
+      final PsiExpression expression2;
+      if (staticEqualsCall) {
+        if (arguments.length != 2) {
+          return;
+        }
+        expression1 = arguments[0];
+        expression2 = arguments[1];
       }
-      final PsiExpression expression1 = arguments[0];
-      final PsiExpression expression2 = methodExpression.getQualifierExpression();
+      else {
+        if (arguments.length != 1) {
+          return;
+        }
+        expression1 = arguments[0];
+        expression2 = methodExpression.getQualifierExpression();
+      }
+
       final PsiType comparisonType;
       if (expression2 == null) {
         final PsiClass aClass = PsiTreeUtil.getParentOfType(expression, PsiClass.class);
@@ -91,10 +121,7 @@ public class EqualsBetweenInconvertibleTypesInspection
       if (comparedType == null) {
         return;
       }
-      final PsiType comparedTypeErasure = TypeConversionUtil.erasure(comparedType);
-      final PsiType comparisonTypeErasure = TypeConversionUtil.erasure(comparisonType);
-      if (comparedTypeErasure == null || comparisonTypeErasure == null ||
-          TypeConversionUtil.areTypesConvertible(comparedTypeErasure, comparisonTypeErasure)) {
+      if (TypeUtils.areConvertible(comparedType, comparisonType)) {
         return;
       }
       registerMethodCallError(expression, comparedType, comparisonType);

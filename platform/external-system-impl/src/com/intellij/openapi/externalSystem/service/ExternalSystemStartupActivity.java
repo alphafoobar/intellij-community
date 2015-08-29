@@ -17,16 +17,19 @@ package com.intellij.openapi.externalSystem.service;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
+import com.intellij.openapi.externalSystem.importing.ImportSpecBuilder;
 import com.intellij.openapi.externalSystem.model.ExternalSystemDataKeys;
 import com.intellij.openapi.externalSystem.service.project.ProjectRenameAware;
 import com.intellij.openapi.externalSystem.service.project.autoimport.ExternalSystemAutoImporter;
+import com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManager;
 import com.intellij.openapi.externalSystem.service.ui.ExternalToolWindowManager;
 import com.intellij.openapi.externalSystem.service.vcs.ExternalSystemVcsRegistrar;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
-import com.intellij.openapi.startup.StartupManager;
+import com.intellij.util.DisposeAwareRunnable;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -51,7 +54,17 @@ public class ExternalSystemStartupActivity implements StartupActivity {
         }
         if (project.getUserData(ExternalSystemDataKeys.NEWLY_IMPORTED_PROJECT) != Boolean.TRUE) {
           for (ExternalSystemManager manager : ExternalSystemManager.EP_NAME.getExtensions()) {
-            ExternalSystemUtil.refreshProjects(project, manager.getSystemId(), false);
+            final boolean isNewProject = project.getUserData(ExternalSystemDataKeys.NEWLY_CREATED_PROJECT) == Boolean.TRUE;
+            if (isNewProject) {
+              ExternalSystemUtil.refreshProjects(
+                new ImportSpecBuilder(project, manager.getSystemId())
+              );
+            }
+            else {
+              ExternalSystemUtil.refreshProjects(
+                new ImportSpecBuilder(project, manager.getSystemId()).whenAutoImportEnabled()
+              );
+            }
           }
         }
         ExternalSystemAutoImporter.letTheMagicBegin(project);
@@ -61,11 +74,7 @@ public class ExternalSystemStartupActivity implements StartupActivity {
       }
     };
 
-    if (project.isInitialized()) {
-      task.run();
-    }
-    else {
-      StartupManager.getInstance(project).registerPostStartupActivity(task);
-    }
+    ExternalProjectsManager.getInstance(project).init();
+    DumbService.getInstance(project).runWhenSmart(DisposeAwareRunnable.create(task, project));
   }
 }

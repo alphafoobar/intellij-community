@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.refactoring.move.moveInner.MoveInnerDialog;
 import com.intellij.refactoring.move.moveInner.MoveInnerImpl;
 import com.intellij.refactoring.move.moveInner.MoveInnerProcessor;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -36,6 +37,7 @@ public class MoveInnerTest extends MultiFileTestCase {
     return JavaTestUtil.getJavaTestDataPath();
   }
   
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/moveInner/";
@@ -83,6 +85,10 @@ public class MoveInnerTest extends MultiFileTestCase {
     doTest(createAction("p.A.B", "B", false, null, false, false, null));
   }
 
+  public void testConstructorUtilClassVisibility() throws Exception {
+    doTest(createAction("p.A.B", "B", false, null, false, false, null));
+  }
+
   public void testFieldAccessInSuper() throws Exception {
     doTest(createAction("p.A.B", "B", true, "a", false, false, null));
   }
@@ -93,6 +99,10 @@ public class MoveInnerTest extends MultiFileTestCase {
 
   public void testImportStaticOfEnum() throws Exception { // IDEADEV-28619
     doTest(createAction("p.A.E", "E", false, null, false, false, null));
+  }
+
+  public void testInnerInnerClassUsedInTypeParams() throws Exception {
+    doTest(createAction("p.Main.A", "A", false, null, false, false, null));
   }
 
   public void testEnumConstructorVisibility() throws Exception { // IDEADEV-28619

@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.util;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -49,6 +50,7 @@ public class Ref<T> {
     return false;
   }
 
+  @NotNull
   public static <T> Ref<T> create() {
     return new Ref<T>();
   }
@@ -56,6 +58,11 @@ public class Ref<T> {
   public static <T> Ref<T> create(@Nullable T value) {
     return new Ref<T>(value);
   }
+
+  @Nullable
+  public static <T> T deref(@Nullable Ref<T> ref) {
+    return ref == null ? null : ref.get();
+  } 
 
   @Override
   public String toString() {

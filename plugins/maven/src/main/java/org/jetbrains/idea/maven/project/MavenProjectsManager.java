@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,11 @@
  */
 package org.jetbrains.idea.maven.project;
 
-import com.intellij.compiler.CompilerWorkspaceConfiguration;
+import com.intellij.CommonBundle;
 import com.intellij.ide.startup.StartupManagerEx;
+import com.intellij.notification.*;
+import com.intellij.notification.impl.NotificationSettings;
+import com.intellij.notification.impl.NotificationsConfigurationImpl;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
@@ -24,27 +27,34 @@ import com.intellij.openapi.compiler.CompileContext;
 import com.intellij.openapi.compiler.CompileTask;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.components.*;
+import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.ui.AppUIUtil;
 import com.intellij.util.Alarm;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.NullableConsumer;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.Update;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.concurrency.AsyncPromise;
+import org.jetbrains.concurrency.Promise;
 import org.jetbrains.idea.maven.importing.MavenDefaultModifiableModelsProvider;
 import org.jetbrains.idea.maven.importing.MavenFoldersImporter;
 import org.jetbrains.idea.maven.importing.MavenModifiableModelsProvider;
@@ -54,6 +64,7 @@ import org.jetbrains.idea.maven.server.MavenEmbedderWrapper;
 import org.jetbrains.idea.maven.server.NativeMavenProjectHolder;
 import org.jetbrains.idea.maven.utils.*;
 
+import javax.swing.event.HyperlinkEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
@@ -63,6 +74,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MavenProjectsManager extends MavenSimpleProjectComponent
   implements PersistentStateComponent<MavenProjectsManagerState>, SettingsSavingComponent {
   private static final int IMPORT_DELAY = 1000;
+  private static final String NON_MANAGED_POM_NOTIFICATION_GROUP_ID = "Maven: non-managed pom.xml";
+  private static final NotificationGroup NON_MANAGED_POM_NOTIFICATION_GROUP =
+    NotificationGroup.balloonGroup(NON_MANAGED_POM_NOTIFICATION_GROUP_ID);
 
   private final AtomicBoolean isInitialized = new AtomicBoolean();
 
@@ -162,14 +176,15 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     startupManager.registerPostStartupActivity(new Runnable() {
       @Override
       public void run() {
+        if (!isMavenizedProject()) {
+          showNotificationOrphanMavenProject(myProject);
+        }
         CompilerManager.getInstance(myProject).addBeforeTask(new CompileTask() {
           @Override
           public boolean execute(CompileContext context) {
             AccessToken token = ReadAction.start();
 
             try {
-              if (!CompilerWorkspaceConfiguration.getInstance(myProject).useOutOfProcessBuild()) return true;
-
               new MavenResourceCompilerConfigurationGenerator(myProject, myProjectsTree).generateBuildConfiguration(context.isRebuild());
             }
             finally {
@@ -182,13 +197,74 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     });
   }
 
+  private void showNotificationOrphanMavenProject(final Project project) {
+    final NotificationSettings notificationSettings = NotificationsConfigurationImpl.getSettings(NON_MANAGED_POM_NOTIFICATION_GROUP_ID);
+    if (!notificationSettings.isShouldLog() && notificationSettings.getDisplayType().equals(NotificationDisplayType.NONE)) {
+      return;
+    }
+
+    File baseDir = VfsUtilCore.virtualToIoFile(project.getBaseDir());
+    File pomXml = new File(baseDir, "pom.xml");
+
+    if (pomXml.exists()) {
+      final VirtualFile file = VfsUtil.findFileByIoFile(pomXml, true);
+      if (file == null) return;
+
+      showBalloon(
+        ProjectBundle.message("maven.orphan.notification.title"),
+        ProjectBundle.message("maven.orphan.notification.msg", file.getPresentableUrl()),
+        NON_MANAGED_POM_NOTIFICATION_GROUP, NotificationType.INFORMATION, new NotificationListener.Adapter() {
+          @Override
+          protected void hyperlinkActivated(@NotNull Notification notification, @NotNull HyperlinkEvent e) {
+            if ("#add".equals(e.getDescription())) {
+              addManagedFilesOrUnignore(ContainerUtil.list(file));
+              notification.expire();
+            }
+            else if ("#disable".equals(e.getDescription())) {
+              final int result = Messages.showYesNoDialog(
+                myProject,
+                "Notification will be disabled for all projects.\n\n" +
+                "Settings | Appearance & Behavior | Notifications | " +
+                NON_MANAGED_POM_NOTIFICATION_GROUP_ID +
+                "\ncan be used to configure the notification.",
+                "Non-Managed Maven Project Detection",
+                "Disable Notification", CommonBundle.getCancelButtonText(), Messages.getWarningIcon());
+              if (result == Messages.YES) {
+                NotificationsConfigurationImpl.getInstanceImpl().changeSettings(
+                  NON_MANAGED_POM_NOTIFICATION_GROUP_ID, NotificationDisplayType.NONE, false, false);
+                notification.expire();
+              }
+              else {
+                notification.hideBalloon();
+              }
+            }
+          }
+        }
+      );
+    }
+  }
+
+  public void showBalloon(@NotNull final String title,
+                          @NotNull final String message,
+                          @NotNull final NotificationGroup group,
+                          @NotNull final NotificationType type,
+                          @Nullable final NotificationListener listener) {
+    AppUIUtil.invokeLaterIfProjectAlive(myProject, new Runnable() {
+      @Override
+      public void run() {
+        group.createNotification(title, message, type, listener).notify(myProject);
+      }
+    });
+  }
+
   private void initMavenized() {
     doInit(false);
   }
 
-  private void initNew(List<VirtualFile> files, List<String> explicitProfiles) {
+  private void initNew(List<VirtualFile> files, MavenExplicitProfiles explicitProfiles) {
     myState.originalFiles = MavenUtil.collectPaths(files);
-    getWorkspaceSettings().setEnabledProfiles(explicitProfiles);
+    getWorkspaceSettings().setEnabledProfiles(explicitProfiles.getEnabledProfiles());
+    getWorkspaceSettings().setDisabledProfiles(explicitProfiles.getDisabledProfiles());
     doInit(true);
   }
 
@@ -244,7 +320,9 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
   }
 
   private void applyStateToTree() {
-    myProjectsTree.resetManagedFilesPathsAndProfiles(myState.originalFiles, getWorkspaceSettings().enabledProfiles);
+    MavenWorkspaceSettings settings = getWorkspaceSettings();
+    MavenExplicitProfiles explicitProfiles = new MavenExplicitProfiles(settings.enabledProfiles, settings.disabledProfiles);
+    myProjectsTree.resetManagedFilesPathsAndProfiles(myState.originalFiles, explicitProfiles);
     myProjectsTree.setIgnoredFilesPaths(new ArrayList<String>(myState.ignoredFiles));
     myProjectsTree.setIgnoredFilesPatterns(myState.ignoredPathMasks);
   }
@@ -346,6 +424,16 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
         if (haveChanges(toImport) || !deleted.isEmpty()) {
           scheduleForNextImport(toImport);
         }
+
+        if (!deleted.isEmpty() && !hasScheduledProjects()) {
+          MavenProject project = ObjectUtils.chooseNotNull(ContainerUtil.getFirstItem(toResolve),
+                                                           ContainerUtil.getFirstItem(getNonIgnoredProjects()));
+          if (project != null) {
+            scheduleForNextImport(Pair.create(project, MavenProjectChanges.ALL));
+            scheduleForNextResolve(ContainerUtil.list(project));
+          }
+        }
+
         scheduleForNextResolve(toResolve);
 
         fireProjectScheduled();
@@ -457,6 +545,14 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
 
       if (mavenized) {
         m.setOption(getMavenizedModuleOptionName(), "true");
+
+        // clear external system API options
+        // see com.intellij.openapi.externalSystem.service.project.manage.ModuleDataService#setModuleOptions
+        m.clearOption(ExternalSystemConstants.EXTERNAL_SYSTEM_ID_KEY);
+        m.clearOption(ExternalSystemConstants.LINKED_PROJECT_PATH_KEY);
+        m.clearOption(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
+        m.clearOption(ExternalSystemConstants.EXTERNAL_SYSTEM_MODULE_GROUP_KEY);
+        m.clearOption(ExternalSystemConstants.EXTERNAL_SYSTEM_MODULE_VERSION_KEY);
       }
       else {
         m.clearOption(getMavenizedModuleOptionName());
@@ -469,11 +565,11 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
   }
 
   @TestOnly
-  public void resetManagedFilesAndProfilesInTests(List<VirtualFile> files, List<String> profiles) {
+  public void resetManagedFilesAndProfilesInTests(List<VirtualFile> files, MavenExplicitProfiles profiles) {
     myWatcher.resetManagedFilesAndProfilesInTests(files, profiles);
   }
 
-  public void addManagedFilesWithProfiles(List<VirtualFile> files, List<String> profiles) {
+  public void addManagedFilesWithProfiles(List<VirtualFile> files, MavenExplicitProfiles profiles) {
     if (!isInitialized()) {
       initNew(files, profiles);
     }
@@ -483,7 +579,7 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
   }
 
   public void addManagedFiles(@NotNull List<VirtualFile> files) {
-    addManagedFilesWithProfiles(files, Collections.<String>emptyList());
+    addManagedFilesWithProfiles(files, MavenExplicitProfiles.NONE);
   }
 
   public void addManagedFilesOrUnignore(@NotNull List<VirtualFile> files) {
@@ -501,12 +597,12 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
   }
 
   @NotNull
-  public Collection<String> getExplicitProfiles() {
-    if (!isInitialized()) return Collections.emptyList();
+  public MavenExplicitProfiles getExplicitProfiles() {
+    if (!isInitialized()) return MavenExplicitProfiles.NONE;
     return myProjectsTree.getExplicitProfiles();
   }
 
-  public void setExplicitProfiles(@NotNull Collection<String> profiles) {
+  public void setExplicitProfiles(@NotNull MavenExplicitProfiles profiles) {
     myWatcher.setExplicitProfiles(profiles);
   }
 
@@ -686,8 +782,8 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     doScheduleUpdateProjects(null, false, forceImportAndResolve);
   }
 
-  public void forceUpdateProjects(@NotNull Collection<MavenProject> projects) {
-    doScheduleUpdateProjects(projects, true, true);
+  public AsyncPromise<Void> forceUpdateProjects(@NotNull Collection<MavenProject> projects) {
+    return doScheduleUpdateProjects(projects, true, true);
   }
 
   public void forceUpdateAllProjectsOrFindAllAvailablePomFiles() {
@@ -697,31 +793,34 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     doScheduleUpdateProjects(null, true, true);
   }
 
-  private void doScheduleUpdateProjects(final Collection<MavenProject> projects,
-                                        final boolean forceUpdate,
-                                        final boolean forceImportAndResolve) {
+  private AsyncPromise<Void> doScheduleUpdateProjects(final Collection<MavenProject> projects,
+                                                      final boolean forceUpdate,
+                                                      final boolean forceImportAndResolve) {
+    final AsyncPromise<Void> promise = new AsyncPromise<Void>();
     MavenUtil.runWhenInitialized(myProject, new DumbAwareRunnable() {
       public void run() {
         if (projects == null) {
-          myWatcher.scheduleUpdateAll(forceUpdate, forceImportAndResolve);
+          myWatcher.scheduleUpdateAll(forceUpdate, forceImportAndResolve).processed(promise);
         }
         else {
           myWatcher.scheduleUpdate(MavenUtil.collectFiles(projects),
                                    Collections.<VirtualFile>emptyList(),
                                    forceUpdate,
-                                   forceImportAndResolve);
+                                   forceImportAndResolve).processed(promise);
         }
       }
     });
+    return promise;
   }
 
-  public void scheduleImportAndResolve() {
-    scheduleImport();
-    scheduleResolve();
+  public Promise<List<Module>> scheduleImportAndResolve() {
+    AsyncPromise<List<Module>> promise = scheduleResolve();// scheduleImport will be called after the scheduleResolve process has finished
     fireImportAndResolveScheduled();
+    return promise;
   }
 
-  private void scheduleResolve() {
+  private AsyncPromise<List<Module>> scheduleResolve() {
+    final AsyncPromise<List<Module>> result = new AsyncPromise<List<Module>>();
     runWhenFullyOpen(new Runnable() {
       public void run() {
         LinkedHashSet<MavenProject> toResolve;
@@ -737,7 +836,9 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
           Runnable onCompletion = it.hasNext() ? null : new Runnable() {
             @Override
             public void run() {
-              if (hasScheduledProjects()) scheduleImport();
+              if (hasScheduledProjects()) {
+                scheduleImport().processed(result);
+              }
             }
           };
 
@@ -746,6 +847,7 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
         }
       }
     });
+    return result;
   }
 
   public void evaluateEffectivePom(@NotNull final MavenProject mavenProject, @NotNull final NullableConsumer<String> consumer) {
@@ -771,8 +873,10 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
                                                  @Override
                                                  public void run(MavenEmbedderWrapper embedder) throws MavenProcessCanceledException {
                                                    try {
+                                                     MavenExplicitProfiles profiles = mavenProject.getActivatedProfilesIds();
                                                      String res =
-                                                       embedder.evaluateEffectivePom(mavenProject.getFile(), mavenProject.getActivatedProfilesIds());
+                                                       embedder.evaluateEffectivePom(mavenProject.getFile(), profiles.getEnabledProfiles(),
+                                                                                     profiles.getDisabledProfiles());
                                                      consumer.consume(res);
                                                    }
                                                    catch (UnsupportedOperationException e) {
@@ -854,16 +958,18 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     scheduleImport();
   }
 
-  private void scheduleImport() {
+  private Promise<List<Module>> scheduleImport() {
+    final AsyncPromise<List<Module>> result = new AsyncPromise<List<Module>>();
     runWhenFullyOpen(new Runnable() {
       public void run() {
         myImportingQueue.queue(new Update(MavenProjectsManager.this) {
           public void run() {
-            importProjects();
+            result.setResult(importProjects());
           }
         });
       }
     });
+    return result;
   }
 
   @TestOnly
@@ -1006,15 +1112,11 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
   }
 
   public void updateProjectTargetFolders() {
-    updateProjectFolders(true);
-  }
-
-  private void updateProjectFolders(final boolean targetFoldersOnly) {
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
+    ApplicationManager.getApplication().invokeLater(new Runnable() {
       public void run() {
         if (myProject.isDisposed()) return;
 
-        MavenFoldersImporter.updateProjectFolders(myProject, targetFoldersOnly);
+        MavenFoldersImporter.updateProjectFolders(myProject, true);
         VirtualFileManager.getInstance().asyncRefresh(null);
       }
     });
@@ -1085,7 +1187,7 @@ public class MavenProjectsManager extends MavenSimpleProjectComponent
     return projectImporter.getCreatedModules();
   }
 
-  private Map<VirtualFile, Module> getFileToModuleMapping(MavenModelsProvider modelsProvider) {
+  private static Map<VirtualFile, Module> getFileToModuleMapping(MavenModelsProvider modelsProvider) {
     Map<VirtualFile, Module> result = new THashMap<VirtualFile, Module>();
     for (Module each : modelsProvider.getModules()) {
       VirtualFile f = findPomFile(each, modelsProvider);

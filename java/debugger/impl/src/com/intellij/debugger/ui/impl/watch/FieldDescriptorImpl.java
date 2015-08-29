@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,32 +17,26 @@ package com.intellij.debugger.ui.impl.watch;
 
 import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.DebuggerContext;
-import com.intellij.debugger.SourcePosition;
-import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.DebuggerUtils;
-import com.intellij.debugger.engine.JVMNameUtil;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
-import com.intellij.debugger.impl.DebuggerContextImpl;
-import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.debugger.impl.PositionUtil;
-import com.intellij.debugger.settings.NodeRendererSettings;
 import com.intellij.debugger.ui.tree.FieldDescriptor;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
-import com.intellij.debugger.ui.tree.render.ClassRenderer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
-import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.StringBuilderSpinAllocator;
-import com.sun.jdi.*;
+import com.sun.jdi.Field;
+import com.sun.jdi.ObjectCollectedException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.Value;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.List;
+import org.jetbrains.annotations.Nullable;
 
 public class FieldDescriptorImpl extends ValueDescriptorImpl implements FieldDescriptor{
   public static final String OUTER_LOCAL_VAR_FIELD_PREFIX = "val$";
@@ -59,78 +53,17 @@ public class FieldDescriptorImpl extends ValueDescriptorImpl implements FieldDes
     setLvalue(!field.isFinal());
   }
 
+  @Override
   public Field getField() {
     return myField;
   }
 
+  @Override
   public ObjectReference getObject() {
     return myObject;
   }
 
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public SourcePosition getSourcePosition(final Project project, final DebuggerContextImpl context) {
-    if (context.getFrameProxy() == null) {
-      return null;
-    }
-    final ReferenceType type = myField.declaringType();
-    final JavaPsiFacade facade = JavaPsiFacade.getInstance(project);
-    final String fieldName = myField.name();
-    if (fieldName.startsWith(OUTER_LOCAL_VAR_FIELD_PREFIX)) {
-      // this field actually mirrors a local variable in the outer class
-      String varName = fieldName.substring(fieldName.lastIndexOf('$') + 1);
-      PsiElement element = PositionUtil.getContextElement(context);
-      if (element == null) {
-        return null;
-      }
-      PsiClass aClass = PsiTreeUtil.getParentOfType(element, PsiClass.class, false);
-      if (aClass == null) {
-        return null;
-      }
-      aClass = (PsiClass) aClass.getNavigationElement();
-      PsiVariable psiVariable = facade.getResolveHelper().resolveReferencedVariable(varName, aClass);
-      if (psiVariable == null) {
-        return null;
-      }
-      return SourcePosition.createFromOffset(psiVariable.getContainingFile(), psiVariable.getTextOffset());
-    }
-    else {
-      final DebuggerSession session = context.getDebuggerSession();
-      final GlobalSearchScope scope = session != null? session.getSearchScope() : GlobalSearchScope.allScope(myProject);
-      PsiClass aClass = facade.findClass(type.name().replace('$', '.'), scope);
-      if (aClass == null) {
-        // trying to search, assuming declaring class is an anonymous class
-        final DebugProcessImpl debugProcess = context.getDebugProcess();
-        if (debugProcess != null) {
-          try {
-            final List<Location> locations = type.allLineLocations();
-            if (!locations.isEmpty()) {
-              // important: use the last location to be sure the position will be within the anonymous class
-              final Location lastLocation = locations.get(locations.size() - 1);
-              final SourcePosition position = debugProcess.getPositionManager().getSourcePosition(lastLocation);
-              if (position != null) {
-                aClass = JVMNameUtil.getClassAt(position);
-              }
-            }
-          }
-          catch (AbsentInformationException ignored) {
-          }
-          catch (ClassNotPreparedException ignored) {
-          }
-        }
-      }
-
-      if (aClass != null) {
-        aClass = (PsiClass) aClass.getNavigationElement();
-        for (PsiField field : aClass.getFields()) {
-          if (fieldName.equals(field.getName())) {
-            return SourcePosition.createFromOffset(field.getContainingFile(), field.getTextOffset());
-          }
-        }
-      }
-      return null;
-    }
-  }
-
+  @Override
   public void setAncestor(NodeDescriptor oldDescriptor) {
     super.setAncestor(oldDescriptor);
     final Boolean isPrimitive = ((FieldDescriptorImpl)oldDescriptor).myIsPrimitive;
@@ -141,6 +74,7 @@ public class FieldDescriptorImpl extends ValueDescriptorImpl implements FieldDes
   }
 
 
+  @Override
   public boolean isPrimitive() {
     if (myIsPrimitive == null) {
       final Value value = getValue();
@@ -148,18 +82,19 @@ public class FieldDescriptorImpl extends ValueDescriptorImpl implements FieldDes
         myIsPrimitive = super.isPrimitive();
       }
       else {
-        myIsPrimitive = DebuggerUtils.isPrimitiveType(myField.typeName()) ? Boolean.TRUE : Boolean.FALSE;
+        myIsPrimitive = DebuggerUtils.isPrimitiveType(myField.typeName());
       }
     }
     return myIsPrimitive.booleanValue();
   }
 
+  @Override
   public Value calcValue(EvaluationContextImpl evaluationContext) throws EvaluateException {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     try {
       return (myObject != null) ? myObject.getValue(myField) : myField.declaringType().getValue(myField);
     }
-    catch (ObjectCollectedException e) {
+    catch (ObjectCollectedException ignored) {
       throw EvaluateExceptionUtil.OBJECT_WAS_COLLECTED;
     }
   }
@@ -168,39 +103,27 @@ public class FieldDescriptorImpl extends ValueDescriptorImpl implements FieldDes
     return myIsStatic;
   }
 
+  @Override
   public String getName() {
-    final String fieldName = myField.name();
-    if (isOuterLocalVariableValue() && NodeRendererSettings.getInstance().getClassRenderer().SHOW_VAL_FIELDS_AS_LOCAL_VARIABLES) {
-      return StringUtil.trimStart(fieldName, OUTER_LOCAL_VAR_FIELD_PREFIX);
-    }
-    return fieldName;
+    return myField.name();
   }
 
   public boolean isOuterLocalVariableValue() {
     try {
       return DebuggerUtils.isSynthetic(myField) && myField.name().startsWith(OUTER_LOCAL_VAR_FIELD_PREFIX);
     }
-    catch (UnsupportedOperationException e) {
+    catch (UnsupportedOperationException ignored) {
       return false;
     }
   }
 
-  public String calcValueName() {
-    final ClassRenderer classRenderer = NodeRendererSettings.getInstance().getClassRenderer();
-    StringBuilder buf = StringBuilderSpinAllocator.alloc();
-    try {
-      buf.append(getName());
-      if (classRenderer.SHOW_DECLARED_TYPE) {
-        buf.append(": ");
-        buf.append(classRenderer.renderTypeName(myField.typeName()));
-      }
-      return buf.toString();
-    }
-    finally {
-      StringBuilderSpinAllocator.dispose(buf);
-    }
+  @Nullable
+  @Override
+  public String getDeclaredType() {
+    return myField.typeName();
   }
 
+  @Override
   public PsiExpression getDescriptorEvaluation(DebuggerContext context) throws EvaluateException {
     PsiElementFactory elementFactory = JavaPsiFacade.getInstance(context.getProject()).getElementFactory();
     String fieldName;

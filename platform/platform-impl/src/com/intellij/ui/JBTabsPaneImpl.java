@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.tabs.*;
+import com.intellij.ui.tabs.impl.JBEditorTabs;
 import com.intellij.ui.tabs.impl.JBTabsImpl;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -33,12 +34,33 @@ import java.awt.event.MouseListener;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 public class JBTabsPaneImpl implements TabbedPane, SwingConstants {
-
-  private final JBTabs myTabs;
+  private final JBTabsImpl myTabs;
   private final CopyOnWriteArraySet<ChangeListener> myListeners = new CopyOnWriteArraySet<ChangeListener>();
 
   public JBTabsPaneImpl(@Nullable Project project, int tabPlacement, @NotNull Disposable parent) {
-    myTabs = new JBTabsImpl(project, ActionManager.getInstance(), project == null ? null : IdeFocusManager.getInstance(project), parent);
+    myTabs = new JBEditorTabs(project, ActionManager.getInstance(), project == null ? null : IdeFocusManager.getInstance(project), parent) {
+      @Override
+      public boolean isAlphabeticalMode() {
+        return false;
+      }
+
+      @Override
+      public boolean supportsCompression() {
+        return false;
+      }
+
+      @Override
+      protected Color getEmptySpaceColor() {
+        return UIUtil.getBgFillColor(getParent());
+      }
+
+      @Override
+      protected void paintSelectionAndBorder(Graphics2D g2d) {
+        super.paintSelectionAndBorder(g2d);
+      }
+    };
+    myTabs.setFirstTabOffset(10);
+
     myTabs.addListener(new TabsListener.Adapter() {
       @Override
       public void selectionChanged(TabInfo oldSelection, TabInfo newSelection) {

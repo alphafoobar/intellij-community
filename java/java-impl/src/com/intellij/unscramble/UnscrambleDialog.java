@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ public class UnscrambleDialog extends DialogWrapper {
   protected AnalyzeStacktraceUtil.StacktraceEditorPanel myStacktraceEditorPanel;
   private VcsContentAnnotationConfigurable myConfigurable;
 
-  public UnscrambleDialog(Project project) {
+  public UnscrambleDialog(@NotNull Project project) {
     super(false);
     myProject = project;
 
@@ -124,7 +124,7 @@ public class UnscrambleDialog extends DialogWrapper {
     myLogFile.setHistorySize(10);
     myLogFile.setHistory(savedUrls);
 
-    String lastUrl = getLastUsedLogUrl();
+    String lastUrl = getPropertyValue(PROPERTY_LOG_FILE_LAST_URL);
     if (lastUrl == null && !savedUrls.isEmpty()) {
       lastUrl = savedUrls.get(savedUrls.size() - 1);
     }
@@ -167,14 +167,10 @@ public class UnscrambleDialog extends DialogWrapper {
     }
   }
 
-  public static String getLastUsedLogUrl() {
-    return PropertiesComponent.getInstance().getValue(PROPERTY_LOG_FILE_LAST_URL);
-  }
-
   @Nullable
-  public static UnscrambleSupport getSavedUnscrambler() {
+  private UnscrambleSupport getSavedUnscrambler() {
     final List<UnscrambleSupport> registeredUnscramblers = getRegisteredUnscramblers();
-    final String savedUnscramblerName = PropertiesComponent.getInstance().getValue(PROPERTY_UNSCRAMBLER_NAME_USED);
+    final String savedUnscramblerName = getPropertyValue(PROPERTY_UNSCRAMBLER_NAME_USED);
     UnscrambleSupport selectedUnscrambler = null;
     for (final UnscrambleSupport unscrambleSupport : registeredUnscramblers) {
       if (Comparing.strEqual(unscrambleSupport.getPresentableName(), savedUnscramblerName)) {
@@ -184,6 +180,7 @@ public class UnscrambleDialog extends DialogWrapper {
     return selectedUnscrambler;
   }
 
+  @NotNull
   public static List<String> getSavedLogFileUrls() {
     final List<String> res = new ArrayList<String>();
     final String savedUrl = PropertiesComponent.getInstance().getValue(PROPERTY_LOG_FILE_HISTORY_URLS);
@@ -212,7 +209,8 @@ public class UnscrambleDialog extends DialogWrapper {
   }
 
   public JComponent getPreferredFocusedComponent() {
-    return getRootPane().getDefaultButton();
+    JRootPane pane = getRootPane();
+    return pane != null ? pane.getDefaultButton() : super.getPreferredFocusedComponent();
   }
 
   private void createLogFileChooser() {
@@ -256,24 +254,22 @@ public class UnscrambleDialog extends DialogWrapper {
 
   public void dispose() {
     if (isOK()){
-      final List list = myLogFile.getHistory();
-      String res = null;
-      for (Object aList : list) {
-        final String s = (String)aList;
-        if (res == null) {
-          res = s;
-        }
-        else {
-          res = res + ":::" + s;
-        }
-      }
-      PropertiesComponent.getInstance().setValue(PROPERTY_LOG_FILE_HISTORY_URLS, res);
+      final List<String> list = myLogFile.getHistory();
+      PropertiesComponent.getInstance().setValue(PROPERTY_LOG_FILE_HISTORY_URLS, list.isEmpty() ? null : StringUtil.join(list, ":::"), null);
       UnscrambleSupport selectedUnscrambler = getSelectedUnscrambler();
-      PropertiesComponent.getInstance().setValue(PROPERTY_UNSCRAMBLER_NAME_USED, selectedUnscrambler == null ? null : selectedUnscrambler.getPresentableName());
-
-      PropertiesComponent.getInstance().setValue(PROPERTY_LOG_FILE_LAST_URL, myLogFile.getText());
+      PropertiesComponent.getInstance().setValue(PROPERTY_UNSCRAMBLER_NAME_USED, selectedUnscrambler == null ? null : selectedUnscrambler.getPresentableName(), null);
+      PropertiesComponent.getInstance().setValue(PROPERTY_LOG_FILE_LAST_URL, StringUtil.nullize(myLogFile.getText()), null);
     }
     super.dispose();
+  }
+
+  @Nullable
+  private String getPropertyValue(@NotNull String name) {
+    String projectValue = PropertiesComponent.getInstance(myProject).getValue(name);
+    if (projectValue != null) {
+      return projectValue;
+    }
+    return PropertiesComponent.getInstance().getValue(name);
   }
 
   public void setText(String trace) {
@@ -294,7 +290,6 @@ public class UnscrambleDialog extends DialogWrapper {
       String text = myStacktraceEditorPanel.getText();
       myStacktraceEditorPanel.setText(normalizeText(text));
     }
-
   }
 
   public static String normalizeText(@NonNls String text) {
@@ -315,8 +310,12 @@ public class UnscrambleDialog extends DialogWrapper {
         builder.append(trimSuffix(line)).append("\n");
         continue;
       }
-      if (!first && mustHaveNewLineBefore(line)) {
-        builder.append("\n");
+      if (line.startsWith("at breakpoint")) { // possible thread status mixed with "at ..."
+        builder.append(" ").append(trimSuffix(line));
+        continue;
+      }
+      if (!first && (mustHaveNewLineBefore(line) || StringUtil.endsWith(builder, ")"))) {
+        if (!StringUtil.endsWith(builder, "\n")) builder.append("\n");
         if (line.startsWith("\"")) builder.append("\n"); // Additional line break for thread names
       }
       first = false;

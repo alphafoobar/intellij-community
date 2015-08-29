@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,10 @@ import java.io.FilenameFilter;
  * @author yole
  */
 public class ProjectCheckoutListener implements CheckoutListener {
+
+  public ProjectCheckoutListener() {
+  }
+
   @Override
   public boolean processCheckedOutDirectory(Project project, File directory) {
     File[] files = directory.listFiles((FilenameFilter) new GlobFilenameFilter("*" + ProjectFileType.DOT_DEFAULT_EXTENSION));
@@ -55,7 +59,7 @@ public class ProjectCheckoutListener implements CheckoutListener {
     final ApplicationNamesInfo namesInfo = ApplicationNamesInfo.getInstance();
     // example: "to create an IntelliJ IDEA project" (full product name is ok);
     // "to create a JetBrains Astella project" (better use not full product name: "to create an Astella project")
-    final String productName = PlatformUtils.isIdea() ? namesInfo.getFullProductName() : namesInfo.getProductName();
+    final String productName = PlatformUtils.isIdeaUltimate() ? namesInfo.getFullProductName() : namesInfo.getProductName();
     final String article = StringUtil.isVowel(Character.toLowerCase(productName.charAt(0))) ? "an " : "a ";
     return article + productName;
   }

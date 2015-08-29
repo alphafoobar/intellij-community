@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.documentation;
 
+import com.google.common.collect.Lists;
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -27,6 +28,7 @@ import com.intellij.psi.PsiElement;
 import com.jetbrains.python.PythonHelpersLocator;
 import com.jetbrains.python.psi.StructuredDocString;
 import com.jetbrains.python.sdk.PySdkUtil;
+import com.jetbrains.python.sdk.PythonEnvUtil;
 import com.jetbrains.python.sdk.PythonSdkType;
 import com.jetbrains.python.toolbox.Substring;
 import org.jetbrains.annotations.NotNull;
@@ -36,7 +38,9 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author yole
@@ -50,8 +54,12 @@ public class PyStructuredDocstringFormatter {
   @Nullable
   public static List<String> formatDocstring(@NotNull final PsiElement element, @NotNull final String docstring) {
     Module module = ModuleUtilCore.findModuleForPsiElement(element);
-    if (module == null) module = ModuleManager.getInstance(element.getProject()).getModules()[0];
-
+    if (module == null) {
+      final Module[] modules = ModuleManager.getInstance(element.getProject()).getModules();
+      if (modules.length == 0) return Lists.newArrayList();
+      module = modules[0];
+    }
+    if (module == null) return Lists.newArrayList();
     final PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(module);
     final List<String> result = new ArrayList<String>();
 
@@ -95,15 +103,16 @@ public class PyStructuredDocstringFormatter {
     if (sdkHome == null) return null;
 
     final Charset charset = EncodingProjectManager.getInstance(module.getProject()).getDefaultCharset();
-    if (charset == null) return null;
 
     final ByteBuffer encoded = charset.encode(docstring);
     final byte[] data = new byte[encoded.limit()];
     encoded.get(data);
 
+    final Map<String, String> env = new HashMap<String, String>();
+    PythonEnvUtil.setPythonDontWriteBytecode(env);
 
     final ProcessOutput output = PySdkUtil.getProcessOutput(new File(sdkHome).getParent(), new String[]{sdkHome, formatter},
-                                                            null, 5000, data, true);
+                                                            env, 5000, data, true);
     if (output.isTimeout()) {
       LOG.info("timeout when calculating docstring");
       return null;

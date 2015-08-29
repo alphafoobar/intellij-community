@@ -19,12 +19,13 @@ import com.intellij.navigation.GotoRelatedItem;
 import com.intellij.navigation.GotoRelatedProvider;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -35,11 +36,14 @@ public class GotoTestRelatedProvider extends GotoRelatedProvider {
   @Override
   public List<? extends GotoRelatedItem> getItems(@NotNull DataContext context) {
     final PsiFile file = CommonDataKeys.PSI_FILE.getData(context);
-    List<PsiElement> result;
+    if (file == null) return Collections.emptyList();
+
+    Collection<PsiElement> result;
     final boolean isTest = TestFinderHelper.isTest(file);
     if (isTest) {
       result = TestFinderHelper.findClassesForTest(file);
-    } else {
+    }
+    else {
       result = TestFinderHelper.findTestsForClass(file);
     }
 
@@ -50,6 +54,6 @@ public class GotoTestRelatedProvider extends GotoRelatedProvider {
       }
       return items;
     }
-    return super.getItems(context);
+    return Collections.emptyList();
   }
 }

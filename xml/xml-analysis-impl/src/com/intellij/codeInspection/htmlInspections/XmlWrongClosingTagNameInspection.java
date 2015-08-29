@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.html.HtmlTag;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.xml.XmlElementType;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.psi.xml.XmlToken;
 import com.intellij.psi.xml.XmlTokenType;
@@ -104,8 +103,8 @@ public class XmlWrongClosingTagNameInspection implements Annotator {
         }
       }
     }
-    final String tagName = tag instanceof HtmlTag ? tag.getName().toLowerCase() : tag.getName();
-    final String endTokenText = tag instanceof HtmlTag ? end.getText().toLowerCase() : end.getText();
+    final String tagName = tag.getName();
+    final String endTokenText = end.getText();
 
     final RenameTagBeginOrEndIntentionAction renameEndAction = new RenameTagBeginOrEndIntentionAction(tagName, endTokenText, false);
     final RenameTagBeginOrEndIntentionAction renameStartAction = new RenameTagBeginOrEndIntentionAction(endTokenText, tagName, true);
@@ -129,8 +128,8 @@ public class XmlWrongClosingTagNameInspection implements Annotator {
         }
       }
     }
-    final String tagName = tag instanceof HtmlTag ? tag.getName().toLowerCase() : tag.getName();
-    final String endTokenText = tag instanceof HtmlTag ? end.getText().toLowerCase() : end.getText();
+    final String tagName = tag.getName();
+    final String endTokenText = end.getText();
 
     final RenameTagBeginOrEndIntentionAction renameEndAction = new RenameTagBeginOrEndIntentionAction(tagName, endTokenText, false);
     final RenameTagBeginOrEndIntentionAction renameStartAction = new RenameTagBeginOrEndIntentionAction(endTokenText, tagName, true);
@@ -154,8 +153,8 @@ public class XmlWrongClosingTagNameInspection implements Annotator {
     while (current != null) {
       final IElementType elementType = prev.getElementType();
 
-      if ((elementType == XmlElementType.XML_NAME || elementType == XmlElementType.XML_TAG_NAME) &&
-          current.getElementType() == XmlElementType.XML_END_TAG_START) {
+      if ((elementType == XmlTokenType.XML_NAME || elementType == XmlTokenType.XML_TAG_NAME) &&
+          current.getElementType() == XmlTokenType.XML_END_TAG_START) {
         return (XmlToken)prev.getPsi();
       }
 

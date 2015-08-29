@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Couple;
 import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
@@ -45,12 +45,35 @@ public class PsiEquivalenceUtil {
                                               @NotNull PsiElement element2,
                                               @Nullable Comparator<PsiElement> resolvedElementsComparator,
                                               boolean areCommentsSignificant) {
-    return areElementsEquivalent(element1, element2, resolvedElementsComparator, null, null, areCommentsSignificant);
+    return areElementsEquivalent(element1, element2, new ReferenceComparator(resolvedElementsComparator), null, null, areCommentsSignificant);
   }
 
   public static boolean areElementsEquivalent(@NotNull PsiElement element1,
                                               @NotNull PsiElement element2,
                                               @Nullable Comparator<PsiElement> resolvedElementsComparator,
+                                              @Nullable Comparator<PsiElement> leafElementsComparator) {
+    return areElementsEquivalent(element1, element2, new ReferenceComparator(resolvedElementsComparator), leafElementsComparator, null, false);
+  }
+
+  private static class ReferenceComparator implements Comparator<PsiReference> {
+    private @Nullable final Comparator<PsiElement> myResolvedElementsComparator;
+
+    ReferenceComparator(@Nullable Comparator<PsiElement> resolvedElementsComparator) {
+      myResolvedElementsComparator = resolvedElementsComparator;
+    }
+
+    @Override
+    public int compare(PsiReference ref1, PsiReference ref2) {
+      PsiElement resolved1 = ref1.resolve();
+      PsiElement resolved2 = ref2.resolve();
+      return Comparing.equal(resolved1, resolved2) ||
+             myResolvedElementsComparator != null && myResolvedElementsComparator.compare(resolved1, resolved2) == 0 ? 0 : 1;
+    }
+  }
+
+  public static boolean areElementsEquivalent(@NotNull PsiElement element1,
+                                              @NotNull PsiElement element2,
+                                              @NotNull Comparator<PsiReference> referenceComparator,
                                               @Nullable Comparator<PsiElement> leafElementsComparator,
                                               @Nullable Condition<PsiElement> isElementSignificantCondition,
                                               boolean areCommentsSignificant) {
@@ -67,7 +90,7 @@ public class PsiEquivalenceUtil {
     for (int i = 0; i < children1.length; i++) {
       PsiElement child1 = children1[i];
       PsiElement child2 = children2[i];
-      if (!areElementsEquivalent(child1, child2, resolvedElementsComparator,
+      if (!areElementsEquivalent(child1, child2, referenceComparator,
                                  leafElementsComparator, isElementSignificantCondition, areCommentsSignificant)) return false;
     }
 
@@ -84,13 +107,9 @@ public class PsiEquivalenceUtil {
     if (ref1 != null) {
       PsiReference ref2 = element2.getReference();
       if (ref2 == null) return false;
-      PsiElement resolved1 = ref1.resolve();
-      PsiElement resolved2 = ref2.resolve();
-      if (!Comparing.equal(resolved1, resolved2)
-          && (resolvedElementsComparator == null || resolvedElementsComparator.compare(resolved1, resolved2) != 0)) return false;
+      if (referenceComparator.compare(ref1, ref2) != 0) return false;
     }
     return true;
-
   }
 
   public static boolean areElementsEquivalent(@NotNull PsiElement element1, @NotNull PsiElement element2) {
@@ -113,12 +132,12 @@ public class PsiEquivalenceUtil {
   }
 
   public static void findChildRangeDuplicates(PsiElement first, PsiElement last,
-                                              final List<Pair<PsiElement, PsiElement>> result,
+                                              final List<Couple<PsiElement>> result,
                                               PsiElement scope) {
     findChildRangeDuplicates(first, last, scope, new PairConsumer<PsiElement, PsiElement>() {
       @Override
       public void consume(final PsiElement start, final PsiElement end) {
-        result.add(new Pair<PsiElement, PsiElement>(start, end));
+        result.add(Couple.of(start, end));
       }
     });
   }

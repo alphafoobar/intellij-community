@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,55 +17,61 @@ package com.intellij.ide.plugins;
 
 import com.intellij.ide.ui.search.SearchableOptionsRegistrar;
 import com.intellij.openapi.extensions.PluginId;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.SortableColumnModel;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 
 /**
- * Created by IntelliJ IDEA.
- * User: stathik
- * Date: Dec 26, 2003
- * Time: 4:16:50 PM
- * To change this template use Options | File Templates.
+ * @author stathik
+ * @author Konstantin Bulenkov
  */
-abstract public class PluginTableModel extends AbstractTableModel implements SortableColumnModel {
+public abstract class PluginTableModel extends AbstractTableModel implements SortableColumnModel {
   protected static final String NAME = "Name";
+
   protected ColumnInfo[] columns;
-  protected List<IdeaPluginDescriptor> view;
+  protected final List<IdeaPluginDescriptor> view = ContainerUtil.newArrayList();
+  protected final List<IdeaPluginDescriptor> filtered = ContainerUtil.newArrayList();
+
   private RowSorter.SortKey myDefaultSortKey;
-  protected final List<IdeaPluginDescriptor> filtered = new ArrayList<IdeaPluginDescriptor>();
   private boolean mySortByStatus;
+  private boolean mySortByRating;
+  private boolean mySortByDownloads;
+  private boolean mySortByUpdated;
 
-  protected PluginTableModel() {
-  }
-
-  public PluginTableModel(ColumnInfo... columns) {
-    this.columns = columns;
-  }
+  protected PluginTableModel() { }
 
   public void setSortKey(final RowSorter.SortKey sortKey) {
     myDefaultSortKey = sortKey;
   }
 
+  @Override
   public int getColumnCount() {
     return columns.length;
   }
 
+  @Override
   public ColumnInfo[] getColumnInfos() {
     return columns;
   }
 
+  @Override
   public boolean isSortable() {
     return true;
   }
 
+  @Override
   public void setSortable(boolean aBoolean) {
     // do nothing cause it's always sortable
   }
 
+  @Override
   public String getColumnName(int column) {
     return columns[column].getName();
   }
@@ -84,25 +90,29 @@ abstract public class PluginTableModel extends AbstractTableModel implements Sor
     return myDefaultSortKey;
   }
 
+  @Override
   public int getRowCount() {
     return view.size();
   }
 
+  @Override
   public Object getValueAt(int rowIndex, int columnIndex) {
     return columns[columnIndex].valueOf(getObjectAt(rowIndex));
   }
 
+  @Override
   public boolean isCellEditable(final int rowIndex, final int columnIndex) {
     return columns[columnIndex].isCellEditable(getObjectAt(rowIndex));
   }
 
+  @Override
   public void setValueAt(final Object aValue, final int rowIndex, final int columnIndex) {
     columns[columnIndex].setValue(getObjectAt(rowIndex), aValue);
     fireTableCellUpdated(rowIndex, columnIndex);
   }
 
-  public ArrayList<IdeaPluginDescriptorImpl> dependent(IdeaPluginDescriptorImpl plugin) {
-    ArrayList<IdeaPluginDescriptorImpl> list = new ArrayList<IdeaPluginDescriptorImpl>();
+  public List<IdeaPluginDescriptorImpl> dependent(IdeaPluginDescriptorImpl plugin) {
+    List<IdeaPluginDescriptorImpl> list = new ArrayList<IdeaPluginDescriptorImpl>();
     for (IdeaPluginDescriptor any : getAllPlugins()) {
       if (any instanceof IdeaPluginDescriptorImpl) {
         PluginId[] dep = any.getDependentPluginIds();
@@ -119,44 +129,30 @@ abstract public class PluginTableModel extends AbstractTableModel implements Sor
 
   public abstract void updatePluginsList(List<IdeaPluginDescriptor> list);
 
-  public void filter(List<IdeaPluginDescriptor> filtered){
-    fireTableDataChanged();
-  }
-
   protected void filter(String filter) {
-    final SearchableOptionsRegistrar optionsRegistrar = SearchableOptionsRegistrar.getInstance();
-    final Set<String> search = optionsRegistrar.getProcessedWords(filter);
+    Set<String> search = SearchableOptionsRegistrar.getInstance().getProcessedWords(filter);
+    List<IdeaPluginDescriptor> allPlugins = getAllPlugins();
 
-    final ArrayList<IdeaPluginDescriptor> desc = new ArrayList<IdeaPluginDescriptor>();
-
-    final List<IdeaPluginDescriptor> toProcess = toProcess();
-    for (IdeaPluginDescriptor descriptor : filtered) {
-      if (!toProcess.contains(descriptor)) {
-        toProcess.add(descriptor);
-      }
-    }
+    view.clear();
     filtered.clear();
-    for (IdeaPluginDescriptor descriptor : toProcess) {
-      if (isPluginDescriptorAccepted(descriptor) &&
-          PluginManagerMain.isAccepted(filter, search, descriptor)) {
-        desc.add(descriptor);
+
+    for (IdeaPluginDescriptor descriptor : allPlugins) {
+      if (isPluginDescriptorAccepted(descriptor) && PluginManagerMain.isAccepted(filter, search, descriptor)) {
+        view.add(descriptor);
       }
       else {
         filtered.add(descriptor);
       }
     }
-    filter(desc);
-  }
 
-  protected ArrayList<IdeaPluginDescriptor> toProcess() {
-    return new ArrayList<IdeaPluginDescriptor>(view);
+    fireTableDataChanged();
   }
 
   public abstract int getNameColumn();
 
   public abstract boolean isPluginDescriptorAccepted(IdeaPluginDescriptor descriptor);
 
-  protected void sort() {
+  public void sort() {
     Collections.sort(view, columns[getNameColumn()].getComparator());
     fireTableDataChanged();
   }
@@ -168,9 +164,33 @@ abstract public class PluginTableModel extends AbstractTableModel implements Sor
   public void setSortByStatus(boolean sortByStatus) {
     mySortByStatus = sortByStatus;
   }
-  
+
+  public boolean isSortByRating() {
+    return mySortByRating;
+  }
+
+  public void setSortByRating(boolean sortByRating) {
+    mySortByRating = sortByRating;
+  }
+
+  public boolean isSortByDownloads() {
+    return mySortByDownloads;
+  }
+
+  public void setSortByDownloads(boolean sortByDownloads) {
+    mySortByDownloads = sortByDownloads;
+  }
+
+  public boolean isSortByUpdated() {
+    return mySortByUpdated;
+  }
+
+  public void setSortByUpdated(boolean sortByUpdated) {
+    mySortByUpdated = sortByUpdated;
+  }
+
   public List<IdeaPluginDescriptor> getAllPlugins() {
-    final ArrayList<IdeaPluginDescriptor> list = new ArrayList<IdeaPluginDescriptor>();
+    List<IdeaPluginDescriptor> list = ContainerUtil.newArrayListWithCapacity(view.size() + filtered.size());
     list.addAll(view);
     list.addAll(filtered);
     return list;

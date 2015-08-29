@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.jetbrains.python.psi.impl;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.ExtensionException;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
@@ -50,18 +51,20 @@ import java.util.*;
  */
 public class PyReferenceExpressionImpl extends PyElementImpl implements PyReferenceExpression {
   private static final Logger LOG = Logger.getInstance("#com.jetbrains.python.psi.impl.PyReferenceExpressionImpl");
+  private QualifiedName myQualifiedName = null;
 
   public PyReferenceExpressionImpl(ASTNode astNode) {
     super(astNode);
   }
 
-  @Override
   @NotNull
+  @Override
   public PsiPolyVariantReference getReference() {
     return getReference(PyResolveContext.defaultContext());
   }
 
   @NotNull
+  @Override
   public PsiPolyVariantReference getReference(PyResolveContext context) {
     final PsiFile file = getContainingFile();
     final PyExpression qualifier = getQualifier();
@@ -99,6 +102,11 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
     return (PyExpression)(nodes.length == 1 ? nodes[0].getPsi() : null);
   }
 
+  @Override
+  public boolean isQualified() {
+    return getQualifier() != null;
+  }
+
   @Nullable
   public String getReferencedName() {
     final ASTNode nameElement = getNameElement();
@@ -117,7 +125,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
   }
 
 
-  private final QualifiedResolveResult EMPTY_RESULT = new QualifiedResolveResultEmpty();
+  private static final QualifiedResolveResult EMPTY_RESULT = new QualifiedResolveResultEmpty();
 
   @NotNull
   public QualifiedResolveResult followAssignmentsChain(PyResolveContext resolveContext) {
@@ -173,7 +181,10 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
 
   @Nullable
   public QualifiedName asQualifiedName() {
-    return PyQualifiedNameFactory.fromReferenceChain(PyResolveUtil.unwindQualifiers(this));
+    if (myQualifiedName == null) {
+      myQualifiedName = PyPsiUtils.asQualifiedName(this);
+    }
+    return myQualifiedName;
   }
 
   @Override
@@ -186,8 +197,8 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
       return null;
     }
     try {
-      final PyExpression qualifier = getQualifier();
-      if (qualifier == null) {
+      final boolean qualified = isQualified();
+      if (!qualified) {
         String name = getReferencedName();
         if (PyNames.NONE.equals(name)) {
           return PyNoneType.INSTANCE;
@@ -197,7 +208,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
       if (type != null) {
         return type;
       }
-      if (qualifier != null) {
+      if (qualified) {
         PyType maybe_type = PyUtil.getSpecialAttributeType(this, context);
         if (maybe_type != null) return maybe_type;
         Ref<PyType> typeOfProperty = getTypeOfProperty(context);
@@ -205,12 +216,14 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
           return typeOfProperty.get();
         }
       }
-      ResolveResult[] targets = getReference(PyResolveContext.noImplicits().withTypeEvalContext(context)).multiResolve(false);
-      if (targets.length == 0) {
+      final PsiPolyVariantReference reference = getReference(PyResolveContext.noImplicits().withTypeEvalContext(context));
+      final List<PsiElement> targets = PyUtil.multiResolveTopPriority(reference);
+      if (targets.isEmpty()) {
         return getQualifiedReferenceTypeByControlFlow(context);
       }
-      for (ResolveResult resolveResult : targets) {
-        PsiElement target = resolveResult.getElement();
+
+      final List<PyType> members = new ArrayList<PyType>();
+      for (PsiElement target : targets) {
         if (target == this || target == null) {
           continue;
         }
@@ -218,12 +231,10 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
           LOG.error("Reference " + this + " resolved to invalid element " + target + " (text=" + target.getText() + ")");
           continue;
         }
-        type = getTypeFromTarget(target, context, this);
-        if (type != null) {
-          return type;
-        }
+        members.add(getTypeFromTarget(target, context, this));
       }
-      return null;
+
+      return PyUnionType.union(members);
     }
     finally {
       TypeEvalStack.evaluated(this);
@@ -264,7 +275,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
     if (qualifierType instanceof PyClassType) {
       final PyClassType classType = (PyClassType)qualifierType;
       PyClass pyClass = classType.getPyClass();
-      Property property = pyClass.findProperty(name);
+      Property property = pyClass.findProperty(name, true, context);
       if (property != null) {
         if (classType.isDefinition()) {
           return Ref.<PyType>create(PyBuiltinCache.getInstance(pyClass).getObjectType(PyNames.PROPERTY));
@@ -291,7 +302,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
   }
 
   @Nullable
-  private PyType getTypeFromProviders(TypeEvalContext context) {
+  private PyType getTypeFromProviders(@NotNull TypeEvalContext context) {
     for (PyTypeProvider provider : Extensions.getExtensions(PyTypeProvider.EP_NAME)) {
       try {
         final PyType type = provider.getReferenceExpressionType(this, context);
@@ -300,7 +311,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
         }
       }
       catch (AbstractMethodError e) {
-        LOG.info(e);
+        LOG.info(new ExtensionException(provider.getClass()));
       }
     }
     return null;
@@ -363,9 +374,20 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
       return context.getType((PyTypedElement)target);
     }
     if (target instanceof PsiDirectory) {
-      PsiFile file = ((PsiDirectory)target).findFile(PyNames.INIT_DOT_PY);
+      final PsiDirectory dir = (PsiDirectory)target;
+      PsiFile file = dir.findFile(PyNames.INIT_DOT_PY);
       if (file != null) {
         return getTypeFromTarget(file, context, anchor);
+      }
+      if (PyUtil.isPackage(dir, anchor)) {
+        final PsiFile containingFile = anchor.getContainingFile();
+        if (containingFile instanceof PyFile) {
+          final QualifiedName qualifiedName = QualifiedNameFinder.findShortestImportableQName(dir);
+          if (qualifiedName != null) {
+            final PyImportedModule module = new PyImportedModule(null, (PyFile)containingFile, qualifiedName);
+            return new PyImportedModuleType(module);
+          }
+        }
       }
     }
     return null;
@@ -398,10 +420,18 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
                                                      @Nullable PsiElement anchor) {
     for (PyTypeProvider provider : Extensions.getExtensions(PyTypeProvider.EP_NAME)) {
       final PyType result = provider.getReferenceType(target, context, anchor);
-      if (result != null) return result;
+      if (result != null) {
+        return result;
+      }
     }
 
     return null;
+  }
+
+  @Override
+  public void subtreeChanged() {
+    super.subtreeChanged();
+    myQualifiedName = null;
   }
 
   private static class QualifiedResolveResultImpl extends RatedResolveResult implements QualifiedResolveResult {
@@ -428,7 +458,7 @@ public class PyReferenceExpressionImpl extends PyElementImpl implements PyRefere
   public static class QualifiedResolveResultEmpty implements QualifiedResolveResult {
     // a trivial implementation
 
-    public QualifiedResolveResultEmpty() {
+    private QualifiedResolveResultEmpty() {
     }
 
     @Override

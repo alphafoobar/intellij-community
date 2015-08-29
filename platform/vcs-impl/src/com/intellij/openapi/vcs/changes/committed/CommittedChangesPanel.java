@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,9 +121,8 @@ public class CommittedChangesPanel extends JPanel implements TypeSafeDataProvide
     } else {
       myBrowser.setTableContextMenu(group, Collections.<AnAction>emptyList());
     }
-    
-    final AnAction anAction = ActionManager.getInstance().getAction("CommittedChanges.Refresh");
-    anAction.registerCustomShortcutSet(CommonShortcuts.getRerun(), this);
+
+    EmptyAction.registerWithShortcutSet("CommittedChanges.Refresh", CommonShortcuts.getRerun(), this);
     myBrowser.addFilter(myFilterComponent);
     myIfNotCachedReloader = myLocation == null ? null : new Consumer<String>() {
       @Override
@@ -332,8 +331,7 @@ public class CommittedChangesPanel extends JPanel implements TypeSafeDataProvide
 
   public void setChangesFilter() {
     CommittedChangesFilterDialog filterDialog = new CommittedChangesFilterDialog(myProject, myProvider.createFilterUI(true), mySettings);
-    filterDialog.show();
-    if (filterDialog.isOK()) {
+    if (filterDialog.showAndGet()) {
       mySettings = filterDialog.getSettings();
       refreshChanges(false);
     }

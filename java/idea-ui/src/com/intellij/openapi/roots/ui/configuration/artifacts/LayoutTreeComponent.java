@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,8 @@ import com.intellij.ui.treeStructure.SimpleTreeStructure;
 import com.intellij.ui.treeStructure.WeightBasedComparator;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.util.io.URLUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -128,11 +129,11 @@ public class LayoutTreeComponent implements DnDTarget, Disposable {
   private void createPropertiesPanel() {
     myPropertiesPanel = new JPanel(new BorderLayout());
     final JPanel emptyPanel = new JPanel();
-    emptyPanel.setMinimumSize(new Dimension(0, 0));
-    emptyPanel.setPreferredSize(new Dimension(0, 0));
+    emptyPanel.setMinimumSize(JBUI.emptySize());
+    emptyPanel.setPreferredSize(JBUI.emptySize());
 
     myPropertiesPanelWrapper = new JPanel(new CardLayout());
-    myPropertiesPanel.setBorder(new CustomLineBorder(UIUtil.getBorderColor(), 1, 0, 0, 0));
+    myPropertiesPanel.setBorder(new CustomLineBorder(1, 0, 0, 0));
     myPropertiesPanelWrapper.add(EMPTY_CARD, emptyPanel);
     myPropertiesPanelWrapper.add(PROPERTIES_CARD, myPropertiesPanel);
   }
@@ -289,9 +290,8 @@ public class LayoutTreeComponent implements DnDTarget, Disposable {
 
   public void updateAndSelect(PackagingElementNode<?> node, final List<? extends PackagingElement<?>> toSelect) {
     myArtifactsEditor.queueValidation();
-    final DefaultMutableTreeNode treeNode = TreeUtil.findNodeWithObject(myTree.getRootNode(), node);
     myTreeStructure.clearCaches();
-    myBuilder.addSubtreeToUpdate(treeNode, new Runnable() {
+    myBuilder.queueUpdateFrom(node, true).doWhenDone(new Runnable() {
       @Override
       public void run() {
         List<PackagingElementNode<?>> nodes = myTree.findNodes(toSelect);
@@ -540,9 +540,15 @@ public class LayoutTreeComponent implements DnDTarget, Disposable {
         for (PackagingSourceItem item : items) {
           final String path = artifactType.getDefaultPathFor(item);
           if (path != null) {
-            final CompositePackagingElement<?> directory = PackagingElementFactory.getInstance().getOrCreateDirectory(rootElement, path);
+            final CompositePackagingElement<?> parent;
+            if (path.endsWith(URLUtil.JAR_SEPARATOR)) {
+              parent = PackagingElementFactory.getInstance().getOrCreateArchive(rootElement, StringUtil.trimEnd(path, URLUtil.JAR_SEPARATOR));
+            }
+            else {
+              parent = PackagingElementFactory.getInstance().getOrCreateDirectory(rootElement, path);
+            }
             final List<? extends PackagingElement<?>> elements = item.createElements(myContext);
-            toSelect.addAll(directory.addOrFindChildren(elements));
+            toSelect.addAll(parent.addOrFindChildren(elements));
           }
         }
       }

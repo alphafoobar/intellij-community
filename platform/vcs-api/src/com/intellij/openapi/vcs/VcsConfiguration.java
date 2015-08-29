@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,31 +17,29 @@ package com.intellij.openapi.vcs;
 
 import com.intellij.ide.todo.TodoPanelSettings;
 import com.intellij.openapi.components.*;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.impl.IgnoreSpaceEnum;
 import com.intellij.openapi.progress.PerformInBackgroundOption;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vcs.versionBrowser.ChangeBrowserSettings;
 import com.intellij.util.PlatformUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 import com.intellij.util.xmlb.annotations.AbstractCollection;
 import com.intellij.util.xmlb.annotations.OptionTag;
 import com.intellij.util.xmlb.annotations.Property;
+import com.intellij.util.xmlb.annotations.Tag;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
-/**
- * author: lesya
- */
 @State(
   name = "VcsManagerConfiguration",
-  storages = { @Storage(file = StoragePathMacros.WORKSPACE_FILE) })
+  storages = @Storage(file = StoragePathMacros.WORKSPACE_FILE)
+)
 public final class VcsConfiguration implements PersistentStateComponent<VcsConfiguration> {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vcs.VcsConfiguration");
   public final static long ourMaximumFileForBaseRevisionSize = 500 * 1000;
 
   @NonNls static final String VALUE_ATTR = "value";
@@ -51,6 +49,7 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
 
   public boolean OFFER_MOVE_TO_ANOTHER_CHANGELIST_ON_PARTIAL_COMMIT = true;
   public boolean CHECK_CODE_SMELLS_BEFORE_PROJECT_COMMIT = !PlatformUtils.isPyCharm() && !PlatformUtils.isRubyMine();
+  public boolean CHECK_CODE_CLEANUP_BEFORE_PROJECT_COMMIT = false;
   public boolean CHECK_NEW_TODO = true;
   public TodoPanelSettings myTodoPanelSettings = new TodoPanelSettings();
   public boolean PERFORM_UPDATE_IN_BACKGROUND = true;
@@ -77,7 +76,6 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   public boolean INCLUDE_TEXT_INTO_SHELF = false;
   public Boolean SHOW_PATCH_IN_EXPLORER = null;
   public boolean SHOW_FILE_HISTORY_DETAILS = true;
-  public boolean SHOW_VCS_ERROR_NOTIFICATIONS = true;
   public boolean SHOW_DIRTY_RECURSIVELY = false;
   public boolean LIMIT_HISTORY = true;
   public int MAXIMUM_HISTORY_ROWS = 1000;
@@ -85,6 +83,10 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   public boolean USE_COMMIT_MESSAGE_MARGIN = false;
   public int COMMIT_MESSAGE_MARGIN_SIZE = 72;
   public boolean WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN = false;
+
+  @AbstractCollection(surroundWithTag = false, elementTag = "path")
+  @Tag("ignored-roots")
+  public List<String> IGNORED_UNREGISTERED_ROOTS = ContainerUtil.newArrayList();
 
   public enum StandardOption {
     ADD(VcsBundle.message("vcs.command.name.add")),
@@ -135,6 +137,10 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   public boolean REFORMAT_BEFORE_PROJECT_COMMIT = false;
   public boolean REFORMAT_BEFORE_FILE_COMMIT = false;
 
+  public boolean REARRANGE_BEFORE_PROJECT_COMMIT = false;
+
+  public Map<String, ChangeBrowserSettings> CHANGE_BROWSER_SETTINGS = new HashMap<String, ChangeBrowserSettings>();
+
   public float FILE_HISTORY_DIALOG_COMMENTS_SPLITTER_PROPORTION = 0.8f;
   public float FILE_HISTORY_DIALOG_SPLITTER_PROPORTION = 0.5f;
 
@@ -152,10 +158,12 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   private final PerformInBackgroundOption myCheckoutOption = new CheckoutInBackgroundOption();
   private final PerformInBackgroundOption myAddRemoveOption = new AddRemoveInBackgroundOption();
 
+  @Override
   public VcsConfiguration getState() {
     return this;
   }
 
+  @Override
   public void loadState(VcsConfiguration state) {
     XmlSerializerUtil.copyBean(state, this);
   }
@@ -214,26 +222,32 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   }
 
   private class UpdateInBackgroundOption implements PerformInBackgroundOption {
+    @Override
     public boolean shouldStartInBackground() {
       return PERFORM_UPDATE_IN_BACKGROUND;
     }
 
+    @Override
     public void processSentToBackground() {}
   }
 
   private class CommitInBackgroundOption implements PerformInBackgroundOption {
+    @Override
     public boolean shouldStartInBackground() {
       return PERFORM_COMMIT_IN_BACKGROUND;
     }
 
+    @Override
     public void processSentToBackground() {}
   }
 
   private class EditInBackgroundOption implements PerformInBackgroundOption {
+    @Override
     public boolean shouldStartInBackground() {
       return PERFORM_EDIT_IN_BACKGROUND;
     }
 
+    @Override
     public void processSentToBackground() {
       PERFORM_EDIT_IN_BACKGROUND = true;
     }
@@ -241,10 +255,12 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   }
 
   private class CheckoutInBackgroundOption implements PerformInBackgroundOption {
+    @Override
     public boolean shouldStartInBackground() {
       return PERFORM_CHECKOUT_IN_BACKGROUND;
     }
 
+    @Override
     public void processSentToBackground() {
       PERFORM_CHECKOUT_IN_BACKGROUND = true;
     }
@@ -252,10 +268,12 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   }
 
   private class AddRemoveInBackgroundOption implements PerformInBackgroundOption {
+    @Override
     public boolean shouldStartInBackground() {
       return PERFORM_ADD_REMOVE_IN_BACKGROUND;
     }
 
+    @Override
     public void processSentToBackground() {
       PERFORM_ADD_REMOVE_IN_BACKGROUND = true;
     }
@@ -279,4 +297,15 @@ public final class VcsConfiguration implements PersistentStateComponent<VcsConfi
   public boolean isChangedOnServerEnabled() {
     return CHECK_LOCALLY_CHANGED_CONFLICTS_IN_BACKGROUND;
   }
+
+  public void addIgnoredUnregisteredRoots(@NotNull Collection<String> roots) {
+    List<String> unregisteredRoots = new ArrayList<String>(IGNORED_UNREGISTERED_ROOTS);
+    for (String root : roots) {
+      if (!unregisteredRoots.contains(root)) {
+        unregisteredRoots.add(root);
+      }
+    }
+    IGNORED_UNREGISTERED_ROOTS = unregisteredRoots;
+  }
+
 }

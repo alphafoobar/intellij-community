@@ -15,9 +15,10 @@
  */
 package com.intellij.lang.properties.editor;
 
-import com.intellij.lang.properties.PropertiesUtil;
+import com.intellij.lang.properties.PropertiesImplUtil;
 import com.intellij.lang.properties.ResourceBundle;
 import com.intellij.lang.properties.psi.PropertiesFile;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorPolicy;
 import com.intellij.openapi.fileEditor.FileEditorProvider;
@@ -26,6 +27,7 @@ import com.intellij.openapi.fileTypes.FileTypeConsumer;
 import com.intellij.openapi.fileTypes.FileTypeFactory;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -37,12 +39,17 @@ public class ResourceBundleEditorProvider extends FileTypeFactory implements Fil
   private static final ResourceBundleFileType RESOURCE_BUNDLE_FILE_TYPE = new ResourceBundleFileType();
 
   @Override
-  public boolean accept(@NotNull Project project, @NotNull VirtualFile file){
+  public boolean accept(@NotNull final Project project, @NotNull final VirtualFile file){
     if (file instanceof ResourceBundleAsVirtualFile) return true;
     if (!file.isValid()) return false;
-    PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
-    PropertiesFile propertiesFile = PropertiesUtil.getPropertiesFile(psiFile);
-    return propertiesFile != null &&  propertiesFile.getResourceBundle().getPropertiesFiles(project).size() > 1;
+    PsiFile psiFile = ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>() {
+      @Override
+      public PsiFile compute() {
+        return PsiManager.getInstance(project).findFile(file);
+      }
+    });
+    PropertiesFile propertiesFile = PropertiesImplUtil.getPropertiesFile(psiFile);
+    return propertiesFile != null &&  propertiesFile.getResourceBundle().getPropertiesFiles().size() > 1;
   }
 
   @Override
@@ -57,10 +64,10 @@ public class ResourceBundleEditorProvider extends FileTypeFactory implements Fil
       if (psiFile == null) {
         throw new IllegalArgumentException("psifile cannot be null");
       }
-      resourceBundle = PropertiesUtil.getPropertiesFile(psiFile).getResourceBundle();
+      resourceBundle = PropertiesImplUtil.getPropertiesFile(psiFile).getResourceBundle();
     }
 
-    return new ResourceBundleEditor(project, resourceBundle);
+    return new ResourceBundleEditor(resourceBundle);
   }
 
   @Override

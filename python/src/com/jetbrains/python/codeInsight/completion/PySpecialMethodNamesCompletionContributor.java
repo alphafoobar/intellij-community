@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ import static com.intellij.patterns.PlatformPatterns.psiElement;
  */
 public class PySpecialMethodNamesCompletionContributor extends CompletionContributor {
   @Override
-  public AutoCompletionDecision handleAutoCompletionPossibility(AutoCompletionContext context) {
+  public AutoCompletionDecision handleAutoCompletionPossibility(@NotNull AutoCompletionContext context) {
     // auto-insert the obvious only case; else show other cases. 
     final LookupElement[] items = context.getItems();
     if (items.length == 1) {

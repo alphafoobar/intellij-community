@@ -2,9 +2,7 @@ package com.jetbrains.python.debugger.pydev;
 
 import com.intellij.xdebugger.frame.XValueChildrenList;
 import com.jetbrains.python.console.pydev.PydevCompletionVariant;
-import com.jetbrains.python.debugger.PyDebugValue;
-import com.jetbrains.python.debugger.PyDebuggerException;
-import com.jetbrains.python.debugger.PyThreadInfo;
+import com.jetbrains.python.debugger.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,14 +24,18 @@ public interface ProcessDebugger {
                         String expression,
                         boolean execute,
                         boolean trimResult)
-                                 throws PyDebuggerException;
+    throws PyDebuggerException;
 
-  void consoleExec(String threadId, String frameId, String expression, DebugCallback<String> callback);
+  void consoleExec(String threadId, String frameId, String expression, PyDebugCallback<String> callback);
 
   XValueChildrenList loadFrame(String threadId, String frameId) throws PyDebuggerException;
 
   // todo: don't generate temp variables for qualified expressions - just split 'em
   XValueChildrenList loadVariable(String threadId, String frameId, PyDebugValue var) throws PyDebuggerException;
+
+  ArrayChunk loadArrayItems(String threadId, String frameId, PyDebugValue var, int rowOffset, int colOffset, int rows, int cols, String format) throws PyDebuggerException;
+
+  void loadReferrers(String threadId, String frameId, PyReferringObjectsValue var, PyDebugCallback<XValueChildrenList> callback);
 
   PyDebugValue changeVariable(String threadId, String frameId, PyDebugValue var, String value)
     throws PyDebuggerException;
@@ -50,7 +52,7 @@ public interface ProcessDebugger {
   void suspendThread(String threadId);
 
   /**
-   *  Disconnects current debug process. Closes all resources.
+   * Disconnects current debug process. Closes all resources.
    */
   void close();
 
@@ -75,6 +77,8 @@ public interface ProcessDebugger {
 
   void setBreakpoint(String typeId, String file, int line, String condition, String logExpression);
 
+  void setBreakpointWithFuncName(String typeId, String file, int line, String condition, String logExpression, String funcName);
+
   void removeBreakpoint(String typeId, String file, int line);
 
   void addCloseListener(RemoteDebuggerCloseListener remoteDebuggerCloseListener);
@@ -84,12 +88,4 @@ public interface ProcessDebugger {
   void addExceptionBreakpoint(ExceptionBreakpointCommandFactory factory);
 
   void removeExceptionBreakpoint(ExceptionBreakpointCommandFactory factory);
-
-  /**
-  * @author traff
-  */
-  interface DebugCallback<T> {
-    void ok(T value);
-    void error(PyDebuggerException exception);
-  }
 }

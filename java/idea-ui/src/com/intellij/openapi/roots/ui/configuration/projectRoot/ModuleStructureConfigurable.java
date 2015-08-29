@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,9 +33,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.module.*;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.DumbAware;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectBundle;
+import com.intellij.openapi.project.*;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.impl.ClonableOrderEntry;
 import com.intellij.openapi.roots.impl.ProjectRootManagerImpl;
@@ -54,6 +52,7 @@ import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.NullableComputable;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -90,7 +89,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
       final NamedConfigurable configurable1 = o1.getConfigurable();
       final NamedConfigurable configurable2 = o2.getConfigurable();
       if (configurable1.getClass() == configurable2.getClass()) {
-        return o1.getDisplayName().compareToIgnoreCase(o2.getDisplayName());
+        return StringUtil.naturalCompare(o1.getDisplayName(), o2.getDisplayName());
       }
       final Object editableObject1 = configurable1.getEditableObject();
       final Object editableObject2 = configurable2.getEditableObject();
@@ -147,9 +146,11 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
   @NotNull
   protected ArrayList<AnAction> createActions(final boolean fromPopup) {
     final ArrayList<AnAction> result = super.createActions(fromPopup);
-    result.add(Separator.getInstance());
-    result.add(new MyGroupAction());
-    addCollapseExpandActions(result);
+    if (fromPopup || !Registry.is("ide.new.project.settings")) {
+      result.add(Separator.getInstance());
+      result.add(new MyGroupAction());
+      addCollapseExpandActions(result);
+    }
     return result;
   }
 
@@ -227,27 +228,28 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
       }
       final String[] groupPath = myPlainMode ? null : myContext.myModulesConfigurator.getModuleModel().getModuleGroupPath(module);
       if (groupPath == null || groupPath.length == 0){
-        addNode(moduleNode, myRoot);
-      } else {
+        myRoot.add(moduleNode);
+      }
+      else {
         final MyNode moduleGroupNode = ModuleGroupUtil
           .buildModuleGroupPath(new ModuleGroup(groupPath), myRoot, moduleGroup2NodeMap,
                                 new Consumer<ModuleGroupUtil.ParentChildRelation<MyNode>>() {
                                   @Override
                                   public void consume(final ModuleGroupUtil.ParentChildRelation<MyNode> parentChildRelation) {
-                                    addNode(parentChildRelation.getChild(), parentChildRelation.getParent());
+                                    parentChildRelation.getParent().add(parentChildRelation.getChild());
                                   }
                                 },
                                 new Function<ModuleGroup, MyNode>() {
                                   @Override
                                   public MyNode fun(final ModuleGroup moduleGroup) {
-                                    final NamedConfigurable moduleGroupConfigurable =
-                                      createModuleGroupConfigurable(moduleGroup);
+                                    final NamedConfigurable moduleGroupConfigurable = createModuleGroupConfigurable(moduleGroup);
                                     return new MyNode(moduleGroupConfigurable, true);
                                   }
                                 });
-        addNode(moduleNode, moduleGroupNode);
+        moduleGroupNode.add(moduleNode);
       }
     }
+    sortDescendants(myRoot);
     if (myProject.isDefault()) {  //do not add modules node in case of template project
       myRoot.removeAllChildren();
     }
@@ -289,7 +291,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
                                  ? null
                                  : group != null ? group.getGroupPath() : null;
       if (groupPath == null || groupPath.length == 0){
-        addNode(moduleNode, myRoot);
+        myRoot.add(moduleNode);
       } else {
         final MyNode moduleGroupNode = ModuleGroupUtil
           .updateModuleGroupPath(new ModuleGroup(groupPath), myRoot, new Function<ModuleGroup, MyNode>() {
@@ -301,7 +303,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
           }, new Consumer<ModuleGroupUtil.ParentChildRelation<MyNode>>() {
             @Override
             public void consume(final ModuleGroupUtil.ParentChildRelation<MyNode> parentChildRelation) {
-              addNode(parentChildRelation.getChild(), parentChildRelation.getParent());
+              parentChildRelation.getParent().add(parentChildRelation.getChild());
             }
           }, new Function<ModuleGroup, MyNode>() {
             @Override
@@ -310,14 +312,13 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
               return new MyNode(moduleGroupConfigurable, true);
             }
           });
-        addNode(moduleNode, moduleGroupNode);
+        moduleGroupNode.add(moduleNode);
       }
       Module module = (Module)moduleNode.getConfigurable().getEditableObject();
       myFacetEditorFacade.addFacetsNodes(module, moduleNode);
       addNodesFromExtensions(module, moduleNode);
     }
-    TreeUtil.sort(myRoot, getNodeComparator());
-    ((DefaultTreeModel)myTree.getModel()).reload(myRoot);
+    sortDescendants(myRoot);
     return true;
   }
 
@@ -369,9 +370,8 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
 
   @Override
   public void apply() throws ConfigurationException {
-    final Set<MyNode> roots = new HashSet<MyNode>();
-    roots.add(myRoot);
-    checkApply(roots, ProjectBundle.message("rename.message.prefix.module"), ProjectBundle.message("rename.module.title"));
+    checkForEmptyAndDuplicatedNames(ProjectBundle.message("rename.message.prefix.module"),
+                                    ProjectBundle.message("rename.module.title"), ModuleConfigurable.class);
 
     // let's apply extensions first, since they can write to/commit modifiable models
     for (final ModuleStructureExtension extension : ModuleStructureExtension.EP_NAME.getExtensions()) {
@@ -922,7 +922,8 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
 
               modifiableRootModel.getModuleExtension(CompilerModuleExtension.class).inheritCompilerOutputPath(true);
 
-              modifiableRootModel.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevelModuleExtension.getInstance(rootModel.getModule()).getLanguageLevel());
+              modifiableRootModel.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(
+                LanguageLevelModuleExtensionImpl.getInstance(rootModel.getModule()).getLanguageLevel());
 
               for (OrderEntry entry : rootModel.getOrderEntries()) {
                 if (entry instanceof JdkOrderEntry) continue;
@@ -949,10 +950,15 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
           };
           builder.setName(component.getNameValue());
           builder.setModuleFilePath(path + "/" + builder.getName() + ModuleFileType.DOT_DEFAULT_EXTENSION);
-          final Module module = myContext.myModulesConfigurator.addModule(builder);
-          if (module != null) {
-            addModuleNode(module);
-          }
+          DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+            @Override
+            public void run() {
+              final Module module = myContext.myModulesConfigurator.addModule(builder);
+              if (module != null) {
+                addModuleNode(module);
+              }
+            }
+          });
         }
         catch (Exception e1) {
           LOG.error(e1);

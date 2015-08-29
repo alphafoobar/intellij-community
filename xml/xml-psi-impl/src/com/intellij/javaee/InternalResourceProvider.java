@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,17 @@ import com.intellij.xml.util.XmlUtil;
  */
 public class InternalResourceProvider implements StandardResourceProvider{
 
+  @Override
   public void registerResources(ResourceRegistrar registrar) {
     ResourceRegistrarImpl impl = (ResourceRegistrarImpl)registrar;
     
     impl.addInternalResource(XmlUtil.XSLT_URI,"xslt-1_0.xsd");
     impl.addInternalResource(XmlUtil.XSLT_URI,"2.0", "xslt-2_0.xsd");
     impl.addInternalResource(XmlUtil.XINCLUDE_URI,"xinclude.xsd");
+
     impl.addInternalResource(XmlUtil.XML_SCHEMA_URI, "XMLSchema.xsd");
     impl.addInternalResource(XmlUtil.XML_SCHEMA_URI + ".xsd", "XMLSchema.xsd");
+
     impl.addInternalResource("http://www.w3.org/2001/XMLSchema.dtd", "XMLSchema.dtd");
     impl.addInternalResource(XmlUtil.XML_SCHEMA_INSTANCE_URI, "XMLSchema-instance.xsd");
     impl.addInternalResource("http://www.w3.org/2001/xml.xsd","xml.xsd");
@@ -62,5 +65,6 @@ public class InternalResourceProvider implements StandardResourceProvider{
     // svg and mathML
     impl.addIgnoredResource(HtmlUtil.MATH_ML_NAMESPACE);
     impl.addIgnoredResource(HtmlUtil.SVG_NAMESPACE);
+    impl.addInternalResource("http://www.w3.org/1999/xlink", "xlink.dtd");
   }
 }

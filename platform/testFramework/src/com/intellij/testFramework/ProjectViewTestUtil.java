@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,19 +15,29 @@
  */
 package com.intellij.testFramework;
 
+import com.intellij.ide.projectView.ProjectView;
 import com.intellij.ide.projectView.ProjectViewNode;
 import com.intellij.ide.projectView.impl.AbstractProjectViewPSIPane;
+import com.intellij.ide.projectView.impl.ProjectViewImpl;
 import com.intellij.ide.projectView.impl.nodes.BasePsiNode;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.AbstractTreeStructure;
+import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.MultiValuesMap;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.openapi.wm.ToolWindowAnchor;
+import com.intellij.openapi.wm.ToolWindowEP;
+import com.intellij.openapi.wm.ToolWindowId;
+import com.intellij.openapi.wm.ex.ToolWindowManagerEx;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.util.PsiUtilBase;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.Function;
-import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.junit.Assert;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -40,7 +50,7 @@ public class ProjectViewTestUtil {
   public static VirtualFile[] getFiles(AbstractTreeNode kid, Function<AbstractTreeNode, VirtualFile[]> converterFunction) {
     if (kid instanceof BasePsiNode) {
       Object value = kid.getValue();
-      VirtualFile virtualFile = PsiUtilBase.getVirtualFile((PsiElement)value);
+      VirtualFile virtualFile = PsiUtilCore.getVirtualFile((PsiElement)value);
       return new VirtualFile[]{virtualFile};
     }
     if (converterFunction != null) {
@@ -150,5 +160,23 @@ public class ProjectViewTestUtil {
   public static boolean isExpanded(PsiElement element, AbstractProjectViewPSIPane pane) {
     DefaultMutableTreeNode nodeForElement = getNodeForElement(element, pane);
     return nodeForElement != null && isExpanded((DefaultMutableTreeNode)nodeForElement.getParent(), pane);
+  }
+
+  public static void setupImpl(@NotNull Project project, boolean loadPaneExtensions) {
+    ToolWindowManagerEx toolWindowManager = ToolWindowManagerEx.getInstanceEx(project);
+    ToolWindow toolWindow = toolWindowManager.getToolWindow(ToolWindowId.PROJECT_VIEW);
+
+    if (toolWindow == null) {
+      ToolWindowEP[] beans = Extensions.getExtensions(ToolWindowEP.EP_NAME);
+      for (final ToolWindowEP bean : beans) {
+        if (bean.id.equals(ToolWindowId.PROJECT_VIEW)) {
+          toolWindow = toolWindowManager.registerToolWindow(bean.id, new JLabel(), ToolWindowAnchor.fromText(bean.anchor), project,
+                                                            false, bean.canCloseContents);
+          break;
+        }
+      }
+    }
+
+    ((ProjectViewImpl)ProjectView.getInstance(project)).setupImpl(toolWindow, loadPaneExtensions);
   }
 }

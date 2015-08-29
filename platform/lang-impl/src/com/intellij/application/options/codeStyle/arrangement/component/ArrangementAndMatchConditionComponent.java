@@ -16,7 +16,7 @@
 package com.intellij.application.options.codeStyle.arrangement.component;
 
 import com.intellij.application.options.codeStyle.arrangement.ArrangementConstants;
-import com.intellij.psi.codeStyle.arrangement.std.ArrangementStandardSettingsManager;
+import com.intellij.psi.codeStyle.arrangement.std.*;
 import com.intellij.application.options.codeStyle.arrangement.match.ArrangementMatchNodeComponentFactory;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.codeStyle.arrangement.match.StdArrangementMatchRule;
@@ -24,8 +24,6 @@ import com.intellij.psi.codeStyle.arrangement.model.ArrangementAtomMatchConditio
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementCompositeMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchConditionVisitor;
-import com.intellij.psi.codeStyle.arrangement.std.ArrangementSettingsToken;
-import com.intellij.psi.codeStyle.arrangement.std.ArrangementUiComponent;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.ui.GridBag;
 import com.intellij.util.ui.UIUtil;
@@ -59,7 +57,8 @@ public class ArrangementAndMatchConditionComponent extends JPanel implements Arr
   public ArrangementAndMatchConditionComponent(@NotNull StdArrangementMatchRule rule,
                                                @NotNull ArrangementCompositeMatchCondition setting,
                                                @NotNull ArrangementMatchNodeComponentFactory factory,
-                                               @NotNull ArrangementStandardSettingsManager manager)
+                                               @NotNull ArrangementStandardSettingsManager manager,
+                                               boolean allowModification)
   {
     mySetting = setting;
     setOpaque(false);
@@ -85,7 +84,7 @@ public class ArrangementAndMatchConditionComponent extends JPanel implements Arr
     for (ArrangementSettingsToken key : ordered) {
       ArrangementMatchCondition operand = operands.get(key);
       assert operand != null;
-      ArrangementUiComponent component = factory.getComponent(operand, rule, true);
+      ArrangementUiComponent component = factory.getComponent(operand, rule, allowModification);
       myComponents.add(component);
       myAvailableTokens.addAll(component.getAvailableTokens());
       JComponent uiComponent = component.getUiComponent();
@@ -262,6 +261,18 @@ public class ArrangementAndMatchConditionComponent extends JPanel implements Arr
     for (ArrangementUiComponent component : myComponents) {
       component.setListener(listener);
     } 
+  }
+
+  @Override
+  public void handleMouseClickOnSelected() {
+    for (ArrangementUiComponent component : myComponents) {
+      component.handleMouseClickOnSelected();
+    }
+  }
+
+  @Override
+  public boolean alwaysCanBeActive() {
+    return false;
   }
 
   @Override

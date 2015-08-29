@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -286,7 +286,8 @@ public @interface DelegatesTo {
         ''', 'Foo'
   }
 
-  void testInConstructor() {
+  @SuppressWarnings("GroovyUnusedDeclaration")
+  void ignoreTestInConstructor() {
     assertScript '''
         class Foo {
           def foo() {}
@@ -529,7 +530,8 @@ class Abc{
         ''', 'Foo'
   }
 
-  void testInConstructorInJava() {
+  @SuppressWarnings("GroovyUnusedDeclaration")
+  void ignoreTestInConstructorInJava() {
     myFixture.configureByText("Abc.java", '''
 import groovy.lang.Closure;
 import groovy.lang.DelegatesTo;
@@ -653,13 +655,58 @@ foo([1:'ab', 2:'cde']) {
 ''', 'String')
   }
 
+  void testDelegateAndDelegatesTo() {
+    assertScript('''
+import groovy.transform.CompileStatic
+
+class Subject {
+    List list = []
+
+    void withList(@DelegatesTo(List) Closure<?> closure) {
+        list.with(closure)
+    }
+}
+
+class Wrapper {
+    @Delegate(parameterAnnotations = true)
+    Subject subject = new Subject()
+}
+
+@CompileStatic
+def staticOnWrapper() {
+    def wrapper = new Wrapper()
+    wrapper.withList {
+        ad<caret>d(1)
+    }
+    assert wrapper.list == [1]
+}
+''', 'List')
+  }
+
+  void testClassTest() {
+    assertScript('''
+class DelegatesToTest {
+    void create(@DelegatesTo.Target Class type, @DelegatesTo(genericTypeIndex = 0, strategy = Closure.OWNER_FIRST) Closure closure) {}
+
+
+    void doit() {
+        create(Person) {
+            a<caret>ge = 30 // IDEA 12.1.6 can resolve this property, 13.1.3 can't
+        }
+    }
+}
+
+class Person {
+    int age
+}
+''', 'Person')
+  }
 
   void assertScript(String text, String resolvedClass) {
     myFixture.configureByText('_a.groovy', text)
 
     final ref = myFixture.file.findReferenceAt(myFixture.editor.caretModel.offset)
-    final resolved = ref.resolve()
-    assertInstanceOf(resolved, PsiMethod)
+    final resolved = assertInstanceOf(ref.resolve(), PsiMethod)
     final containingClass = resolved.containingClass.name
     assertEquals(resolvedClass, containingClass)
   }

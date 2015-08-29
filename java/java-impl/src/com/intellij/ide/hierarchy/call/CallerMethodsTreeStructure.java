@@ -46,8 +46,21 @@ public final class CallerMethodsTreeStructure extends HierarchyTreeStructure {
   @NotNull
   @Override
   protected final Object[] buildChildren(@NotNull final HierarchyNodeDescriptor descriptor) {
-    final PsiMember enclosingElement = ((CallHierarchyNodeDescriptor)descriptor).getEnclosingElement();
+    PsiMember enclosingElement = ((CallHierarchyNodeDescriptor)descriptor).getEnclosingElement();
     HierarchyNodeDescriptor nodeDescriptor = getBaseDescriptor();
+
+    if (enclosingElement instanceof PsiMethod) {
+      PsiClass clazz = enclosingElement.getContainingClass();
+      if (isLocalOrAnonymousClass(clazz)) {
+        PsiElement parent = clazz.getParent();
+        PsiElement grandParent = parent instanceof PsiNewExpression ? parent.getParent() : null;
+        if (grandParent instanceof PsiExpressionList) {
+          // for created anonymous class that immediately passed as argument use instantiation point as next call point (IDEA-73312)
+          enclosingElement = CallHierarchyNodeDescriptor.getEnclosingElement(grandParent);
+        }
+      }
+    }
+
     if (!(enclosingElement instanceof PsiMethod) || nodeDescriptor == null) {
       return ArrayUtil.EMPTY_OBJECT_ARRAY;
     }
@@ -78,6 +91,10 @@ public final class CallerMethodsTreeStructure extends HierarchyTreeStructure {
     }
 
     return methodToDescriptorMap.values().toArray(new Object[methodToDescriptorMap.size()]);
+  }
+
+  private static boolean isLocalOrAnonymousClass(PsiMember enclosingElement) {
+    return enclosingElement instanceof PsiClass && ((PsiClass)enclosingElement).getQualifiedName() == null;
   }
 
   @Override

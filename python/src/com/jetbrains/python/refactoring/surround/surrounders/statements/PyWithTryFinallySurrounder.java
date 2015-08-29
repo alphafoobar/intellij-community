@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@ public class PyWithTryFinallySurrounder extends PyWithTryExceptSurrounder {
     final PyFinallyPart finallyPart = tryStatement.getFinallyPart();
     assert finallyPart != null;
     final PyStatementList statementList = finallyPart.getStatementList();
-    assert statementList != null;
     return statementList.getTextRange();
   }
 }

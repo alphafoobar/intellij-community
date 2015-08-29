@@ -18,12 +18,9 @@ package com.intellij.testFramework;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.projectRoots.JavaSdk;
-import com.intellij.openapi.projectRoots.JavaSdkVersion;
-import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.projectRoots.SdkModificator;
+import com.intellij.openapi.projectRoots.*;
 import com.intellij.openapi.projectRoots.impl.ProjectJdkImpl;
-import com.intellij.openapi.roots.LanguageLevelModuleExtension;
+import com.intellij.openapi.roots.LanguageLevelModuleExtensionImpl;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderRootType;
@@ -32,10 +29,15 @@ import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.util.SystemProperties;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
 
 import java.io.File;
+import java.util.List;
+
+import static org.junit.Assume.assumeTrue;
 
 public class IdeaTestUtil extends PlatformTestUtil {
   public static void main(String[] args) {
@@ -51,7 +53,7 @@ public class IdeaTestUtil extends PlatformTestUtil {
     final LanguageLevelProjectExtension projectExt = LanguageLevelProjectExtension.getInstance(module.getProject());
 
     final LanguageLevel projectLevel = projectExt.getLanguageLevel();
-    final LanguageLevel moduleLevel = LanguageLevelModuleExtension.getInstance(module).getLanguageLevel();
+    final LanguageLevel moduleLevel = LanguageLevelModuleExtensionImpl.getInstance(module).getLanguageLevel();
     try {
       projectExt.setLanguageLevel(level);
       setModuleLanguageLevel(module, level);
@@ -64,7 +66,8 @@ public class IdeaTestUtil extends PlatformTestUtil {
   }
 
   public static void setModuleLanguageLevel(Module module, final LanguageLevel level) {
-    final LanguageLevelModuleExtension modifiable = (LanguageLevelModuleExtension)LanguageLevelModuleExtension.getInstance(module).getModifiableModel(true);
+    final LanguageLevelModuleExtensionImpl
+      modifiable = (LanguageLevelModuleExtensionImpl)LanguageLevelModuleExtensionImpl.getInstance(module).getModifiableModel(true);
     modifiable.setLanguageLevel(level);
     modifiable.commit();
   }
@@ -139,5 +142,18 @@ public class IdeaTestUtil extends PlatformTestUtil {
     });
   }
 
-  
+
+  @NotNull
+  public static String requireRealJdkHome() {
+    String javaHome = SystemProperties.getJavaHome();
+    List<String> paths =
+      ContainerUtil.packNullables(javaHome, new File(javaHome).getParent(), System.getenv("JDK_16_x64"), System.getenv("JDK_16"));
+    for (String path : paths) {
+      if (JdkUtil.checkForJdk(new File(path))) {
+        return path;
+      }
+    }
+    assumeTrue("Cannot find JDK, checked paths: " + paths, false);
+    return null;
+  }
 }

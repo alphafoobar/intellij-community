@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,23 +47,28 @@ public class HighlightNamesUtil {
   private static final Logger LOG = Logger.getInstance("#" + HighlightNamesUtil.class.getName());
 
   @Nullable
-  public static HighlightInfo highlightMethodName(@NotNull PsiMethod method,
-                                                  final PsiElement elementToHighlight,
-                                                  final boolean isDeclaration,
-                                                  @NotNull TextAttributesScheme colorsScheme) {
+  static HighlightInfo highlightMethodName(@NotNull PsiMethod method,
+                                           final PsiElement elementToHighlight,
+                                           final boolean isDeclaration,
+                                           @NotNull TextAttributesScheme colorsScheme) {
     return highlightMethodName(method, elementToHighlight, elementToHighlight.getTextRange(), colorsScheme, isDeclaration);
   }
 
   @Nullable
-  public static HighlightInfo highlightMethodName(@NotNull PsiMethod method,
-                                                  final PsiElement elementToHighlight,
-                                                  TextRange range, @NotNull TextAttributesScheme colorsScheme, final boolean isDeclaration) {
+  static HighlightInfo highlightMethodName(@NotNull PsiMethod method,
+                                           final PsiElement elementToHighlight,
+                                           TextRange range, @NotNull TextAttributesScheme colorsScheme, final boolean isDeclaration) {
     boolean isInherited = false;
 
     if (!isDeclaration) {
       if (isCalledOnThis(elementToHighlight)) {
-        PsiClass enclosingClass = PsiTreeUtil.getParentOfType(elementToHighlight, PsiClass.class);
-        isInherited = enclosingClass != null && enclosingClass.isInheritor(method.getContainingClass(), true);
+        final PsiClass containingClass = method.getContainingClass();
+        PsiClass enclosingClass = containingClass == null ? null : PsiTreeUtil.getParentOfType(elementToHighlight, PsiClass.class);
+        while (enclosingClass != null) {
+          isInherited = enclosingClass.isInheritor(containingClass, true);
+          if (isInherited) break;
+          enclosingClass = PsiTreeUtil.getParentOfType(enclosingClass, PsiClass.class, true);
+        }
       }
     }
 
@@ -100,7 +105,7 @@ public class HighlightNamesUtil {
   }
 
   @Nullable
-  public static HighlightInfo highlightClassName(PsiClass aClass, PsiElement elementToHighlight, @NotNull TextAttributesScheme colorsScheme) {
+  static HighlightInfo highlightClassName(PsiClass aClass, PsiElement elementToHighlight, @NotNull TextAttributesScheme colorsScheme) {
     HighlightInfoType type = getClassNameHighlightType(aClass, elementToHighlight);
     if (elementToHighlight != null) {
       TextAttributes attributes = mergeWithScopeAttributes(aClass, type, colorsScheme);
@@ -133,9 +138,9 @@ public class HighlightNamesUtil {
   }
 
   @Nullable
-  public static HighlightInfo highlightVariableName(final PsiVariable variable,
-                                                    final PsiElement elementToHighlight,
-                                                    @NotNull TextAttributesScheme colorsScheme) {
+  static HighlightInfo highlightVariableName(final PsiVariable variable,
+                                             final PsiElement elementToHighlight,
+                                             @NotNull TextAttributesScheme colorsScheme) {
     HighlightInfoType varType = getVariableNameHighlightType(variable);
     if (varType != null) {
       if (variable instanceof PsiField) {
@@ -152,12 +157,9 @@ public class HighlightNamesUtil {
   }
 
   @Nullable
-  public static HighlightInfo highlightClassNameInQualifier(final PsiJavaCodeReferenceElement element,
-                                                            @NotNull TextAttributesScheme colorsScheme) {
-    PsiExpression qualifierExpression = null;
-    if (element instanceof PsiReferenceExpression) {
-      qualifierExpression = ((PsiReferenceExpression)element).getQualifierExpression();
-    }
+  static HighlightInfo highlightClassNameInQualifier(final PsiJavaCodeReferenceElement element,
+                                                     @NotNull TextAttributesScheme colorsScheme) {
+    PsiElement qualifierExpression = element.getQualifier();
     if (qualifierExpression instanceof PsiJavaCodeReferenceElement) {
       PsiElement resolved = ((PsiJavaCodeReferenceElement)qualifierExpression).resolve();
       if (resolved instanceof PsiClass) {
@@ -217,7 +219,7 @@ public class HighlightNamesUtil {
   }
 
   @Nullable
-  public static HighlightInfo highlightReassignedVariable(PsiVariable variable, PsiElement elementToHighlight) {
+  static HighlightInfo highlightReassignedVariable(PsiVariable variable, PsiElement elementToHighlight) {
     if (variable instanceof PsiLocalVariable) {
       return HighlightInfo.newHighlightInfo(HighlightInfoType.REASSIGNED_LOCAL_VARIABLE).range(elementToHighlight).create();
     }
@@ -248,6 +250,7 @@ public class HighlightNamesUtil {
     return result;
   }
 
+  @NotNull
   public static TextRange getMethodDeclarationTextRange(@NotNull PsiMethod method) {
     if (method instanceof SyntheticElement) return TextRange.EMPTY_RANGE;
     int start = stripAnnotationsFromModifierList(method.getModifierList());
@@ -257,12 +260,14 @@ public class HighlightNamesUtil {
     return new TextRange(start, end);
   }
 
+  @NotNull
   public static TextRange getFieldDeclarationTextRange(@NotNull PsiField field) {
     int start = stripAnnotationsFromModifierList(field.getModifierList());
     int end = field.getNameIdentifier().getTextRange().getEndOffset();
     return new TextRange(start, end);
   }
 
+  @NotNull
   public static TextRange getClassDeclarationTextRange(@NotNull PsiClass aClass) {
     if (aClass instanceof PsiEnumConstantInitializer) {
       return ((PsiEnumConstantInitializer)aClass).getEnumConstant().getNameIdentifier().getTextRange();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@
 package com.intellij.refactoring.inline;
 
 import com.intellij.codeInsight.PsiEquivalenceUtil;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.codeInspection.sameParameterValue.SameParameterValueInspection;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -39,6 +41,7 @@ import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.InlineUtil;
 import com.intellij.refactoring.util.RefactoringMessageDialog;
 import com.intellij.util.Processor;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -116,8 +119,8 @@ public class InlineParameterHandler extends JavaInlineActionHandler {
         return true;
       }
     });
-    final int offset = editor.getCaretModel().getOffset();
-    final PsiElement refExpr = psiElement.getContainingFile().findElementAt(offset);
+    final PsiReference reference = TargetElementUtil.findReference(editor);
+    final PsiReferenceExpression refExpr = reference instanceof PsiReferenceExpression ? ((PsiReferenceExpression)reference) : null;
     final PsiCodeBlock codeBlock = PsiTreeUtil.getParentOfType(refExpr, PsiCodeBlock.class);
     if (codeBlock != null) {
       final PsiElement[] defs = DefUseUtil.getDefs(codeBlock, psiParameter, refExpr);
@@ -126,19 +129,22 @@ public class InlineParameterHandler extends JavaInlineActionHandler {
         if (def instanceof PsiReferenceExpression && PsiUtil.isOnAssignmentLeftHand((PsiExpression)def)) {
           final PsiExpression rExpr = ((PsiAssignmentExpression)def.getParent()).getRExpression();
           if (rExpr != null) {
-            final PsiElement[] refs = DefUseUtil.getRefs(codeBlock, psiParameter, refExpr);
+            PsiExpression toInline = InlineLocalHandler.getDefToInline(psiParameter, refExpr, codeBlock);
+            if (toInline != null) {
+              final PsiElement[] refs = DefUseUtil.getRefs(codeBlock, psiParameter, toInline);
 
-            if (InlineLocalHandler.checkRefsInAugmentedAssignmentOrUnaryModified(refs, def) == null) {
-              new WriteCommandAction(project) {
-                @Override
-                protected void run(Result result) throws Throwable {
-                  for (final PsiElement ref : refs) {
-                    InlineUtil.inlineVariable(psiParameter, rExpr, (PsiJavaCodeReferenceElement)ref);
+              if (InlineLocalHandler.checkRefsInAugmentedAssignmentOrUnaryModified(refs, def) == null) {
+                new WriteCommandAction(project) {
+                  @Override
+                  protected void run(@NotNull Result result) throws Throwable {
+                    for (final PsiElement ref : refs) {
+                      InlineUtil.inlineVariable(psiParameter, rExpr, (PsiJavaCodeReferenceElement)ref);
+                    }
+                    def.getParent().delete();
                   }
-                  def.getParent().delete();
-                }
-              }.execute();
-              return;
+                }.execute();
+                return;
+              }
             }
           }
         }
@@ -199,7 +205,7 @@ public class InlineParameterHandler extends JavaInlineActionHandler {
     }
 
     if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      String occurencesString = RefactoringBundle.message("occurences.string", occurrences.size());
+      String occurencesString = RefactoringBundle.message("occurrences.string", occurrences.size());
       String question = RefactoringBundle.message("inline.parameter.confirmation", psiParameter.getName(),
                                                   constantExpression.getText()) + " " + occurencesString;
       RefactoringMessageDialog dialog = new RefactoringMessageDialog(
@@ -209,19 +215,22 @@ public class InlineParameterHandler extends JavaInlineActionHandler {
         "OptionPane.questionIcon",
         true,
         project);
-      dialog.show();
-      if (!dialog.isOK()){
+      if (!dialog.showAndGet()) {
         return;
       }
     }
 
     final RefactoringEventData data = new RefactoringEventData();
     data.addElement(psiElement.copy());
-    project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(REFACTORING_ID, data);
 
-    SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method, psiParameter, constantExpression);
-
-    project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(REFACTORING_ID, null);
+    CommandProcessor.getInstance().executeCommand(project, new Runnable() {
+      @Override
+      public void run() {
+        project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(REFACTORING_ID, data);
+        SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method, psiParameter, constantExpression);
+        project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(REFACTORING_ID, null);
+      }
+    }, REFACTORING_NAME, null);
   }
 
   @Nullable

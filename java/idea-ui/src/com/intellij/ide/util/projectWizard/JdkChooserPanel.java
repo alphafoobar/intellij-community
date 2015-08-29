@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.ui.ClickListener;
 import com.intellij.ui.DoubleClickListener;
-import com.intellij.ui.ListScrollingUtil;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.ArrayUtil;
 import gnu.trove.TIntArrayList;
@@ -70,7 +70,7 @@ public class JdkChooserPanel extends JPanel {
     });
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (myProject == null) {
           editJdkTable();
         }
@@ -108,8 +108,7 @@ public class JdkChooserPanel extends JPanel {
     ProjectJdksEditor editor = new ProjectJdksEditor((Sdk)myList.getSelectedValue(),
                                                      myProject != null ? myProject : ProjectManager.getInstance().getDefaultProject(),
                                                      myList);
-    editor.show();
-    if (editor.isOK()) {
+    if (editor.showAndGet()) {
       Sdk selectedJdk = editor.getSelectedJdk();
       updateList(selectedJdk, null);
     }
@@ -224,8 +223,9 @@ public class JdkChooserPanel extends JPanel {
     }
     if (jdkToSelect != null) {
       jdkChooserPanel.selectJdk(jdkToSelect);
-    } else {
-      ListScrollingUtil.ensureSelectionExists(jdkChooserPanel.myList);
+    }
+    else {
+      ScrollingUtil.ensureSelectionExists(jdkChooserPanel.myList);
     }
     new DoubleClickListener() {
       @Override
@@ -234,8 +234,7 @@ public class JdkChooserPanel extends JPanel {
         return true;
       }
     }.installOn(jdkChooserPanel.myList);
-    dialog.show();
-    return dialog.isOK() ? jdkChooserPanel.getChosenJdk() : null;
+    return dialog.showAndGet() ? jdkChooserPanel.getChosenJdk() : null;
   }
 
   public static Sdk chooseAndSetJDK(final Project project) {

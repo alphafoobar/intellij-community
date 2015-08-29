@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -196,11 +196,11 @@ public class UpdateInfoTree extends PanelWithActionsAndCloseButton implements Di
       public String convert(TreePath path) {
         Object last = path.getLastPathComponent();
         if (last instanceof AbstractTreeNode) {
-          return ((AbstractTreeNode)last).getName();
+          return ((AbstractTreeNode)last).getText();
         }
         return TreeSpeedSearch.NODE_DESCRIPTOR_TOSTRING.convert(path);
       }
-    });
+    }, true);
 
     myTree.addMouseListener(new PopupHandler() {
       public void invokePopup(Component comp, int x, int y) {
@@ -285,7 +285,7 @@ public class UpdateInfoTree extends PanelWithActionsAndCloseButton implements Di
       final VirtualFilePointer result = myNext;
       final FileStatus status = myStatus;
       step();
-      return new Pair<VirtualFilePointer, FileStatus>(result, status);
+      return Pair.create(result, status);
     }
 
     private void step() {
@@ -457,7 +457,7 @@ public class UpdateInfoTree extends PanelWithActionsAndCloseButton implements Di
         if (scope != null) {
           PackageSet packageSet = scope.getValue();
           if (packageSet instanceof PackageSetBase) {
-            return new Pair<PackageSetBase, NamedScopesHolder>((PackageSetBase)packageSet, holder);
+            return Pair.create((PackageSetBase)packageSet, holder);
           }
         }
       }

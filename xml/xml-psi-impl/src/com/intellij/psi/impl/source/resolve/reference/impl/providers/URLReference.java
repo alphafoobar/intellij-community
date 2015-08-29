@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.codeInsight.daemon.EmptyResolveMessageProvider;
 import com.intellij.codeInsight.daemon.XmlErrorMessages;
 import com.intellij.javaee.ExternalResourceManager;
 import com.intellij.javaee.ExternalResourceManagerEx;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -29,25 +28,19 @@ import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlDocument;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.xml.XmlNSDescriptor;
-import com.intellij.xml.XmlSchemaProvider;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Set;
-
 /**
  * @author Dmitry Avdeev
 */
 public class URLReference implements PsiReference, EmptyResolveMessageProvider {
-  @NonNls private static final String TARGET_NAMESPACE_ATTR_NAME = "targetNamespace";
+  @NonNls public static final String TARGET_NAMESPACE_ATTR_NAME = "targetNamespace";
 
   private final PsiElement myElement;
   private final TextRange myRange;
@@ -64,14 +57,17 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
     mySoft = soft;
   }
 
+  @Override
   public PsiElement getElement() {
     return myElement;
   }
 
+  @Override
   public TextRange getRangeInElement() {
     return myRange != null ? myRange : ElementManipulators.getValueTextRange(myElement);
   }
 
+  @Override
   @Nullable
   public PsiElement resolve() {
     myIncorrectResourceMapped = false;
@@ -134,6 +130,7 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
 
       final PsiElement[] result = new PsiElement[1];
       processWsdlSchemas(rootTag,new Processor<XmlTag>() {
+        @Override
         public boolean process(final XmlTag t) {
           if (canonicalText.equals(t.getAttributeValue(TARGET_NAMESPACE_ATTR_NAME))) {
             result[0] = t;
@@ -156,6 +153,7 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
     return null;
   }
 
+  @Override
   @NotNull
   public String getCanonicalText() {
     final String text = myElement.getText();
@@ -166,6 +164,7 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
     return "";
   }
 
+  @Override
   public PsiElement handleElementRename(String newElementName) throws IncorrectOperationException {
     final TextRange textRangeInElement = getRangeInElement();
     final PsiElement elementToChange = myElement.findElementAt(textRangeInElement.getStartOffset());
@@ -178,6 +177,7 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
     return myElement;
   }
 
+  @Override
   public PsiElement bindToElement(@NotNull PsiElement element) throws IncorrectOperationException {
     assert element instanceof PsiFile;
 
@@ -190,42 +190,25 @@ public class URLReference implements PsiReference, EmptyResolveMessageProvider {
     return myElement;
   }
 
+  @Override
   public boolean isReferenceTo(PsiElement element) {
     return myElement.getManager().areElementsEquivalent(resolve(),element);
   }
 
+  @Override
   @NotNull
   public Object[] getVariants() {
-    final XmlFile file = (XmlFile)myElement.getContainingFile();
-    Set<String> list = new HashSet<String>();
-    for (XmlSchemaProvider provider : Extensions.getExtensions(XmlSchemaProvider.EP_NAME)) {
-      if (provider.isAvailable(file)) {
-        list.addAll(provider.getAvailableNamespaces(file, null));
-      }
-    }
-    if (!list.isEmpty()) {
-      return ArrayUtil.toObjectArray(list);
-    }
-    String[] resourceUrls = ExternalResourceManager.getInstance().getResourceUrls(null, true);
-    final XmlDocument document = file.getDocument();
-    assert document != null;
-    XmlTag rootTag = document.getRootTag();
-    final ArrayList<String> additionalNs = new ArrayList<String>();
-    if (rootTag != null) processWsdlSchemas(rootTag, new Processor<XmlTag>() {
-      public boolean process(final XmlTag xmlTag) {
-        final String s = xmlTag.getAttributeValue(TARGET_NAMESPACE_ATTR_NAME);
-        if (s != null) { additionalNs.add(s); }
-        return true;
-      }
-    });
-    resourceUrls = ArrayUtil.mergeArrays(resourceUrls, ArrayUtil.toStringArray(additionalNs));
-    return resourceUrls;
+    return EMPTY_ARRAY;
   }
 
+  public boolean isSchemaLocation() { return false; }
+
+  @Override
   public boolean isSoft() {
     return mySoft;
   }
 
+  @Override
   @NotNull
   public String getUnresolvedMessagePattern() {
     return XmlErrorMessages.message(myIncorrectResourceMapped ? "registered.resource.is.not.recognized":"uri.is.not.registered");

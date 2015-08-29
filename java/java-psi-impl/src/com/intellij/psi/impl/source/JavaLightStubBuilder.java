@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ public class JavaLightStubBuilder extends LightStubBuilder {
     if (pkg != null) {
       LighterASTNode ref = LightTreeUtil.firstChildOfType(tree, pkg, JavaElementType.JAVA_CODE_REFERENCE);
       if (ref != null) {
-        refText = SourceUtil.getReferenceText(tree, ref);
+        refText = JavaSourceUtil.getReferenceText(tree, ref);
       }
     }
     return new PsiJavaFileStubImpl((PsiJavaFile)file, StringRef.fromString(refText), false);
@@ -57,7 +57,7 @@ public class JavaLightStubBuilder extends LightStubBuilder {
 
     if (checkByTypes(parentType, nodeType)) return true;
 
-    if (nodeType == JavaElementType.CODE_BLOCK && node instanceof TreeElement) {
+    if (nodeType == JavaElementType.CODE_BLOCK) {
       CodeBlockVisitor visitor = new CodeBlockVisitor();
       ((TreeElement)node).acceptTree(visitor);
       return visitor.result;
@@ -73,7 +73,7 @@ public class JavaLightStubBuilder extends LightStubBuilder {
 
     if (checkByTypes(parentType, nodeType)) return true;
 
-    if (nodeType == JavaElementType.CODE_BLOCK && node instanceof LighterLazyParseableNode) {
+    if (nodeType == JavaElementType.CODE_BLOCK) {
       CodeBlockVisitor visitor = new CodeBlockVisitor();
       ((LighterLazyParseableNode)node).accept(visitor);
       return visitor.result;
@@ -84,6 +84,9 @@ public class JavaLightStubBuilder extends LightStubBuilder {
 
   private static boolean checkByTypes(IElementType parentType, IElementType nodeType) {
     if (ElementType.IMPORT_STATEMENT_BASE_BIT_SET.contains(parentType)) {
+      return true;
+    }
+    if (nodeType == JavaElementType.RECEIVER_PARAMETER) {
       return true;
     }
     if (nodeType == JavaElementType.PARAMETER && parentType != JavaElementType.PARAMETER_LIST) {

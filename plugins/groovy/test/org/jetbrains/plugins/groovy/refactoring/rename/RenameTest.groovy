@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,11 +77,13 @@ def foo(newName) {
     myFixture.configureByText(GroovyFileType.GROOVY_FILE_TYPE, """
 import foo.bar.Zoo
 SomeClass c = new SomeClass()
+Zoo zoo
 """)
     myFixture.renameElement(someClass, "NewClass")
     myFixture.checkResult """
 import foo.bar.Zoo
 NewClass c = new NewClass()
+Zoo zoo
 """
   }
 
@@ -448,9 +450,9 @@ foo = 4"""
   }
 
   public void testExtensionOnClassRename() {
-    myFixture.configureByText "Foo.gpp", "class Foo {}"
+    myFixture.configureByText "Foo.gy", "class Foo {}"
     myFixture.renameElement myFixture.findClass("Foo"), "Bar"
-    assert "gpp", myFixture.file.virtualFile.extension
+    assert "gy", myFixture.file.virtualFile.extension
   }
 
   public void testRenameJavaUsageFail() {
@@ -702,6 +704,54 @@ print new Abc()
       renameElement(file, 'Abcd.groovy')
       checkResult('''\
 print new Abcd()
+''')
+    }
+  }
+
+  void testTraitField() {
+    myFixture.with {
+      configureByText('a.groovy', '''\
+trait T {
+    public int f<caret>oo = 5
+
+    def bar() {
+        print foo
+    }
+}
+
+class X implements T {
+   def bar() {
+      print T__foo
+   }
+}
+
+trait T2 extends T {
+    def bar() {
+        print T__foo //actually this ref is unresolved since super fields are not visible in extending traits
+    }
+}
+''')
+      renameElementAtCaret("baz")
+      checkResult('''\
+trait T {
+    public int baz = 5
+
+    def bar() {
+        print baz
+    }
+}
+
+class X implements T {
+   def bar() {
+      print T__baz
+   }
+}
+
+trait T2 extends T {
+    def bar() {
+        print T__foo //actually this ref is unresolved since super fields are not visible in extending traits
+    }
+}
 ''')
     }
   }

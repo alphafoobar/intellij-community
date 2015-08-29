@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2010 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.siyeh.ig.imports;
 
+import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.psi.*;
 import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.InspectionGadgetsBundle;
@@ -26,7 +27,7 @@ import com.intellij.psi.util.FileTypeUtils;
 import com.siyeh.ig.psiutils.ImportUtils;
 import org.jetbrains.annotations.NotNull;
 
-public class JavaLangImportInspection extends BaseInspection {
+public class JavaLangImportInspection extends BaseInspection implements CleanupLocalInspectionTool{
 
   @Override
   @NotNull
@@ -48,6 +49,11 @@ public class JavaLangImportInspection extends BaseInspection {
   }
 
   @Override
+  public boolean shouldInspect(PsiFile file) {
+    return !FileTypeUtils.isInServerPageFile(file);
+  }
+
+  @Override
   public BaseInspectionVisitor buildVisitor() {
     return new JavaLangImportVisitor();
   }
@@ -58,9 +64,6 @@ public class JavaLangImportInspection extends BaseInspection {
     public void visitClass(@NotNull PsiClass aClass) {
       // no call to super, so it doesn't drill down
       if (!(aClass.getParent() instanceof PsiJavaFile)) {
-        return;
-      }
-      if (FileTypeUtils.isInServerPageFile(aClass.getContainingFile())) {
         return;
       }
       final PsiJavaFile file = (PsiJavaFile)aClass.getContainingFile();

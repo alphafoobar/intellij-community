@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,10 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */
-
-/**
- * @author cdr
  */
 package com.intellij.testFramework;
 
@@ -36,10 +32,7 @@ import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.extensions.Extensions;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
@@ -51,10 +44,10 @@ import com.intellij.util.NullableFunction;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
-import junit.framework.Assert;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.junit.Assert;
 
 import java.awt.*;
 import java.lang.reflect.Field;
@@ -63,6 +56,9 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * @author cdr
+ */
 public class ExpectedHighlightingData {
   private static final Logger LOG = Logger.getInstance("#com.intellij.testFramework.ExpectedHighlightingData");
 
@@ -78,6 +74,8 @@ public class ExpectedHighlightingData {
   private final PsiFile myFile;
   @NonNls private static final String ANY_TEXT = "*";
   private final String myText;
+  
+  private boolean myIgnoreExtraHighlighting; 
 
   public static class ExpectedHighlightingSet {
     private final HighlightSeverity severity;
@@ -99,7 +97,7 @@ public class ExpectedHighlightingData {
   public void init() {
     new WriteCommandAction(null){
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         extractExpectedLineMarkerSet(myDocument);
         extractExpectedHighlightsSet(myDocument);
         refreshLineMarkers();
@@ -138,7 +136,7 @@ public class ExpectedHighlightingData {
         for (SeveritiesProvider provider : Extensions.getExtensions(SeveritiesProvider.EP_NAME)) {
           for (HighlightInfoType type : provider.getSeveritiesHighlightInfoTypes()) {
             final HighlightSeverity severity = type.getSeverity(null);
-            highlightingTypes.put(severity.toString(), new ExpectedHighlightingSet(severity, false, true));
+            highlightingTypes.put(severity.getName(), new ExpectedHighlightingSet(severity, false, true));
           }
         }
         highlightingTypes.put(END_LINE_HIGHLIGHT_MARKER, new ExpectedHighlightingSet(HighlightSeverity.ERROR, true, true));
@@ -153,7 +151,17 @@ public class ExpectedHighlightingData {
                                   final boolean checkWeakWarnings,
                                   final boolean checkInfos,
                                   @Nullable final PsiFile file) {
+    this(document, checkWarnings, checkWeakWarnings, checkInfos, false, file);
+  }
+
+  public ExpectedHighlightingData(@NotNull final Document document,
+                                  final boolean checkWarnings,
+                                  final boolean checkWeakWarnings,
+                                  final boolean checkInfos,
+                                  final boolean ignoreExtraHighlighting,
+                                  @Nullable final PsiFile file) {
     this(document, file);
+    myIgnoreExtraHighlighting = ignoreExtraHighlighting;
     if (checkWarnings) checkWarnings();
     if (checkWeakWarnings) checkWeakWarnings();
     if (checkInfos) checkInfos();
@@ -282,6 +290,7 @@ public class ExpectedHighlightingData {
     }
     if (descr != null) {
       descr = descr.replaceAll("\\\\\\\\\"", "\"");  // replace: \\" to ", doesn't check symbol before sequence \\"
+      descr = descr.replaceAll("\\\\\"", "\"");
     }
 
     HighlightInfoType type = WHATEVER;
@@ -349,45 +358,25 @@ public class ExpectedHighlightingData {
   private static final HighlightInfoType WHATEVER = new HighlightInfoType.HighlightInfoTypeImpl(HighlightSeverity.INFORMATION,
                                                                                                 HighlighterColors.TEXT);
 
-  public void checkLineMarkers(Collection<LineMarkerInfo> markerInfos, String text) {
+  public void checkLineMarkers(@NotNull Collection<LineMarkerInfo> markerInfos, @NotNull String text) {
     String fileName = myFile == null ? "" : myFile.getName() + ": ";
     String failMessage = "";
 
-    if (markerInfos != null) {
-      for (LineMarkerInfo info : markerInfos) {
-        if (!containsLineMarker(info, lineMarkerInfos.values())) {
-          final int startOffset = info.startOffset;
-          final int endOffset = info.endOffset;
-
-          int y1 = StringUtil.offsetToLineNumber(text, startOffset);
-          int y2 = StringUtil.offsetToLineNumber(text, endOffset);
-          int x1 = startOffset - StringUtil.lineColToOffset(text, y1, 0);
-          int x2 = endOffset - StringUtil.lineColToOffset(text, y2, 0);
-
-          if (!failMessage.isEmpty()) failMessage += '\n';
-          failMessage += fileName + "Extra line marker highlighted " +
-                            "(" + (x1 + 1) + ", " + (y1 + 1) + ")" + "-" +
-                            "(" + (x2 + 1) + ", " + (y2 + 1) + ")"
-                            + ": '"+info.getLineMarkerTooltip()+"'"
-                            ;
-        }
+    for (LineMarkerInfo info : markerInfos) {
+      if (!containsLineMarker(info, lineMarkerInfos.values())) {
+        if (!failMessage.isEmpty()) failMessage += '\n';
+        failMessage += fileName + "Extra line marker highlighted " +
+                          rangeString(text, info.startOffset, info.endOffset)
+                          + ": '"+info.getLineMarkerTooltip()+"'"
+                          ;
       }
     }
 
     for (LineMarkerInfo expectedLineMarker : lineMarkerInfos.values()) {
-      if (markerInfos != null && !containsLineMarker(expectedLineMarker, markerInfos)) {
-        final int startOffset = expectedLineMarker.startOffset;
-        final int endOffset = expectedLineMarker.endOffset;
-
-        int y1 = StringUtil.offsetToLineNumber(text, startOffset);
-        int y2 = StringUtil.offsetToLineNumber(text, endOffset);
-        int x1 = startOffset - StringUtil.lineColToOffset(text, y1, 0);
-        int x2 = endOffset - StringUtil.lineColToOffset(text, y2, 0);
-
+      if (!markerInfos.isEmpty() && !containsLineMarker(expectedLineMarker, markerInfos)) {
         if (!failMessage.isEmpty()) failMessage += '\n';
         failMessage += fileName + "Line marker was not highlighted " +
-                       "(" + (x1 + 1) + ", " + (y1 + 1) + ")" + "-" +
-                       "(" + (x2 + 1) + ", " + (y2 + 1) + ")"
+                       rangeString(text, expectedLineMarker.startOffset, expectedLineMarker.endOffset)
                        + ": '"+expectedLineMarker.getLineMarkerTooltip()+"'"
           ;
       }
@@ -427,21 +416,15 @@ public class ExpectedHighlightingData {
     String failMessage = "";
 
     for (HighlightInfo info : reverseCollection(infos)) {
-      if (!expectedInfosContainsInfo(info)) {
+      if (!expectedInfosContainsInfo(info) && !myIgnoreExtraHighlighting) {
         final int startOffset = info.startOffset;
         final int endOffset = info.endOffset;
         String s = text.substring(startOffset, endOffset);
         String desc = info.getDescription();
 
-        int y1 = StringUtil.offsetToLineNumber(text, startOffset);
-        int y2 = StringUtil.offsetToLineNumber(text, endOffset);
-        int x1 = startOffset - StringUtil.lineColToOffset(text, y1, 0);
-        int x2 = endOffset - StringUtil.lineColToOffset(text, y2, 0);
-
         if (!failMessage.isEmpty()) failMessage += '\n';
-        failMessage += fileName + "Extra text fragment highlighted " +
-                          "(" + (x1 + 1) + ", " + (y1 + 1) + ")" + "-" +
-                          "(" + (x2 + 1) + ", " + (y2 + 1) + ")" +
+        failMessage += fileName + "Extra " +
+                          rangeString(text, startOffset, endOffset) +
                           " :'" +
                           s +
                           "'" + (desc == null ? "" : " (" + desc + ")")
@@ -459,15 +442,9 @@ public class ExpectedHighlightingData {
           String s = text.substring(startOffset, endOffset);
           String desc = expectedInfo.getDescription();
 
-          int y1 = StringUtil.offsetToLineNumber(text, startOffset);
-          int y2 = StringUtil.offsetToLineNumber(text, endOffset);
-          int x1 = startOffset - StringUtil.lineColToOffset(text, y1, 0);
-          int x2 = endOffset - StringUtil.lineColToOffset(text, y2, 0);
-
           if (!failMessage.isEmpty()) failMessage += '\n';
-          failMessage += fileName + "Text fragment was not highlighted " +
-                            "(" + (x1 + 1) + ", " + (y1 + 1) + ")" + "-" +
-                            "(" + (x2 + 1) + ", " + (y2 + 1) + ")" +
+          failMessage += fileName + "Missing " +
+                            rangeString(text, startOffset, endOffset) +
                             " :'" +
                             s +
                             "'" + (desc == null ? "" : " (" + desc + ")");
@@ -511,6 +488,16 @@ public class ExpectedHighlightingData {
       }
     });
 
+    boolean showAttributesKeys = false;
+    for (ExpectedHighlightingSet eachSet : types.values()) {
+      for (HighlightInfo eachInfo : eachSet.infos) {
+        if (eachInfo.forcedTextAttributesKey != null) {
+          showAttributesKeys = true;
+          break;
+        }
+      }
+    }
+
     // sort filtered highlighting data by end offset in descending order
     Collections.sort(list, new Comparator<Pair<String, HighlightInfo>>() {
       @Override
@@ -539,14 +526,14 @@ public class ExpectedHighlightingData {
 
     // combine highlighting data with original text
     StringBuilder sb = new StringBuilder();
-    Pair<Integer, Integer> result = composeText(sb, list, 0, text, text.length(), 0);
+    Couple<Integer> result = composeText(sb, list, 0, text, text.length(), 0, showAttributesKeys);
     sb.insert(0, text.substring(0, result.second));
     return sb.toString();
   }
 
-  private static Pair<Integer, Integer> composeText(StringBuilder sb,
-                                                    List<Pair<String, HighlightInfo>> list, int index,
-                                                    String text, int endPos, int startPos) {
+  private static Couple<Integer> composeText(StringBuilder sb,
+                                             List<Pair<String, HighlightInfo>> list, int index,
+                                             String text, int endPos, int startPos, boolean showAttributesKeys) {
     int i = index;
     while (i < list.size()) {
       Pair<String, HighlightInfo> pair = list.get(i);
@@ -562,18 +549,24 @@ public class ExpectedHighlightingData {
       sb.insert(0, "</" + severity + ">");
       endPos = info.endOffset;
       if (prev != null && prev.endOffset > info.startOffset) {
-        Pair<Integer, Integer> result = composeText(sb, list, i + 1, text, endPos, info.startOffset);
+        Couple<Integer> result = composeText(sb, list, i + 1, text, endPos, info.startOffset, showAttributesKeys);
         i = result.first - 1;
         endPos = result.second;
       }
       sb.insert(0, text.substring(info.startOffset, endPos));
-      sb.insert(0, "<" + severity + " descr=\"" + info.getDescription() + "\">");
+
+      String str = "<" + severity + " descr=\"" + StringUtil.escapeQuotes(String.valueOf(info.getDescription())) + "\"";
+      if (showAttributesKeys) {
+        str += " textAttributesKey=\"" + info.forcedTextAttributesKey + "\"";
+      }
+      str += ">";
+      sb.insert(0, str);
 
       endPos = info.startOffset;
       i++;
     }
 
-    return Pair.create(i, endPos);
+    return Couple.of(i, endPos);
   }
 
   private static boolean infosContainsExpectedInfo(Collection<HighlightInfo> infos, HighlightInfo expectedInfo) {
@@ -614,5 +607,18 @@ public class ExpectedHighlightingData {
       (expectedInfo.forcedTextAttributes == null || Comparing.equal(expectedInfo.getTextAttributes(null, null),
                                                                     info.getTextAttributes(null, null))) &&
       (expectedInfo.forcedTextAttributesKey == null || expectedInfo.forcedTextAttributesKey.equals(info.forcedTextAttributesKey));
+  }
+
+  private static String rangeString(String text, int startOffset, int endOffset) {
+    int startLine = StringUtil.offsetToLineNumber(text, startOffset);
+    int endLine = StringUtil.offsetToLineNumber(text, endOffset);
+
+    int startCol = startOffset - StringUtil.lineColToOffset(text, startLine, 0);
+    int endCol = endOffset - StringUtil.lineColToOffset(text, endLine, 0);
+
+    if (startLine == endLine) {
+      return String.format("(%d:%d/%d)", startLine + 1, startCol + 1, endCol - startCol);
+    }
+    return String.format("(%d:%d..%d:%d)", startLine + 1, endLine + 1, startCol + 1, endCol + 1);
   }
 }

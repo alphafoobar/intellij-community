@@ -18,6 +18,7 @@ package com.intellij.mock;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.FileIndexFacade;
+import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
@@ -73,6 +74,11 @@ public class MockFileIndexFacade extends FileIndexFacade {
   }
 
   @Override
+  public boolean isUnderIgnored(@NotNull VirtualFile file) {
+    return false;
+  }
+
+  @Override
   public Module getModuleForFile(@NotNull VirtualFile file) {
     return myModule;
   }
@@ -80,6 +86,12 @@ public class MockFileIndexFacade extends FileIndexFacade {
   @Override
   public boolean isValidAncestor(@NotNull VirtualFile baseDir, @NotNull VirtualFile child) {
     return VfsUtilCore.isAncestor(baseDir, child, false);
+  }
+
+  @NotNull
+  @Override
+  public ModificationTracker getRootModificationTracker() {
+    return ModificationTracker.NEVER_CHANGED;
   }
 
   public void addLibraryRoot(VirtualFile file) {

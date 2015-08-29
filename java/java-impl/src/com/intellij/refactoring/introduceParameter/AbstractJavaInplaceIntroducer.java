@@ -6,6 +6,7 @@ import com.intellij.codeInsight.template.Expression;
 import com.intellij.codeInsight.template.ExpressionContext;
 import com.intellij.codeInsight.template.Result;
 import com.intellij.codeInsight.template.TextResult;
+import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
@@ -49,8 +50,7 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
 
   @Override
   protected String[] suggestNames(boolean replaceAll, PsiVariable variable) {
-    myTypeSelectorManager.setAllOccurrences(replaceAll);
-    final PsiType defaultType = myTypeSelectorManager.getTypeSelector().getSelectedType();
+    final PsiType defaultType = getType();
     final String propertyName = variable != null
                                 ? JavaCodeStyleManager.getInstance(myProject).variableNameToPropertyName(variable.getName(), VariableKind.LOCAL_VARIABLE)
                                 : null;
@@ -92,7 +92,7 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
   }
 
   @Override
-  protected void restoreState(PsiVariable psiField) {
+  protected void restoreState(@NotNull PsiVariable psiField) {
     final SmartTypePointer typePointer = SmartTypePointerManager.getInstance(myProject).createSmartTypePointer(getType());
     super.restoreState(psiField);
     for (PsiExpression occurrence : myOccurrences) {
@@ -121,7 +121,7 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
   public static String[] appendUnresolvedExprName(String[] names, final PsiExpression expr) {
     if (expr instanceof PsiReferenceExpression && ((PsiReferenceExpression)expr).resolve() == null) {
       final String name = expr.getText();
-      if (JavaPsiFacade.getInstance(expr.getProject()).getNameHelper().isIdentifier(name, LanguageLevel.HIGHEST)) {
+      if (PsiNameHelper.getInstance(expr.getProject()).isIdentifier(name, LanguageLevel.HIGHEST)) {
         names = ArrayUtil.mergeArrays(new String[]{name}, names);
       }
     }
@@ -139,7 +139,9 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
     final PsiElement refVariableElementParent = refVariableElement != null ? refVariableElement.getParent() : null;
     PsiExpression expression = refVariableElement instanceof PsiKeyword && refVariableElementParent instanceof PsiNewExpression 
                                ? (PsiNewExpression)refVariableElementParent 
-                               : PsiTreeUtil.getParentOfType(refVariableElement, PsiReferenceExpression.class);
+                               : refVariableElementParent instanceof PsiParenthesizedExpression 
+                                 ? ((PsiParenthesizedExpression)refVariableElementParent).getExpression() 
+                                 : PsiTreeUtil.getParentOfType(refVariableElement, PsiReferenceExpression.class);
     if (expression instanceof PsiReferenceExpression && !(expression.getParent() instanceof PsiMethodCallExpression)) {
       final String referenceName = ((PsiReferenceExpression)expression).getReferenceName();
       if (((PsiReferenceExpression)expression).resolve() == psiVariable ||
@@ -151,7 +153,7 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
     if (expression == null) {
       expression = PsiTreeUtil.getParentOfType(refVariableElement, PsiExpression.class);
     }
-    while (expression instanceof PsiReferenceExpression) {
+    while (expression instanceof PsiReferenceExpression || expression instanceof PsiMethodCallExpression) {
       final PsiElement parent = expression.getParent();
       if (parent instanceof PsiMethodCallExpression) {
         if (parent.getText().equals(exprText)) return (PsiExpression)parent;
@@ -161,8 +163,10 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
         if (expression.getText().equals(exprText)) {
           return expression;
         }
-      } else {
+      } else if (expression instanceof PsiReferenceExpression) {
         return null;
+      } else {
+        break;
       }
     }
     if (expression != null && expression.isValid() && expression.getText().equals(exprText)) {
@@ -200,4 +204,11 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
      };
    }
 
+  protected String chooseName(String[] names, Language language) {
+    String inputName = getInputName();
+    if (inputName != null && !isIdentifier(inputName, language)) {
+      inputName = null;
+    }
+    return inputName != null ? inputName : names[0];
+  }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,15 @@ import java.util.List;
  * @author vlan
  */
 public interface StructuredDocString {
+  /**
+   * Creates parameter type documentation specific for certain doct type
+   * @param name param name
+   * @param type param type
+   * @return text to add to docsting
+   */
+  @NotNull
+  String createParameterType(@NotNull String name, @NotNull String type);
+
   String getDescription();
 
   String getSummary();

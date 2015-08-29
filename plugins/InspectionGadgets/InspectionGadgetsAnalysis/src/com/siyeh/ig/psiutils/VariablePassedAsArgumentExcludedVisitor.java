@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2012 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,22 @@
 package com.siyeh.ig.psiutils;
 
 import com.intellij.psi.*;
+import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Set;
-
-class VariablePassedAsArgumentExcludedVisitor extends JavaRecursiveElementVisitor {
+class VariablePassedAsArgumentExcludedVisitor extends JavaRecursiveElementWalkingVisitor {
 
   @NotNull
   private final PsiVariable variable;
-  private final Set<String> excludes;
+  private final Processor<PsiCall> myCallProcessor;
   private final boolean myBuilderPattern;
 
-  private boolean passed = false;
+  private boolean passed;
 
-  public VariablePassedAsArgumentExcludedVisitor(@NotNull PsiVariable variable, @NotNull Set<String> excludes, boolean builderPattern) {
+  VariablePassedAsArgumentExcludedVisitor(@NotNull PsiVariable variable, boolean builderPattern,
+                                          @NotNull Processor<PsiCall> callProcessor) {
     this.variable = variable;
-    this.excludes = excludes;
+    myCallProcessor = callProcessor;
     myBuilderPattern = builderPattern;
   }
 
@@ -44,57 +44,36 @@ class VariablePassedAsArgumentExcludedVisitor extends JavaRecursiveElementVisito
   }
 
   @Override
-  public void visitMethodCallExpression(@NotNull PsiMethodCallExpression call) {
+  public void visitCallExpression(PsiCallExpression callExpression) {
     if (passed) {
       return;
     }
-    super.visitMethodCallExpression(call);
-    final PsiExpressionList argumentList = call.getArgumentList();
-    final PsiExpression[] arguments = argumentList.getExpressions();
-    for (PsiExpression argument : arguments) {
-      if (!VariableAccessUtils.mayEvaluateToVariable(argument, variable, myBuilderPattern)) {
-        continue;
-      }
-      final PsiMethod method = call.resolveMethod();
-      if (method != null) {
-        final PsiClass aClass = method.getContainingClass();
-        if (aClass != null) {
-          final String name = aClass.getQualifiedName();
-          if (excludes.contains(name)) {
-            continue;
-          }
-        }
-      }
-      passed = true;
-    }
+    super.visitCallExpression(callExpression);
+    visitCall(callExpression);
   }
 
   @Override
-  public void visitNewExpression(@NotNull PsiNewExpression newExpression) {
+  public void visitEnumConstant(PsiEnumConstant enumConstant) {
     if (passed) {
       return;
     }
-    super.visitNewExpression(newExpression);
-    final PsiExpressionList argumentList = newExpression.getArgumentList();
+    super.visitEnumConstant(enumConstant);
+    visitCall(enumConstant);
+  }
+
+  private void visitCall(PsiCall call) {
+    final PsiExpressionList argumentList = call.getArgumentList();
     if (argumentList == null) {
       return;
     }
-    final PsiExpression[] arguments = argumentList.getExpressions();
-    for (PsiExpression argument : arguments) {
+    for (PsiExpression argument : argumentList.getExpressions()) {
       if (!VariableAccessUtils.mayEvaluateToVariable(argument, variable, myBuilderPattern)) {
         continue;
       }
-      final PsiMethod constructor = newExpression.resolveConstructor();
-      if (constructor != null) {
-        final PsiClass aClass = constructor.getContainingClass();
-        if (aClass != null) {
-          final String name = aClass.getQualifiedName();
-          if (excludes.contains(name)) {
-            continue;
-          }
-        }
+      if (!myCallProcessor.process(call)) {
+        passed = true;
+        break;
       }
-      passed = true;
     }
   }
 

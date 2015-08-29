@@ -27,6 +27,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.TextComponentAccessor;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.projectImport.ProjectFormatPanel;
+import com.intellij.ui.HideableTitledPanel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,6 +53,8 @@ public abstract class AbstractImportFromExternalSystemControl<
 
   @NotNull private final PaintAwarePanel           myComponent              = new PaintAwarePanel(new GridBagLayout());
   @NotNull private final TextFieldWithBrowseButton myLinkedProjectPathField = new TextFieldWithBrowseButton();
+  @Nullable private final HideableTitledPanel hideableSystemSettingsPanel;
+  @NotNull private final ProjectFormatPanel myProjectFormatPanel;
 
   @NotNull private final  ExternalSystemSettingsControl<ProjectSettings> myProjectSettingsControl;
   @NotNull private final  ProjectSystemId                                myExternalSystemId;
@@ -58,16 +62,28 @@ public abstract class AbstractImportFromExternalSystemControl<
 
   @Nullable Project myCurrentProject;
 
-  @SuppressWarnings("AbstractMethodCallInConstructor")
+  private boolean myShowProjectFormatPanel;
+  private final JLabel myProjectFormatLabel;
+
   protected AbstractImportFromExternalSystemControl(@NotNull ProjectSystemId externalSystemId,
                                                     @NotNull SystemSettings systemSettings,
                                                     @NotNull ProjectSettings projectSettings)
+  {
+    this(externalSystemId, systemSettings, projectSettings, false);
+  }
+
+  @SuppressWarnings("AbstractMethodCallInConstructor")
+  protected AbstractImportFromExternalSystemControl(@NotNull ProjectSystemId externalSystemId,
+                                                    @NotNull SystemSettings systemSettings,
+                                                    @NotNull ProjectSettings projectSettings,
+                                                    boolean showProjectFormatPanel)
   {
     myExternalSystemId = externalSystemId;
     mySystemSettings = systemSettings;
     myProjectSettings = projectSettings;
     myProjectSettingsControl = createProjectSettingsControl(projectSettings);
     mySystemSettingsControl = createSystemSettingsControl(systemSettings);
+    myShowProjectFormatPanel = showProjectFormatPanel;
 
     JLabel linkedProjectPathLabel =
       new JLabel(ExternalSystemBundle.message("settings.label.select.project", externalSystemId.getReadableName()));
@@ -102,8 +118,25 @@ public abstract class AbstractImportFromExternalSystemControl<
     myComponent.add(linkedProjectPathLabel, ExternalSystemUiUtil.getLabelConstraints(0));
     myComponent.add(myLinkedProjectPathField, ExternalSystemUiUtil.getFillLineConstraints(0));
     myProjectSettingsControl.fillUi(myComponent, 0);
+
+    myProjectFormatPanel = new ProjectFormatPanel();
+    myProjectFormatLabel = new JLabel(ExternalSystemBundle.message("settings.label.project.format"));
+    myComponent.add(myProjectFormatLabel, ExternalSystemUiUtil.getLabelConstraints(0));
+    myComponent.add(myProjectFormatPanel.getStorageFormatComboBox(), ExternalSystemUiUtil.getFillLineConstraints(0));
+
     if (mySystemSettingsControl != null) {
-      mySystemSettingsControl.fillUi(myComponent, 0);
+      final PaintAwarePanel mySystemSettingsControlPanel = new PaintAwarePanel();
+      mySystemSettingsControl.fillUi(mySystemSettingsControlPanel, 0);
+
+      JPanel panel = new JPanel(new BorderLayout());
+      panel.add(mySystemSettingsControlPanel, BorderLayout.CENTER);
+      hideableSystemSettingsPanel = new HideableTitledPanel(
+        ExternalSystemBundle.message("settings.title.system.settings", myExternalSystemId.getReadableName()), false);
+      hideableSystemSettingsPanel.setContentComponent(panel);
+      hideableSystemSettingsPanel.setOn(false);
+      myComponent.add(hideableSystemSettingsPanel, ExternalSystemUiUtil.getFillLineConstraints(0));
+    } else {
+      hideableSystemSettingsPanel = null;
     }
     ExternalSystemUiUtil.fillBottom(myComponent);
   }
@@ -160,6 +193,11 @@ public abstract class AbstractImportFromExternalSystemControl<
     return myProjectSettingsControl;
   }
 
+  @Nullable
+  public ExternalSystemSettingsControl<SystemSettings> getSystemSettingsControl() {
+    return mySystemSettingsControl;
+  }
+
   public void setLinkedProjectPath(@NotNull String path) {
     myProjectSettings.setExternalProjectPath(path);
     myLinkedProjectPathField.setText(path);
@@ -175,12 +213,23 @@ public abstract class AbstractImportFromExternalSystemControl<
     return myProjectSettings;
   }
 
+  public void setShowProjectFormatPanel(boolean showProjectFormatPanel) {
+    myShowProjectFormatPanel = showProjectFormatPanel;
+  }
+
   public void reset() {
     myLinkedProjectPathField.setText("");
     myProjectSettingsControl.reset();
     if (mySystemSettingsControl != null) {
       mySystemSettingsControl.reset();
     }
+    if (hideableSystemSettingsPanel != null) {
+      hideableSystemSettingsPanel.setOn(false);
+    }
+    myProjectFormatLabel.setVisible(myShowProjectFormatPanel);
+    myProjectFormatPanel.setVisible(myShowProjectFormatPanel);
+    myProjectFormatPanel.getPanel().setVisible(myShowProjectFormatPanel);
+    myProjectFormatPanel.getStorageFormatComboBox().setVisible(myShowProjectFormatPanel);
   }
 
   public void apply() throws ConfigurationException {
@@ -207,5 +256,10 @@ public abstract class AbstractImportFromExternalSystemControl<
       mySystemSettingsControl.validate(mySystemSettings);
       mySystemSettingsControl.apply(mySystemSettings);
     }
+  }
+
+  @Nullable
+  public ProjectFormatPanel getProjectFormatPanel() {
+    return myShowProjectFormatPanel ? myProjectFormatPanel : null;
   }
 }

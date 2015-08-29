@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.externalSystem.service.project.autoimport;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
@@ -28,6 +29,7 @@ import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTask;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskState;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType;
+import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
 import com.intellij.openapi.externalSystem.service.internal.ExternalSystemProcessingManager;
 import com.intellij.openapi.externalSystem.service.project.ExternalProjectRefreshCallback;
 import com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManager;
@@ -37,7 +39,6 @@ import com.intellij.openapi.externalSystem.util.DisposeAwareProjectChange;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
-import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx;
@@ -50,12 +51,14 @@ import com.intellij.util.Alarm;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.messages.MessageBus;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -69,11 +72,11 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
   @NotNull private final ConcurrentMap<ProjectSystemId, Set<String /* external project path */>> myFilesToRefresh
     = ContainerUtil.newConcurrentMap();
 
-  @NotNull private final Alarm         myVfsAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+  @NotNull private final Alarm         myVfsAlarm;
   @NotNull private final ReadWriteLock myVfsLock  = new ReentrantReadWriteLock();
 
   @NotNull private final Set<Document> myDocumentsToSave = ContainerUtilRt.newHashSet();
-  @NotNull private final Alarm         myDocumentAlarm   = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+  @NotNull private final Alarm         myDocumentAlarm;
   @NotNull private final ReadWriteLock myDocumentLock    = new ReentrantReadWriteLock();
 
   @NotNull private final Runnable                       myFilesRequest         = new Runnable() {
@@ -98,7 +101,7 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
             ProjectRootManagerEx.getInstanceEx(myProject).mergeRootsChangesDuring(new Runnable() {
               @Override
               public void run() {
-                myProjectDataManager.importData(externalProject.getKey(), Collections.singleton(externalProject), myProject, true);
+                myProjectDataManager.importData(externalProject, myProject, true);
               }
             });
           }
@@ -124,6 +127,8 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
     myProject = project;
     myProjectDataManager = projectDataManager;
     myAutoImportAware = autoImportAware;
+    myVfsAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, project);
+    myDocumentAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, project);
   }
 
   @SuppressWarnings("unchecked")
@@ -150,7 +155,7 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
       entries
     );
     final MessageBus messageBus = project.getMessageBus();
-    messageBus.connect().subscribe(VirtualFileManager.VFS_CHANGES, autoImporter);
+    messageBus.connect(project).subscribe(VirtualFileManager.VFS_CHANGES, autoImporter);
 
     EditorFactory.getInstance().getEventMulticaster().addDocumentListener(autoImporter, project);
   }
@@ -219,6 +224,8 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
   }
 
   private void saveDocumentsIfNecessary() {
+    if(ApplicationManager.getApplication().isDisposed()) return;
+
     final FileDocumentManager fileDocumentManager = FileDocumentManager.getInstance();
     Lock lock = myDocumentLock.writeLock();
     Set<Document> toKeep = ContainerUtilRt.newHashSet();
@@ -236,7 +243,7 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
       }
       myDocumentsToSave.clear();
       if (!toSave.isEmpty()) {
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
+        invokeLaterIfNeeded(new Runnable() {
           @Override
           public void run() {
             for (Document document : toSave) {
@@ -252,6 +259,15 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
     }
     finally {
       lock.unlock();
+    }
+  }
+
+  private static void invokeLaterIfNeeded(Runnable runnable) {
+    if (ApplicationManager.getApplication().isDispatchThread()) {
+      runnable.run();
+    }
+    else {
+      ApplicationManager.getApplication().invokeLater(runnable);
     }
   }
 
@@ -342,8 +358,7 @@ public class ExternalSystemAutoImporter implements BulkFileListener, DocumentLis
       for (String path : entry.getValue()) {
         final ExternalSystemTask resolveTask = processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT, entry.getKey(), path);
         final ExternalSystemTaskState taskState = resolveTask == null ? null : resolveTask.getState();
-        if (taskState == null || taskState.isStopped() ||
-            (taskState == ExternalSystemTaskState.IN_PROGRESS && resolveTask.cancel())) {
+        if (taskState == null || taskState.isStopped()) {
           ExternalSystemUtil.refreshProject(
             myProject, entry.getKey(), path, myRefreshCallback, false, ProgressExecutionMode.IN_BACKGROUND_ASYNC, false);
         }

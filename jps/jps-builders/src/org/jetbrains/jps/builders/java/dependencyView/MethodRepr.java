@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,18 @@ package org.jetbrains.jps.builders.java.dependencyView;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.DataInputOutputUtil;
 import gnu.trove.THashSet;
-import org.jetbrains.asm4.Type;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.jps.builders.storage.BuildDataCorruptedException;
+import org.jetbrains.org.objectweb.asm.Type;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Set;
 
 /**
  * @author: db
@@ -107,8 +112,8 @@ class MethodRepr extends ProtoMember {
   public void updateClassUsages(final DependencyContext context, final int owner, final Set<UsageRepr.Usage> s) {
     myType.updateClassUsages(context, owner, s);
 
-    for (int i = 0; i < myArgumentTypes.length; i++) {
-      myArgumentTypes[i].updateClassUsages(context, owner, s);
+    for (final TypeRepr.AbstractType argType : myArgumentTypes) {
+      argType.updateClassUsages(context, owner, s);
     }
 
     if (myExceptions != null) {
@@ -119,17 +124,17 @@ class MethodRepr extends ProtoMember {
   }
 
   public MethodRepr(final DependencyContext context,
-                    final int a,
-                    final int n,
-                    final int s,
-                    final String d,
-                    final String[] e,
-                    final Object value) {
-    super(a, s, n, TypeRepr.getType(context, Type.getReturnType(d)), value);
+                    final int accessFlags,
+                    final int name,
+                    final int signature,
+                    final String descriptor,
+                    final String[] exceptions,
+                    final Object defaultValue) {
+    super(accessFlags, signature, name, TypeRepr.getType(context, Type.getReturnType(descriptor)), defaultValue);
     Set<TypeRepr.AbstractType> typeCollection =
-      e != null ? new THashSet<TypeRepr.AbstractType>(e.length) : Collections.<TypeRepr.AbstractType>emptySet();
-    myExceptions = (Set<TypeRepr.AbstractType>)TypeRepr.createClassType(context, e, typeCollection);
-    myArgumentTypes = TypeRepr.getType(context, Type.getArgumentTypes(d));
+      exceptions != null ? new THashSet<TypeRepr.AbstractType>(exceptions.length) : Collections.<TypeRepr.AbstractType>emptySet();
+    myExceptions = (Set<TypeRepr.AbstractType>)TypeRepr.createClassType(context, exceptions, typeCollection);
+    myArgumentTypes = TypeRepr.getType(context, Type.getArgumentTypes(descriptor));
   }
 
   public MethodRepr(final DependencyContext context, final DataInput in) {
@@ -141,7 +146,7 @@ class MethodRepr extends ProtoMember {
       myExceptions = (Set<TypeRepr.AbstractType>)RW.read(externalizer, new THashSet<TypeRepr.AbstractType>(0), in);
     }
     catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new BuildDataCorruptedException(e);
     }
   }
 
@@ -155,12 +160,12 @@ class MethodRepr extends ProtoMember {
   public static DataExternalizer<MethodRepr> externalizer(final DependencyContext context) {
     return new DataExternalizer<MethodRepr>() {
       @Override
-      public void save(final DataOutput out, final MethodRepr value) throws IOException {
+      public void save(@NotNull final DataOutput out, final MethodRepr value) throws IOException {
         value.save(out);
       }
 
       @Override
-      public MethodRepr read(DataInput in) throws IOException {
+      public MethodRepr read(@NotNull DataInput in) throws IOException {
         return new MethodRepr(context, in);
       }
     };
@@ -211,7 +216,7 @@ class MethodRepr extends ProtoMember {
   }
 
   public UsageRepr.Usage createMetaUsage(final DependencyContext context, final int owner) {
-    return UsageRepr.createMetaMethodUsage(context, name, owner, getDescr(context));
+    return UsageRepr.createMetaMethodUsage(context, name, owner);
   }
 
   @Override

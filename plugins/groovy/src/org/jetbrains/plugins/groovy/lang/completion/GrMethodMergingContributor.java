@@ -21,7 +21,7 @@ import com.intellij.codeInsight.lookup.LookupItem;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiParameter;
 import com.intellij.psi.PsiType;
-import com.intellij.psi.ResolveResult;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames;
 
@@ -32,7 +32,7 @@ import java.util.ArrayList;
  */
 public class GrMethodMergingContributor extends CompletionContributor {
   @Override
-  public AutoCompletionDecision handleAutoCompletionPossibility(AutoCompletionContext context) {
+  public AutoCompletionDecision handleAutoCompletionPossibility(@NotNull AutoCompletionContext context) {
     final CompletionParameters parameters = context.getParameters();
 
     if (parameters.getCompletionType() != CompletionType.SMART && parameters.getCompletionType() != CompletionType.BASIC) {
@@ -45,13 +45,9 @@ public class GrMethodMergingContributor extends CompletionContributor {
     final LookupElement[] items = context.getItems();
     if (items.length > 1) {
       String commonName = null;
-      LookupElement best = null;
       final ArrayList<PsiMethod> allMethods = new ArrayList<PsiMethod>();
       for (LookupElement item : items) {
-        Object o = item.getObject();
-        if (o instanceof ResolveResult) {
-          o = ((ResolveResult)o).getElement();
-        }
+        Object o = item.getPsiElement();
         if (item.getUserData(LookupItem.FORCE_SHOW_SIGNATURE_ATTR) != null || !(o instanceof PsiMethod)) {
           return AutoCompletionDecision.SHOW_LOOKUP;
         }
@@ -75,17 +71,14 @@ public class GrMethodMergingContributor extends CompletionContributor {
           return AutoCompletionDecision.SHOW_LOOKUP;
         }
 
-        if (best == null && method.getParameterList().getParametersCount() > 0) {
-          best = item;
-        }
         commonName = name;
         allMethods.add(method);
-        item.putUserData(JavaCompletionUtil.ALL_METHODS_ATTRIBUTE, allMethods);
       }
-      if (best == null) {
-        best = items[0];
+      for (LookupElement item : items) {
+        JavaCompletionUtil.putAllMethods(item, allMethods);
       }
-      return AutoCompletionDecision.insertItem(best);
+
+      return AutoCompletionDecision.insertItem(JavaMethodMergingContributor.findBestOverload(items));
     }
 
     return super.handleAutoCompletionPossibility(context);

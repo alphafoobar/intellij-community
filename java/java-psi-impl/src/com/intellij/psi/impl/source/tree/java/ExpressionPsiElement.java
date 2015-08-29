@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/*
- * @author max
- */
 package com.intellij.psi.impl.source.tree.java;
 
 import com.intellij.lang.ASTNode;
@@ -24,13 +20,11 @@ import com.intellij.psi.impl.source.tree.*;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * @author max
+ */
 public class ExpressionPsiElement extends CompositePsiElement {
-  private final int myHC = CompositePsiElement.ourHC++;
-
-  @Override
-  public final int hashCode() {
-    return myHC;
-  }
+  @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod") private final int myHC = CompositePsiElement.ourHC++;
 
   public ExpressionPsiElement(final IElementType type) {
     super(type);
@@ -38,12 +32,18 @@ public class ExpressionPsiElement extends CompositePsiElement {
 
   @Override
   public void replaceChildInternal(@NotNull ASTNode child, @NotNull TreeElement newElement) {
-    if (ElementType.EXPRESSION_BIT_SET.contains(child.getElementType())) {
+    if (ElementType.EXPRESSION_BIT_SET.contains(child.getElementType()) &&
+        ElementType.EXPRESSION_BIT_SET.contains(newElement.getElementType())) {
       boolean needParenth = ReplaceExpressionUtil.isNeedParenthesis(child, newElement);
       if (needParenth) {
-        newElement = SourceUtil.addParenthToReplacedChild(JavaElementType.PARENTH_EXPRESSION, newElement, getManager());
+        newElement = JavaSourceUtil.addParenthToReplacedChild(JavaElementType.PARENTH_EXPRESSION, newElement, getManager());
       }
     }
     super.replaceChildInternal(child, newElement);
+  }
+
+  @Override
+  public final int hashCode() {
+    return myHC;
   }
 }

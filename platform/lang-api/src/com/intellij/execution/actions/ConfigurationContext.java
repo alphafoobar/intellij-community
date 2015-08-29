@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@ import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
@@ -42,6 +43,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
@@ -65,6 +67,7 @@ public class ConfigurationContext {
   private List<RuntimeConfigurationProducer> myPreferredProducers;
   private List<ConfigurationFromContext> myConfigurationsFromContext;
 
+  @NotNull
   public static ConfigurationContext getFromContext(DataContext dataContext) {
     final ConfigurationContext context = new ConfigurationContext(dataContext);
     final DataManager dataManager = DataManager.getInstance();
@@ -102,6 +105,13 @@ public class ConfigurationContext {
     myLocation = new PsiLocation<PsiElement>(project, myModule, element);
   }
 
+  public ConfigurationContext(PsiElement element) {
+    myModule = ModuleUtilCore.findModuleForPsiElement(element);
+    myLocation = new PsiLocation<PsiElement>(element.getProject(), myModule, element);
+    myRuntimeConfiguration = null;
+    myContextComponent = null;
+  }
+
   /**
    * Returns the configuration created from this context.
    *
@@ -116,7 +126,7 @@ public class ConfigurationContext {
   private void createConfiguration() {
     LOG.assertTrue(myConfiguration == null);
     final Location location = getLocation();
-    myConfiguration = location != null ?
+    myConfiguration = location != null && !DumbService.isDumb(location.getProject()) ?
         PreferredProducerFind.createConfiguration(location, this) :
         null;
   }
@@ -180,7 +190,7 @@ public class ConfigurationContext {
           }
         }
       }
-      for (RunConfigurationProducer producer : Extensions.getExtensions(RunConfigurationProducer.EP_NAME)) {
+      for (RunConfigurationProducer producer : RunConfigurationProducer.getProducers(getProject())) {
         RunnerAndConfigurationSettings configuration = producer.findExistingConfiguration(this);
         if (configuration != null && configuration.getConfiguration() == myRuntimeConfiguration) {
           myExistingConfiguration.set(configuration);
@@ -195,7 +205,7 @@ public class ConfigurationContext {
         }
       }
     }
-    for (RunConfigurationProducer producer : Extensions.getExtensions(RunConfigurationProducer.EP_NAME)) {
+    for (RunConfigurationProducer producer : RunConfigurationProducer.getProducers(getProject())) {
       RunnerAndConfigurationSettings configuration = producer.findExistingConfiguration(this);
       if (configuration != null) {
         myExistingConfiguration.set(configuration);
@@ -220,12 +230,12 @@ public class ConfigurationContext {
     }
     if (element == null) {
       final PsiElement[] elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext);
-      element = elements != null && elements.length >= 1 ? elements[0] : null;
+      element = elements != null && elements.length > 0 ? elements[0] : null;
     }
     if (element == null) {
-      final VirtualFile file = CommonDataKeys.VIRTUAL_FILE.getData(dataContext);
-      if (file != null) {
-        element = PsiManager.getInstance(project).findFile(file);
+      final VirtualFile[] files = CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
+      if (files != null && files.length > 0) {
+        element = PsiManager.getInstance(project).findFile(files[0]);
       }
     }
     return element;
@@ -276,6 +286,7 @@ public class ConfigurationContext {
     return myPreferredProducers;
   }
 
+  @Nullable
   public List<ConfigurationFromContext> getConfigurationsFromContext() {
     if (myConfigurationsFromContext == null) {
       myConfigurationsFromContext = PreferredProducerFind.getConfigurationsFromContext(myLocation, this, true);

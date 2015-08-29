@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,7 @@ package com.intellij.openapi.project.ex;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.vfs.VirtualFile;
-import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -40,17 +38,15 @@ public abstract class ProjectManagerEx extends ProjectManager {
   public abstract Project newProject(final String projectName, @NotNull String filePath, boolean useDefaultProjectSettings, boolean isDummy);
 
   @Nullable
-  public abstract Project loadProject(@NotNull String filePath) throws IOException, JDOMException, InvalidDataException;
+  public abstract Project loadProject(@NotNull String filePath) throws IOException;
 
-  public abstract boolean openProject(Project project);
+  public abstract boolean openProject(@NotNull Project project);
 
   public abstract boolean isProjectOpened(Project project);
 
-  public abstract boolean canClose(Project project);
+  public abstract boolean canClose(@NotNull Project project);
 
-  public abstract void saveChangedProjectFile(VirtualFile file, final Project project);
-
-  public abstract boolean isFileSavedToBeReloaded(VirtualFile file);
+  public abstract void saveChangedProjectFile(@NotNull VirtualFile file, @NotNull Project project);
 
   public abstract void blockReloadingProjectOnExternalChanges();
   public abstract void unblockReloadingProjectOnExternalChanges();
@@ -59,6 +55,7 @@ public abstract class ProjectManagerEx extends ProjectManager {
   public abstract void openTestProject(@NotNull Project project);
 
   @TestOnly
+  @NotNull
   // returns remaining open test projects
   public abstract Collection<Project> closeTestProject(@NotNull Project project);
 
@@ -72,5 +69,5 @@ public abstract class ProjectManagerEx extends ProjectManager {
   }
 
   @Nullable
-  public abstract Project convertAndLoadProject(String filePath) throws IOException;
+  public abstract Project convertAndLoadProject(@NotNull String filePath) throws IOException;
 }

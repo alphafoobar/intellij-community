@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package org.jetbrains.plugins.groovy.refactoring.inline;
 
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.lang.refactoring.InlineHandler;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -81,7 +81,7 @@ public class GroovyInlineMethodUtil {
     }
 
     if (invokedOnReference) {
-      PsiReference reference = editor != null ? TargetElementUtilBase.findReference(editor, editor.getCaretModel().getOffset()) : null;
+      PsiReference reference = editor != null ? TargetElementUtil.findReference(editor, editor.getCaretModel().getOffset()) : null;
       if (reference == null) return InlineHandler.Settings.CANNOT_INLINE_SETTINGS;
 
       PsiElement element = reference.getElement();
@@ -178,13 +178,14 @@ public class GroovyInlineMethodUtil {
     if (!application.isUnitTestMode()) {
       final InlineMethodDialog dialog = new InlineMethodDialog(project, method, invokedOnReference, checkMethodForRecursion(method));
 
-      dialog.show();
-      if (!dialog.isOK()) {
-        WindowManager.getInstance().getStatusBar(project).setInfo(GroovyRefactoringBundle.message("press.escape.to.remove.the.highlighting"));
+      if (!dialog.showAndGet()) {
+        WindowManager.getInstance().getStatusBar(project)
+          .setInfo(GroovyRefactoringBundle.message("press.escape.to.remove.the.highlighting"));
         return InlineHandler.Settings.CANNOT_INLINE_SETTINGS;
       }
       else {
         return new InlineHandler.Settings() {
+          @Override
           public boolean isOnlyOneReferenceToInline() {
             return dialog.isInlineThisOnly();
           }
@@ -192,6 +193,7 @@ public class GroovyInlineMethodUtil {
       }
     }
     return new InlineHandler.Settings() {
+      @Override
       public boolean isOnlyOneReferenceToInline() {
         return true;
       }
@@ -202,7 +204,7 @@ public class GroovyInlineMethodUtil {
   private static boolean hasBadReturns(GrMethod method) {
     Collection<GrStatement> returnStatements = ControlFlowUtils.collectReturns(method.getBlock());
     GrOpenBlock block = method.getBlock();
-    if (block == null || returnStatements.size() == 0) return false;
+    if (block == null || returnStatements.isEmpty()) return false;
     boolean checked = checkTailOpenBlock(block, returnStatements);
     return !(checked && returnStatements.isEmpty());
   }
@@ -414,10 +416,12 @@ public class GroovyInlineMethodUtil {
       }
     }
 
+    @Override
     protected void doHelpAction() {
       HelpManager.getInstance().invokeHelp(HelpID.INLINE_METHOD);
     }
 
+    @Override
     protected boolean canInlineThisOnly() {
       return myAllowInlineThisOnly;
     }
@@ -601,6 +605,7 @@ public class GroovyInlineMethodUtil {
           if (!isFinal) {
             final PsiReference lastRef =
               Collections.max(ReferencesSearch.search(resolved).findAll(), new Comparator<PsiReference>() {
+                @Override
                 public int compare(PsiReference o1, PsiReference o2) {
                   return o1.getElement().getTextRange().getStartOffset() - o2.getElement().getTextRange().getStartOffset();
                 }

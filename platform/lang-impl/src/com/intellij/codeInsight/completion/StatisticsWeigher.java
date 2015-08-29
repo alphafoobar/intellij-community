@@ -17,6 +17,7 @@ package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.lookup.Classifier;
 import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.codeInsight.lookup.WeighingContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
@@ -48,24 +49,23 @@ public class StatisticsWeigher extends CompletionWeigher {
 
   public static class LookupStatisticsWeigher extends Classifier<LookupElement> {
     private final CompletionLocation myLocation;
-    private final Classifier<LookupElement> myNext;
     private final Map<LookupElement, Integer> myWeights = new IdentityHashMap<LookupElement, Integer>();
     @SuppressWarnings("unchecked") private final Set<LookupElement> myNoStats = new THashSet<LookupElement>(TObjectHashingStrategy.IDENTITY);
     private int myPrefixChanges;
 
     public LookupStatisticsWeigher(CompletionLocation location, Classifier<LookupElement> next) {
+      super(next);
       myLocation = location;
-      myNext = next;
     }
 
     @Override
-    public void addElement(LookupElement element) {
+    public void addElement(LookupElement element, ProcessingContext context) {
       StatisticsInfo baseInfo = getBaseStatisticsInfo(element, myLocation);
-      myWeights.put(element, weigh(element, baseInfo));
+      myWeights.put(element, weigh(element, baseInfo, context.get(CompletionLookupArranger.WEIGHING_CONTEXT)));
       if (baseInfo == StatisticsInfo.EMPTY) {
         myNoStats.add(element);
       }
-      myNext.addElement(element);
+      super.addElement(element, context);
     }
 
     private void checkPrefixChanged(ProcessingContext context) {
@@ -80,7 +80,7 @@ public class StatisticsWeigher extends CompletionWeigher {
     public Iterable<LookupElement> classify(Iterable<LookupElement> source, final ProcessingContext context) {
       checkPrefixChanged(context);
 
-      final Collection<List<LookupElement>> byWeight = buildMapByWeight(source).descendingMap().values();
+      final Collection<List<LookupElement>> byWeight = buildMapByWeight(source, context).descendingMap().values();
 
       List<LookupElement> initialList = getInitialNoStatElements(source, context);
 
@@ -119,10 +119,10 @@ public class StatisticsWeigher extends CompletionWeigher {
       return initialList;
     }
 
-    private TreeMap<Integer, List<LookupElement>> buildMapByWeight(Iterable<LookupElement> source) {
+    private TreeMap<Integer, List<LookupElement>> buildMapByWeight(Iterable<LookupElement> source, ProcessingContext context) {
       TreeMap<Integer, List<LookupElement>> map = new TreeMap<Integer, List<LookupElement>>();
       for (LookupElement element : source) {
-        final int weight = getWeight(element);
+        final int weight = getWeight(element, context.get(CompletionLookupArranger.WEIGHING_CONTEXT));
         List<LookupElement> list = map.get(weight);
         if (list == null) {
           map.put(weight, list = new SmartList<LookupElement>());
@@ -132,19 +132,19 @@ public class StatisticsWeigher extends CompletionWeigher {
       return map;
     }
 
-    private int getWeight(LookupElement t) {
+    private int getWeight(LookupElement t, WeighingContext context) {
       Integer w = myWeights.get(t);
       if (w == null) {
-        myWeights.put(t, w = weigh(t, getBaseStatisticsInfo(t, myLocation)));
+        myWeights.put(t, w = weigh(t, getBaseStatisticsInfo(t, myLocation), context));
       }
       return w;
     }
 
-    private int weigh(@NotNull LookupElement item, final StatisticsInfo baseInfo) {
+    private static int weigh(@NotNull LookupElement item, final StatisticsInfo baseInfo, WeighingContext context) {
       if (baseInfo == StatisticsInfo.EMPTY) {
         return 0;
       }
-      String prefix = myLocation.getCompletionParameters().getLookup().itemPattern(item);
+      String prefix = context.itemPattern(item);
       StatisticsInfo composed = composeStatsWithPrefix(baseInfo, prefix, false);
       int minRecency = composed.getLastUseRecency();
       int useCount = composed.getUseCount();
@@ -159,9 +159,16 @@ public class StatisticsWeigher extends CompletionWeigher {
         if (builder.length() > 0) {
           builder.append(", ");
         }
-        builder.append("stats=").append(getWeight(element));
+        builder.append("stats=").append(getWeight(element, context.get(CompletionLookupArranger.WEIGHING_CONTEXT)));
       }
-      myNext.describeItems(map, context);
+      super.describeItems(map, context);
+    }
+
+    @Override
+    public void removeElement(LookupElement element, ProcessingContext context) {
+      myWeights.remove(element);
+      myNoStats.remove(element);
+      super.removeElement(element, context);
     }
   }
 

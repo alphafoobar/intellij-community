@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,12 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.testFramework.fixtures;
 
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -27,20 +25,26 @@ import java.io.IOException;
  * @author Dmitry Avdeev
  */
 public interface TempDirTestFixture extends IdeaTestFixture {
+  @NotNull
+  VirtualFile copyFile(@NotNull VirtualFile file, @NotNull String targetPath);
 
-  VirtualFile copyFile(@NotNull VirtualFile file, String targetPath);
+  @NotNull
+  VirtualFile copyAll(@NotNull String dataDir, @NotNull String targetDir);
 
-  VirtualFile copyAll(String dataDir, String targetDir);
+  @NotNull
+  VirtualFile copyAll(@NotNull String dataDir, @NotNull String targetDir, @NotNull VirtualFileFilter filter);
 
-  VirtualFile copyAll(String dataDir, String targetDir, @NotNull VirtualFileFilter filter);
-
+  @NotNull
   String getTempDirPath();
 
-  VirtualFile getFile(@NonNls String path);
+  VirtualFile getFile(@NotNull String path);
 
-  @NotNull VirtualFile createFile(final String name);
+  @NotNull
+  VirtualFile createFile(@NotNull String name);
 
-  @NotNull VirtualFile findOrCreateDir(final String name) throws IOException;
+  @NotNull
+  VirtualFile findOrCreateDir(@NotNull String name) throws IOException;
 
-  @NotNull VirtualFile createFile(final String name, String text) throws IOException;
+  @NotNull
+  VirtualFile createFile(@NotNull String name, String text) throws IOException;
 }

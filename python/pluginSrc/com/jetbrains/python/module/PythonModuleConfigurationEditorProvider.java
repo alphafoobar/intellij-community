@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,16 @@
  */
 package com.jetbrains.python.module;
 
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleConfigurationEditor;
 import com.intellij.openapi.module.ModuleType;
+import com.intellij.openapi.roots.ui.configuration.DefaultModuleConfigurationEditorFactory;
 import com.intellij.openapi.roots.ui.configuration.ModuleConfigurationEditorProvider;
 import com.intellij.openapi.roots.ui.configuration.ModuleConfigurationState;
-import com.intellij.openapi.roots.ui.configuration.DefaultModuleConfigurationEditorFactory;
-import com.intellij.openapi.module.ModuleConfigurationEditor;
-import com.intellij.openapi.module.Module;
+import org.jetbrains.jps.model.java.JavaSourceRootType;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author yole
@@ -34,7 +35,7 @@ public class PythonModuleConfigurationEditorProvider implements ModuleConfigurat
     if (!(ModuleType.get(module) instanceof PythonModuleType)) return ModuleConfigurationEditor.EMPTY;
     final DefaultModuleConfigurationEditorFactory editorFactory = DefaultModuleConfigurationEditorFactory.getInstance();
     final List<ModuleConfigurationEditor> editors = new ArrayList<ModuleConfigurationEditor>();
-    editors.add(editorFactory.createModuleContentRootsEditor(state));
+    editors.add(new PyContentEntriesEditor(module, state, JavaSourceRootType.SOURCE));
     editors.add(editorFactory.createClasspathEditor(state));
     return editors.toArray(new ModuleConfigurationEditor[editors.size()]);
   }

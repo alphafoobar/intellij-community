@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2009 Bas Leijdekkers
+ * Copyright 2008-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.siyeh.ig.style;
 
+import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
@@ -26,8 +27,7 @@ import com.siyeh.ig.InspectionGadgetsFix;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public class UnnecessaryConstantArrayCreationExpressionInspection
-  extends BaseInspection {
+public class UnnecessaryConstantArrayCreationExpressionInspection extends BaseInspection implements CleanupLocalInspectionTool {
 
   @Override
   @NotNull
@@ -90,8 +90,7 @@ public class UnnecessaryConstantArrayCreationExpressionInspection
     extends BaseInspectionVisitor {
 
     @Override
-    public void visitArrayInitializerExpression(
-      PsiArrayInitializerExpression expression) {
+    public void visitArrayInitializerExpression(PsiArrayInitializerExpression expression) {
       super.visitArrayInitializerExpression(expression);
       final PsiElement parent = expression.getParent();
       if (!(parent instanceof PsiNewExpression)) {
@@ -102,6 +101,9 @@ public class UnnecessaryConstantArrayCreationExpressionInspection
         return;
       }
       final PsiVariable variable = (PsiVariable)grandParent;
+      if (!variable.getType().equals(expression.getType())) {
+        return;
+      }
       if (hasGenericTypeParameters(variable)) {
         return;
       }

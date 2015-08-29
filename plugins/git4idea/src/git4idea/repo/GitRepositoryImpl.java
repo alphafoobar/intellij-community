@@ -17,13 +17,16 @@ package git4idea.repo;
 
 import com.intellij.dvcs.repo.RepositoryImpl;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import git4idea.GitLocalBranch;
 import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
+import git4idea.GitVcs;
 import git4idea.branch.GitBranchesCollection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,7 +37,7 @@ import java.util.Collection;
 /**
  * @author Kirill Likhodedov
  */
-public class GitRepositoryImpl extends RepositoryImpl implements GitRepository, Disposable {
+public class GitRepositoryImpl extends RepositoryImpl implements GitRepository {
 
   @NotNull private final GitPlatformFacade myPlatformFacade;
   @NotNull private final GitRepositoryReader myReader;
@@ -135,6 +138,19 @@ public class GitRepositoryImpl extends RepositoryImpl implements GitRepository, 
     return myInfo.getState();
   }
 
+  @Nullable
+  @Override
+  public String getCurrentBranchName() {
+    GitLocalBranch currentBranch = getCurrentBranch();
+    return currentBranch == null ? null : currentBranch.getName();
+  }
+
+  @Nullable
+  @Override
+  public AbstractVcs getVcs() {
+    return GitVcs.getInstance(getProject());
+  }
+
   /**
    * @return local and remote branches in this repository.
    */
@@ -174,36 +190,36 @@ public class GitRepositoryImpl extends RepositoryImpl implements GitRepository, 
 
   @Override
   public void update() {
-    myInfo = readRepoInfo(this, myPlatformFacade, myReader, myInfo);
+    GitRepoInfo previousInfo = myInfo;
+    myInfo = readRepoInfo();
+    notifyListeners(this, previousInfo, myInfo);
   }
 
   @NotNull
-  private static GitRepoInfo readRepoInfo(@NotNull GitRepository repository, @NotNull GitPlatformFacade platformFacade,
-                                          @NotNull GitRepositoryReader reader, @Nullable GitRepoInfo previousInfo) {
-    File configFile = new File(VfsUtilCore.virtualToIoFile(repository.getGitDir()), "config");
-    GitConfig config = GitConfig.read(platformFacade, configFile);
+  private GitRepoInfo readRepoInfo() {
+    File configFile = new File(VfsUtilCore.virtualToIoFile(getGitDir()), "config");
+    GitConfig config = GitConfig.read(myPlatformFacade, configFile);
     Collection<GitRemote> remotes = config.parseRemotes();
-    TempState tempState = readRepository(reader, remotes);
-    Collection<GitBranchTrackInfo> trackInfos = config.parseTrackInfos(tempState.myBranches.getLocalBranches(),
-                                                                       tempState.myBranches.getRemoteBranches());
-    GitRepoInfo info = new GitRepoInfo(tempState.myCurrentBranch, tempState.myCurrentRevision, tempState.myState,
-                                       remotes, tempState.myBranches.getLocalBranches(),
-                                       tempState.myBranches.getRemoteBranches(), trackInfos);
-    notifyListeners(repository, previousInfo, info);
-    return info;
-  }
-
-  private static TempState readRepository(GitRepositoryReader reader, @NotNull Collection<GitRemote> remotes) {
-    return new TempState(reader.readState(), reader.readCurrentRevision(), reader.readCurrentBranch(), reader.readBranches(remotes));
+    GitBranchState state = myReader.readState(remotes);
+    Collection<GitBranchTrackInfo> trackInfos = config.parseTrackInfos(state.getLocalBranches(), state.getRemoteBranches());
+    return new GitRepoInfo(state.getCurrentBranch(), state.getCurrentRevision(), state.getState(), remotes,
+                           state.getLocalBranches(), state.getRemoteBranches(), trackInfos);
   }
 
   // previous info can be null before the first update
-  private static void notifyListeners(@NotNull GitRepository repository, @Nullable GitRepoInfo previousInfo, @NotNull GitRepoInfo info) {
+  private static void notifyListeners(@NotNull final GitRepository repository, @Nullable GitRepoInfo previousInfo, @NotNull GitRepoInfo info) {
     if (Disposer.isDisposed(repository.getProject())) {
       return;
     }
     if (!info.equals(previousInfo)) {
-      repository.getProject().getMessageBus().syncPublisher(GIT_REPO_CHANGE).repositoryChanged(repository);
+      ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+        public void run() {
+          Project project = repository.getProject();
+          if (!project.isDisposed()) {
+            project.getMessageBus().syncPublisher(GIT_REPO_CHANGE).repositoryChanged(repository);
+          }
+        }
+      });
     }
   }
 
@@ -212,20 +228,4 @@ public class GitRepositoryImpl extends RepositoryImpl implements GitRepository, 
   public String toLogString() {
     return String.format("GitRepository " + getRoot() + " : " + myInfo);
   }
-
-  private static class TempState {
-    private final State myState;
-    private final String myCurrentRevision;
-    private final GitLocalBranch myCurrentBranch;
-    private final GitBranchesCollection myBranches;
-
-    public TempState(@NotNull State state, @Nullable String currentRevision, @Nullable GitLocalBranch currentBranch,
-                     @NotNull GitBranchesCollection branches) {
-      myState = state;
-      myCurrentRevision = currentRevision;
-      myCurrentBranch = currentBranch;
-      myBranches = branches;
-    }
-  }
-
 }

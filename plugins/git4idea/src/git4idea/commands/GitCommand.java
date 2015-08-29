@@ -15,6 +15,7 @@
  */
 package git4idea.commands;
 
+import com.intellij.openapi.util.registry.Registry;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -41,6 +42,7 @@ public class GitCommand {
   public static final GitCommand CHECK_ATTR = read("check-attr");
   public static final GitCommand COMMIT = write("commit");
   public static final GitCommand CONFIG = read("config");
+  public static final GitCommand CHERRY = read("cherry");
   public static final GitCommand CHERRY_PICK = write("cherry-pick");
   public static final GitCommand CLONE = write("clone");
   public static final GitCommand DIFF = read("diff");
@@ -61,7 +63,7 @@ public class GitCommand {
   public static final GitCommand RM = write("rm");
   public static final GitCommand SHOW = read("show");
   public static final GitCommand STASH = write("stash");
-  public static final GitCommand STATUS = read("status");
+  public static final GitCommand STATUS = Registry.is("git.status.write") ? write("status") : read("status");
   public static final GitCommand TAG = read("tag");
   public static final GitCommand UPDATE_INDEX = write("update-index");
 
@@ -102,6 +104,11 @@ public class GitCommand {
   @NotNull
   public GitCommand readLockingCommand() {
     return new GitCommand(this, LockingPolicy.READ);
+  }
+
+  @NotNull
+  public GitCommand writeLockingCommand() {
+    return new GitCommand(this, LockingPolicy.WRITE);
   }
 
   @NotNull

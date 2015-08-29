@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
   private final ClassFilter myChooserFilter;
   @Nullable
   private final String myPatternsHelpId;
+  private String classDelimiter = "$";
 
   public ClassFilterEditor(Project project) {
     this(project, null);
@@ -112,13 +113,11 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
     myTable.setTableHeader(null);
     myTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
     myTable.setColumnSelectionAllowed(false);
-    myTable.setPreferredScrollableViewportSize(new Dimension(200, 100));
+    myTable.setPreferredScrollableViewportSize(new Dimension(200, myTable.getRowHeight() * JBTable.PREFERRED_SCROLLABLE_VIEWPORT_HEIGHT_IN_ROWS));
 
     TableColumnModel columnModel = myTable.getColumnModel();
     TableColumn column = columnModel.getColumn(FilterTableModel.CHECK_MARK);
-    int width = new JCheckBox().getPreferredSize().width;
-    column.setPreferredWidth(width);
-    column.setMaxWidth(width);
+    TableUtil.setupCheckboxColumn(column);
     column.setCellRenderer(new EnabledCellRenderer(myTable.getDefaultRenderer(Boolean.class)));
     columnModel.getColumn(FilterTableModel.FILTER).setCellRenderer(new FilterCellRenderer());
 
@@ -225,7 +224,7 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
         return filter;
       }
       if (columnIndex == CHECK_MARK) {
-        return filter.isEnabled() ? Boolean.TRUE : Boolean.FALSE;
+        return filter.isEnabled();
       }
       return null;
     }
@@ -250,12 +249,12 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
     }
 
     public boolean isCellEditable(int rowIndex, int columnIndex) {
-      return isEnabled() && (columnIndex == CHECK_MARK);
+      return isEnabled();
     }
 
     public void removeRow(final int idx) {
       myFilters.remove(idx);
-      fireTableDataChanged();
+      fireTableRowsDeleted(idx, idx);
     }
   }
 
@@ -271,7 +270,7 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
       UIManager.put(UIUtil.TABLE_FOCUS_CELL_BACKGROUND_PROPERTY, color);
       com.intellij.ui.classFilter.ClassFilter filter =
         (com.intellij.ui.classFilter.ClassFilter)table.getValueAt(row, FilterTableModel.FILTER);
-      component.setEnabled(ClassFilterEditor.this.isEnabled() && filter.isEnabled());
+      component.setEnabled(isSelected || (ClassFilterEditor.this.isEnabled() && filter.isEnabled()));
       return component;
     }
   }
@@ -298,8 +297,7 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
 
   protected void addPatternFilter() {
     ClassFilterEditorAddDialog dialog = new ClassFilterEditorAddDialog(myProject, myPatternsHelpId);
-    dialog.show();
-    if (dialog.isOK()) {
+    if (dialog.showAndGet()) {
       String pattern = dialog.getPattern();
       if (pattern != null) {
         com.intellij.ui.classFilter.ClassFilter filter = createFilter(pattern);
@@ -330,16 +328,20 @@ public class ClassFilterEditor extends JPanel implements ComponentWithEmptyText 
   }
 
   @Nullable
-  private static String getJvmClassName(PsiClass aClass) {
+  private String getJvmClassName(PsiClass aClass) {
     PsiClass parentClass = PsiTreeUtil.getParentOfType(aClass, PsiClass.class, true);
     if (parentClass != null) {
       final String parentName = getJvmClassName(parentClass);
       if (parentName == null) {
         return null;
       }
-      return parentName + "$" + aClass.getName();
+      return parentName + classDelimiter + aClass.getName();
     }
     return aClass.getQualifiedName();
+  }
+
+  public void setClassDelimiter(String classDelimiter) {
+    this.classDelimiter = classDelimiter;
   }
 
   public void addPattern(String pattern) {

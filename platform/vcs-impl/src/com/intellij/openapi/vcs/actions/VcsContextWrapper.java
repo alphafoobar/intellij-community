@@ -21,13 +21,13 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FilePathImpl;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeList;
 import com.intellij.openapi.vcs.ui.Refreshable;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.vcsUtil.VcsUtil;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -51,32 +51,39 @@ public class VcsContextWrapper implements VcsContext {
     myActionName = actionName;
   }
 
+  @Override
   public String getPlace() {
     return myPlace;
   }
 
   @Override
-  public String getActionName() {
+  public
+  String getActionName() {
     return myActionName;
   }
 
-  public static VcsContext createCachedInstanceOn(AnActionEvent event) {
+  @NotNull
+  public static VcsContext createCachedInstanceOn(@NotNull AnActionEvent event) {
     return new CachedVcsContext(createInstanceOn(event));
   }
 
-  public static VcsContextWrapper createInstanceOn(final AnActionEvent event) {
+  @NotNull
+  public static VcsContextWrapper createInstanceOn(@NotNull AnActionEvent event) {
     return new VcsContextWrapper(event.getDataContext(), event.getModifiers(), event.getPlace(), event.getPresentation().getText());
   }
 
+  @Override
   public Project getProject() {
     return CommonDataKeys.PROJECT.getData(myContext);
   }
 
+  @Override
   public VirtualFile getSelectedFile() {
     VirtualFile[] files = getSelectedFiles();
     return files.length == 0 ? null : files[0];
   }
 
+  @Override
   @NotNull
   public VirtualFile[] getSelectedFiles() {
     VirtualFile[] fileArray = CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(myContext);
@@ -106,14 +113,17 @@ public class VcsContextWrapper implements VcsContext {
     return VfsUtilCore.toVirtualFileArray(result);
   }
 
+  @Override
   public Editor getEditor() {
     return CommonDataKeys.EDITOR.getData(myContext);
   }
 
+  @Override
   public Collection<VirtualFile> getSelectedFilesCollection() {
     return Arrays.asList(getSelectedFiles());
   }
 
+  @Override
   public File getSelectedIOFile() {
     File file = VcsDataKeys.IO_FILE.getData(myContext);
     if (file != null) return file;
@@ -123,6 +133,7 @@ public class VcsContextWrapper implements VcsContext {
     return files[0];
   }
 
+  @Override
   public File[] getSelectedIOFiles() {
     File[] files = VcsDataKeys.IO_FILE_ARRAY.getData(myContext);
     if (files != null && files.length > 0) return files;
@@ -131,14 +142,18 @@ public class VcsContextWrapper implements VcsContext {
     return null;
   }
 
+  @Override
   public int getModifiers() {
     return myModifiers;
   }
 
+  @Override
   public Refreshable getRefreshableDialog() {
     return Refreshable.PANEL_KEY.getData(myContext);
   }
 
+  @NotNull
+  @Override
   public FilePath[] getSelectedFilePaths() {
     Set<FilePath> result = new THashSet<FilePath>();
     FilePath path = VcsDataKeys.FILE_PATH.getData(myContext);
@@ -157,14 +172,14 @@ public class VcsContextWrapper implements VcsContext {
 
     VirtualFile[] selectedFiles = getSelectedFiles();
     for (VirtualFile selectedFile : selectedFiles) {
-      FilePathImpl filePath = new FilePathImpl(selectedFile);
+      FilePath filePath = VcsUtil.getFilePath(selectedFile);
       result.add(filePath);
     }
 
     File[] selectedIOFiles = getSelectedIOFiles();
     if (selectedIOFiles != null){
       for (File selectedFile : selectedIOFiles) {
-        FilePathImpl filePath = FilePathImpl.create(selectedFile);
+        FilePath filePath = VcsUtil.getFilePath(selectedFile);
         if (filePath != null) {
           result.add(filePath);
         }
@@ -176,6 +191,7 @@ public class VcsContextWrapper implements VcsContext {
   }
 
   @Nullable
+  @Override
   public FilePath getSelectedFilePath() {
     FilePath[] selectedFilePaths = getSelectedFilePaths();
     if (selectedFilePaths.length == 0) {
@@ -187,11 +203,13 @@ public class VcsContextWrapper implements VcsContext {
   }
 
   @Nullable
+  @Override
   public ChangeList[] getSelectedChangeLists() {
     return VcsDataKeys.CHANGE_LISTS.getData(myContext);
   }
 
   @Nullable
+  @Override
   public Change[] getSelectedChanges() {
     return VcsDataKeys.CHANGES.getData(myContext);
   }

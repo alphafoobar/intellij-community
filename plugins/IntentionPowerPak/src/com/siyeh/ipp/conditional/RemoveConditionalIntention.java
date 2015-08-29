@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2005 Dave Griffith
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,36 +18,35 @@ package com.siyeh.ipp.conditional;
 import com.intellij.psi.PsiConditionalExpression;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
-import com.intellij.util.IncorrectOperationException;
+import com.siyeh.ig.PsiReplacementUtil;
+import com.siyeh.ig.psiutils.BoolUtils;
 import com.siyeh.ipp.base.Intention;
 import com.siyeh.ipp.base.PsiElementPredicate;
-import com.siyeh.ipp.psiutils.BoolUtils;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 public class RemoveConditionalIntention extends Intention {
 
+  @Override
   @NotNull
   public PsiElementPredicate getElementPredicate() {
     return new RemoveConditionalPredicate();
   }
 
-  public void processIntention(PsiElement element)
-    throws IncorrectOperationException {
-    final PsiConditionalExpression expression =
-      (PsiConditionalExpression)element;
+  @Override
+  public void processIntention(PsiElement element) {
+    final PsiConditionalExpression expression = (PsiConditionalExpression)element;
     final PsiExpression condition = expression.getCondition();
     final PsiExpression thenExpression = expression.getThenExpression();
     assert thenExpression != null;
     @NonNls final String thenExpressionText = thenExpression.getText();
     if ("true".equals(thenExpressionText)) {
       final String newExpression = condition.getText();
-      replaceExpression(newExpression, expression);
+      PsiReplacementUtil.replaceExpression(expression, newExpression);
     }
     else {
-      final String newExpression =
-        BoolUtils.getNegatedExpressionText(condition);
-      replaceExpression(newExpression, expression);
+      final String newExpression = BoolUtils.getNegatedExpressionText(condition);
+      PsiReplacementUtil.replaceExpression(expression, newExpression);
     }
   }
 }

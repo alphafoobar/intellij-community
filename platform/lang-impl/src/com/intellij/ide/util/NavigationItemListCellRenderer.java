@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,6 @@ import com.intellij.navigation.NavigationItem;
 import com.intellij.navigation.NavigationItemFileStatus;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
-import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
@@ -64,9 +61,6 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
     int index,
     boolean isSelected,
     boolean cellHasFocus) {
-    EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-    Font editorFont = new Font(scheme.getEditorFontName(), Font.PLAIN, scheme.getEditorFontSize());
-    setFont(editorFont);
     removeAll();
 
     final boolean hasRightRenderer = UISettings.getInstance().SHOW_ICONS_IN_QUICK_NAVIGATION;
@@ -107,7 +101,7 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
       final PsiElement psiElement = value instanceof PsiElement
                                     ? (PsiElement)value
                                     : CommonDataKeys.PSI_ELEMENT.getData((DataProvider) value);
-      if (psiElement != null) {
+      if (psiElement != null && psiElement.isValid()) {
         final FileColorManager fileColorManager = FileColorManager.getInstance(psiElement.getProject());
         final Color fileColor = fileColorManager.getRendererBackground(psiElement.getContainingFile());
         if (fileColor != null) {

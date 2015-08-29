@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
  */
 package com.intellij.lang.spi;
 
-import com.intellij.JavaTestUtil;
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.refactoring.MultiFileTestCase;
 import com.intellij.refactoring.rename.RenameProcessor;
 import com.intellij.refactoring.rename.RenamePsiElementProcessor;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * User: anna
@@ -42,9 +42,9 @@ public class SPIRenameTest extends MultiFileTestCase {
         final VirtualFile file = rootDir.findFileByRelativePath("foo/" + editorFile);
         assert file != null;
         configureByExistingFile(file);
-        final PsiElement element = TargetElementUtilBase.findTargetElement(myEditor,
-                                                                           TargetElementUtilBase.REFERENCED_ELEMENT_ACCEPTED |
-                                                                           TargetElementUtilBase.ELEMENT_NAME_ACCEPTED);
+        final PsiElement element = TargetElementUtil.findTargetElement(myEditor,
+                                                                       TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED |
+                                                                       TargetElementUtil.ELEMENT_NAME_ACCEPTED);
         assert element != null;
         final PsiElement substitution = RenamePsiElementProcessor.forElement(element).substituteElementToRename(element, myEditor);
         assert substitution != null;
@@ -53,6 +53,7 @@ public class SPIRenameTest extends MultiFileTestCase {
     });
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return  "/spi/";

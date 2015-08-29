@@ -2,7 +2,7 @@ package pck;
 import static pck.D.foo;
 import static pck.C.foo;
 
-public class C {
+class C {
      public static <T> void foo(Comparable<T> x){}
 }
 
@@ -12,6 +12,6 @@ class D {
 
 class B{
     public static void bar(Comparable<?> x){
-        foo<error descr="Ambiguous method call: both 'D.foo(Comparable<?>)' and 'C.foo(Comparable<?>)' match">(x)</error>;
+        foo<error descr="Ambiguous method call: both 'D.foo(Comparable<?>)' and 'C.foo(Comparable<capture of ?>)' match">(x)</error>;
     }
 }

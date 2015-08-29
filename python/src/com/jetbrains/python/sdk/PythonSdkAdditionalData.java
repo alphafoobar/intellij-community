@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
+import static com.intellij.openapi.util.JDOMExternalizer.loadStringsList;
+
 /**
  * @author traff
  */
@@ -58,16 +60,11 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
   }
 
   public Object clone() throws CloneNotSupportedException {
-    try {
-      final PythonSdkAdditionalData copy = (PythonSdkAdditionalData)super.clone();
-      copy.setAddedPaths(getAddedPaths());
-      copy.setExcludedPaths(getExcludedPaths());
-      copy.setAssociatedProjectPath(getAssociatedProjectPath());
-      return copy;
-    }
-    catch (CloneNotSupportedException e) {
-      return null;
-    }
+    final PythonSdkAdditionalData copy = new PythonSdkAdditionalData(myFlavor);
+    copy.setAddedPaths(getAddedPaths());
+    copy.setExcludedPaths(getExcludedPaths());
+    copy.setAssociatedProjectPath(getAssociatedProjectPath());
+    return copy;
   }
 
   public Set<SimpleProjectRoot> getAddedPaths() {
@@ -181,16 +178,6 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
     return files;
   }
 
-  protected static List<String> loadStringsList(Element element, String rootName, String attrName) {
-    final List<String> paths = new LinkedList<String>();
-    if (element != null) {
-      @NotNull final List list = element.getChildren(rootName);
-      for (Object o : list) {
-        paths.add(((Element)o).getAttribute(attrName).getValue());
-      }
-    }
-    return paths;
-  }
 
   public Set<VirtualFile> getAddedPathFiles() {
     return getPathsAsVirtualFiles(myAddedPaths);

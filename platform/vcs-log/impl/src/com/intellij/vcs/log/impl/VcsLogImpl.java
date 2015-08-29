@@ -20,14 +20,15 @@ import com.intellij.ui.table.JBTable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.VcsLogDataHolder;
-import com.intellij.vcs.log.ui.VcsLogUI;
-import com.intellij.vcs.log.ui.tables.AbstractVcsLogTableModel;
+import com.intellij.vcs.log.ui.VcsLogUiImpl;
+import com.intellij.vcs.log.ui.tables.GraphTableModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.Future;
 
 /**
  *
@@ -35,9 +36,9 @@ import java.util.List;
 public class VcsLogImpl implements VcsLog {
 
   @NotNull private final VcsLogDataHolder myDataHolder;
-  @NotNull private final VcsLogUI myUi;
+  @NotNull private final VcsLogUiImpl myUi;
 
-  public VcsLogImpl(@NotNull VcsLogDataHolder holder, @NotNull VcsLogUI ui) {
+  public VcsLogImpl(@NotNull VcsLogDataHolder holder, @NotNull VcsLogUiImpl ui) {
     myDataHolder = holder;
     myUi = ui;
   }
@@ -48,7 +49,7 @@ public class VcsLogImpl implements VcsLog {
     List<Hash> hashes = ContainerUtil.newArrayList();
     JBTable table = myUi.getTable();
     for (int row : table.getSelectedRows()) {
-      Hash hash = ((AbstractVcsLogTableModel)table.getModel()).getHashAtRow(row);
+      Hash hash = ((GraphTableModel)table.getModel()).getHashAtRow(row);
       if (hash != null) {
         hashes.add(hash);
       }
@@ -62,7 +63,7 @@ public class VcsLogImpl implements VcsLog {
     List<VcsFullCommitDetails> details = ContainerUtil.newArrayList();
     JBTable table = myUi.getTable();
     for (int row : table.getSelectedRows()) {
-      AbstractVcsLogTableModel model = (AbstractVcsLogTableModel)table.getModel();
+      GraphTableModel model = (GraphTableModel)table.getModel();
       VcsFullCommitDetails commitDetails = model.getFullCommitDetails(row);
       if (commitDetails == null) {
         return ContainerUtil.emptyList();
@@ -70,12 +71,6 @@ public class VcsLogImpl implements VcsLog {
       details.add(commitDetails);
     }
     return details;
-  }
-
-  @Override
-  @Nullable
-  public VcsFullCommitDetails getDetailsIfAvailable(@NotNull final Hash hash) {
-    return myDataHolder.getCommitDetailsGetter().getCommitDataIfAvailable(hash);
   }
 
   @Nullable
@@ -87,11 +82,12 @@ public class VcsLogImpl implements VcsLog {
   @NotNull
   @Override
   public Collection<VcsRef> getAllReferences() {
-    return myDataHolder.getDataPack().getRefsModel().getAllRefs();
+    return myUi.getDataPack().getRefsModel().getAllRefs();
   }
 
+  @NotNull
   @Override
-  public void jumpToReference(final String reference) {
+  public Future<Boolean> jumpToReference(final String reference) {
     Collection<VcsRef> references = getAllReferences();
     VcsRef ref = ContainerUtil.find(references, new Condition<VcsRef>() {
       @Override
@@ -100,10 +96,10 @@ public class VcsLogImpl implements VcsLog {
       }
     });
     if (ref != null) {
-      myUi.jumpToCommit(ref.getCommitHash());
+      return myUi.jumpToCommit(ref.getCommitHash());
     }
     else {
-      myUi.jumpToCommitByPartOfHash(reference);
+      return myUi.jumpToCommitByPartOfHash(reference);
     }
   }
 

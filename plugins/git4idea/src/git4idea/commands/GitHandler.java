@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,29 @@ package git4idea.commands;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.ProcessEventListener;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.EnvironmentUtil;
 import com.intellij.util.EventDispatcher;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.io.URLUtil;
+import com.intellij.util.net.HttpConfigurable;
+import com.intellij.util.net.IdeaWideProxySelector;
 import com.intellij.vcsUtil.VcsFileUtil;
 import git4idea.GitVcs;
 import git4idea.config.GitVcsApplicationSettings;
@@ -45,15 +54,22 @@ import org.jetbrains.git4idea.ssh.GitSSHHandler;
 import org.jetbrains.git4idea.ssh.GitXmlRpcSshService;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import static java.util.Collections.singletonList;
+
 /**
  * A handler for git commands
  */
 public abstract class GitHandler {
+
+  protected static final Logger LOG = Logger.getInstance(GitHandler.class);
+  protected static final Logger OUTPUT_LOG = Logger.getInstance("#output." + GitHandler.class.getName());
+
   protected final Project myProject;
   protected final GitCommand myCommand;
 
@@ -61,7 +77,6 @@ public abstract class GitHandler {
   private final List<VcsException> myErrors = Collections.synchronizedList(new ArrayList<VcsException>());
   private final List<String> myLastOutput = Collections.synchronizedList(new ArrayList<String>());
   private final int LAST_OUTPUT_SIZE = 5;
-  protected static final Logger LOG = Logger.getInstance(GitHandler.class.getName());
   final GeneralCommandLine myCommandLine;
   @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
   Process myProcess;
@@ -71,7 +86,8 @@ public abstract class GitHandler {
   private final File myWorkingDirectory;
 
   private boolean myEnvironmentCleanedUp = true; // the flag indicating that environment has been cleaned up, by default is true because there is nothing to clean
-  private int myHandlerNo;
+  private int mySshHandler = -1;
+  private int myHttpHandler = -1;
   private Processor<OutputStream> myInputProcessor; // The processor for stdin
 
   // if true process might be cancelled
@@ -83,7 +99,8 @@ public abstract class GitHandler {
 
   @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
   @NonNls
-  private Charset myCharset = Charset.forName("UTF-8"); // Character set to use for IO
+  @NotNull
+  private Charset myCharset = CharsetToolkit.UTF8_CHARSET; // Character set to use for IO
 
   private final EventDispatcher<ProcessEventListener> myListeners = EventDispatcher.create(ProcessEventListener.class);
   @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
@@ -99,8 +116,8 @@ public abstract class GitHandler {
 
   private long myStartTime; // git execution start timestamp
   private static final long LONG_TIME = 10 * 1000;
-  @Nullable private ModalityState myState;
-  @Nullable private String myUrl;
+  @Nullable private Collection<String> myUrls;
+  private boolean myHttpAuthFailed;
 
 
   /**
@@ -115,17 +132,20 @@ public abstract class GitHandler {
     myCommand = command;
     myAppSettings = GitVcsApplicationSettings.getInstance();
     myProjectSettings = GitVcsSettings.getInstance(myProject);
-    myEnv = new HashMap<String, String>(System.getenv());
-    myVcs = GitVcs.getInstance(project);
+    myEnv = new HashMap<String, String>(EnvironmentUtil.getEnvironmentMap());
+    myVcs = ObjectUtils.assertNotNull(GitVcs.getInstance(project));
     myWorkingDirectory = directory;
     myCommandLine = new GeneralCommandLine();
     if (myAppSettings != null) {
       myCommandLine.setExePath(myAppSettings.getPathToGit());
     }
     myCommandLine.setWorkDirectory(myWorkingDirectory);
-    if (command.name().length() > 0) {
-      myCommandLine.addParameter(command.name());
+    if (GitVersionSpecialty.CAN_OVERRIDE_GIT_CONFIG_FOR_COMMAND.existsIn(myVcs.getVersion())) {
+      myCommandLine.addParameters("-c", "core.quotepath=false");
     }
+    myCommandLine.addParameter(command.name());
+    myStdoutSuppressed = true;
+    mySilent = myCommand.lockingPolicy() == GitCommand.LockingPolicy.READ;
   }
 
   /**
@@ -220,13 +240,16 @@ public abstract class GitHandler {
     return file;
   }
 
-  @SuppressWarnings("NullableProblems")
   public void setUrl(@NotNull String url) {
-    myUrl = url;
+    setUrls(singletonList(url));
+  }
+
+  public void setUrls(@NotNull Collection<String> urls) {
+    myUrls = urls;
   }
 
   protected boolean isRemote() {
-    return myUrl != null;
+    return myUrls != null;
   }
 
   /**
@@ -404,7 +427,6 @@ public abstract class GitHandler {
   /**
    * Start process
    */
-  @SuppressWarnings("UseOfSystemOutOrSystemErr")
   public synchronized void start() {
     checkNotStarted();
 
@@ -418,38 +440,15 @@ public abstract class GitHandler {
       }
       else {
         LOG.debug("cd " + myWorkingDirectory);
-        LOG.debug(printableCommandLine());
-      }
-
-      if (ApplicationManager.getApplication().isUnitTestMode()) {
-        System.out.println("cd " + myWorkingDirectory);
-        System.out.println(printableCommandLine());
+        LOG.debug("[" + myWorkingDirectory.getName() + "] " + printableCommandLine());
       }
 
       // setup environment
-      GitRemoteProtocol remoteProtocol = GitRemoteProtocol.fromUrl(myUrl);
-      if (remoteProtocol == GitRemoteProtocol.SSH && myProjectSettings.isIdeaSsh()) {
-        GitXmlRpcSshService ssh = ServiceManager.getService(GitXmlRpcSshService.class);
-        myEnv.put(GitSSHHandler.GIT_SSH_ENV, ssh.getScriptPath().getPath());
-        myHandlerNo = ssh.registerHandler(new GitSSHGUIHandler(myProject, myState));
-        myEnvironmentCleanedUp = false;
-        myEnv.put(GitSSHHandler.SSH_HANDLER_ENV, Integer.toString(myHandlerNo));
-        int port = ssh.getXmlRcpPort();
-        myEnv.put(GitSSHHandler.SSH_PORT_ENV, Integer.toString(port));
-        LOG.debug(String.format("handler=%s, port=%s", myHandlerNo, port));
-      }
-      else if (remoteProtocol == GitRemoteProtocol.HTTP) {
-        GitHttpAuthService service = ServiceManager.getService(GitHttpAuthService.class);
-        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_ENV, service.getScriptPath().getPath());
-        assert myUrl != null : "myUrl can't be null here";
-        GitHttpAuthenticator httpAuthenticator = service.createAuthenticator(myProject, myState, myCommand, myUrl);
-        myHandlerNo = service.registerHandler(httpAuthenticator);
-        myEnvironmentCleanedUp = false;
-        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_HANDLER_ENV, Integer.toString(myHandlerNo));
-        int port = service.getXmlRcpPort();
-        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_PORT_ENV, Integer.toString(port));
-        LOG.debug(String.format("handler=%s, port=%s", myHandlerNo, port));
-        addAuthListener(httpAuthenticator);
+      if (isRemote()) {
+        setupHttpAuthenticator();
+        if (myProjectSettings.isIdeaSsh()) {
+          setupSshAuthenticator();
+        }
       }
       myCommandLine.getEnvironment().clear();
       myCommandLine.getEnvironment().putAll(myEnv);
@@ -457,38 +456,100 @@ public abstract class GitHandler {
       myProcess = startProcess();
       startHandlingStreams();
     }
+    catch (ProcessCanceledException pce) {
+      cleanupEnv();
+    }
     catch (Throwable t) {
-      LOG.error(t);
+      if (!ApplicationManager.getApplication().isUnitTestMode() || !myProject.isDisposed()) {
+        LOG.error(t); // will surely happen if called during unit test disposal, because the working dir is simply removed then
+      }
       cleanupEnv();
       myListeners.getMulticaster().startFailed(t);
     }
+  }
+
+  private void setupHttpAuthenticator() throws IOException {
+    GitHttpAuthService service = ServiceManager.getService(GitHttpAuthService.class);
+    myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_ENV, service.getScriptPath().getPath());
+    GitHttpAuthenticator httpAuthenticator = service.createAuthenticator(myProject, myCommand, ObjectUtils.assertNotNull(myUrls));
+    myHttpHandler = service.registerHandler(httpAuthenticator);
+    myEnvironmentCleanedUp = false;
+    myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_HANDLER_ENV, Integer.toString(myHttpHandler));
+    int port = service.getXmlRcpPort();
+    myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_PORT_ENV, Integer.toString(port));
+    LOG.debug(String.format("handler=%s, port=%s", myHttpHandler, port));
+    addAuthListener(httpAuthenticator);
+  }
+
+  private void setupSshAuthenticator() throws IOException {
+    GitXmlRpcSshService ssh = ServiceManager.getService(GitXmlRpcSshService.class);
+    myEnv.put(GitSSHHandler.GIT_SSH_ENV, ssh.getScriptPath().getPath());
+    mySshHandler = ssh.registerHandler(new GitSSHGUIHandler(myProject));
+    myEnvironmentCleanedUp = false;
+    myEnv.put(GitSSHHandler.SSH_HANDLER_ENV, Integer.toString(mySshHandler));
+    int port = ssh.getXmlRcpPort();
+    myEnv.put(GitSSHHandler.SSH_PORT_ENV, Integer.toString(port));
+    LOG.debug(String.format("handler=%s, port=%s", mySshHandler, port));
+
+    final HttpConfigurable httpConfigurable = HttpConfigurable.getInstance();
+    boolean useHttpProxy = httpConfigurable.USE_HTTP_PROXY && !isSshUrlExcluded(httpConfigurable, ObjectUtils.assertNotNull(myUrls));
+    myEnv.put(GitSSHHandler.SSH_USE_PROXY_ENV, String.valueOf(useHttpProxy));
+
+    if (useHttpProxy) {
+      myEnv.put(GitSSHHandler.SSH_PROXY_HOST_ENV, StringUtil.notNullize(httpConfigurable.PROXY_HOST));
+      myEnv.put(GitSSHHandler.SSH_PROXY_PORT_ENV, String.valueOf(httpConfigurable.PROXY_PORT));
+      boolean proxyAuthentication = httpConfigurable.PROXY_AUTHENTICATION;
+      myEnv.put(GitSSHHandler.SSH_PROXY_AUTHENTICATION_ENV, String.valueOf(proxyAuthentication));
+
+      if (proxyAuthentication) {
+        myEnv.put(GitSSHHandler.SSH_PROXY_USER_ENV, StringUtil.notNullize(httpConfigurable.PROXY_LOGIN));
+        myEnv.put(GitSSHHandler.SSH_PROXY_PASSWORD_ENV, StringUtil.notNullize(httpConfigurable.getPlainProxyPassword()));
+      }
+    }
+  }
+
+  protected static boolean isSshUrlExcluded(@NotNull final HttpConfigurable httpConfigurable, @NotNull Collection<String> urls) {
+    return ContainerUtil.exists(urls, new Condition<String>() {
+      @Override
+      public boolean value(String url) {
+        String host = URLUtil.parseHostFromSshUrl(url);
+        return ((IdeaWideProxySelector)httpConfigurable.getOnlyBySettingsSelector()).isProxyException(host);
+      }
+    });
   }
 
   private void addAuthListener(@NotNull final GitHttpAuthenticator authenticator) {
     // TODO this code should be located in GitLineHandler, and the other remote code should be move there as well
     if (this instanceof GitLineHandler) {
       ((GitLineHandler)this).addLineListener(new GitLineHandlerAdapter() {
-
-        private boolean myAuthFailed;
-
         @Override
-        public void onLineAvailable(String line, Key outputType) {
-          if (line.toLowerCase().contains("authentication failed")) {
-            myAuthFailed = true;
+        public void onLineAvailable(@NonNls String line, Key outputType) {
+          String lowerCaseLine = line.toLowerCase();
+          if (lowerCaseLine.contains("authentication failed") || lowerCaseLine.contains("403 forbidden")) {
+            myHttpAuthFailed = true;
           }
         }
 
         @Override
         public void processTerminated(int exitCode) {
-          if (myAuthFailed) {
-            authenticator.forgetPassword();
+          if (!authenticator.wasCancelled()) {
+            if (myHttpAuthFailed) {
+              authenticator.forgetPassword();
+            }
+            else {
+              authenticator.saveAuthData();
+            }
           }
           else {
-            authenticator.saveAuthData();
+            myHttpAuthFailed = false;
           }
         }
       });
     }
+  }
+
+  public boolean hasHttpAuthFailed() {
+    return myHttpAuthFailed;
   }
 
   protected abstract Process startProcess() throws ExecutionException;
@@ -545,17 +606,13 @@ public abstract class GitHandler {
     if (myEnvironmentCleanedUp) {
       return;
     }
-    GitRemoteProtocol remoteProtocol = GitRemoteProtocol.fromUrl(myUrl);
-    if (remoteProtocol == GitRemoteProtocol.SSH) {
-      GitXmlRpcSshService ssh = ServiceManager.getService(GitXmlRpcSshService.class);
-      myEnvironmentCleanedUp = true;
-      ssh.unregisterHandler(myHandlerNo);
+    if (mySshHandler > 0) {
+      ServiceManager.getService(GitXmlRpcSshService.class).unregisterHandler(mySshHandler);
     }
-    else if (remoteProtocol == GitRemoteProtocol.HTTP) {
-      GitHttpAuthService service = ServiceManager.getService(GitHttpAuthService.class);
-      myEnvironmentCleanedUp = true;
-      service.unregisterHandler(myHandlerNo);
+    if (myHttpHandler > 0) {
+      ServiceManager.getService(GitHttpAuthService.class).unregisterHandler(myHttpHandler);
     }
+    myEnvironmentCleanedUp = true;
   }
 
   /**
@@ -590,13 +647,16 @@ public abstract class GitHandler {
   public void setSilent(final boolean silent) {
     checkNotStarted();
     mySilent = silent;
-    setStderrSuppressed(silent);
-    setStdoutSuppressed(silent);
+    if (silent) {
+      setStderrSuppressed(true);
+      setStdoutSuppressed(true);
+    }
   }
 
   /**
    * @return a character set to use for IO
    */
+  @NotNull
   public Charset getCharset() {
     return myCharset;
   }
@@ -607,7 +667,7 @@ public abstract class GitHandler {
    * @param charset a character set
    */
   @SuppressWarnings({"SameParameterValue"})
-  public void setCharset(final Charset charset) {
+  public void setCharset(@NotNull Charset charset) {
     myCharset = charset;
   }
 
@@ -689,10 +749,6 @@ public abstract class GitHandler {
   public synchronized void resumeWriteLock() {
     assert mySuspendAction != null;
     myResumeAction.run();
-  }
-
-  public void setModalityState(@Nullable ModalityState state) {
-    myState = state;
   }
 
   /**

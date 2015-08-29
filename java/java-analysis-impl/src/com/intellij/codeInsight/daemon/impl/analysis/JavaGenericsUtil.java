@@ -48,10 +48,13 @@ public class JavaGenericsUtil {
       }
       PsiType[] parameters = classType.getParameters();
 
-      for (PsiType parameter : parameters) {
-        if (parameter instanceof PsiWildcardType && ((PsiWildcardType)parameter).getBound() == null) {
-          return true;
+      if (parameters.length > 0) {
+        for (PsiType parameter : parameters) {
+          if (!(parameter instanceof PsiWildcardType && ((PsiWildcardType)parameter).getBound() == null)) {
+            return false;
+          }
         }
+        return true;
       }
       final PsiClass resolved = ((PsiClassType)PsiUtil.convertAnonymousToBaseType(classType)).resolve();
       if (resolved instanceof PsiTypeParameter) {
@@ -281,11 +284,18 @@ public class JavaGenericsUtil {
       if (typeParameter == null) return null;
       PsiClass owner = (PsiClass)typeParameter.getOwner();
       if (owner == null) return null;
-      PsiSubstitutor superClassSubstitutor = TypeConversionUtil.getClassSubstitutor(owner, aClass, PsiSubstitutor.EMPTY);
+      PsiSubstitutor superClassSubstitutor = TypeConversionUtil.getClassSubstitutor(owner, aClass, substitutor);
       if (superClassSubstitutor == null) return null;
       PsiType itemType = superClassSubstitutor.substitute(typeParameter);
-      itemType = substitutor.substitute(itemType);
       return itemType == null ? PsiType.getJavaLangObject(manager, aClass.getResolveScope()) : itemType;
+    }
+    if (type instanceof PsiIntersectionType) {
+      for (PsiType conjunct : ((PsiIntersectionType)type).getConjuncts()) {
+        final PsiType itemType = getCollectionItemType(conjunct, scope);
+        if (itemType != null) {
+          return itemType;
+        }
+      }
     }
     return null;
   }

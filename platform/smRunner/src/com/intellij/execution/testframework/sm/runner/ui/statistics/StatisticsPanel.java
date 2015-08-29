@@ -17,6 +17,7 @@ package com.intellij.execution.testframework.sm.runner.ui.statistics;
 
 import com.intellij.execution.testframework.TestFrameworkRunningModel;
 import com.intellij.execution.testframework.TestsUIUtil;
+import com.intellij.execution.testframework.actions.TestContext;
 import com.intellij.execution.testframework.sm.SMRunnerUtil;
 import com.intellij.execution.testframework.sm.runner.SMTRunnerEventsAdapter;
 import com.intellij.execution.testframework.sm.runner.SMTRunnerEventsListener;
@@ -163,7 +164,11 @@ public class StatisticsPanel implements DataProvider {
     if (SM_TEST_RUNNER_STATISTICS.is(dataId)) {
       return this;
     }
-    return TestsUIUtil.getData(getSelectedItem(), dataId, myFrameworkRunningModel);
+    final SMTestProxy selectedItem = getSelectedItem();
+    if (TestContext.DATA_KEY.is(dataId)) {
+      return new TestContext(myFrameworkRunningModel, selectedItem);
+    }
+    return TestsUIUtil.getData(selectedItem, dataId, myFrameworkRunningModel);
   }
 
   /**
@@ -284,7 +289,8 @@ public class StatisticsPanel implements DataProvider {
       public void run() {
         final int rowIndex = myTableModel.getIndexOf(proxy);
         if (rowIndex >= 0) {
-          myStatisticsTableView.setRowSelectionInterval(rowIndex, rowIndex);
+          final int rowIndexToView = myStatisticsTableView.convertRowIndexToView(rowIndex);
+          myStatisticsTableView.setRowSelectionInterval(rowIndexToView, rowIndexToView);
         }
       }
     });

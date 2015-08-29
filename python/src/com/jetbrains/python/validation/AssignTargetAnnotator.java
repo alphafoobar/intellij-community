@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -130,7 +130,7 @@ public class AssignTargetAnnotator extends PyAnnotator {
 
     @Override
     public void visitPyTupleExpression(final PyTupleExpression node) {
-      if (node.getElements().length == 0) {
+      if (node.isEmpty()) {
         getHolder().createErrorAnnotation(node, message("ANN.cant.assign.to.parens"));
       }
       else if (myOp == Operation.AugAssign) {
@@ -153,7 +153,7 @@ public class AssignTargetAnnotator extends PyAnnotator {
 
     @Override
     public void visitPyListLiteralExpression(final PyListLiteralExpression node) {
-      if (node.getElements().length == 0) {
+      if (node.isEmpty()) {
         getHolder().createErrorAnnotation(node, message("ANN.cant.assign.to.brackets"));
       }
       else if (myOp == Operation.AugAssign) {

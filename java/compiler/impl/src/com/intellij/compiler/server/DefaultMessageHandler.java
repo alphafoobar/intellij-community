@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,10 @@ import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.util.ProgressIndicatorBase;
+import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
+import com.intellij.openapi.progress.util.ReadTask;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
@@ -27,7 +31,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.*;
 import com.intellij.util.SmartList;
-import com.intellij.util.cls.ClsUtil;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.SequentialTaskExecutor;
 import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
@@ -35,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.ide.PooledThreadExecutor;
 import org.jetbrains.jps.api.CmdlineProtoUtil;
 import org.jetbrains.jps.api.CmdlineRemoteProto;
+import org.jetbrains.org.objectweb.asm.Opcodes;
 
 import java.util.*;
 
@@ -44,8 +49,10 @@ import java.util.*;
  */
 public abstract class DefaultMessageHandler implements BuilderMessageHandler {
   private static final Logger LOG = Logger.getInstance("#com.intellij.compiler.server.DefaultMessageHandler");
+  public static final long CONSTANT_SEARCH_TIME_LIMIT = 60 * 1000L; // one minute
   private final Project myProject;
   private final SequentialTaskExecutor myTaskExecutor = new SequentialTaskExecutor(PooledThreadExecutor.INSTANCE);
+  private volatile long myConstantSearchTime = 0L;
 
   protected DefaultMessageHandler(Project project) {
     myProject = project;
@@ -60,19 +67,23 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
     //noinspection EnumSwitchStatementWhichMissesCases
     switch (msg.getType()) {
       case BUILD_EVENT:
-        handleBuildEvent(sessionId, msg.getBuildEvent());
+        final CmdlineRemoteProto.Message.BuilderMessage.BuildEvent event = msg.getBuildEvent();
+        if (event.getEventType() == CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.Type.CUSTOM_BUILDER_MESSAGE && event.hasCustomBuilderMessage()) {
+          final CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.CustomBuilderMessage message = event.getCustomBuilderMessage();
+          if (!myProject.isDisposed()) {
+            myProject.getMessageBus().syncPublisher(CustomBuilderMessageHandler.TOPIC).messageReceived(
+              message.getBuilderId(), message.getMessageType(), message.getMessageText()
+            );
+          }
+        }
+        handleBuildEvent(sessionId, event);
         break;
       case COMPILE_MESSAGE:
         handleCompileMessage(sessionId, msg.getCompileMessage());
         break;
       case CONSTANT_SEARCH_TASK:
         final CmdlineRemoteProto.Message.BuilderMessage.ConstantSearchTask task = msg.getConstantSearchTask();
-        myTaskExecutor.submit(new Runnable() {
-          @Override
-          public void run() {
-            handleConstantSearchTask(channel, sessionId, task);
-          }
-        });
+        handleConstantSearchTask(channel, sessionId, task);
         break;
     }
   }
@@ -81,22 +92,58 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
 
   protected abstract void handleBuildEvent(UUID sessionId, CmdlineRemoteProto.Message.BuilderMessage.BuildEvent event);
 
-  private void handleConstantSearchTask(Channel channel, UUID sessionId, CmdlineRemoteProto.Message.BuilderMessage.ConstantSearchTask task) {
+  private void handleConstantSearchTask(final Channel channel, final UUID sessionId, final CmdlineRemoteProto.Message.BuilderMessage.ConstantSearchTask task) {
+    ProgressIndicatorUtils.scheduleWithWriteActionPriority(new ProgressIndicatorBase(), myTaskExecutor, new ReadTask() {
+      @Override
+      public void computeInReadAction(@NotNull ProgressIndicator indicator) {
+        if (DumbService.isDumb(myProject)) {
+          onCanceled(indicator);
+        }
+        else {
+          doHandleConstantSearchTask(channel, sessionId, task);
+        }
+      }
+
+      @Override
+      public void onCanceled(@NotNull ProgressIndicator indicator) {
+        DumbService.getInstance(myProject).runWhenSmart(new Runnable() {
+          @Override
+          public void run() {
+            handleConstantSearchTask(channel, sessionId, task);
+          }
+        });
+      }
+    });
+  }
+
+  private void doHandleConstantSearchTask(Channel channel, UUID sessionId, CmdlineRemoteProto.Message.BuilderMessage.ConstantSearchTask task) {
     final String ownerClassName = task.getOwnerClassName();
     final String fieldName = task.getFieldName();
     final int accessFlags = task.getAccessFlags();
     final boolean accessChanged = task.getIsAccessChanged();
     final boolean isRemoved = task.getIsFieldRemoved();
+    boolean canceled = false;
     final Ref<Boolean> isSuccess = Ref.create(Boolean.TRUE);
     final Set<String> affectedPaths = Collections.synchronizedSet(new HashSet<String>()); // PsiSearchHelper runs multiple threads
+    final long searchStart = System.currentTimeMillis();
     try {
-      if (isDumbMode()) {
+      if (myConstantSearchTime > CONSTANT_SEARCH_TIME_LIMIT) {
+        // skipping constant search and letting the build rebuild dependent modules
+        isSuccess.set(Boolean.FALSE);
+        LOG.debug("Total constant search time exceeded time limit for this build session");
+      }
+      else if(isDumbMode()) {
         // do not wait until dumb mode finishes
         isSuccess.set(Boolean.FALSE);
         LOG.debug("Constant search task: cannot search in dumb mode");
       }
       else {
         final String qualifiedName = ownerClassName.replace('$', '.');
+
+        handleCompileMessage(sessionId, CmdlineProtoUtil.createCompileProgressMessageResponse(
+          "Searching for usages of changed/removed constants for class " + qualifiedName
+        ).getCompileMessage());
+
         final PsiClass[] classes = ApplicationManager.getApplication().runReadAction(new Computable<PsiClass[]>() {
           public PsiClass[] compute() {
             return JavaPsiFacade.getInstance(myProject).findClasses(qualifiedName, GlobalSearchScope.allScope(myProject));
@@ -147,7 +194,7 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
               }
               else {
                 for (final PsiField changedField : changedFields) {
-                  if (!accessChanged && ClsUtil.isPrivate(accessFlags)) {
+                  if (!accessChanged && isPrivate(accessFlags)) {
                     // optimization: don't need to search, cause may be used only in this class
                     continue;
                   }
@@ -167,23 +214,39 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
         }
       }
     }
-    finally {
-      final CmdlineRemoteProto.Message.ControllerMessage.ConstantSearchResult.Builder builder = CmdlineRemoteProto.Message.ControllerMessage.ConstantSearchResult.newBuilder();
-      builder.setOwnerClassName(ownerClassName);
-      builder.setFieldName(fieldName);
-      if (isSuccess.get()) {
-        builder.setIsSuccess(true);
-        builder.addAllPath(affectedPaths);
-        LOG.debug("Constant search task: " + affectedPaths.size() + " affected files found");
-      }
-      else {
-        builder.setIsSuccess(false);
-        LOG.debug("Constant search task: unsuccessful");
-      }
-      channel.writeAndFlush(CmdlineProtoUtil.toMessage(sessionId, CmdlineRemoteProto.Message.ControllerMessage.newBuilder().setType(
-        CmdlineRemoteProto.Message.ControllerMessage.Type.CONSTANT_SEARCH_RESULT).setConstantSearchResult(builder.build()).build()
-      ));
+    catch (ProcessCanceledException e) {
+      canceled = true;
+      throw e;
     }
+    finally {
+      myConstantSearchTime += (System.currentTimeMillis() - searchStart);
+      if (!canceled) {
+        notifyConstantSearchFinished(channel, sessionId, ownerClassName, fieldName, isSuccess, affectedPaths);
+      }
+    }
+  }
+
+  private static void notifyConstantSearchFinished(Channel channel,
+                                                   UUID sessionId,
+                                                   String ownerClassName,
+                                                   String fieldName,
+                                                   Ref<Boolean> isSuccess, Set<String> affectedPaths) {
+    final CmdlineRemoteProto.Message.ControllerMessage.ConstantSearchResult.Builder builder =
+      CmdlineRemoteProto.Message.ControllerMessage.ConstantSearchResult.newBuilder();
+    builder.setOwnerClassName(ownerClassName);
+    builder.setFieldName(fieldName);
+    if (isSuccess.get()) {
+      builder.setIsSuccess(true);
+      builder.addAllPath(affectedPaths);
+      LOG.debug("Constant search task: " + affectedPaths.size() + " affected files found");
+    }
+    else {
+      builder.setIsSuccess(false);
+      LOG.debug("Constant search task: unsuccessful");
+    }
+    channel.writeAndFlush(CmdlineProtoUtil.toMessage(sessionId, CmdlineRemoteProto.Message.ControllerMessage.newBuilder().setType(
+      CmdlineRemoteProto.Message.ControllerMessage.Type.CONSTANT_SEARCH_RESULT).setConstantSearchResult(builder.build()).build()
+    ));
   }
 
   private boolean isDumbMode() {
@@ -192,12 +255,7 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
     if (isDumb) {
       // wait some time
       for (int idx = 0; idx < 5; idx++) {
-        try {
-          //noinspection BusyWait
-          Thread.sleep(10L);
-        }
-        catch (InterruptedException ignored) {
-        }
+        TimeoutUtil.sleep(10L);
         isDumb = dumbService.isDumb();
         if (!isDumb) {
           break;
@@ -246,7 +304,7 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
 
   private SearchScope getSearchScope(PsiClass aClass, int fieldAccessFlags) {
     SearchScope searchScope = GlobalSearchScope.projectScope(myProject);
-    if (aClass != null && ClsUtil.isPackageLocal(fieldAccessFlags)) {
+    if (aClass != null && isPackageLocal(fieldAccessFlags)) {
       final PsiFile containingFile = aClass.getContainingFile();
       if (containingFile instanceof PsiJavaFile) {
         final String packageName = ((PsiJavaFile)containingFile).getPackageName();
@@ -263,7 +321,7 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
   private static boolean processIdentifiers(PsiSearchHelper helper, @NotNull final PsiElementProcessor<PsiIdentifier> processor, @NotNull final String identifier, @NotNull SearchScope searchScope, short searchContext) {
     TextOccurenceProcessor processor1 = new TextOccurenceProcessor() {
       @Override
-      public boolean execute(PsiElement element, int offsetInElement) {
+      public boolean execute(@NotNull PsiElement element, int offsetInElement) {
         return !(element instanceof PsiIdentifier) || processor.execute((PsiIdentifier)element);
       }
     };
@@ -341,4 +399,11 @@ public abstract class DefaultMessageHandler implements BuilderMessageHandler {
     return null;
   }
 
+  private static boolean isPackageLocal(int flags) {
+    return (Opcodes.ACC_PUBLIC & flags) == 0 && (Opcodes.ACC_PROTECTED & flags) == 0 && (Opcodes.ACC_PRIVATE & flags) == 0;
+  }
+
+  private static boolean isPrivate(int flags) {
+    return (Opcodes.ACC_PRIVATE & flags) != 0;
+  }
 }

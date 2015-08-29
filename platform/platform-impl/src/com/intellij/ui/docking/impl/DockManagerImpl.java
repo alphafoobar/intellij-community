@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -93,6 +94,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     myProject = project;
   }
 
+  @Override
   public void register(final DockContainer container) {
     myContainers.add(container);
     Disposer.register(container, new Disposable() {
@@ -116,9 +118,15 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     readStateFor(id);
   }
 
+  public void readState() {
+    for (String id : myFactories.keySet()) {
+      readStateFor(id);
+    }
+  }
+
   @Override
   public Set<DockContainer> getContainers() {
-    return Collections.unmodifiableSet(myContainers);
+    return Collections.unmodifiableSet(new HashSet<DockContainer>(myContainers));
   }
 
   @Override
@@ -140,6 +148,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     return wnd != null ? key + "#" + wnd.myId : key;
   }
 
+  @Override
   public DockContainer getContainerFor(Component c) {
     if (c == null) return null;
 
@@ -394,7 +403,8 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     });
   }
 
-  public Pair<FileEditor[], FileEditorProvider[]> createNewDockContainerFor(VirtualFile file, FileEditorManagerImpl fileEditorManager) {
+  @NotNull
+  public Pair<FileEditor[], FileEditorProvider[]> createNewDockContainerFor(@NotNull VirtualFile file, @NotNull FileEditorManagerImpl fileEditorManager) {
     DockContainer container = getFactory(DockableEditorContainerFactory.TYPE).createContainer(null);
     register(container);
 
@@ -458,7 +468,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
       center.add(myDockContentUiContainer, BorderLayout.CENTER);
 
       myUiContainer.add(center, BorderLayout.CENTER);
-      if (!(container instanceof DockContainer.Dialog)) {
+      if (myStatusBar != null) {
         myUiContainer.add(myStatusBar.getComponent(), BorderLayout.SOUTH);
       }
 
@@ -498,6 +508,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     }
 
     private void updateNorthPanel() {
+      if (ApplicationManager.getApplication().isUnitTestMode()) return;
       myNorthPanel.setVisible(UISettings.getInstance().SHOW_NAVIGATION_BAR
                               && !(myContainer instanceof DockContainer.Dialog)
                               && !UISettings.getInstance().PRESENTATION_MODE);
@@ -584,7 +595,8 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
         }
       });
 
-      new UiNotifyConnector(((RootPaneContainer)frame).getContentPane(), myContainer);
+      UiNotifyConnector connector = new UiNotifyConnector(((RootPaneContainer)frame).getContentPane(), myContainer);
+      Disposer.register(myContainer, connector);
     }
   }
 

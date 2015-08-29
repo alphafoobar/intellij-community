@@ -22,6 +22,7 @@ import com.intellij.history.utils.LocalHistoryLog;
 import com.intellij.util.Producer;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.io.DataInputOutputUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -43,15 +44,15 @@ public class ChangeSet {
   public ChangeSet(long id, long timestamp) {
     myId = id;
     myTimestamp = timestamp;
-    myChanges = ContainerUtil.createLockFreeCopyOnWriteList();
+    myChanges = new ArrayList<Change>();
   }
 
   public ChangeSet(DataInput in) throws IOException {
-    myId = in.readLong();
+    myId = DataInputOutputUtil.readLONG(in);
     myName = StreamUtil.readStringOrNull(in);
-    myTimestamp = in.readLong();
+    myTimestamp = DataInputOutputUtil.readTIME(in);
 
-    int count = in.readInt();
+    int count = DataInputOutputUtil.readINT(in);
     List<Change> changes = new ArrayList<Change>(count);
     while (count-- > 0) {
       changes.add(StreamUtil.readChange(in));
@@ -61,11 +62,12 @@ public class ChangeSet {
   }
 
   public void write(DataOutput out) throws IOException {
-    out.writeLong(myId);
+    LocalHistoryLog.LOG.assertTrue(isLocked, "Changeset should be locked");
+    DataInputOutputUtil.writeLONG(out, myId);
     StreamUtil.writeStringOrNull(out, myName);
-    out.writeLong(myTimestamp);
+    DataInputOutputUtil.writeTIME(out, myTimestamp);
 
-    out.writeInt(myChanges.size());
+    DataInputOutputUtil.writeINT(out, myChanges.size());
     for (Change c : myChanges) {
       StreamUtil.writeChange(out, c);
     }
@@ -118,7 +120,7 @@ public class ChangeSet {
   }
 
   public void addChange(final Change c) {
-    LocalHistoryLog.LOG.assertTrue(!isLocked, "Changset is already locked");
+    LocalHistoryLog.LOG.assertTrue(!isLocked, "Changeset is already locked");
     accessChanges(new Runnable() {
       @Override
       public void run() {

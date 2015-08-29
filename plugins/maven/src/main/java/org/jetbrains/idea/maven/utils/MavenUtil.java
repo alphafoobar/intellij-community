@@ -29,6 +29,7 @@ import com.intellij.notification.Notifications;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -47,6 +48,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.JarUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -57,6 +59,7 @@ import com.intellij.psi.PsiManager;
 import com.intellij.util.DisposeAwareRunnable;
 import com.intellij.util.Function;
 import com.intellij.util.SystemProperties;
+import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
 import icons.MavenIcons;
@@ -158,6 +161,28 @@ public class MavenUtil {
       else {
         ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(r, p), state);
       }
+    }
+  }
+  
+  public static void smartInvokeAndWait(final Project p, final ModalityState state, final Runnable r) {
+    if (isNoBackgroundMode() || ApplicationManager.getApplication().isDispatchThread()) {
+      r.run();
+    }
+    else {
+      final Semaphore semaphore = new Semaphore();
+      semaphore.down();
+      DumbService.getInstance(p).smartInvokeLater(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            r.run();
+          }
+          finally {
+            semaphore.up();
+          }
+        }
+      }, state);
+      semaphore.waitFor();
     }
   }
 
@@ -328,9 +353,9 @@ public class MavenUtil {
                                              Properties properties,
                                              Properties conditions,
                                              boolean interactive) throws IOException {
-    FileTemplateManager manager = FileTemplateManager.getInstance();
+    FileTemplateManager manager = FileTemplateManager.getInstance(project);
     FileTemplate fileTemplate = manager.getJ2eeTemplate(templateName);
-    Properties allProperties = manager.getDefaultProperties(project);
+    Properties allProperties = manager.getDefaultProperties();
     if (!interactive) {
       allProperties.putAll(properties);
     }
@@ -487,7 +512,7 @@ public class MavenUtil {
   @Nullable
   public static File resolveMavenHomeDirectory(@Nullable String overrideMavenHome) {
     if (!isEmptyOrSpaces(overrideMavenHome)) {
-      return new File(overrideMavenHome);
+      return MavenServerManager.getInstance().getMavenHomeFile(overrideMavenHome);
     }
 
     String m2home = System.getenv(ENV_M2_HOME);
@@ -535,8 +560,8 @@ public class MavenUtil {
         return home;
       }
     }
-    
-    return null;
+
+    return MavenServerManager.getInstance().getMavenHomeFile(MavenServerManager.BUNDLED_MAVEN_3);
   }
 
   @Nullable
@@ -607,18 +632,34 @@ public class MavenUtil {
   }
 
   @Nullable
-  public static String getMavenVersion(String mavenHome) {
+  public static String getMavenVersion(@Nullable File mavenHome) {
+    if(mavenHome == null) return null;
     String[] libs = new File(mavenHome, "lib").list();
 
     if (libs != null) {
       for (String lib : libs) {
         if (lib.startsWith("maven-core-") && lib.endsWith(".jar")) {
-          return lib.substring("maven-core-".length(), lib.length() - ".jar".length());
+          String version = lib.substring("maven-core-".length(), lib.length() - ".jar".length());
+          if (StringUtil.contains(version, ".x")) {
+            Properties props = JarUtil.loadProperties(new File(mavenHome, "lib/" + lib),
+                                                      "META-INF/maven/org.apache.maven/maven-core/pom.properties");
+            return props != null ? props.getProperty("version") : null;
+          }
+          else {
+            return version;
+          }
+        }
+        if (lib.startsWith("maven-") && lib.endsWith("-uber.jar")) {
+          return lib.substring("maven-".length(), lib.length() - "-uber.jar".length());
         }
       }
     }
-
     return null;
+  }
+
+  @Nullable
+  public static String getMavenVersion(String mavenHome) {
+    return getMavenVersion(new File(mavenHome));
   }
 
   public static boolean isMaven3(String mavenHome) {
@@ -629,8 +670,6 @@ public class MavenUtil {
   @Nullable
   public static File resolveGlobalSettingsFile(@Nullable String overriddenMavenHome) {
     File directory = resolveMavenHomeDirectory(overriddenMavenHome);
-    if (directory == null) return null;
-
     return new File(new File(directory, CONF_DIR), SETTINGS_XML);
   }
 
@@ -703,17 +742,13 @@ public class MavenUtil {
     return text;
   }
 
-  @NotNull
+  @Nullable
   public static VirtualFile resolveSuperPomFile(@Nullable File mavenHome) {
     VirtualFile result = null;
     if (mavenHome != null) {
       result = doResolveSuperPomFile(new File(mavenHome, LIB_DIR));
     }
-    if (result == null) {
-      result = doResolveSuperPomFile(MavenServerManager.getMavenLibDirectory());
-      assert result != null : "Super pom not found in: " + MavenServerManager.getMavenLibDirectory();
-    }
-    return result;
+    return result == null ? doResolveSuperPomFile(MavenServerManager.getMavenLibDirectory()) : result;
   }
 
   @Nullable
@@ -928,8 +963,14 @@ public class MavenUtil {
   }
 
   public static String getArtifactName(String packaging, Module module, boolean exploded) {
-    final String baseName = module.getName() + ":" + packaging;
-    return exploded ? baseName + " exploded" : baseName;
+    return module.getName() + ":" + packaging + (exploded ? " exploded" : "");
   }
 
+  public static String getEjbClientArtifactName(Module module) {
+    return module.getName() + ":ejb-client";
+  }
+
+  public static String getIdeaVersionToPassToMavenProcess() {
+    return ApplicationInfoImpl.getShadowInstance().getMajorVersion() + "." + ApplicationInfoImpl.getShadowInstance().getMinorVersion();
+  }
 }

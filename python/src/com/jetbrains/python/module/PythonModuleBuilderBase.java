@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,8 +57,9 @@ public class PythonModuleBuilderBase extends ModuleBuilder {
   }
 
   public void setupRootModel(final ModifiableRootModel rootModel) throws ConfigurationException {
-    if (mySdk != null) {
-      rootModel.setSdk(mySdk);
+    // false for the module automatically created in a new project
+    if (myJdk != null) {
+      rootModel.setSdk(myJdk);
     }
     else {
       rootModel.inheritSdk();

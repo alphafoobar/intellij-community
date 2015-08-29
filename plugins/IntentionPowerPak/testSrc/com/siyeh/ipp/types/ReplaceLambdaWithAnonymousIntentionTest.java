@@ -23,6 +23,10 @@ public class ReplaceLambdaWithAnonymousIntentionTest extends IPPTestCase {
     doTest();
   }
 
+  public void testSimpleRunnableOnArrow() {
+    doTest();
+  }
+
   public void testWithSubstitution() {
     doTest();
   }
@@ -47,6 +51,10 @@ public class ReplaceLambdaWithAnonymousIntentionTest extends IPPTestCase {
     doTest();
   }
 
+  public void testLocalClasses() {
+    doTest();
+  }
+
   public void testNoFunctionalInterfaceFound() {
     assertIntentionNotAvailable();
   }
@@ -65,6 +73,22 @@ public class ReplaceLambdaWithAnonymousIntentionTest extends IPPTestCase {
 
   public void testQualifyThis() {
     doTest();
+  }
+
+  public void testQualifyThis1() {
+    doTest();
+  }
+
+  public void testStaticCalls() {
+    doTest();
+  }
+
+  public void testIncorrectReturnStatementWhenLambdaIsVoidCompatibleButExpressionHasReturnValue() throws Exception {
+    doTest();
+  }
+
+  public void testForbidReplacementWhenParamsOrReturnWouldBeNotDenotableTypes1() throws Exception {
+    assertIntentionNotAvailable();
   }
 
   @Override

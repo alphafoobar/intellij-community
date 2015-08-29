@@ -158,11 +158,219 @@ public class JavaFormatterBracesTest extends AbstractJavaFormatterTest {
 
   public void testSimpleMethodsInOneLineEvenIfExceedsRightMargin() {
     getSettings().KEEP_SIMPLE_METHODS_IN_ONE_LINE = true;
-    getSettings().getRootSettings().RIGHT_MARGIN = 90;
+    getSettings().RIGHT_MARGIN = 90;
     String text = "public class Repr2 {\n" +
                   "    public void start() { System.out.println(\"kfjsdkfjsdkfjskdjfslkdjfklsdjfklsdjfksjdfkljsdkfjsd!\"); }\n" +
                   "}";
     doTextTest(text, text);
+  }
+
+  public void testKeepSimpleBlocksInOneLine_OnIfStatementsThenBlock() throws Exception {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+    String singleLine = "if (2 > 3) { System.out.println(\"AA!\"); }";
+
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+    doMethodTest(singleLine, singleLine);
+
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.END_OF_LINE;
+    doMethodTest(singleLine, singleLine);
+  }
+
+  public void testKeepSimpleBlocksInOneLine_OnIfStatementsElseBlock() throws Exception {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+
+    String before = "if (2 > 3) {\n" +
+                    "    System.out.println(\"AA!\");\n" +
+                    "} else { int a = 3; }";
+
+    String afterNextLineOption = "if (2 > 3)\n" +
+                                 "{\n" +
+                                 "    System.out.println(\"AA!\");\n" +
+                                 "} else { int a = 3; }";
+
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+    doMethodTest(before, afterNextLineOption);
+
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.END_OF_LINE;
+    doMethodTest(before, before);
+  }
+
+  public void testIfStatement_WhenBraceOnNextLine_AndKeepSimpleBlockInOneLineEnabled() throws Exception {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+    String before = "if (2 > 3) {\n" +
+                    "    System.out.println(\"AA!\");\n" +
+                    "}";
+    String after = "if (2 > 3)\n" +
+                   "{\n" +
+                   "    System.out.println(\"AA!\");\n" +
+                   "}";
+    doMethodTest(before, after);
+  }
+
+  public void testIfStatementElseBranchIsOnNewLine() throws Exception {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+    String before = "if (2 > 3) {\n" +
+                    "    System.out.println(\"AA!\");\n" +
+                    "} else {\n" +
+                    "    int a = 3;\n" +
+                    "}";
+    String after = "if (2 > 3)\n" +
+                   "{\n" +
+                   "    System.out.println(\"AA!\");\n" +
+                   "} else\n" +
+                   "{\n" +
+                   "    int a = 3;\n" +
+                   "}";
+    doMethodTest(before, after);
+  }
+
+  public void testIfElseBranchesKeepedInOneLine() throws Exception {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
+
+    String singleLine = "if (2 > 3) { System.out.println(\"AA!\"); } else { System.out.println(\"BBB!!\"); }";
+    String multiLine = "if (2 > 3) { System.out.println(\"AA!\"); }\n" +
+                       "else { System.out.println(\"BBB!!\"); }";
+
+    getSettings().ELSE_ON_NEW_LINE = false;
+    doMethodTest(singleLine, singleLine);
+    doMethodTest(multiLine, singleLine);
+
+    getSettings().ELSE_ON_NEW_LINE = true;
+    doMethodTest(singleLine, multiLine);
+    doMethodTest(multiLine, multiLine);
+  }
+
+  public void testMethodBraceOnNextLineIfWrapped() {
+    getSettings().METHOD_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    getSettings().METHOD_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+    getSettings().RIGHT_MARGIN = 50;
+    doClassTest(
+      "public static void main(int state, int column, int width, int rate) {\n" +
+      "}\n",
+      "public static void main(int state, int column,\n" +
+      "                        int width, int rate)\n" +
+      "{\n" +
+      "}\n"
+    );
+  }
+
+  public void testIDEA127110() {
+    getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    doMethodTest(
+      "if (   1 > 2) {\n" +
+      "\n" +
+      "} else {\n" +
+      "\n" +
+      "}\n" +
+      "\n" +
+      "try {\n" +
+      "\n" +
+      "} catch (     Exception e) {\n" +
+      "\n" +
+      "} finally {\n" +
+      "\n" +
+      "}",
+      "if (1 > 2) {\n" +
+      "\n" +
+      "} else {\n" +
+      "\n" +
+      "}\n" +
+      "\n" +
+      "try {\n" +
+      "\n" +
+      "} catch (Exception e) {\n" +
+      "\n" +
+      "} finally {\n" +
+      "\n" +
+      "}"
+    );
+  }
+
+  public void testConstructorLeftBraceWithComment() {
+    getSettings().METHOD_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    doClassTest(
+      "/**\n" +
+      " *\n" +
+      " */\n" +
+      "  public Test() {\n" +
+      "}\n",
+      "/**\n" +
+      " *\n" +
+      " */\n" +
+      "public Test() {\n" +
+      "}\n"
+    );
+  }
+
+  public void testConstructorLeftBraceWithAnnotation() {
+    getSettings().METHOD_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    doClassTest(
+      "   @Deprecated\n" +
+      "public Test() {\n" +
+      "}\n",
+      "@Deprecated\n" +
+      "public Test() {\n" +
+      "}\n"
+    );
+  }
+
+  public void testConstructorLeftBraceWithEndLineComment() {
+    getSettings().METHOD_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    doClassTest(
+      "// comment\n" +
+      "  public Test() {\n" +
+      "}\n",
+      "// comment\n" +
+      "public Test() {\n" +
+      "}\n"
+    );
+  }
+
+  public void testAnonClassCodeBlock_BracesIndented() {
+    getSettings().CLASS_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_SHIFTED;
+    doTextTest(
+      "class X {\n" +
+      "    public void run() {\n" +
+      "        Runnable a = new Runnable() {\n" +
+      "            @Override\n" +
+      "            public void run() {\n" +
+      "                \n" +
+      "            }\n" +
+      "        };\n" +
+      "    }\n" +
+      "}",
+
+      "class X\n" +
+      "    {\n" +
+      "    public void run() {\n" +
+      "        Runnable a = new Runnable()\n" +
+      "            {\n" +
+      "            @Override\n" +
+      "            public void run() {\n" +
+      "\n" +
+      "            }\n" +
+      "            };\n" +
+      "    }\n" +
+      "    }"
+    );
+  }
+
+  public void testMethodIsSimple_IfCodeBlockHasNoLinefeeds() {
+    getSettings().KEEP_SIMPLE_METHODS_IN_ONE_LINE = true;
+    doClassTest(
+      "public ModelAndView handleRequestInternalEmptyMulti(\n" +
+      "        final HttpServletRequest httpServletRequest,\n" +
+      "      final HttpServletResponse response)\n" +
+      "      throws IOException {}",
+      "public ModelAndView handleRequestInternalEmptyMulti(\n" +
+      "        final HttpServletRequest httpServletRequest,\n" +
+      "        final HttpServletResponse response)\n" +
+      "        throws IOException {}"
+    );
   }
 
 }

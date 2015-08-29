@@ -17,12 +17,17 @@ package com.intellij.tasks.impl;
 
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.PasswordUtil;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.tasks.CustomTaskState;
 import com.intellij.tasks.TaskRepository;
 import com.intellij.tasks.TaskRepositoryType;
 import com.intellij.util.xmlb.annotations.Tag;
 import com.intellij.util.xmlb.annotations.Transient;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,6 +41,8 @@ public abstract class BaseRepository extends TaskRepository {
   protected boolean myUseProxy;
   protected boolean myUseHttpAuthentication;
   protected boolean myLoginAnonymously;
+  protected CustomTaskState myPreferredOpenTaskState;
+  protected CustomTaskState myPreferredCloseTaskState;
 
   public BaseRepository(TaskRepositoryType type) {
     super(type);
@@ -85,6 +92,7 @@ public abstract class BaseRepository extends TaskRepository {
     }
   }
 
+  @NotNull
   @Override
   public abstract BaseRepository clone();
 
@@ -130,9 +138,52 @@ public abstract class BaseRepository extends TaskRepository {
     myLoginAnonymously = loginAnonymously;
   }
 
+  @Override
+  public void setPreferredOpenTaskState(@Nullable CustomTaskState state) {
+    myPreferredOpenTaskState = state;
+  }
+
   @Nullable
-  public String extractId(String taskName) {
+  @Override
+  public CustomTaskState getPreferredOpenTaskState() {
+    return myPreferredOpenTaskState;
+  }
+
+  @Override
+  public void setPreferredCloseTaskState(@Nullable CustomTaskState state) {
+    myPreferredCloseTaskState = state;
+  }
+
+  @Nullable
+  @Override
+  public CustomTaskState getPreferredCloseTaskState() {
+    return myPreferredCloseTaskState;
+  }
+
+  @Nullable
+  public String extractId(@NotNull String taskName) {
     Matcher matcher = PATTERN.matcher(taskName);
     return matcher.find() ? matcher.group() : null;
+  }
+
+  @Override
+  public void setUrl(String url) {
+    super.setUrl(addSchemeIfNoneSpecified(url));
+  }
+
+  @Nullable
+  private static String addSchemeIfNoneSpecified(@Nullable String url) {
+    if (StringUtil.isNotEmpty(url)) {
+      try {
+        final String scheme = new URI(url).getScheme();
+        // For URL like "foo.bar:8080" host name will be parsed as scheme
+        if (scheme == null || !scheme.startsWith("http")) {
+          url = "http://" + url;
+        }
+      }
+      catch (URISyntaxException ignored) {
+      }
+    }
+    return url;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -135,7 +135,7 @@ public class InplaceIntroduceConstantPopup extends AbstractInplaceIntroduceField
       public PsiField compute() {
 
         PsiField field = elementFactory.createFieldFromText(
-          psiType.getCanonicalText() + " " + (getInputName() != null ? getInputName() : names[0]) + " = " + myInitializerText + ";",
+          psiType.getCanonicalText() + " " + (chooseName(names, myParentClass.getLanguage())) + " = " + myInitializerText + ";",
           myParentClass);
         PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
         PsiUtil.setModifierProperty(field, PsiModifier.STATIC, true);
@@ -224,8 +224,13 @@ public class InplaceIntroduceConstantPopup extends AbstractInplaceIntroduceField
   }
 
   @Override
+  protected String getRefactoringId() {
+    return "refactoring.extractConstant";
+  }
+
+  @Override
   protected boolean startsOnTheSameElement(RefactoringActionHandler handler, PsiElement element) {
-    return super.startsOnTheSameElement(handler, element) && handler instanceof IntroduceConstantHandler;
+    return handler instanceof IntroduceConstantHandler && super.startsOnTheSameElement(handler, element);
   }
 
   @Override
@@ -243,7 +248,7 @@ public class InplaceIntroduceConstantPopup extends AbstractInplaceIntroduceField
                                                 myParentClass, false, false);
     new WriteCommandAction(myProject, getCommandName(), getCommandName()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         if (getLocalVariable() != null) {
           final LocalToFieldHandler.IntroduceFieldRunnable fieldRunnable =
             new LocalToFieldHandler.IntroduceFieldRunnable(false, (PsiLocalVariable)getLocalVariable(), myParentClass, settings, true,

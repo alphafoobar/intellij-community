@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -250,7 +250,7 @@ public class PsiFieldImpl extends JavaStubPsiElement<PsiFieldStub> implements Ps
     private static final OurConstValueComputer INSTANCE = new OurConstValueComputer();
 
     @Override
-    public Object execute(PsiVariable variable, Set<PsiVariable> visitedVars) {
+    public Object execute(@NotNull PsiVariable variable, Set<PsiVariable> visitedVars) {
       return ((PsiFieldImpl)variable)._computeConstantValue(visitedVars);
     }
   }
@@ -333,6 +333,9 @@ public class PsiFieldImpl extends JavaStubPsiElement<PsiFieldStub> implements Ps
 
   @Override
   public PsiDocComment getDocComment(){
+    final PsiFieldStub stub = getStub();
+    if (stub != null && !stub.hasDocComment()) return null;
+
     CompositeElement treeElement = getNode();
     if (getTypeElement() != null) {
       PsiElement element = treeElement.findChildByRoleAsPsiElement(ChildRole.DOC_COMMENT);
@@ -399,9 +402,14 @@ public class PsiFieldImpl extends JavaStubPsiElement<PsiFieldStub> implements Ps
 
   @Override
   public PsiElement getOriginalElement() {
-    PsiClass originalClass = (PsiClass)getContainingClass().getOriginalElement();
-    PsiField originalField = originalClass.findFieldByName(getName(), false);
-    return originalField != null ? originalField : this;
+    PsiClass containingClass = getContainingClass();
+    if (containingClass != null) {
+      PsiField originalField = ((PsiClass)containingClass.getOriginalElement()).findFieldByName(getName(), false);
+      if (originalField != null) {
+        return originalField;
+      }
+    }
+    return this;
   }
 
   @Override

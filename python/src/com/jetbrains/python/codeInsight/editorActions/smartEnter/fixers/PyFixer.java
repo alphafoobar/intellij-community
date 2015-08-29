@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.IncorrectOperationException;
 import com.jetbrains.python.codeInsight.editorActions.smartEnter.PySmartEnterProcessor;
+import com.jetbrains.python.psi.PyElement;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Created by IntelliJ IDEA.
@@ -26,6 +28,20 @@ import com.jetbrains.python.codeInsight.editorActions.smartEnter.PySmartEnterPro
  * Date:   15.04.2010
  * Time:   17:10:33
  */
-public interface PyFixer {
-    void apply(Editor editor, PySmartEnterProcessor processor, PsiElement psiElement) throws IncorrectOperationException;
+public abstract class PyFixer<T extends PyElement> {
+  private final Class<T> myClass;
+
+  public PyFixer(@NotNull Class<T> aClass) {
+    myClass = aClass;
+  }
+
+  public final void apply(@NotNull Editor editor, @NotNull PySmartEnterProcessor processor, @NotNull PsiElement element)
+    throws IncorrectOperationException {
+    if (myClass.isInstance(element)) {
+      //noinspection unchecked
+      doApply(editor, processor, (T)element);
+    }
+  }
+
+  public abstract void doApply(@NotNull Editor editor, @NotNull PySmartEnterProcessor processor, @NotNull T element);
 }

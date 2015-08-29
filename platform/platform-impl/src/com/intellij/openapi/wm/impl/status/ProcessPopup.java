@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.panels.VerticalBox;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.IJSwingUtilities;
 import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
@@ -129,7 +130,6 @@ public class ProcessPopup  {
     builder.setResizable(true);
     builder.setTitle(IdeBundle.message("progress.window.title"));
     builder.setDimensionServiceKey(null, "ProcessPopupWindow", true);
-    builder.setMinSize(getMinSize());
     builder.setCancelOnClickOutside(false);
     builder.setRequestFocus(requestFocus);
     builder.setBelongsToGlobalPopupStack(false);
@@ -138,22 +138,23 @@ public class ProcessPopup  {
     builder.setCancelButton(new MinimizeButton("Hide"));
 
     JFrame frame = (JFrame)UIUtil.findUltimateParent(myProgressPanel);
-    Dimension contentSize = myRootContent.getPreferredSize();
+
+    updateContentUI();
+    myActiveContentComponent.setBorder(null);
     if (frame != null) {
+      Dimension contentSize = myRootContent.getPreferredSize();
       Rectangle bounds = frame.getBounds();
       int width = Math.max(bounds.width / 4, contentSize.width);
       int height = Math.min(bounds.height / 4, contentSize.height);
 
       int x = (int)(bounds.getMaxX() - width);
       int y = (int)(bounds.getMaxY() - height);
-      builder.setMinSize(new Dimension(width, height));
       myPopup = builder.createPopup();
 
       StatusBarEx sb = (StatusBarEx)((IdeFrame)frame).getStatusBar();
       if (sb.isVisible()) {
         y -= sb.getSize().height;
       }
-
 
       myPopup.showInScreenCoordinates(myProgressPanel.getRootPane(), new Point(x - 5, y - 5));
     } else {
@@ -179,22 +180,24 @@ public class ProcessPopup  {
         }
       }
     };
-    scrolls.getViewport().setBackground(myActiveFocusedContent.getBackground());
-    scrolls.setBorder(null);
     myActiveContentComponent = scrolls;
+    updateContentUI();
+  }
+
+  private void updateContentUI() {
+    if (myActiveContentComponent == null || myActiveFocusedContent == null) return;
+    IJSwingUtilities.updateComponentTreeUI(myActiveContentComponent);
+    if (myActiveContentComponent instanceof JScrollPane) {
+      ((JScrollPane)myActiveContentComponent).getViewport().setBackground(myActiveFocusedContent.getBackground());
+    }
+    myActiveContentComponent.setBorder(null);
+
   }
 
   private static Dimension getEmptyPreferredSize() {
     final Dimension size = ScreenUtil.getMainScreenBounds().getSize();
     size.width *= 0.3d;
     size.height *= 0.3d;
-    return size;
-  }
-
-  private static Dimension getMinSize() {
-    final Dimension size = ScreenUtil.getMainScreenBounds().getSize();
-    size.width *= 0.1d;
-    size.height *= 0.1d;
     return size;
   }
 

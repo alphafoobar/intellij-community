@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 package com.intellij.util;
 
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.io.URLUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -32,17 +34,20 @@ import java.util.Locale;
  * @author max
  */
 public class ResourceUtil {
-  @NonNls private static final String ENCODING_UTF_8 = "UTF-8";
 
   private ResourceUtil() {
   }
 
   public static URL getResource(@NotNull Class loaderClass, @NonNls @NotNull String basePath, @NonNls @NotNull String fileName) {
-    if (basePath.endsWith("/")) basePath = basePath.substring(0, basePath.length() - 1);
+    return getResource(loaderClass.getClassLoader(), basePath, fileName);
+  }
 
-    final List<String> bundles = calculateBundleNames(basePath, Locale.getDefault());
+  public static URL getResource(@NotNull ClassLoader loader, @NonNls @NotNull String basePath, @NonNls @NotNull String fileName) {
+    String fixedPath = StringUtil.trimStart(StringUtil.trimEnd(basePath, "/"), "/");
+
+    List<String> bundles = calculateBundleNames(fixedPath, Locale.getDefault());
     for (String bundle : bundles) {
-      URL url = loaderClass.getResource(bundle + "/" + fileName);
+      URL url = loader.getResource(bundle + "/" + fileName);
       if (url == null) continue;
 
       try {
@@ -55,7 +60,7 @@ public class ResourceUtil {
       return url;
     }
 
-    return loaderClass.getResource(basePath + "/" + fileName);
+    return loader.getResource(fixedPath + "/" + fileName);
   }
 
   /**
@@ -108,7 +113,7 @@ public class ResourceUtil {
   public static String loadText(@NotNull URL url) throws IOException {
     InputStream inputStream = new BufferedInputStream(URLUtil.openStream(url));
 
-    InputStreamReader reader = new InputStreamReader(inputStream, ENCODING_UTF_8);
+    InputStreamReader reader = new InputStreamReader(inputStream, CharsetToolkit.UTF8_CHARSET);
     try {
       StringBuilder text = new StringBuilder();
       char[] buf = new char[5000];

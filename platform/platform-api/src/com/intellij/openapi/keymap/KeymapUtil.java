@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.openapi.util.registry.RegistryValueListener;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -33,6 +34,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.StringTokenizer;
@@ -58,7 +60,7 @@ public class KeymapUtil {
   private KeymapUtil() {
   }
 
-  public static String getShortcutText(Shortcut shortcut) {
+  public static String getShortcutText(@NotNull Shortcut shortcut) {
     String s = "";
 
     if (shortcut instanceof KeyboardShortcut) {
@@ -184,14 +186,18 @@ public class KeymapUtil {
     }
   }
 
+  @NotNull
+  public static String getFirstKeyboardShortcutText(@NotNull String actionId) {
+    Shortcut[] shortcuts = KeymapManager.getInstance().getActiveKeymap().getShortcuts(actionId);
+    KeyboardShortcut shortcut = ContainerUtil.findInstance(shortcuts, KeyboardShortcut.class);
+    return shortcut == null? "" : getShortcutText(shortcut);
+  }
+
+  @NotNull
   public static String getFirstKeyboardShortcutText(@NotNull AnAction action) {
     Shortcut[] shortcuts = action.getShortcutSet().getShortcuts();
-    for (Shortcut shortcut : shortcuts) {
-      if (shortcut instanceof KeyboardShortcut) {
-        return getShortcutText(shortcut);
-      }
-    }
-    return "";
+    KeyboardShortcut shortcut = ContainerUtil.findInstance(shortcuts, KeyboardShortcut.class);
+    return shortcut == null ? "" : getShortcutText(shortcut);
   }
 
   public static String getShortcutsText(Shortcut[] shortcuts) {
@@ -362,5 +368,58 @@ public class KeymapUtil {
       toolTipText += " (" + shortcutsText + ")";
     }
     return toolTipText;
+  }
+
+  /**
+   * Checks that one of the mouse shortcuts assigned to the provided action has the same modifiers as provided
+   */
+  public static boolean matchActionMouseShortcutsModifiers(final Keymap activeKeymap,
+                                                           @JdkConstants.InputEventMask int modifiers,
+                                                           final String actionId) {
+    final MouseShortcut syntheticShortcut = new MouseShortcut(MouseEvent.BUTTON1, modifiers, 1);
+    for (Shortcut shortcut : activeKeymap.getShortcuts(actionId)) {
+      if (shortcut instanceof MouseShortcut) {
+        final MouseShortcut mouseShortcut = (MouseShortcut)shortcut;
+        if (mouseShortcut.getModifiers() == syntheticShortcut.getModifiers()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Checks whether mouse event's button and modifiers match a shortcut configured in active keymap for given action id.
+   * Only shortcuts having click count of 1 can be matched, mouse event's click count is ignored.
+   */
+  public static boolean isMouseActionEvent(@NotNull MouseEvent e, @NotNull String actionId) {
+    KeymapManager keymapManager = KeymapManager.getInstance();
+    if (keymapManager == null) {
+      return false;
+    }
+    Keymap keymap = keymapManager.getActiveKeymap();
+    if (keymap == null) {
+      return false;
+    }
+    int button = e.getButton();
+    int modifiers = e.getModifiersEx();
+    if (button == MouseEvent.NOBUTTON && e.getID() == MouseEvent.MOUSE_DRAGGED) {
+      // mouse drag events don't have button field set due to some reason
+      if ((modifiers & InputEvent.BUTTON1_DOWN_MASK) != 0) {
+        button = MouseEvent.BUTTON1;
+      } else if ((modifiers & InputEvent.BUTTON2_DOWN_MASK) != 0) {
+        button = MouseEvent.BUTTON2;
+      }
+    }
+    String[] actionIds = keymap.getActionIds(new MouseShortcut(button, modifiers, 1));
+    if (actionIds == null) {
+      return false;
+    }
+    for (String id : actionIds) {
+      if (actionId.equals(id)) {
+        return true;
+      }
+    }
+    return false;
   }
 }

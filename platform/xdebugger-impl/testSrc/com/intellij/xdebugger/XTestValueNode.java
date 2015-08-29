@@ -41,7 +41,9 @@ public class XTestValueNode extends XValueNodePresentationConfigurator.Configura
     return false;
   }
 
-  public void waitFor(long timeoutInMillis) throws InterruptedException {
-    if (!XDebuggerTestUtil.waitFor(myFinished, timeoutInMillis)) throw new AssertionError("Waiting timed out");
+  public void waitFor(long timeoutInMillis) {
+    if (!XDebuggerTestUtil.waitFor(myFinished, timeoutInMillis)) {
+      throw new AssertionError("Waiting timed out");
+    }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,9 @@ public class DocStringFormat {
   public static final String PLAIN = "Plain";
   public static final String EPYTEXT = "Epytext";
   public static final String REST = "reStructuredText";
+  public static final String NUMPY = "NumPy";
 
-  public static final List<String> ALL = ImmutableList.of(PLAIN, EPYTEXT, REST);
+  public static final List<String> ALL = ImmutableList.of(PLAIN, EPYTEXT, REST, NUMPY);
 
   private DocStringFormat() {
   }

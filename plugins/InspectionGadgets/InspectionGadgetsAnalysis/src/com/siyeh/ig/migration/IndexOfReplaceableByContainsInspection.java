@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2011  Bas Leijdekkers
+ * Copyright 2005-2014  Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ComparisonUtils;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import org.jetbrains.annotations.NonNls;
@@ -109,7 +110,7 @@ public class IndexOfReplaceableByContainsInspection
       else {
         return;
       }
-      replaceExpression(expression, newExpressionText);
+      PsiReplacementUtil.replaceExpression(expression, newExpressionText);
     }
 
     @Override
@@ -160,6 +161,11 @@ public class IndexOfReplaceableByContainsInspection
   }
 
   @Override
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
+  }
+
+  @Override
   public BaseInspectionVisitor buildVisitor() {
     return new IndexOfReplaceableByContainsVisitor();
   }
@@ -170,9 +176,6 @@ public class IndexOfReplaceableByContainsInspection
     @Override
     public void visitBinaryExpression(
       PsiBinaryExpression expression) {
-      if (!PsiUtil.isLanguageLevel5OrHigher(expression)) {
-        return;
-      }
       super.visitBinaryExpression(expression);
       final PsiExpression rhs = expression.getROperand();
       if (rhs == null) {

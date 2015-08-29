@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.project.DumbModePermission;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -46,6 +47,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.RefactoringBundle;
+import com.intellij.refactoring.safeDelete.SafeDeleteDialog;
 import com.intellij.refactoring.safeDelete.SafeDeleteProcessor;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.RefactoringUIUtil;
@@ -124,22 +126,31 @@ public class DeleteHandler {
     final boolean dumb = DumbService.getInstance(project).isDumb();
     if (safeDeleteApplicable && !dumb) {
       final Ref<Boolean> exit = Ref.create(false);
-      DeleteDialog dialog = new DeleteDialog(project, elements, new DeleteDialog.Callback() {
+      final SafeDeleteDialog dialog = new SafeDeleteDialog(project, elements, new SafeDeleteDialog.Callback() {
         @Override
-        public void run(final DeleteDialog dialog) {
+        public void run(final SafeDeleteDialog dialog) {
           if (!CommonRefactoringUtil.checkReadOnlyStatusRecursively(project, Arrays.asList(elements), true)) return;
-          SafeDeleteProcessor.createInstance(project, new Runnable() {
+
+          SafeDeleteProcessor processor = SafeDeleteProcessor.createInstance(project, new Runnable() {
             @Override
             public void run() {
               exit.set(true);
               dialog.close(DialogWrapper.OK_EXIT_CODE);
             }
-          }, elements, dialog.isSearchInComments(), dialog.isSearchInNonJava(), true).run();
+          }, elements, dialog.isSearchInComments(), dialog.isSearchForTextOccurences(), true);
+
+          DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, processor);
         }
-      });
+      }) {
+        @Override
+        protected boolean isDelete() {
+          return true;
+        }
+      };
       if (needConfirmation) {
-        dialog.show();
-        if (!dialog.isOK() || exit.get()) return;
+        if (!dialog.showAndGet() || exit.get()) {
+          return;
+        }
       }
     }
     else {

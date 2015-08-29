@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,8 +41,7 @@ import java.util.List;
 public class VirtualEnvSdkFlavor extends CPythonSdkFlavor {
   private VirtualEnvSdkFlavor() {
   }
-
-  private final static String[] NAMES = new String[]{"python", "jython", "pypy", "python.exe", "jython.bat", "pypy.exe"};
+  private final static String[] NAMES = new String[]{"jython", "pypy", "python.exe", "jython.bat", "pypy.exe"};
 
   public static VirtualEnvSdkFlavor INSTANCE = new VirtualEnvSdkFlavor();
 
@@ -83,7 +82,7 @@ public class VirtualEnvSdkFlavor extends CPythonSdkFlavor {
   public static Collection<String> findInDirectory(VirtualFile rootDir) {
     List<String> candidates = new ArrayList<String>();
     if (rootDir != null) {
-      rootDir.refresh(false, false);
+      rootDir.refresh(true, false);
       VirtualFile[] suspects = rootDir.getChildren();
       for (VirtualFile child : suspects) {
         if (child.isDirectory()) {
@@ -107,15 +106,15 @@ public class VirtualEnvSdkFlavor extends CPythonSdkFlavor {
   private static String findInterpreter(VirtualFile dir) {
     for (VirtualFile child : dir.getChildren()) {
       if (!child.isDirectory()) {
-        final String childName = child.getName();
+        final String childName = child.getName().toLowerCase();
         for (String name : NAMES) {
           if (SystemInfo.isWindows) {
             if (childName.equals(name)) {
-              return child.getPath();
+              return FileUtil.toSystemDependentName(child.getPath());
             }
           }
           else {
-            if (childName.startsWith(name)) {
+            if (childName.startsWith(name) || PYTHON_RE.matcher(childName).matches()) {
               if (!childName.endsWith("-config")) {
                 return child.getPath();
               }

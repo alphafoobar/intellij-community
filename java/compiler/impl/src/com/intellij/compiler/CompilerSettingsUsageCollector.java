@@ -15,15 +15,14 @@
  */
 package com.intellij.compiler;
 
+import com.intellij.internal.statistic.AbstractApplicationUsagesCollector;
 import com.intellij.internal.statistic.CollectUsagesException;
-import com.intellij.internal.statistic.UsagesCollector;
 import com.intellij.internal.statistic.beans.GroupDescriptor;
 import com.intellij.internal.statistic.beans.UsageDescriptor;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -31,19 +30,15 @@ import java.util.Set;
  * @author Eugene Zhuravlev
  *         Date: 4/11/13
  */
-public class CompilerSettingsUsageCollector extends UsagesCollector{
+public class CompilerSettingsUsageCollector extends AbstractApplicationUsagesCollector{
   public static final String GROUP_ID = "compiler";
 
   @NotNull
   @Override
-  public Set<UsageDescriptor> getUsages(@Nullable Project project) throws CollectUsagesException {
+  public Set<UsageDescriptor> getProjectUsages(@Nullable Project project) throws CollectUsagesException {
     final CompilerWorkspaceConfiguration wsConfig = CompilerWorkspaceConfiguration.getInstance(project);
-    if (!wsConfig.useOutOfProcessBuild()) {
-      return Collections.emptySet();
-    }
     
     final Set<UsageDescriptor> result = new HashSet<UsageDescriptor>();
-    result.add(new UsageDescriptor("external_build", 1));
     if (wsConfig.MAKE_PROJECT_ON_SAVE) {
       result.add(new UsageDescriptor("auto_make", 1));
     }

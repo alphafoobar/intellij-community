@@ -23,17 +23,8 @@ package com.intellij.codeInspection;
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.codeInspection.java15api.Java15APIUsageInspection;
-import com.intellij.openapi.roots.ContentIterator;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.VfsUtilCore;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileFilter;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
-import com.intellij.psi.javadoc.PsiDocComment;
-import com.intellij.psi.javadoc.PsiDocTag;
-import com.intellij.psi.javadoc.PsiDocTagValue;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.testFramework.InspectionTestCase;
 
@@ -70,9 +61,44 @@ public class JavaAPIUsagesInspectionTest extends InspectionTestCase {
     });
   }
 
-  @SuppressWarnings("UnusedDeclaration")
-  public void _testCollectSinceApiUsages() {
-    final String version = "1.7";
+  public void testDefaultMethods() throws Exception {
+    IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_1_6, new Runnable() {
+      @Override
+      public void run() {
+        doTest();
+      }
+    });
+  }
+
+  public void testOverrideAnnotation() throws Exception {
+    IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_1_6, new Runnable() {
+      @Override
+      public void run() {
+        doTest();
+      }
+    });
+  }
+
+  public void testRawInheritFromNewlyGenerified() throws Exception {
+    IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_1_6, new Runnable() {
+      @Override
+      public void run() {
+        doTest();
+      }
+    });
+  }
+
+  @Override
+  protected Sdk getTestProjectSdk() {
+    return IdeaTestUtil.getMockJdk18();
+  }
+
+  //generate apiXXX.txt
+  /*
+  //todo exclude inheritors of ConcurrentMap#putIfAbsent
+  public void testCollectSinceApiUsages() {
+    final String version = "1.8";
+    final LinkedHashSet<String> notDocumented = new LinkedHashSet<String>();
     final ContentIterator contentIterator = new ContentIterator() {
       @Override
       public boolean processFile(VirtualFile fileOrDir) {
@@ -82,6 +108,26 @@ public class JavaAPIUsagesInspectionTest extends InspectionTestCase {
             @Override
             public void visitElement(PsiElement element) {
               super.visitElement(element);
+              if (isDocumentedSinceApi(element)) {
+                System.out.println(Java15APIUsageInspection.getSignature((PsiMember)element));
+                if (element instanceof PsiMethod) {
+                  OverridingMethodsSearch.search((PsiMethod)element, GlobalSearchScope.notScope(GlobalSearchScope.projectScope(getProject())), true).forEach(
+                    new Processor<PsiMethod>() {
+                      @Override
+                      public boolean process(PsiMethod method) {
+                        if (isDocumentedSinceApi(method.getNavigationElement())) {
+                          return true;
+                        }
+  
+                        notDocumented.add(Java15APIUsageInspection.getSignature(method));
+                        return true;
+                      }
+                    });
+                }
+              }
+            }
+
+            public boolean isDocumentedSinceApi(PsiElement element) {
               if (element instanceof PsiDocCommentOwner) {
                 final PsiDocComment comment = ((PsiDocCommentOwner)element).getDocComment();
                 if (comment != null) {
@@ -89,28 +135,31 @@ public class JavaAPIUsagesInspectionTest extends InspectionTestCase {
                     if (Comparing.strEqual(tag.getName(), "since")) {
                       final PsiDocTagValue value = tag.getValueElement();
                       if (value != null && value.getText().equals(version)) {
-                        System.out.println(Java15APIUsageInspection.getSignature((PsiMember)element));
+                        return true;
                       }
                       break;
                     }
                   }
                 }
               }
+              return false;
             }
           });
         }
         return true;
       }
     };
-    final VirtualFile srcFile = JarFileSystem.getInstance().findFileByPath("c:/program files/java/jdk1.6.0_12/src.zip!/");
+    final VirtualFile srcFile = JarFileSystem.getInstance().findFileByPath("c:/tools/jdk8/src.zip!/");
     assert srcFile != null;
     VfsUtilCore.iterateChildrenRecursively(srcFile, VirtualFileFilter.ALL, contentIterator);
+
+    notDocumented.forEach(System.out::println);
   }
-/*
+
   @Override
   protected void setUpJdk() {
     Module[] modules = ModuleManager.getInstance(myProject).getModules();
-    final Sdk sdk = JavaSdk.getInstance().createJdk("1.7", "c:/program files (x86)/java/jdk1.7.0_09/", false);
+    final Sdk sdk = JavaSdk.getInstance().createJdk("1.8", "c:/tools/jdk8/", false);
     for (Module module : modules) {
       ModuleRootModificationUtil.setModuleSdk(module, sdk);
     }

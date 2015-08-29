@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,7 @@
  */
 package org.jetbrains.idea.svn;
 
-import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FilePathImpl;
-import com.intellij.openapi.vcs.VcsConfiguration;
-import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.actions.VcsContextFactory;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
@@ -27,6 +24,7 @@ import com.intellij.openapi.vcs.history.VcsAppendableHistorySessionPartner;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vcs.history.VcsHistoryProvider;
 import com.intellij.util.concurrency.Semaphore;
+import com.intellij.vcsUtil.VcsUtil;
 import junit.framework.Assert;
 import org.junit.Test;
 
@@ -49,7 +47,7 @@ public class SvnHistoryTest extends Svn17TestCase {
     checkin();
 
     for (int i = 0; i < 10; i++) {
-      editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
+      VcsTestUtil.editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
       checkin();
     }
 
@@ -99,7 +97,7 @@ public class SvnHistoryTest extends Svn17TestCase {
     checkin();
 
     for (int i = 0; i < 10; i++) {
-      editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
+      VcsTestUtil.editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
       checkin();
     }
 
@@ -149,13 +147,13 @@ public class SvnHistoryTest extends Svn17TestCase {
     checkin();
 
     for (int i = 0; i < 10; i++) {
-      editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
+      VcsTestUtil.editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
       checkin();
     }
 
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
-    provider.reportAppendableHistory(new FilePathImpl(tree.myS1File), new VcsAppendableHistorySessionPartner() {
+    provider.reportAppendableHistory(VcsUtil.getFilePath(tree.myS1File), new VcsAppendableHistorySessionPartner() {
       @Override
       public void reportCreatedEmptySession(VcsAbstractHistorySession session) {
       }
@@ -198,17 +196,17 @@ public class SvnHistoryTest extends Svn17TestCase {
     checkin();
 
     for (int i = 0; i < 10; i++) {
-      editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
+      VcsTestUtil.editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
       checkin();
     }
 
-    renameFileInCommand(myProject, tree.myS1File, "renamed.txt");
+    VcsTestUtil.renameFileInCommand(myProject, tree.myS1File, "renamed.txt");
     VcsDirtyScopeManager.getInstance(myProject).markEverythingDirty();
     ChangeListManager.getInstance(myProject).ensureUpToDate(false);
 
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
-    provider.reportAppendableHistory(new FilePathImpl(tree.myS1File), new VcsAppendableHistorySessionPartner() {
+    provider.reportAppendableHistory(VcsUtil.getFilePath(tree.myS1File), new VcsAppendableHistorySessionPartner() {
       @Override
       public void reportCreatedEmptySession(VcsAbstractHistorySession session) {
       }
@@ -251,18 +249,18 @@ public class SvnHistoryTest extends Svn17TestCase {
     checkin();
 
     for (int i = 0; i < 10; i++) {
-      editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
+      VcsTestUtil.editFileInCommand(myProject, tree.myS1File, "1\n2\n3\n4\n" + i);
       checkin();
     }
 
-    renameFileInCommand(myProject, tree.myTargetDir, "renamedTarget");
-    moveFileInCommand(myProject, tree.myS1File, tree.myTargetDir);
+    VcsTestUtil.renameFileInCommand(myProject, tree.myTargetDir, "renamedTarget");
+    VcsTestUtil.moveFileInCommand(myProject, tree.myS1File, tree.myTargetDir);
     VcsDirtyScopeManager.getInstance(myProject).markEverythingDirty();
     ChangeListManager.getInstance(myProject).ensureUpToDate(false);
 
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
-    provider.reportAppendableHistory(new FilePathImpl(tree.myS1File), new VcsAppendableHistorySessionPartner() {
+    provider.reportAppendableHistory(VcsUtil.getFilePath(tree.myS1File), new VcsAppendableHistorySessionPartner() {
       @Override
       public void reportCreatedEmptySession(VcsAbstractHistorySession session) {
       }
@@ -296,7 +294,7 @@ public class SvnHistoryTest extends Svn17TestCase {
 
     myCnt = 0;
     semaphore.down();
-    provider.reportAppendableHistory(new FilePathImpl(tree.myTargetDir), new VcsAppendableHistorySessionPartner() {
+    provider.reportAppendableHistory(VcsUtil.getFilePath(tree.myTargetDir), new VcsAppendableHistorySessionPartner() {
       @Override
       public void reportCreatedEmptySession(VcsAbstractHistorySession session) {
       }
@@ -329,7 +327,7 @@ public class SvnHistoryTest extends Svn17TestCase {
 
     myCnt = 0;
     semaphore.down();
-    provider.reportAppendableHistory(new FilePathImpl(tree.myTargetFiles.get(0)), new VcsAppendableHistorySessionPartner() {
+    provider.reportAppendableHistory(VcsUtil.getFilePath(tree.myTargetFiles.get(0)), new VcsAppendableHistorySessionPartner() {
       @Override
       public void reportCreatedEmptySession(VcsAbstractHistorySession session) {
       }

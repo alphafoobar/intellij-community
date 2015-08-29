@@ -17,6 +17,7 @@ package com.intellij.codeInsight.editorActions;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.search.LocalSearchScope;
@@ -24,6 +25,7 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.siyeh.ig.psiutils.ParenthesesUtils;
 
 public class DeclarationJoinLinesHandler implements JoinLinesHandlerDelegate {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.editorActions.DeclarationJoinLinesHandler");
@@ -64,13 +66,58 @@ public class DeclarationJoinLinesHandler implements JoinLinesHandlerDelegate {
     }
 
     final PsiElementFactory factory = JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory();
+    final PsiExpression initializerExpression = getInitializerExpression(var, assignment);
+    if (initializerExpression == null) return -1;
+
+    PsiExpressionStatement statement = (PsiExpressionStatement)assignment.getParent();
+
+    int startOffset = decl.getTextRange().getStartOffset();
+    try {
+      PsiDeclarationStatement newDecl = factory.createVariableDeclarationStatement(var.getName(), var.getType(), initializerExpression);
+      PsiVariable newVar = (PsiVariable)newDecl.getDeclaredElements()[0];
+      if (var.getModifierList().getText().length() > 0) {
+        PsiUtil.setModifierProperty(newVar, PsiModifier.FINAL, true);
+      }
+      newVar.getModifierList().replace(var.getModifierList());
+      PsiVariable variable = (PsiVariable)newDecl.getDeclaredElements()[0];
+      final int offsetBeforeEQ = variable.getNameIdentifier().getTextRange().getEndOffset();
+      final int offsetAfterEQ = variable.getInitializer().getTextRange().getStartOffset() + 1;
+      newDecl = (PsiDeclarationStatement)CodeStyleManager.getInstance(psiManager).reformatRange(newDecl, offsetBeforeEQ, offsetAfterEQ);
+
+      PsiElement child = statement.getLastChild();
+      while (child instanceof PsiComment || child instanceof PsiWhiteSpace) {
+        child = child.getPrevSibling();
+      }
+      if (child != null && child.getNextSibling() != null) {
+        newDecl.addRangeBefore(child.getNextSibling(), statement.getLastChild(), null);
+      }
+
+      decl.replace(newDecl);
+      statement.delete();
+      return startOffset + newDecl.getTextRange().getEndOffset() - newDecl.getTextRange().getStartOffset();
+    }
+    catch (IncorrectOperationException e) {
+      LOG.error(e);
+      return -1;
+    }
+  }
+
+  public static PsiExpression getInitializerExpression(PsiLocalVariable var,
+                                                       PsiAssignmentExpression assignment) {
+    return getInitializerExpression(var.getInitializer(), 
+                                    assignment);
+  }
+
+  public static PsiExpression getInitializerExpression(PsiExpression initializer,
+                                                       PsiAssignmentExpression assignment) {
     PsiExpression initializerExpression;
     final IElementType originalOpSign = assignment.getOperationTokenType();
+    final PsiExpression rExpression = assignment.getRExpression();
     if (originalOpSign == JavaTokenType.EQ) {
-      initializerExpression = assignment.getRExpression();
+      initializerExpression = rExpression;
     }
     else {
-      if (var.getInitializer() == null) return -1;
+      if (initializer == null) return null;
       String opSign = null;
       if (originalOpSign == JavaTokenType.ANDEQ) {
         opSign = "&";
@@ -107,46 +154,23 @@ public class DeclarationJoinLinesHandler implements JoinLinesHandlerDelegate {
       }
 
       try {
-        initializerExpression =
-          factory.createExpressionFromText(var.getInitializer().getText() + opSign + assignment.getRExpression().getText(), var);
-        initializerExpression = (PsiExpression)CodeStyleManager.getInstance(psiManager).reformat(initializerExpression);
+        final Project project = assignment.getProject();
+        String initializerText = initializer.getText() + opSign;
+        final String rightText = rExpression.getText();
+        if (ParenthesesUtils.areParenthesesNeeded(assignment.getOperationSign(), rExpression)) {
+          initializerText += "(" + rightText + ")";
+        }
+        else {
+          initializerText += rightText;
+        }
+        initializerExpression = JavaPsiFacade.getElementFactory(project).createExpressionFromText(initializerText, assignment);
+        initializerExpression = (PsiExpression)CodeStyleManager.getInstance(project).reformat(initializerExpression);
       }
       catch (IncorrectOperationException e) {
         LOG.error(e);
-        return -1;
+        return null;
       }
     }
-
-    PsiExpressionStatement statement = (PsiExpressionStatement)assignment.getParent();
-
-    int startOffset = decl.getTextRange().getStartOffset();
-    try {
-      PsiDeclarationStatement newDecl = factory.createVariableDeclarationStatement(var.getName(), var.getType(), initializerExpression);
-      PsiVariable newVar = (PsiVariable)newDecl.getDeclaredElements()[0];
-      if (var.getModifierList().getText().length() > 0) {
-        PsiUtil.setModifierProperty(newVar, PsiModifier.FINAL, true);
-      }
-      newVar.getModifierList().replace(var.getModifierList());
-      PsiVariable variable = (PsiVariable)newDecl.getDeclaredElements()[0];
-      final int offsetBeforeEQ = variable.getNameIdentifier().getTextRange().getEndOffset();
-      final int offsetAfterEQ = variable.getInitializer().getTextRange().getStartOffset() + 1;
-      newDecl = (PsiDeclarationStatement)CodeStyleManager.getInstance(psiManager).reformatRange(newDecl, offsetBeforeEQ, offsetAfterEQ);
-
-      PsiElement child = statement.getLastChild();
-      while (child instanceof PsiComment || child instanceof PsiWhiteSpace) {
-        child = child.getPrevSibling();
-      }
-      if (child != null && child.getNextSibling() != null) {
-        newDecl.addRangeBefore(child.getNextSibling(), statement.getLastChild(), null);
-      }
-
-      decl.replace(newDecl);
-      statement.delete();
-      return startOffset + newDecl.getTextRange().getEndOffset() - newDecl.getTextRange().getStartOffset();
-    }
-    catch (IncorrectOperationException e) {
-      LOG.error(e);
-      return -1;
-    }
+    return initializerExpression;
   }
 }

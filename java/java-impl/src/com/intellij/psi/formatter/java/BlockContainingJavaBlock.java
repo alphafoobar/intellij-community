@@ -17,9 +17,9 @@ package com.intellij.psi.formatter.java;
 
 import com.intellij.formatting.*;
 import com.intellij.lang.ASTNode;
-import com.intellij.psi.JavaTokenType;
-import com.intellij.psi.PsiStatement;
+import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.formatter.FormatterUtil;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaDocElementType;
@@ -44,8 +44,13 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
 
   private final List<Indent> myIndentsBefore = new ArrayList<Indent>();
 
-  public BlockContainingJavaBlock(final ASTNode node, final Wrap wrap, final Alignment alignment, final Indent indent, CommonCodeStyleSettings settings) {
-    super(node, wrap, alignment, indent, settings);
+  public BlockContainingJavaBlock(ASTNode node,
+                                  Wrap wrap,
+                                  Alignment alignment,
+                                  Indent indent,
+                                  CommonCodeStyleSettings settings,
+                                  JavaCodeStyleSettings javaSettings) {
+    super(node, wrap, alignment, indent, settings, javaSettings);
   }
   @Override
   protected List<Block> buildChildren() {
@@ -55,8 +60,13 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
 
     buildChildren(result, childAlignment, childWrap);
 
-    return result;
+    for (Block block : result) {
+      if (block instanceof AbstractJavaBlock) {
+        ((AbstractJavaBlock)block).setParentBlock(this);
+      }
+    }
 
+    return result;
   }
 
   private void buildChildren(final ArrayList<Block> result, final Alignment childAlignment, final Wrap childWrap) {
@@ -149,10 +159,21 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
       else if (isSimpleStatement(child) || StdTokenSets.COMMENT_BIT_SET.contains(child.getElementType())){
         return getCodeBlockInternalIndent(1);
       }
+      else if (isNodeParentMethod(child) && 
+               (child.getElementType() == JavaElementType.TYPE
+                || child.getElementType() == JavaTokenType.IDENTIFIER
+                || child.getElementType() == JavaElementType.THROWS_LIST
+                || child.getElementType() == JavaElementType.TYPE_PARAMETER_LIST)) {
+        return Indent.getNoneIndent();
+      }
       else {
         return Indent.getContinuationIndent(myIndentSettings.USE_RELATIVE_INDENTS);
       }
     }
+  }
+
+  private static boolean isNodeParentMethod(@NotNull ASTNode node) {
+    return node.getTreeParent() != null && node.getTreeParent().getElementType() == JavaElementType.METHOD;
   }
 
   private Indent calcIndentBefore(final ASTNode child, final int state) {
@@ -169,8 +190,12 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
     if (state == BEFORE_FIRST) {
       return getCodeBlockExternalIndent();
     }
-    if (child.getElementType() == JavaTokenType.ELSE_KEYWORD)
+    if (child.getElementType() == JavaTokenType.ELSE_KEYWORD) {
       return getCodeBlockExternalIndent();
+    }
+    if (child.getPsi() instanceof PsiTypeElement) {
+      return Indent.getNoneIndent();
+    }
 
     return Indent.getContinuationIndent(myIndentSettings.USE_RELATIVE_INDENTS);
   }
@@ -228,8 +253,8 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
       if (prevBlock instanceof ASTBlock && nextBlock instanceof ASTBlock) {
         ASTNode prevNode = ((ASTBlock)prevBlock).getNode();
         ASTNode nextNode = ((ASTBlock)nextBlock).getNode();
-        if (prevNode != null && nextNode != null && prevNode.getElementType() == JavaTokenType.RPARENTH 
-            && nextNode.getElementType() != JavaTokenType.LBRACE) 
+        if (prevNode != null && nextNode != null && prevNode.getElementType() == JavaTokenType.RPARENTH
+            && nextNode.getElementType() != JavaTokenType.LBRACE)
         {
           useExternalIndent = true;
         }
@@ -240,7 +265,7 @@ public class BlockContainingJavaBlock extends AbstractJavaBlock{
       return new ChildAttributes(getCodeBlockChildExternalIndent(newChildIndex), null);
     }
     else {
-      return new ChildAttributes(myIndentsBefore.get(newChildIndex), null);
+      return new ChildAttributes(myIndentsBefore.get(newChildIndex), getUsedAlignment(newChildIndex));
     }
   }
 

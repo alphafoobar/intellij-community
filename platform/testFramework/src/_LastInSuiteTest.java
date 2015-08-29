@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.testFramework.LeakHunter;
@@ -22,12 +24,30 @@ import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ui.UIUtil;
 import junit.framework.TestCase;
 
+import java.lang.reflect.Method;
+
 /**
  * This must be the last test.
  * @author max
  */
+@SuppressWarnings("JUnitTestClassNamingConvention")
 public class _LastInSuiteTest extends TestCase {
   public void testProjectLeak() throws Exception {
+    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          LightPlatformTestCase.initApplication(); // in case nobody cared to init. LightPlatformTestCase.disposeApplication() would not work otherwise.
+        }
+        catch (RuntimeException e) {
+          throw e;
+        }
+        catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      }
+    });
+
     new WriteCommandAction.Simple(null) {
       @Override
       protected void run() throws Throwable {
@@ -39,7 +59,9 @@ public class _LastInSuiteTest extends TestCase {
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
+        ((ApplicationImpl)ApplicationManager.getApplication()).setDisposeInProgress(true);
         LightPlatformTestCase.disposeApplication();
+        UIUtil.dispatchAllInvocationEvents();
       }
     });
 
@@ -53,11 +75,23 @@ public class _LastInSuiteTest extends TestCase {
     }
   }
 
+  @SuppressWarnings("UseOfSystemOutOrSystemErr")
+  public void testStatistics() throws Exception {
+    if (_FirstInSuiteTest.suiteStarted != 0) {
+      long testSuiteDuration = System.nanoTime() - _FirstInSuiteTest.suiteStarted;
+      System.out.println(String.format("##teamcity[buildStatisticValue key='ideaTests.totalTimeMs' value='%d']",
+                                       testSuiteDuration / 1000000));
+    }
+    LightPlatformTestCase.reportTestExecutionStatistics();
+  }
+
   private static void captureMemorySnapshot() {
     try {
-      ReflectionUtil.getMethod(Class.forName("com.intellij.util.ProfilingUtil"), "forceCaptureMemorySnapshot").invoke(null);
+      Method snapshot = ReflectionUtil.getMethod(Class.forName("com.intellij.util.ProfilingUtil"), "forceCaptureMemorySnapshot");
+      if (snapshot != null) {
+        snapshot.invoke(null);
+      }
     }
-    catch (Exception ignored) {
-    }
+    catch (Exception ignored) { }
   }
 }

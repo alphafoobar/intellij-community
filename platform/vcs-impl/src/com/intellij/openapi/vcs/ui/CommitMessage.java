@@ -20,14 +20,16 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.SpellCheckingEditorCustomizationProvider;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
-import com.intellij.spellchecker.ui.SpellCheckingEditorCustomization;
 import com.intellij.ui.*;
 import com.intellij.util.Consumer;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -118,11 +120,11 @@ public class CommitMessage extends AbstractDataProviderPanel implements Disposab
     VcsConfiguration configuration = VcsConfiguration.getInstance(project);
     if (configuration != null) {
       boolean enableSpellChecking = forceSpellCheckOn || configuration.CHECK_COMMIT_MESSAGE_SPELLING;
-      features.add(SpellCheckingEditorCustomization.getInstance(enableSpellChecking));
+      ContainerUtil.addIfNotNull(features, SpellCheckingEditorCustomizationProvider.getInstance().getCustomization(enableSpellChecking));
       features.add(new RightMarginEditorCustomization(configuration.USE_COMMIT_MESSAGE_MARGIN, configuration.COMMIT_MESSAGE_MARGIN_SIZE));
       features.add(WrapWhenTypingReachesRightMarginCustomization.getInstance(configuration.WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN));
     } else {
-      features.add(SpellCheckingEditorCustomization.ENABLED);
+      ContainerUtil.addIfNotNull(features, SpellCheckingEditorCustomizationProvider.getInstance().getEnabledCustomization());
       features.add(new RightMarginEditorCustomization(false, -1));
     }
 
@@ -143,7 +145,7 @@ public class CommitMessage extends AbstractDataProviderPanel implements Disposab
   }
 
   public void setText(final String initialMessage) {
-    final String text = initialMessage == null ? "" : initialMessage;
+    final String text = initialMessage == null ? "" : StringUtil.convertLineSeparators(initialMessage);
     myEditorField.setText(text);
     if (myMessageConsumer != null) {
       myMessageConsumer.consume(text);
@@ -176,7 +178,10 @@ public class CommitMessage extends AbstractDataProviderPanel implements Disposab
       return;
     }
     EditorEx editorEx = (EditorEx)editor;
-    SpellCheckingEditorCustomization.getInstance(check).customize(editorEx);
+    EditorCustomization customization = SpellCheckingEditorCustomizationProvider.getInstance().getCustomization(check);
+    if (customization != null) {
+      customization.customize(editorEx);
+    }
   }
 
   public void dispose() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import org.jetbrains.idea.maven.utils.MavenUtil;
 import javax.swing.event.HyperlinkEvent;
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -45,7 +46,7 @@ import java.util.List;
  */
 public class MavenExecuteGoalAction extends DumbAwareAction {
   @Override
-  public void actionPerformed(final AnActionEvent e) {
+  public void actionPerformed(@NotNull final AnActionEvent e) {
     final Project project = e.getRequiredData(CommonDataKeys.PROJECT);
 
     ExecuteMavenGoalHistoryService historyService = ExecuteMavenGoalHistoryService.getInstance(project);
@@ -68,8 +69,7 @@ public class MavenExecuteGoalAction extends DumbAwareAction {
       dialog.setGoals(historyService.getCanceledCommand());
     }
 
-    dialog.show();
-    if (!dialog.isOK()) {
+    if (!dialog.showAndGet()) {
       historyService.setCanceledCommand(dialog.getGoals());
       return;
     }
@@ -97,7 +97,8 @@ public class MavenExecuteGoalAction extends DumbAwareAction {
                                                      @Override
                                                      protected void hyperlinkActivated(@NotNull Notification notification,
                                                                                        @NotNull HyperlinkEvent e) {
-                                                       ShowSettingsUtil.getInstance().showSettingsDialog(project, MavenSettings.DISPLAY_NAME);
+                                                       ShowSettingsUtil.getInstance()
+                                                         .showSettingsDialog(project, MavenSettings.DISPLAY_NAME);
                                                      }
                                                    });
 
@@ -105,7 +106,8 @@ public class MavenExecuteGoalAction extends DumbAwareAction {
       return;
     }
 
-    MavenRunnerParameters parameters = new MavenRunnerParameters(true, workDirectory, Arrays.asList(ParametersList.parse(goals)), null);
+    MavenRunnerParameters parameters =
+      new MavenRunnerParameters(true, workDirectory, Arrays.asList(ParametersList.parse(goals)), Collections.<String>emptyList());
 
     MavenGeneralSettings generalSettings = new MavenGeneralSettings();
     generalSettings.setMavenHome(mavenHome.getPath());

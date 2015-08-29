@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.openapi.components.AbstractProjectComponent;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.psi.search.FileTypeIndex;
@@ -44,21 +44,24 @@ public class PropertiesFilesManager extends AbstractProjectComponent {
     super(project);
   }
 
+  @Override
   public void projectOpened() {
     final PropertyChangeListener myListener = new PropertyChangeListener() {
+      @Override
       public void propertyChange(final PropertyChangeEvent evt) {
         String propertyName = evt.getPropertyName();
         if (EncodingManager.PROP_NATIVE2ASCII_SWITCH.equals(propertyName) ||
             EncodingManager.PROP_PROPERTIES_FILES_ENCODING.equals(propertyName)
           ) {
           DumbService.getInstance(myProject).smartInvokeLater(new Runnable(){
+            @Override
             public void run() {
               ApplicationManager.getApplication().runWriteAction(new Runnable(){
+                @Override
                 public void run() {
-                  if (myProject.isDisposed()) return;
                   Collection<VirtualFile> filesToRefresh = FileBasedIndex.getInstance()
                     .getContainingFiles(FileTypeIndex.NAME, PropertiesFileType.INSTANCE, GlobalSearchScope.allScope(myProject));
-                  VirtualFile[] virtualFiles = VfsUtil.toVirtualFileArray(filesToRefresh);
+                  VirtualFile[] virtualFiles = VfsUtilCore.toVirtualFileArray(filesToRefresh);
                   FileDocumentManager.getInstance().saveAllDocuments();
 
                   //force to re-detect encoding
@@ -76,12 +79,9 @@ public class PropertiesFilesManager extends AbstractProjectComponent {
     EncodingManager.getInstance().addPropertyChangeListener(myListener,myProject);
   }
 
+  @Override
   @NotNull
   public String getComponentName() {
     return "PropertiesFileManager";
-  }
-
-  public boolean processAllPropertiesFiles(final PropertiesFileProcessor processor) {
-    return PropertiesReferenceManager.getInstance(myProject).processAllPropertiesFiles(processor);
   }
 }

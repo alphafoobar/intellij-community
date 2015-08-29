@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ public abstract class DomStub extends ObjectStubBase<DomStub> {
     myLocalName = localName;
   }
 
+  @Override
   public abstract List<DomStub> getChildrenStubs();
 
   public String getName() {
@@ -132,11 +133,27 @@ public abstract class DomStub extends ObjectStubBase<DomStub> {
     return false;
   }
 
+  public abstract int getIndex();
+
   @Override
-  public boolean equals(Object obj) {
-    if (obj == this) return true;
-    return super.equals(obj);
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+
+    DomStub stub = (DomStub)o;
+    if (stub.getIndex() != getIndex()) return false;
+    if (stub.isCustom() != isCustom()) return false;
+
+    return Comparing.strEqual(stub.getName(), getName()) &&
+           Comparing.strEqual(stub.getNamespaceKey(), getNamespaceKey());
   }
 
-  public abstract int getIndex();
+  @Override
+  public int hashCode() {
+    int result = myLocalName.hashCode();
+    result = 31 * result + myNamespace.hashCode();
+    result = 31 * result + getIndex();
+    result = 31 * result + (isCustom() ? 1 : 0);
+    return result;
+  }
 }

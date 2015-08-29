@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.javaee;
 
+import com.intellij.ide.DataManager;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
@@ -26,16 +27,16 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.ScrollPaneFactory;
-import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBTabbedPane;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.tree.TreeUtil;
@@ -45,6 +46,7 @@ import com.intellij.xml.index.IndexedRelevantResource;
 import com.intellij.xml.index.XmlNamespaceIndex;
 import com.intellij.xml.index.XsdNamespaceBuilder;
 import com.intellij.xml.util.XmlUtil;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -105,7 +107,7 @@ public class MapExternalResourceDialog extends DialogWrapper {
 
     ColoredTreeCellRenderer renderer = new ColoredTreeCellRenderer() {
       @Override
-      public void customizeCellRenderer(JTree tree,
+      public void customizeCellRenderer(@NotNull JTree tree,
                                         Object value,
                                         boolean selected,
                                         boolean expanded,
@@ -142,6 +144,7 @@ public class MapExternalResourceDialog extends DialogWrapper {
     });
 
     myExplorer = new FileSystemTreeImpl(project, new FileChooserDescriptor(true, false, false, false, true, false));
+    Disposer.register(getDisposable(), myExplorer);
 
     myExplorer.addListener(new FileSystemTree.Listener() {
       @Override
@@ -163,7 +166,7 @@ public class MapExternalResourceDialog extends DialogWrapper {
       schema = XmlUtil.findNamespaceByLocation(file, uri);
     }
     else if (location != null) {
-      VirtualFile virtualFile = VfsUtil.findRelativeFile(location, null);
+      VirtualFile virtualFile = VfsUtilCore.findRelativeFile(location, null);
       if (virtualFile != null) {
         schema = PsiManager.getInstance(project).findFile(virtualFile);
       }
@@ -177,7 +180,7 @@ public class MapExternalResourceDialog extends DialogWrapper {
       myExplorer.select(schema.getVirtualFile(), null);
     }
 
-    int index = PropertiesComponent.getInstance().getOrInitInt(MAP_EXTERNAL_RESOURCE_SELECTED_TAB, 0);
+    int index = PropertiesComponent.getInstance().getInt(MAP_EXTERNAL_RESOURCE_SELECTED_TAB, 0);
     myTabs.setSelectedIndex(index);
     myTabs.getModel().addChangeListener(new ChangeListener() {
       @Override
@@ -231,16 +234,25 @@ public class MapExternalResourceDialog extends DialogWrapper {
   }
 
   private void createUIComponents() {
-    myExplorerPanel = new JBPanel(new BorderLayout()) {
+    myExplorerPanel = new JPanel(new BorderLayout());
+    DataManager.registerDataProvider(myExplorerPanel, new DataProvider() {
+      @Nullable
       @Override
-      public void calcData(DataKey key, DataSink sink) {
-        if (key == CommonDataKeys.VIRTUAL_FILE_ARRAY) {
-          sink.put(CommonDataKeys.VIRTUAL_FILE_ARRAY, myExplorer.getSelectedFiles());
+      public Object getData(@NonNls String dataId) {
+        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) {
+          return myExplorer.getSelectedFiles();
         }
-        else if (key == FileSystemTree.DATA_KEY) {
-          sink.put(FileSystemTree.DATA_KEY, myExplorer);
+        else if (FileSystemTree.DATA_KEY.is(dataId)) {
+          return myExplorer;
         }
+        return null;
       }
-    };
+    });
+  }
+
+  @Nullable
+  @Override
+  protected String getHelpId() {
+    return "Map External Resource dialog";
   }
 }

@@ -15,7 +15,7 @@ setProperty("pythonCommunityHome", "$home/python")
 // load ApplicationInfo.xml properties
 ant.xmlproperty(file: "$pythonCommunityHome/resources/idea/PyCharmCoreApplicationInfo.xml", collapseAttributes: "true")
 
-setProperty("system_selector", "PyCharm${p("component.version.major")}0")
+setProperty("system_selector", "PyCharmCE${p("component.version.major")}0")
 setProperty("dryRun", false)
 setProperty("jdk16", guessJdk())
 
@@ -162,18 +162,25 @@ public layoutCommunity(String classesPath, Set usedJars) {
   ant.echo(message: "PC-${buildNumber}", file: "${paths.distAll}/build.txt")
 
   def launcher = "${paths.distWin}/bin/pycharm.exe"
+  def launcher64 = "${paths.distWin}/bin/pycharm64.exe"
   List resourcePaths = ["$ch/community-resources/src",
     "$ch/platform/icons/src",
     "$pythonCommunityHome/resources"]
   buildWinLauncher("$ch", "$ch/bin/WinLauncher/WinLauncher.exe", launcher,
                    appInfo, "$pythonCommunityHome/build/pycharm_community_launcher.properties", system_selector, resourcePaths)
+  buildWinLauncher("$ch", "$ch/bin/WinLauncher/WinLauncher64.exe", launcher64,
+                   appInfo, "$pythonCommunityHome/build/pycharm64_community_launcher.properties", system_selector, resourcePaths)
 
-  buildWinZip("${paths.artifacts}/pycharmPC-${buildNumber}.zip", [paths.distAll, paths.distWin])
+  List pathsDist = new File("${home}/out/pycharm/bundled.win.jdk/jre").exists() ? [paths.distAll, paths.distWin, "${home}/out/pycharm/bundled.win.jdk"] : [paths.distAll, paths.distWin]
+  buildWinZip("${paths.artifacts}/pycharmPC-${buildNumber}.zip", pathsDist)
 
   String tarRoot = isEap() ? "pycharm-community-$buildNumber" : "pycharm-community-${p("component.version.major")}.${p("component.version.minor")}"
   buildTarGz(tarRoot, "$paths.artifacts/pycharmPC-${buildNumber}.tar", [paths.distAll, paths.distUnix])
+  if (p("jdk.bundled.linux") != "false") {
+    buildTarGz(tarRoot, "$paths.artifacts/pycharmPC-${buildName}-jdk-bundled.tar", [paths.distAll, paths.distUnix, "${home}/out/pycharm/bundled.linux.jdk"], ["jre/jre/bin/*"])
+  }
 
-  String macAppRoot = isEap() ? "PyCharm CE ${p("component.version.major")}.${p("component.version.minor")} EAP.app" : "PyCharm CE.app"
+  String macAppRoot = isEap() ? "PyCharm CE ${p("component.version.major")}.${p("component.version.minor")} EAP.app/Contents" : "PyCharm CE.app/Contents"
   buildMacZip(macAppRoot, "${paths.artifacts}/pycharmPC-${buildNumber}.sit", [paths.distAll], paths.distMac)
 }
 
@@ -181,22 +188,9 @@ private layoutPlugins(layouts) {
   dir("plugins") {
     layouts.layoutPlugin("rest")
     layouts.layoutPlugin("python-rest")
-    /*
-    layouts.layoutPlugin("pycharm-flask")
-    layouts.layoutPlugin("pycharm-numpy")
-    layouts.layoutPlugin("textmate") {
-      dir("themes") {
-        fileset(dir: "${home}/plugins/textmate/lib/themes/", includes: "*.tmTheme")
-      }
-      fileset(dir: "${home}/plugins/textmate/lib") {
-        include(name: "jcodings.jar")
-        include(name: "joni.jar")
-      }
+    layouts.layoutPlugin("ipnb") {
+      fileset(dir: "$pythonCommunityHome/ipnb/lib")
     }
-    layouts.layoutPlugin("puppet")
-    layouts.layoutPlugin("fileWatcher")
-    layouts.layoutPlugin("ini4idea")
-    */
   }
 
   layouts.layoutCommunityPlugins(ch)
@@ -209,6 +203,9 @@ private String appInfoFile(String classesPath) {
 private layoutFull(Map args, String target, Set usedJars) {
   def openapiModules = pycharmPlatformApiModules()
   def superLayouts = includeFile("$ch/build/scripts/layouts.gant")
+
+  reassignAltClickToMultipleCarets("$ch")
+  
   def result = layout(target) {
     dir("lib") {
       jar("util.jar") {
@@ -220,7 +217,10 @@ private layoutFull(Map args, String target, Set usedJars) {
         openapiModules.each { module it }
       }
 
-      jar("annotations.jar") { module("annotations") }
+      jar("annotations.jar") {
+        module("annotations-common")
+        module("annotations")
+      }
       jar("extensions.jar") { module("extensions") }
 
       jar("pycharm.jar") {
@@ -264,6 +264,11 @@ private layoutFull(Map args, String target, Set usedJars) {
 
       usedJars.each {
         fileset(file: it)
+      }
+
+      fileset(dir: "$ch/build/kotlinc/lib") {
+        include(name: "kotlin-runtime.jar")
+        include(name: "kotlin-reflect.jar")
       }
 
       dir("libpty") {
@@ -341,8 +346,7 @@ private layoutWin(Map args, String target) {
   }
 
   winScripts(target, ch, "pycharm.bat", args)
-  winVMOptions(target, null, "pycharm.exe")
-
+  winVMOptions(target, null, "pycharm.exe", "pycharm64.exe")
   ant.copy(file: "$home/python/help/pycharmhelp.jar", todir: "$target/help", failonerror: false)
 }
 
@@ -385,5 +389,6 @@ private layoutMac(Map _args, String target) {
   args.help_id = "PY"
   args."idea.properties.path" = "${paths.distAll}/bin/idea.properties"
   args."idea.properties" = ["idea.no.jre.check": true, "ide.mac.useNativeClipboard": "false"];
+  args.executable = "pycharm"
   layoutMacApp(target, ch, args)
 }

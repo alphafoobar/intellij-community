@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.ide.util.TreeClassChooserFactory;
 import com.intellij.ide.util.TreeFileChooser;
 import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.PropertiesReferenceManager;
-import com.intellij.lang.properties.PropertiesUtil;
+import com.intellij.lang.properties.PropertiesUtilBase;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.lang.properties.psi.Property;
 import com.intellij.openapi.application.ApplicationManager;
@@ -375,7 +375,7 @@ public final class StringEditorDialog extends DialogWrapper{
           public void actionPerformed(final ActionEvent e) {
             Project project = myEditor.getProject();
             final String bundleNameText = myTfBundleName.getText().replace('/', '.');
-            PropertiesFile file = PropertiesUtil.getPropertiesFile(bundleNameText, myEditor.getModule(), myLocale);
+            PropertiesFile file = PropertiesUtilBase.getPropertiesFile(bundleNameText, myEditor.getModule(), myLocale);
             PsiFile initialPropertiesFile = file == null ? null : file.getContainingFile();
             final GlobalSearchScope moduleScope = GlobalSearchScope.moduleWithDependenciesScope(myEditor.getModule());
             TreeFileChooser fileChooser = TreeClassChooserFactory.getInstance(project).createFileChooser(UIDesignerBundle.message("title.choose.properties.file"), initialPropertiesFile,
@@ -415,7 +415,7 @@ public final class StringEditorDialog extends DialogWrapper{
           public void actionPerformed(final ActionEvent e) {
             // 1. Check that bundle exist. Otherwise we cannot show key chooser
             final String bundleName = myTfBundleName.getText();
-            if(bundleName.length() == 0){
+            if (bundleName.length() == 0) {
               Messages.showErrorDialog(
                 UIDesignerBundle.message("error.specify.bundle.name"),
                 CommonBundle.getErrorTitle()
@@ -424,7 +424,7 @@ public final class StringEditorDialog extends DialogWrapper{
             }
             final PropertiesReferenceManager manager = PropertiesReferenceManager.getInstance(myEditor.getProject());
             final PropertiesFile bundle = manager.findPropertiesFile(myEditor.getModule(), bundleName.replace('/', '.'), myLocale);
-            if(bundle == null){
+            if (bundle == null) {
               Messages.showErrorDialog(
                 UIDesignerBundle.message("error.bundle.does.not.exist", bundleName),
                 CommonBundle.getErrorTitle()
@@ -440,14 +440,13 @@ public final class StringEditorDialog extends DialogWrapper{
               myTfKey.getText(), // key to preselect
               myEditor
             );
-            dialog.show();
-            if(!dialog.isOK()){
+            if (!dialog.showAndGet()) {
               return;
             }
 
             // 3. Apply new key/value
             final StringDescriptor descriptor = dialog.getDescriptor();
-            if(descriptor == null){
+            if (descriptor == null) {
               return;
             }
             myTfKey.setText(descriptor.getKey());

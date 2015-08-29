@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package com.intellij.refactoring.inline;
 
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.lang.Language;
 import com.intellij.lang.refactoring.InlineHandler;
 import com.intellij.lang.refactoring.InlineHandlers;
@@ -53,7 +53,7 @@ public class GenericInlineHandler {
   private static final Logger LOG = Logger.getInstance(GenericInlineHandler.class);
 
   public static boolean invoke(final PsiElement element, @Nullable Editor editor, final InlineHandler languageSpecific) {
-    final PsiReference invocationReference = editor != null ? TargetElementUtilBase.findReference(editor) : null;
+    final PsiReference invocationReference = editor != null ? TargetElementUtil.findReference(editor) : null;
     final InlineHandler.Settings settings = languageSpecific.prepareInlineElement(element, editor, invocationReference != null);
     if (settings == null || settings == InlineHandler.Settings.CANNOT_INLINE_SETTINGS) {
       return settings != null;
@@ -89,8 +89,7 @@ public class GenericInlineHandler {
       }
       else {
         final ConflictsDialog conflictsDialog = new ConflictsDialog(project, conflicts);
-        conflictsDialog.show();
-        if (!conflictsDialog.isOK()) {
+        if (!conflictsDialog.showAndGet()) {
           return true;
         }
       }
@@ -184,7 +183,7 @@ public class GenericInlineHandler {
       }
     }
     else {
-      conflicts.putValue(referenceElement, "Cannot inline reference from " + language.getID());
+      conflicts.putValue(referenceElement, "Cannot inline reference from " + language.getDisplayName());
     }
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -298,23 +298,17 @@ public class AbstractTreeBuilder implements Disposable {
 
   @NotNull
   public ActionCallback queueUpdateFrom(final Object element, final boolean forceResort, final boolean updateStructure) {
-    if (getUi() == null) return new ActionCallback.Rejected();
+    if (getUi() == null) return ActionCallback.REJECTED;
 
     final ActionCallback result = new ActionCallback();
 
-    getUi().invokeLaterIfNeeded(false, new Runnable() {
+    getUi().invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeBuilder.queueUpdateFrom") {
       @Override
-      public void run() {
-        if (updateStructure) {
-          if (forceResort) {
-            getUi().incComparatorStamp();
-          }
-
-          getUi().queueUpdate(element, true).notify(result);
+      public void perform() {
+        if (updateStructure && forceResort) {
+          getUi().incComparatorStamp();
         }
-        else {
-          getUi().queueUpdate(element, false).notify(result);
-        }
+        getUi().queueUpdate(element, updateStructure).notify(result);
       }
     });
 
@@ -467,9 +461,9 @@ public class AbstractTreeBuilder implements Disposable {
 
     final Application app = ApplicationManager.getApplication();
     if (app != null) {
-      app.runReadAction(new Runnable() {
+      app.runReadAction(new TreeRunnable("AbstractTreeBuilder.runBackgroundLoading") {
         @Override
-        public void run() {
+        public void perform() {
           runnable.run();
         }
       });
@@ -490,28 +484,17 @@ public class AbstractTreeBuilder implements Disposable {
     }
   }
 
-  @SuppressWarnings({"UnusedDeclaration", "SpellCheckingInspection"})
-  @Deprecated
-  @NotNull
-  /**
-   * @deprecated use {@link #getInitialized()}
-   * to remove in IDEA 14
-   */
-  public final ActionCallback getIntialized() {
-    return getInitialized();
-  }
-
   @NotNull
   public final ActionCallback getInitialized() {
     if (isDisposed()) {
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
     return myUi.getInitialized();
   }
 
   @NotNull
   public final ActionCallback getReady(Object requestor) {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return myUi.getReady(requestor);
   }
@@ -534,14 +517,14 @@ public class AbstractTreeBuilder implements Disposable {
 
   @NotNull
   public ActionCallback cancelUpdate() {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return getUi().cancelUpdate();
   }
 
   @NotNull
   public ActionCallback batch(@NotNull Progressive progressive) {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return getUi().batch(progressive);
   }

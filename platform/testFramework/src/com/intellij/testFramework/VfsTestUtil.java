@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.PathUtil;
 import com.intellij.util.text.StringTokenizer;
-import junit.framework.Assert;
+import org.junit.Assert;
 
 import java.io.File;
 import java.io.IOException;
@@ -50,9 +50,9 @@ public class VfsTestUtil {
   }
 
   private static VirtualFile createFileOrDir(final VirtualFile root,
-                                            final String relativePath,
-                                            final String text,
-                                            final boolean dir) {
+                                             final String relativePath,
+                                             final String text,
+                                             final boolean dir) {
     try {
       AccessToken token = WriteAction.start();
       try {
@@ -67,18 +67,35 @@ public class VfsTestUtil {
           }
           parent = child;
         }
-        final VirtualFile file;
+
+        VirtualFile file;
         parent.getChildren();//need this to ensure that fileCreated event is fired
         if (dir) {
           file = parent.createChildDirectory(VfsTestUtil.class, PathUtil.getFileName(relativePath));
         }
         else {
-          file = parent.createChildData(VfsTestUtil.class, PathUtil.getFileName(relativePath));
-          if (!text.isEmpty()) {
-            VfsUtil.saveText(file, text);
+          file = parent.findFileByRelativePath(relativePath);
+          if (file == null) {
+            file = parent.createChildData(VfsTestUtil.class, PathUtil.getFileName(relativePath));
           }
+          VfsUtil.saveText(file, text);
         }
         return file;
+      }
+      finally {
+        token.finish();
+      }
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static void deleteFile(final VirtualFile file) {
+    try {
+      AccessToken token = WriteAction.start();
+      try {
+        file.delete(VfsTestUtil.class);
       }
       finally {
         token.finish();

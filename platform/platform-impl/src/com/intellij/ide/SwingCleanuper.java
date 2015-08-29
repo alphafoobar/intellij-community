@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ProjectManagerAdapter;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.util.Alarm;
 import com.intellij.util.ReflectionUtil;
@@ -56,13 +57,9 @@ import java.util.EventListener;
 public final class SwingCleanuper implements ApplicationComponent{
   private final Alarm myAlarm;
 
-  /** Invoked by reflection
-   * @param projectManager   */
-  SwingCleanuper(ProjectManager projectManager){
-    myAlarm=new Alarm();
-
-    projectManager.addProjectManagerListener(
-      new ProjectManagerAdapter(){
+  public SwingCleanuper(Application application, ProjectManager projectManager) {
+    myAlarm = new Alarm(application);
+    projectManager.addProjectManagerListener(new ProjectManagerAdapter(){
         public void projectOpened(final Project project) {
           myAlarm.cancelAllRequests();
         }
@@ -86,7 +83,8 @@ public final class SwingCleanuper implements ApplicationComponent{
                 if(frame!=null){
                   final Application app = ApplicationManager.getApplication();
                   if (app != null && app.isActive()) {
-                    ((JComponent)frame.getStatusBar()).requestFocus();
+                    StatusBar statusBar = frame.getStatusBar();
+                    if (statusBar != null) ((JComponent)statusBar).requestFocus();
                   }
                 }
 
@@ -96,7 +94,7 @@ public final class SwingCleanuper implements ApplicationComponent{
                     public void run() {
 
                       // KeyboardFocusManager.newFocusOwner
-                      resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
+                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
 
                       // Clear "realOppositeComponent", "realOppositeWindow"
                       final KeyboardFocusManager focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
@@ -107,8 +105,8 @@ public final class SwingCleanuper implements ApplicationComponent{
                       // Memory leak on static field in BasicPopupMenuUI
 
                       try {
-                        final Object helperObject = ReflectionUtil.getField(BasicPopupMenuUI.class, null, Object.class, "menuKeyboardHelper");
-                        if (null != helperObject) {
+                        Object helperObject = ReflectionUtil.getStaticFieldValue(BasicPopupMenuUI.class, Object.class, "menuKeyboardHelper");
+                        if (helperObject != null) {
                           resetField(helperObject, Component.class, "lastFocused");
                         }
                       }
@@ -119,12 +117,10 @@ public final class SwingCleanuper implements ApplicationComponent{
                       // Memory leak on javax.swing.TransferHandler$SwingDragGestureRecognizer.component
 
                       try{
-                        final Field recognizerField = TransferHandler.class.getDeclaredField("recognizer");
-                        recognizerField.setAccessible(true);
-                        final Object recognizerObject = recognizerField.get(null);
-                        if(recognizerObject!=null){ // that is memory leak
-                          final Method setComponentMethod = DragGestureRecognizer.class.getDeclaredMethod("setComponent", Component.class);
-                          setComponentMethod.invoke(recognizerObject,new Object[]{null});
+                        DragGestureRecognizer recognizer = ReflectionUtil.getStaticFieldValue(TransferHandler.class, DragGestureRecognizer.class, "recognizer");
+
+                        if (recognizer != null) { // that is memory leak
+                          recognizer.setComponent(null);
                         }
                       }
                       catch (Exception e){
@@ -132,26 +128,24 @@ public final class SwingCleanuper implements ApplicationComponent{
                       }
                       try {
                         fixJTextComponentMemoryLeak();
-                      } catch(NoSuchFieldException e) {
-                        // JDK 1.5
-                      } catch(Exception e) {
+                      }
+                      catch(Exception e) {
                         // Ignore
                       }
 
                       focusManager.setGlobalCurrentFocusCycleRoot(null); //Remove focus leaks
 
                       try {
-                        final Method m = KeyboardFocusManager.class.getDeclaredMethod("setGlobalFocusOwner", Component.class);
-                        m.setAccessible(true);
+                        final Method m = ReflectionUtil.getDeclaredMethod(KeyboardFocusManager.class,"setGlobalFocusOwner", Component.class);
                         m.invoke(focusManager, new Object[]{null});
                       }
                       catch (Exception e) {
                         // Ignore
                       }
 
-                      resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
-                      resetStaticField(KeyboardFocusManager.class, "permanentFocusOwner");
-                      resetStaticField(KeyboardFocusManager.class, "currentFocusCycleRoot");
+                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
+                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "permanentFocusOwner");
+                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "currentFocusCycleRoot");
                     }
                   }
                 );
@@ -171,7 +165,6 @@ public final class SwingCleanuper implements ApplicationComponent{
         if (SystemInfo.isMac) {
           try {
             field = ReflectionUtil.findField(AccessibleContext.class, Object.class, "nativeAXResource");
-            field.setAccessible(true);
           }
           catch (NoSuchFieldException ignored) {
           }
@@ -230,7 +223,6 @@ public final class SwingCleanuper implements ApplicationComponent{
                 Object resource = myNativeAXResourceField.get(ac);
                 if (resource != null && resource.getClass().getName().equals("apple.awt.CAccessible")) {
                   Field accessible = ReflectionUtil.findField(resource.getClass(), Accessible.class, "accessible");
-                  accessible.setAccessible(true);
                   accessible.set(resource, null);
                 }
               }
@@ -255,14 +247,6 @@ public final class SwingCleanuper implements ApplicationComponent{
       // Ignore
     }
   }
-  private static void resetStaticField(@NotNull Class aClass, @NotNull @NonNls String name) {
-    try {
-      Field field = aClass.getDeclaredField(name);
-      ReflectionUtil.resetField(null, field);
-    }
-    catch (Exception ignored) {
-    }
-  }
 
   public final void disposeComponent(){}
 
@@ -273,13 +257,10 @@ public final class SwingCleanuper implements ApplicationComponent{
 
   public final void initComponent() { }
 
-  private static void fixJTextComponentMemoryLeak() throws NoSuchFieldException, IllegalAccessException {
-    //noinspection HardCodedStringLiteral
-    final Field focusedComponentField = JTextComponent.class.getDeclaredField("focusedComponent");
-    focusedComponentField.setAccessible(true);
-    final JTextComponent component = (JTextComponent)focusedComponentField.get(null);
+  private static void fixJTextComponentMemoryLeak() {
+    final JTextComponent component = ReflectionUtil.getStaticFieldValue(JTextComponent.class, JTextComponent.class, "focusedComponent");
     if (component != null && !component.isDisplayable()){
-      focusedComponentField.set(null, null);
+      ReflectionUtil.resetField(JTextComponent.class, JTextComponent.class, "focusedComponent");
     }
   }
 

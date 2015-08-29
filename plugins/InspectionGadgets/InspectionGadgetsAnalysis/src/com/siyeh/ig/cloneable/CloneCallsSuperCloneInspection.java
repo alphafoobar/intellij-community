@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2007 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,12 @@ package com.siyeh.ig.cloneable;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiModifier;
+import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.psiutils.CloneUtils;
+import com.siyeh.ig.psiutils.MethodCallUtils;
 import org.jetbrains.annotations.NotNull;
 
 public class CloneCallsSuperCloneInspection extends BaseInspection {
@@ -77,17 +79,10 @@ public class CloneCallsSuperCloneInspection extends BaseInspection {
           containingClass.isAnnotationType()) {
         return;
       }
-      if (CloneUtils.onlyThrowsCloneNotSupportedException(method)) {
-        if (method.hasModifierProperty(PsiModifier.FINAL) ||
-            containingClass.hasModifierProperty(
-              PsiModifier.FINAL)) {
-          return;
-        }
+      if (CloneUtils.onlyThrowsException(method)) {
+        return;
       }
-      final CallToSuperCloneVisitor visitor =
-        new CallToSuperCloneVisitor();
-      method.accept(visitor);
-      if (visitor.isCallToSuperCloneFound()) {
+      if (MethodCallUtils.containsSuperMethodCall(HardcodedMethodConstants.CLONE, method)) {
         return;
       }
       registerMethodError(method);

@@ -15,7 +15,6 @@
  */
 package org.intellij.lang.xpath.xslt.run;
 
-import com.intellij.diagnostic.logging.DebuggerLogConsoleManager;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
@@ -140,32 +139,31 @@ public final class XsltRunConfiguration extends LocatableConfigurationBase imple
         return state;
     }
 
-    //invoke before run/debug tabs are shown.
-    //Should be overriden to add additional tabs for run/debug toolwindow
     @Override
     public void createAdditionalTabComponents(final AdditionalTabComponentManager manager, ProcessHandler startedProcess) {
-        if (myOutputType == OutputType.CONSOLE) {
-            final HighlightingOutputConsole console = new HighlightingOutputConsole(getProject(), myFileType);
+      if (myOutputType == OutputType.CONSOLE) {
+        final HighlightingOutputConsole console = new HighlightingOutputConsole(getProject(), myFileType);
 
-            final List<XsltRunnerExtension> extensions = XsltRunnerExtension.getExtensions(this, manager instanceof DebuggerLogConsoleManager);
-            boolean consoleTabAdded = false;
-            for (XsltRunnerExtension extension : extensions) {
-                if (extension.createTabs(getProject(), manager, console, startedProcess)) {
-                    consoleTabAdded = true;
-                }
-            }
-            if (!consoleTabAdded) {
-                manager.addAdditionalTabComponent(console, console.getTabTitle());    // TODO: verify parameter
-            }
-
-            final OutputTabAdapter listener = new OutputTabAdapter(startedProcess, console);
-
-            if (startedProcess.isStartNotified()) {
-                listener.startNotified(new ProcessEvent(startedProcess));
-            } else {
-                startedProcess.addProcessListener(listener);
-            }
+          XsltCommandLineState state = startedProcess.getUserData(XsltCommandLineState.STATE);
+          boolean debug = state != null && state.isDebugger();
+          boolean consoleTabAdded = false;
+        for (XsltRunnerExtension extension : XsltRunnerExtension.getExtensions(this, debug)) {
+          if (extension.createTabs(getProject(), manager, console, startedProcess)) {
+            consoleTabAdded = true;
+          }
         }
+        if (!consoleTabAdded) {
+          manager.addAdditionalTabComponent(console, console.getTabTitle());    // TODO: verify parameter
+        }
+
+        final OutputTabAdapter listener = new OutputTabAdapter(startedProcess, console);
+        if (startedProcess.isStartNotified()) {
+          listener.startNotified(new ProcessEvent(startedProcess));
+        }
+        else {
+          startedProcess.addProcessListener(listener);
+        }
+      }
     }
 
     @Override

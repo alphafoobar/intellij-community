@@ -84,13 +84,11 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testConvertDictComp() {
-    setLanguageLevel(LanguageLevel.PYTHON26);
-    doTest(PyBundle.message("INTN.convert.dict.comp.to"));
+    doTest(PyBundle.message("INTN.convert.dict.comp.to"), LanguageLevel.PYTHON26);
   }
 
   public void testConvertSetLiteral() {
-    setLanguageLevel(LanguageLevel.PYTHON26);
-    doTest(PyBundle.message("INTN.convert.set.literal.to"));
+    doTest(PyBundle.message("INTN.convert.set.literal.to"), LanguageLevel.PYTHON26);
   }
 
   public void testReplaceExceptPart() {
@@ -214,6 +212,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testMultilineQuotedString() { //PY-8064
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doTest(PyBundle.message("INTN.quoted.string.double.to.single"));
   }
 
@@ -253,6 +252,25 @@ public class PyIntentionTest extends PyTestCase {
     doTest(PyBundle.message("INTN.triple.quoted.string"));
   }
 
+  // PY-8989
+  public void testConvertTripleQuotedStringRawStrings() {
+    doTest(PyBundle.message("INTN.triple.quoted.string"));
+  }
+
+  // PY-8989
+  public void testConvertTripleQuotedStringDoesNotReplacePythonEscapes() {
+    doTest(PyBundle.message("INTN.triple.quoted.string"), LanguageLevel.PYTHON33);
+  }
+
+  // PY-8989
+  public void testConvertTripleQuotedStringMultilineGluedString() {
+    doTest(PyBundle.message("INTN.triple.quoted.string"), LanguageLevel.PYTHON33);
+  }
+
+  public void testConvertTripleQuotedEmptyString() {
+    doTest(PyBundle.message("INTN.triple.quoted.string"), LanguageLevel.PYTHON33);
+  }
+
   public void testTransformConditionalExpression() { //PY-3094
     doTest(PyBundle.message("INTN.transform.into.if.else.statement"));
   }
@@ -261,7 +279,13 @@ public class PyIntentionTest extends PyTestCase {
     doTest("Convert to 'import sys'");
   }
 
+  // PY-11074
+  public void testImportToImportFrom() {
+    doTest("Convert to 'from __builtin__ import ...'");
+  }
+
   public void testTypeInDocstring() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doDocReferenceTest();
   }
 
@@ -278,7 +302,12 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testTypeInDocstring5() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doDocReferenceTest();
+  }
+
+  public void testTypeInDocstringAtTheEndOfFunction() {
+    doDocReturnTypeTest();
   }
 
   public void testTypeInDocstring6() {         //PY-7973
@@ -289,15 +318,27 @@ public class PyIntentionTest extends PyTestCase {
     doDocReferenceTest();
   }
 
+  // PY-16456
+  public void testTypeInDocStringDifferentIndentationSize() {
+    doDocReferenceTest();
+  }
+
+  // PY-16456
+  public void testReturnTypeInDocStringDifferentIndentationSize() {
+    doDocReturnTypeTest();
+  }
+
   public void testReturnTypeInDocstring() {
     doDocReturnTypeTest();
   }
 
   public void testTypeInDocstring1() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doDocReturnTypeTest();
   }
 
   public void testTypeInDocstring2() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doDocReturnTypeTest();
   }
 
@@ -351,6 +392,10 @@ public class PyIntentionTest extends PyTestCase {
     doTestTypeAssertion();
   }
 
+  public void testTypeAssertionInDictComp() {  //PY-7971
+    doNegativeTest(PyBundle.message("INTN.insert.assertion"));
+  }
+
   private void doTestTypeAssertion() {
     doTest(PyBundle.message("INTN.insert.assertion"));
   }
@@ -364,6 +409,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testDocStubKeywordOnly() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     doDocStubTest(LanguageLevel.PYTHON32);
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,11 +25,9 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.ScrollType;
-import com.intellij.openapi.editor.event.CaretEvent;
-import com.intellij.openapi.editor.event.CaretListener;
-import com.intellij.openapi.editor.event.DocumentAdapter;
-import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.*;
 import com.intellij.openapi.editor.impl.EditorImpl;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
@@ -177,7 +175,7 @@ public class ParameterInfoController implements Disposable {
     List<ParameterInfoController> allControllers = getAllControllers(myEditor);
     allControllers.add(this);
 
-    myEditorCaretListener = new CaretListener(){
+    myEditorCaretListener = new CaretAdapter(){
       @Override
       public void caretPositionChanged(CaretEvent e) {
         myAlarm.cancelAllRequests();
@@ -236,14 +234,22 @@ public class ParameterInfoController implements Disposable {
     //JLayeredPane layeredPane = myEditor.getComponent().getRootPane().getLayeredPane();
     //p.x = Math.min(p.x, layeredPane.getWidth() - hintSize.width);
     //p.x = Math.max(p.x, 0);
-    myHint.updateBounds(p.x, p.y);
+    myHint.pack();
+    myHint.updateLocation(p.x, p.y);
   }
 
   private void addAlarmRequest(){
     Runnable request = new Runnable(){
       @Override
       public void run(){
-        if (!myDisposed && !myProject.isDisposed()) updateComponent();
+        if (!myDisposed && !myProject.isDisposed()) {
+          DumbService.getInstance(myProject).withAlternativeResolveEnabled(new Runnable() {
+            @Override
+            public void run() {
+              updateComponent();
+            }
+          });
+        }
       }
     };
     myAlarm.addRequest(request, DELAY, ModalityState.stateForComponent(myEditor.getComponent()));
@@ -277,44 +283,47 @@ public class ParameterInfoController implements Disposable {
     }
   }
 
-  public static void nextParameter (Editor editor, int lbraceOffset) {
-    final ParameterInfoController controller = findControllerAtOffset(editor, lbraceOffset);
-    if (controller != null) controller.prevOrNextParameter(true, (ParameterInfoHandlerWithTabActionSupport)controller.myHandler);
+  public static boolean hasPrevOrNextParameter(Editor editor, int lbraceOffset, boolean isNext) {
+    ParameterInfoController controller = findControllerAtOffset(editor, lbraceOffset);
+    return controller != null && controller.getPrevOrNextParameterOffset(isNext) != -1;
   }
 
-  public static void prevParameter (Editor editor, int lbraceOffset) {
-    final ParameterInfoController parameterInfoController = findControllerAtOffset(editor, lbraceOffset);
-    if (parameterInfoController != null) parameterInfoController.prevOrNextParameter(false, (ParameterInfoHandlerWithTabActionSupport)parameterInfoController.myHandler);
-  }
-
-  private void prevOrNextParameter(boolean isNext, ParameterInfoHandlerWithTabActionSupport handler) {
-    final PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(myEditor.getDocument());
-    CharSequence chars = myEditor.getDocument().getCharsSequence();
-    int offset = CharArrayUtil.shiftBackward(chars, myEditor.getCaretModel().getOffset() - 1, " \t") + 1;
-
-    int lbraceOffset = myLbraceMarker.getStartOffset();
-    if (lbraceOffset < offset) {
-      PsiElement argList = findArgumentList(file, offset, lbraceOffset);
-
-      if (argList != null) {
-        int currentParameterIndex = ParameterInfoUtils.getCurrentParameterIndex(argList.getNode(), offset, handler.getActualParameterDelimiterType());
-        PsiElement currentParameter = null;
-        if (currentParameterIndex > 0 && !isNext) {
-          currentParameter = handler.getActualParameters(argList)[currentParameterIndex - 1];
-        }
-        else if (currentParameterIndex < handler.getActualParameters(argList).length - 1 && isNext) {
-          currentParameter = handler.getActualParameters(argList)[currentParameterIndex + 1];
-        }
-
-        if (currentParameter != null) {
-          offset = currentParameter.getTextRange().getStartOffset();
-          myEditor.getCaretModel().moveToOffset(offset);
-          myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
-          myEditor.getSelectionModel().removeSelection();
-          handler.updateParameterInfo(argList, new MyUpdateParameterInfoContext(offset, file));
-        }
-      }
+  public static void prevOrNextParameter(Editor editor, int lbraceOffset, boolean isNext) {
+    ParameterInfoController controller = findControllerAtOffset(editor, lbraceOffset);
+    int newOffset = controller != null ? controller.getPrevOrNextParameterOffset(isNext) : -1;
+    if (newOffset != -1) {
+      controller.moveToParameterAtOffset(newOffset);
     }
+  }
+
+  private void moveToParameterAtOffset(int offset) {
+    PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(myEditor.getDocument());
+    PsiElement argsList = findArgumentList(file, offset, -1);
+    if (argsList == null) return;
+
+    myEditor.getCaretModel().moveToOffset(offset);
+    myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    myEditor.getSelectionModel().removeSelection();
+    myHandler.updateParameterInfo(argsList, new MyUpdateParameterInfoContext(offset, file));
+  }
+
+  private int getPrevOrNextParameterOffset(boolean isNext) {
+    if (!(myHandler instanceof ParameterInfoHandlerWithTabActionSupport)) return -1;
+
+    int offset = CharArrayUtil.shiftBackward(myEditor.getDocument().getCharsSequence(), myEditor.getCaretModel().getOffset() - 1, " \t") + 1;
+    int lbraceOffset = myLbraceMarker.getStartOffset();
+    PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(myEditor.getDocument());
+    PsiElement argList = lbraceOffset < offset ? findArgumentList(file, offset, lbraceOffset) : null;
+    if (argList == null) return -1;
+
+    ParameterInfoHandlerWithTabActionSupport handler = (ParameterInfoHandlerWithTabActionSupport)myHandler;
+    int currentParameterIndex = ParameterInfoUtils.getCurrentParameterIndex(argList.getNode(), offset, handler.getActualParameterDelimiterType());
+    if (currentParameterIndex == -1) return -1;
+
+    @SuppressWarnings("unchecked") PsiElement[] parameters = handler.getActualParameters(argList);
+    int prevOrNextParameterIndex = isNext && currentParameterIndex < parameters.length - 1 ? currentParameterIndex + 1 :
+                                   !isNext && currentParameterIndex > 0 ? currentParameterIndex - 1 : -1;
+    return prevOrNextParameterIndex != -1 ? parameters[prevOrNextParameterIndex].getTextRange().getStartOffset() : -1;
   }
 
   @Nullable

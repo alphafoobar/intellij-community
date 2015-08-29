@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,11 @@ package com.intellij.psi.impl.source.tree;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
+import com.intellij.reference.SoftReference;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NotNull;
@@ -29,16 +31,18 @@ import org.jetbrains.annotations.Nullable;
 
 public abstract class LeafElement extends TreeElement {
   private static final Logger LOG = Logger.getInstance("com.intellij.psi.impl.source.tree.LeafElement");
+  private static final Key<SoftReference<String>> CACHED_TEXT = Key.create("CACHED_TEXT");
 
   private static final int TEXT_MATCHES_THRESHOLD = 5;
 
   private final CharSequence myText;
 
-  protected LeafElement(IElementType type, CharSequence text) {
+  protected LeafElement(@NotNull IElementType type, CharSequence text) {
     super(type);
     myText = text;
   }
 
+  @NotNull
   @Override
   public LeafElement clone() {
     LeafElement clone = (LeafElement)super.clone();
@@ -51,13 +55,24 @@ public abstract class LeafElement extends TreeElement {
     return myText.length();
   }
 
+  @NotNull
   @Override
   public CharSequence getChars() {
     return myText;
   }
 
+  @NotNull
   @Override
   public String getText() {
+    if (myText.length() > 1000 && !(myText instanceof String)) { // e.g. a large text file
+      String text = SoftReference.dereference(getUserData(CACHED_TEXT));
+      if (text == null) {
+        text = myText.toString();
+        putUserData(CACHED_TEXT, new SoftReference<String>(text));
+      }
+      return text;
+    }
+
     return myText.toString();
   }
 
@@ -125,15 +140,17 @@ public abstract class LeafElement extends TreeElement {
     return start + length;
   }
 
-  public LeafElement rawReplaceWithText(String newText) {
+  @NotNull
+  public LeafElement rawReplaceWithText(@NotNull String newText) {
     LeafElement newLeaf = ASTFactory.leaf(getElementType(), newText);
     copyUserDataTo(newLeaf);
     rawReplaceWithList(newLeaf);
     newLeaf.clearCaches();
     return newLeaf;
   }
-  
-  public LeafElement replaceWithText(String newText) {
+
+  @NotNull
+  public LeafElement replaceWithText(@NotNull String newText) {
     LeafElement newLeaf = ChangeUtil.copyLeafWithText(this, newText);
     getTreeParent().replaceChild(this, newLeaf);
     return newLeaf;
@@ -145,7 +162,7 @@ public abstract class LeafElement extends TreeElement {
   }
 
   @Override
-  @SuppressWarnings({"MethodOverloadsMethodOfSuperclass"})
+  @SuppressWarnings("MethodOverloadsMethodOfSuperclass")
   public boolean textMatches(@NotNull final CharSequence buf, int start, int end) {
     final CharSequence text = getChars();
     final int len = text.length();
@@ -196,7 +213,7 @@ public abstract class LeafElement extends TreeElement {
     return leafHC(getChars());
   }
 
-  public static int leafHC(CharSequence text) {
+  static int leafHC(CharSequence text) {
     final int len = text.length();
     int hc = 0;
 
@@ -227,6 +244,7 @@ public abstract class LeafElement extends TreeElement {
     return getNotCachedLength();
   }
 
+  @NotNull
   @Override
   public ASTNode[] getChildren(TokenSet filter) {
     return EMPTY_ARRAY;
@@ -278,16 +296,14 @@ public abstract class LeafElement extends TreeElement {
   }
 
   @Override
-  @Nullable
-  public <T extends PsiElement> T getPsi(Class<T> clazz) {
+  public <T extends PsiElement> T getPsi(@NotNull Class<T> clazz) {
     return getPsi(clazz, getPsi(), LOG);
   }
 
-  @Nullable
-  static <T extends PsiElement> T getPsi(Class<T> clazz, PsiElement element, Logger log) {
+  static <T extends PsiElement> T getPsi(@NotNull Class<T> clazz, PsiElement element, Logger log) {
     log.assertTrue(clazz.isInstance(element), "unexpected psi class. expected: " + clazz
                                              + " got: " + (element == null ? null : element.getClass()));
+    //noinspection unchecked
     return (T)element;
   }
-
 }

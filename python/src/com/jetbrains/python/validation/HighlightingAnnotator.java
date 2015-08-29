@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ public class HighlightingAnnotator extends PyAnnotator {
   @Override
   public void visitPyReferenceExpression(PyReferenceExpression node) {
     final String referencedName = node.getReferencedName();
-    if (node.getQualifier() == null && referencedName != null) {
+    if (!node.isQualified() && referencedName != null) {
       PyFunction function = PsiTreeUtil.getParentOfType(node, PyFunction.class);
       if (function != null) {
         final PyNamedParameter element = function.getParameterList().findParameterByName(referencedName);

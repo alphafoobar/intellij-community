@@ -17,8 +17,6 @@ package com.jetbrains.python.refactoring;
 
 import com.intellij.lang.LanguageRefactoringSupport;
 import com.intellij.lang.refactoring.RefactoringSupportProvider;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.fixtures.LightMarkedTestCase;
@@ -50,11 +48,9 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
     assertNotNull(provider);
     final RefactoringActionHandler handler = provider.getExtractMethodHandler();
     assertNotNull(handler);
-    final Editor editor = myFixture.getEditor();
-    assertInstanceOf(editor, EditorEx.class);
     System.setProperty(PyExtractMethodUtil.NAME, newName);
     try {
-      handler.invoke(myFixture.getProject(), editor, myFixture.getFile(), ((EditorEx)editor).getDataContext());
+      refactorUsingHandler(handler);
     }
     finally {
       System.clearProperty(PyExtractMethodUtil.NAME);
@@ -105,10 +101,6 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
     doTest("bar");
   }
 
-  public void testNameCollisionClass() {
-    doFail("hello", "Method name clashes with already existing name");
-  }
-
   public void testNameCollisionFile() {
     doFail("hello", "Method name clashes with already existing name");
   }
@@ -123,11 +115,6 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
 
   public void testOutNotEmptyStatements2() {
     doTest("sum_squares");
-  }
-
-  // PY-2903
-  public void _testComment() {
-    doTest("bar");
   }
 
   public void testFile() {
@@ -151,14 +138,10 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
   }
 
   public void testWrongSelectionFromImportStar() {
-    doFail("bar", "Cannot perform refactoring with from import statement inside code block");
+    doFail("bar", "Cannot perform refactoring with star import statement inside code block");
   }
 
   public void testPy479() {
-    doTest("bar");
-  }
-
-  public void testClassContext() {
     doTest("bar");
   }
 
@@ -170,7 +153,7 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
     doTest("bar");
   }
 
-  public void testComment2() {
+  public void testCommentIncluded() {
     doTest("baz");
   }
 
@@ -284,5 +267,15 @@ public class PyExtractMethodTest extends LightMarkedTestCase {
 
   public void testDuplicateCheckParam() {
     doTest("foo");
+  }
+
+  // PY-7753
+  public void testRedundantGlobalInTopLevelFunction() {
+    doTest("foo");
+  }
+
+  // PY-6620
+  public void testProhibitedAtClassLevel() {
+    doFail("foo", "Cannot perform refactoring at class level");
   }
 }

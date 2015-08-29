@@ -27,7 +27,6 @@ package com.intellij.codeInspection.dataFlow.value;
 import com.intellij.codeInspection.dataFlow.Nullness;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.JavaConstantExpressionEvaluator;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -43,22 +42,30 @@ public class DfaValueFactory {
   private final Map<Pair<DfaPsiType, DfaPsiType>, Boolean> myConvertibleCache = ContainerUtil.newHashMap();
   private final Map<PsiType, DfaPsiType> myDfaTypes = ContainerUtil.newHashMap();
   private final boolean myHonorFieldInitializers;
+  private final boolean myUnknownMembersAreNullable;
 
-  public DfaValueFactory(boolean honorFieldInitializers) {
+  public DfaValueFactory(boolean honorFieldInitializers, boolean unknownMembersAreNullable) {
     myHonorFieldInitializers = honorFieldInitializers;
+    myUnknownMembersAreNullable = unknownMembersAreNullable;
     myValues.add(null);
     myVarFactory = new DfaVariableValue.Factory(this);
     myConstFactory = new DfaConstValue.Factory(this);
     myBoxedFactory = new DfaBoxedValue.Factory(this);
     myTypeFactory = new DfaTypeValue.Factory(this);
     myRelationFactory = new DfaRelationValue.Factory(this);
+    myExpressionFactory = new DfaExpressionFactory(this);
   }
 
   public boolean isHonorFieldInitializers() {
     return myHonorFieldInitializers;
   }
 
+  public boolean isUnknownMembersAreNullable() {
+    return myUnknownMembersAreNullable;
+  }
+
   public DfaValue createTypeValue(@Nullable PsiType type, Nullness nullability) {
+    type = TypeConversionUtil.erasure(type);
     if (type == null) return DfaUnknownValue.getInstance();
     return getTypeFactory().createTypeValue(internType(type), nullability);
   }
@@ -66,7 +73,7 @@ public class DfaValueFactory {
   private DfaPsiType internType(@NotNull PsiType psiType) {
     DfaPsiType dfaType = myDfaTypes.get(psiType);
     if (dfaType == null) {
-      myDfaTypes.put(psiType, dfaType = new DfaPsiType(TypeConversionUtil.erasure(psiType), myAssignableCache, myConvertibleCache));
+      myDfaTypes.put(psiType, dfaType = new DfaPsiType(psiType, myAssignableCache, myConvertibleCache));
     }
     return dfaType;
   }
@@ -82,28 +89,7 @@ public class DfaValueFactory {
 
   @Nullable
   public DfaValue createValue(PsiExpression psiExpression) {
-    if (psiExpression instanceof PsiReferenceExpression) {
-      return createReferenceValue((PsiReferenceExpression)psiExpression);
-    }
-
-    if (psiExpression instanceof PsiLiteralExpression) {
-      return createLiteralValue((PsiLiteralExpression)psiExpression);
-    }
-
-    if (psiExpression instanceof PsiNewExpression) {
-      return createTypeValue(psiExpression.getType(), Nullness.NOT_NULL);
-    }
-
-    final Object value = JavaConstantExpressionEvaluator.computeConstantExpression(psiExpression, false);
-    PsiType type = psiExpression.getType();
-    if (value != null && type != null) {
-      if (value instanceof String) {
-        return createTypeValue(type, Nullness.NOT_NULL); // Non-null string literal.
-      }
-      return getConstFactory().createFromValue(value, type, null);
-    }
-
-    return null;
+    return myExpressionFactory.getExpressionDfaValue(psiExpression);
   }
 
   @Nullable
@@ -112,45 +98,6 @@ public class DfaValueFactory {
       return createTypeValue(literal.getType(), Nullness.NOT_NULL); // Non-null string literal.
     }
     return getConstFactory().create(literal);
-  }
-
-  private static boolean isNotNullExpression(PsiExpression initializer, PsiType type) {
-    if (initializer instanceof PsiNewExpression) {
-      return true;
-    }
-    if (initializer instanceof PsiPolyadicExpression) {
-      if (type != null && type.equalsToText(CommonClassNames.JAVA_LANG_STRING)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  @Nullable
-  public DfaValue createReferenceValue(PsiReferenceExpression referenceExpression) {
-    PsiElement psiSource = referenceExpression.resolve();
-    if (!(psiSource instanceof PsiVariable)) {
-      return null;
-    }
-
-    final PsiVariable variable = (PsiVariable)psiSource;
-    if (variable.hasModifierProperty(PsiModifier.FINAL) && !variable.hasModifierProperty(PsiModifier.TRANSIENT)) {
-      DfaValue constValue = getConstFactory().create(variable);
-      if (constValue != null) return constValue;
-
-      PsiExpression initializer = variable.getInitializer();
-      PsiType type = initializer == null ? null : initializer.getType();
-      if (initializer != null && type != null && isNotNullExpression(initializer, type)) {
-        return createTypeValue(type, Nullness.NOT_NULL);
-      }
-    }
-
-    if (!variable.hasModifierProperty(PsiModifier.VOLATILE) && isEffectivelyUnqualified(referenceExpression)) {
-      return getVarFactory().createVariableValue(variable, referenceExpression.getType(), false, null);
-    }
-
-    return null;
   }
 
   @Nullable
@@ -186,6 +133,7 @@ public class DfaValueFactory {
   private final DfaBoxedValue.Factory myBoxedFactory;
   private final DfaTypeValue.Factory myTypeFactory;
   private final DfaRelationValue.Factory myRelationFactory;
+  private final DfaExpressionFactory myExpressionFactory;
 
   @NotNull
   public DfaVariableValue.Factory getVarFactory() {

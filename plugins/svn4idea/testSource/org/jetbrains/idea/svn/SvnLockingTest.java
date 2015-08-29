@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.jetbrains.idea.svn;
 import com.intellij.idea.Bombed;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.PluginPathManager;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.Semaphore;
 import junit.framework.Assert;
 import junit.framework.TestCase;
@@ -51,6 +52,7 @@ public class SvnLockingTest extends TestCase {
 
   @Before
   public void setUp() throws Exception {
+    super.setUp();
     //PlatformTestCase.initPlatformLangPrefix();
     File pluginRoot = new File(PluginPathManager.getPluginHomePath("svn4idea"));
     if (!pluginRoot.isDirectory()) {
@@ -65,6 +67,7 @@ public class SvnLockingTest extends TestCase {
 
   @Override
   public void tearDown() throws Exception {
+    super.tearDown();
   }
 
   public void testPrepare() throws Exception {
@@ -83,8 +86,8 @@ public class SvnLockingTest extends TestCase {
     final HangInWrite operation1 = new HangInWrite("one_");
     final HangInWrite operation2 = new HangInWrite("two_");
 
-    final Thread thread1 = new Thread(operation1);
-    final Thread thread2 = new Thread(operation2);
+    final Thread thread1 = new Thread(operation1,"op1");
+    final Thread thread2 = new Thread(operation2,"op2");
     try {
       thread1.start();
       waitForRunning(operation1);
@@ -112,37 +115,21 @@ public class SvnLockingTest extends TestCase {
     final OnlyWrite operation1 = new OnlyWrite("one");
     final OnlyWrite operation2 = new OnlyWrite("two");
 
-    final Thread thread1 = new Thread(operation1);
-    final Thread thread2 = new Thread(operation2);
+    final Thread thread1 = new Thread(operation1,"one");
+    final Thread thread2 = new Thread(operation2,"two");
 
     try {
       thread1.start();
-      try {
-        Thread.sleep(500);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(500);
       Assert.assertTrue(operation1.isInsideWrite());
       thread2.start();
-      try {
-        Thread.sleep(500);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(500);
       Assert.assertFalse(operation2.isInsideWrite());
       operation1.go();
-      try {
-        Thread.sleep(500);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(500);
       Assert.assertTrue(operation2.isInsideWrite());
       operation2.go();
-      try {
-        Thread.sleep(500);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(500);
     } finally {
       myLocks.dispose();
       operation1.stop();
@@ -203,9 +190,9 @@ public class SvnLockingTest extends TestCase {
     final HangInWrite operation2 = new HangInWrite("two1");
     final HangInRead read = new HangInRead("READ");
 
-    final Thread thread1 = new Thread(operation1);
-    final Thread threadRead = new Thread(read);
-    final Thread thread2 = new Thread(operation2);
+    final Thread thread1 = new Thread(operation1,"op1");
+    final Thread threadRead = new Thread(read,"read1");
+    final Thread thread2 = new Thread(operation2,"op2");
 
     try {
       thread1.start();
@@ -248,11 +235,7 @@ public class SvnLockingTest extends TestCase {
   private void waitForRunning(HangRun operation1, int multiply) {
     int cnt = 10 * multiply;
     while (cnt > 0) {
-      try {
-        Thread.sleep(10 * multiply);
-      } catch (InterruptedException e) {
-        //
-      }
+      TimeoutUtil.sleep(10 * multiply);
       if (operation1.isRunning()) break;
       -- cnt;
     }
@@ -383,12 +366,7 @@ public class SvnLockingTest extends TestCase {
                       public boolean call(int i) {
                         if (myStopped) return false;
                         System.out.println("busy " + myName);
-                        try {
-                          Thread.sleep(10);
-                        }
-                        catch (InterruptedException e) {
-                          //
-                        }
+                        TimeoutUtil.sleep(10);
                         return true;
                       }
                     });

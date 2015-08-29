@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ package com.jetbrains.python.psi.impl;
 
 import com.intellij.codeInsight.completion.CompletionUtil;
 import com.intellij.lang.ASTNode;
+import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NotNullLazyValue;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.search.LocalSearchScope;
@@ -40,8 +41,10 @@ import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.documentation.DocStringUtil;
 import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
+import com.jetbrains.python.psi.resolve.RatedResolveResult;
 import com.jetbrains.python.psi.stubs.PropertyStubStorage;
 import com.jetbrains.python.psi.stubs.PyClassStub;
 import com.jetbrains.python.psi.stubs.PyFunctionStub;
@@ -54,31 +57,69 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.util.*;
 
+import static com.intellij.openapi.util.text.StringUtil.join;
+import static com.intellij.openapi.util.text.StringUtil.notNullize;
+
 /**
  * @author yole
  */
-public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implements PyClass {
-  public static final PyClass[] EMPTY_ARRAY = new PyClassImpl[0];
-
-  private List<PyTargetExpression> myInstanceAttributes;
-  private final NotNullLazyValue<CachedValue<Boolean>> myNewStyle = new NotNullLazyValue<CachedValue<Boolean>>() {
-    @NotNull
-    @Override
-    protected CachedValue<Boolean> compute() {
-      return CachedValuesManager.getManager(getProject()).createCachedValue(new NewStyleCachedValueProvider(), false);
-    }
-  };
-
-  private volatile Map<String, Property> myPropertyCache;
-
-  private class CachedAncestorsProvider implements ParameterizedCachedValueProvider<List<PyClassLikeType>, TypeEvalContext> {
-    @Nullable
-    @Override
-    public CachedValueProvider.Result<List<PyClassLikeType>> compute(@NotNull TypeEvalContext context) {
-      final List<PyClassLikeType> ancestorTypes = isNewStyleClass() ? getMROAncestorTypes(context) : getOldStyleAncestorTypes(context);
-      return CachedValueProvider.Result.create(ancestorTypes, PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT);
+public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyClass {
+  public static class MROException extends Exception {
+    public MROException(String s) {
+      super(s);
     }
   }
+
+  public static final PyClass[] EMPTY_ARRAY = new PyClassImpl[0];
+
+  /**
+   * Ancestors cache is lazy because provider ({@link com.jetbrains.python.psi.impl.PyClassImpl.CachedAncestorsProvider}) needs
+   * {@link #getProject()} which is notavailable during consructor time.
+   */
+  private TypeEvalContextBasedCache<List<PyClassLikeType>> myAncestorsCache;
+
+  /**
+   * Lock to create {@link #myAncestorsCache} in lazy way.
+   */
+  @NotNull
+  private final Object myAncestorsCacheLock = new Object();
+
+  /**
+   * Engine to create list of ancestors based on context
+   */
+  private class CachedAncestorsProvider implements Function<TypeEvalContext, List<PyClassLikeType>> {
+    @Nullable
+    @Override
+    public List<PyClassLikeType> fun(@NotNull TypeEvalContext context) {
+      List<PyClassLikeType> ancestorTypes;
+      if (isNewStyleClass(context)) {
+        try {
+          ancestorTypes = getMROAncestorTypes(context);
+        }
+        catch (MROException e) {
+          ancestorTypes = getOldStyleAncestorTypes(context);
+          boolean hasUnresolvedAncestorTypes = false;
+          for (PyClassLikeType type : ancestorTypes) {
+            if (type == null) {
+              hasUnresolvedAncestorTypes = true;
+              break;
+            }
+          }
+          if (!hasUnresolvedAncestorTypes) {
+            ancestorTypes = Collections.singletonList(null);
+          }
+        }
+      }
+      else {
+        ancestorTypes = getOldStyleAncestorTypes(context);
+      }
+      return ancestorTypes;
+    }
+  }
+
+  private List<PyTargetExpression> myInstanceAttributes;
+
+  private volatile Map<String, Property> myPropertyCache;
 
   private final Key<ParameterizedCachedValue<List<PyClassLikeType>, TypeEvalContext>> myCachedValueKey = Key.create("cached ancestors");
   private final CachedAncestorsProvider myCachedAncestorsProvider = new CachedAncestorsProvider();
@@ -88,10 +129,12 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return new PyClassTypeImpl(this, true);
   }
 
-  private class NewStyleCachedValueProvider implements CachedValueProvider<Boolean> {
+  private class NewStyleCachedValueProvider implements ParameterizedCachedValueProvider<Boolean, TypeEvalContext> {
+
+    @Nullable
     @Override
-    public Result<Boolean> compute() {
-      return new Result<Boolean>(calculateNewStyleClass(), PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT);
+    public CachedValueProvider.Result<Boolean> compute(TypeEvalContext param) {
+      return new CachedValueProvider.Result<Boolean>(calculateNewStyleClass(param), PsiModificationTracker.MODIFICATION_COUNT);
     }
   }
 
@@ -105,6 +148,25 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
   public PyClassImpl(@NotNull final PyClassStub stub, @NotNull IStubElementType nodeType) {
     super(stub, nodeType);
+  }
+
+  /**
+   * @return ancestors cache. It is created lazyly if needed.
+   */
+  @NotNull
+  private TypeEvalContextBasedCache<List<PyClassLikeType>> getAncestorsCache() {
+    if (myAncestorsCache != null) {
+      return myAncestorsCache;
+    }
+    synchronized (myAncestorsCacheLock) {
+      if (myAncestorsCache == null) {
+        myAncestorsCache = new TypeEvalContextBasedCache<List<PyClassLikeType>>(
+          CachedValuesManager.getManager(getProject()),
+          new CachedAncestorsProvider()
+        );
+      }
+      return myAncestorsCache;
+    }
   }
 
   public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
@@ -148,6 +210,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     pyVisitor.visitPyClass(this);
   }
 
+  @Override
   @NotNull
   public PyStatementList getStatementList() {
     final PyStatementList statementList = childToPsi(PyElementTypes.STATEMENT_LIST);
@@ -164,6 +227,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return null;
   }
 
+  @Override
   @NotNull
   public PyExpression[] getSuperClassExpressions() {
     final PyArgumentList argList = getSuperClassExpressionList();
@@ -186,20 +250,20 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
         }
       }
     }
+    // Heuristic: unfold Foo[Bar] to Foo for subscription expressions for superclasses
+    else if (expression instanceof PySubscriptionExpression) {
+      final PySubscriptionExpression subscriptionExpr = (PySubscriptionExpression)expression;
+      return subscriptionExpr.getOperand();
+    }
     return expression;
   }
 
   @NotNull
   @Override
-  public List<PyClass> getAncestorClasses() {
-    return getAncestorClasses(TypeEvalContext.codeInsightFallback());
-  }
-
-  @NotNull
-  @Override
-  public List<PyClass> getAncestorClasses(@NotNull TypeEvalContext context) {
+  public final List<PyClass> getAncestorClasses(@Nullable final TypeEvalContext context) {
     final List<PyClass> results = new ArrayList<PyClass>();
-    for (PyClassLikeType type : getAncestorTypes(context)) {
+    final TypeEvalContext contextToUse = (context != null ? context : TypeEvalContext.codeInsightFallback(getProject()));
+    for (final PyClassLikeType type : getAncestorTypes(contextToUse)) {
       if (type instanceof PyClassType) {
         results.add(((PyClassType)type).getPyClass());
       }
@@ -211,7 +275,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     if (this == parent) {
       return true;
     }
-    for (PyClass superclass : getAncestorClasses()) {
+    for (PyClass superclass : getAncestorClasses(null)) {
       if (parent == superclass) return true;
     }
     return false;
@@ -222,7 +286,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     if (superClassQName.equals(getQualifiedName())) {
       return true;
     }
-    for (PyClassLikeType type : getAncestorTypes(TypeEvalContext.codeInsightFallback())) {
+    for (PyClassLikeType type : getAncestorTypes(TypeEvalContext.codeInsightFallback(getProject()))) {
       if (type != null && superClassQName.equals(type.getClassQName())) {
         return true;
       }
@@ -236,31 +300,11 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
   @Nullable
   public String getQualifiedName() {
-    String name = getName();
-    final PyClassStub stub = getStub();
-    PsiElement ancestor = stub != null ? stub.getParentStub().getPsi() : getParent();
-    while (!(ancestor instanceof PsiFile)) {
-      if (ancestor == null) return name;    // can this happen?
-      if (ancestor instanceof PyClass) {
-        name = ((PyClass)ancestor).getName() + "." + name;
-      }
-      ancestor = stub != null ? ((StubBasedPsiElement)ancestor).getStub().getParentStub().getPsi() : ancestor.getParent();
-    }
-
-    PsiFile psiFile = ((PsiFile)ancestor).getOriginalFile();
-    final PyFile builtins = PyBuiltinCache.getInstance(this).getBuiltinsFile();
-    if (!psiFile.equals(builtins)) {
-      VirtualFile vFile = psiFile.getVirtualFile();
-      if (vFile != null) {
-        final String packageName = QualifiedNameFinder.findShortestImportableName(this, vFile);
-        return packageName + "." + name;
-      }
-    }
-    return name;
+    return QualifiedNameFinder.getQualifiedName(this);
   }
 
   @Override
-  public List<String> getSlots() {
+  public List<String> getSlots(TypeEvalContext context) {
     final Set<String> result = new LinkedHashSet<String>();
     boolean found = false;
     final List<String> ownSlots = getOwnSlots();
@@ -268,7 +312,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       found = true;
       result.addAll(ownSlots);
     }
-    for (PyClass cls : getAncestorClasses()) {
+    for (PyClass cls : getAncestorClasses(context)) {
       final List<String> ancestorSlots = cls.getOwnSlots();
       if (ancestorSlots != null) {
         found = true;
@@ -290,7 +334,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
   @NotNull
   public PyClass[] getSuperClasses() {
-    final List<PyClassLikeType> superTypes = getSuperClassTypes(TypeEvalContext.codeInsightFallback());
+    final List<PyClassLikeType> superTypes = getSuperClassTypes(TypeEvalContext.codeInsightFallback(getProject()));
     if (superTypes.isEmpty()) {
       return EMPTY_ARRAY;
     }
@@ -303,12 +347,38 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return result.toArray(new PyClass[result.size()]);
   }
 
+  @Override
+  public ItemPresentation getPresentation() {
+    return new PyElementPresentation(this) {
+      @Nullable
+      @Override
+      public String getPresentableText() {
+        if (!isValid()) {
+          return null;
+        }
+        final StringBuilder result = new StringBuilder(notNullize(getName(), PyNames.UNNAMED_ELEMENT));
+        final PyExpression[] superClassExpressions = getSuperClassExpressions();
+        if (superClassExpressions.length > 0) {
+          result.append("(");
+          result.append(join(Arrays.asList(superClassExpressions), new Function<PyExpression, String>() {
+            public String fun(PyExpression expr) {
+              String name = expr.getText();
+              return notNullize(name, PyNames.UNNAMED_ELEMENT);
+            }
+          }, ", "));
+          result.append(")");
+        }
+        return result.toString();
+      }
+    };
+  }
+
   @NotNull
-  private static List<PyClassLikeType> mroMerge(@NotNull List<List<PyClassLikeType>> sequences) {
+  private static List<PyClassLikeType> mroMerge(@NotNull List<List<PyClassLikeType>> sequences) throws MROException {
     List<PyClassLikeType> result = new LinkedList<PyClassLikeType>(); // need to insert to 0th position on linearize
     while (true) {
       // filter blank sequences
-      List<List<PyClassLikeType>> nonBlankSequences = new ArrayList<List<PyClassLikeType>>(sequences.size());
+      final List<List<PyClassLikeType>> nonBlankSequences = new ArrayList<List<PyClassLikeType>>(sequences.size());
       for (List<PyClassLikeType> item : sequences) {
         if (item.size() > 0) nonBlankSequences.add(item);
       }
@@ -318,14 +388,19 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       PyClassLikeType head = null; // to keep compiler happy; really head is assigned in the loop at least once.
       for (List<PyClassLikeType> seq : nonBlankSequences) {
         head = seq.get(0);
-        boolean head_in_tails = false;
-        for (List<PyClassLikeType> tail_seq : nonBlankSequences) {
-          if (tail_seq.indexOf(head) > 0) { // -1 is not found, 0 is head, >0 is tail.
-            head_in_tails = true;
+        if (head == null) {
+          seq.remove(0);
+          found = true;
+          break;
+        }
+        boolean headInTails = false;
+        for (List<PyClassLikeType> tailSeq : nonBlankSequences) {
+          if (tailSeq.indexOf(head) > 0) { // -1 is not found, 0 is head, >0 is tail.
+            headInTails = true;
             break;
           }
         }
-        if (!head_in_tails) {
+        if (!headInTails) {
           found = true;
           break;
         }
@@ -335,48 +410,96 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       }
       if (!found) {
         // Inconsistent hierarchy results in TypeError
-        throw new IllegalStateException("Inconsistent class hierarchy");
+        throw new MROException("Inconsistent class hierarchy");
       }
       // our head is clean;
       result.add(head);
       // remove it from heads of other sequences
-      for (List<PyClassLikeType> seq : nonBlankSequences) {
-        if (Comparing.equal(seq.get(0), head)) {
-          seq.remove(0);
+      if (head != null) {
+        for (List<PyClassLikeType> seq : nonBlankSequences) {
+          if (Comparing.equal(seq.get(0), head)) {
+            seq.remove(0);
+          }
         }
       }
     } // we either return inside the loop or die by assertion
   }
 
+
   @NotNull
-  private static List<PyClassLikeType> mroLinearize(@NotNull PyClassLikeType type, @NotNull Set<PyClassLikeType> seen, boolean addThisType,
-                                                    @NotNull TypeEvalContext context) {
-    if (seen.contains(type)) {
-      throw new IllegalStateException("Circular class inheritance");
+  private static List<PyClassLikeType> mroLinearize(@NotNull PyClassLikeType type,
+                                                    boolean addThisType,
+                                                    @NotNull TypeEvalContext context,
+                                                    @NotNull Map<PyClassLikeType, Ref<List<PyClassLikeType>>> cache) throws MROException {
+    final Ref<List<PyClassLikeType>> computed = cache.get(type);
+    if (computed != null) {
+      if (computed.isNull()) {
+        throw new MROException("Circular class inheritance");
+      }
+      return computed.get();
     }
-    final List<PyClassLikeType> bases = type.getSuperClassTypes(context);
-    List<List<PyClassLikeType>> lines = new ArrayList<List<PyClassLikeType>>();
-    for (PyClassLikeType base : bases) {
-      if (base != null) {
-        final Set<PyClassLikeType> newSeen = new HashSet<PyClassLikeType>(seen);
-        newSeen.add(type);
-        List<PyClassLikeType> lin = mroLinearize(base, newSeen, true, context);
-        if (!lin.isEmpty()) lines.add(lin);
+    cache.put(type, Ref.<List<PyClassLikeType>>create());
+    List<PyClassLikeType> result = null;
+    try {
+      final List<PyClassLikeType> bases = type.getSuperClassTypes(context);
+      final List<List<PyClassLikeType>> lines = new ArrayList<List<PyClassLikeType>>();
+      for (PyClassLikeType base : bases) {
+        if (base != null) {
+          final List<PyClassLikeType> baseClassMRO = mroLinearize(base, true, context, cache);
+          if (!baseClassMRO.isEmpty()) {
+            lines.add(baseClassMRO);
+          }
+        }
+      }
+      if (!bases.isEmpty()) {
+        lines.add(bases);
+      }
+      result = mroMerge(lines);
+      if (addThisType) {
+        result.add(0, type);
       }
     }
-    if (!bases.isEmpty()) {
-      lines.add(bases);
-    }
-    List<PyClassLikeType> result = mroMerge(lines);
-    if (addThisType) {
-      result.add(0, type);
+    finally {
+      cache.put(type, Ref.create(result));
     }
     return result;
   }
 
+  @Override
   @NotNull
-  public PyFunction[] getMethods() {
-    return getClassChildren(PythonDialectsTokenSetProvider.INSTANCE.getFunctionDeclarationTokens(), PyFunction.ARRAY_FACTORY);
+  public PyFunction[] getMethods(final boolean inherited) {
+    final PyFunction[] thisClassFunctions =
+      getClassChildren(PythonDialectsTokenSetProvider.INSTANCE.getFunctionDeclarationTokens(), PyFunction.ARRAY_FACTORY);
+    if (!inherited) {
+      return thisClassFunctions;
+    }
+    // Map to get rid of duplicated (overwritten methods)
+    final Map<String, PyFunction> result = new HashMap<String, PyFunction>();
+    // We get classes in MRO order (hopefully), so last methods are last
+    for (final PyClass superClass : getAncestorClasses(null)) {
+      for (final PyFunction function : superClass.getMethods(false)) {
+        final String functionName = function.getName();
+        if (functionName != null) {
+          result.put(functionName, function);
+        }
+      }
+    }
+    // We now need to add our own methods
+    for (final PyFunction function : thisClassFunctions) {
+      final String functionName = function.getName();
+      if (functionName != null) {
+        result.put(functionName, function);
+      }
+    }
+    final Collection<PyFunction> functionsToReturn = result.values();
+    return functionsToReturn.toArray(new PyFunction[functionsToReturn.size()]);
+  }
+
+  @Override
+  @NotNull
+  public Map<String, Property> getProperties() {
+    initProperties();
+    return new HashMap<String, Property>(myPropertyCache);
   }
 
   @Override
@@ -443,20 +566,20 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   }
 
   @Nullable
-  public PyFunction findInitOrNew(boolean inherited) {
+  public PyFunction findInitOrNew(boolean inherited, final @Nullable TypeEvalContext context) {
     NameFinder<PyFunction> proc;
-    if (isNewStyleClass()) {
+    if (isNewStyleClass(null)) {
       proc = new NameFinder<PyFunction>(PyNames.INIT, PyNames.NEW);
     }
     else {
       proc = new NameFinder<PyFunction>(PyNames.INIT);
     }
-    visitMethods(proc, inherited, true);
+    visitMethods(proc, inherited, true, context);
     return proc.getResult();
   }
 
-  private final static Maybe<Callable> UNKNOWN_CALL = new Maybe<Callable>(); // denotes _not_ a PyFunction, actually
-  private final static Maybe<Callable> NONE = new Maybe<Callable>(null); // denotes an explicit None
+  private final static Maybe<PyCallable> UNKNOWN_CALL = new Maybe<PyCallable>(); // denotes _not_ a PyFunction, actually
+  private final static Maybe<PyCallable> NONE = new Maybe<PyCallable>(null); // denotes an explicit None
 
   /**
    * @param name            name of the property
@@ -492,7 +615,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     // look at @property decorators
     Map<String, List<PyFunction>> grouped = new HashMap<String, List<PyFunction>>();
     // group suitable same-named methods, each group defines a property
-    for (PyFunction method : getMethods()) {
+    for (PyFunction method : getMethods(false)) {
       final String methodName = method.getName();
       if (name == null || name.equals(methodName)) {
         List<PyFunction> bucket = grouped.get(methodName);
@@ -504,9 +627,9 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       }
     }
     for (Map.Entry<String, List<PyFunction>> entry : grouped.entrySet()) {
-      Maybe<Callable> getter = NONE;
-      Maybe<Callable> setter = NONE;
-      Maybe<Callable> deleter = NONE;
+      Maybe<PyCallable> getter = NONE;
+      Maybe<PyCallable> setter = NONE;
+      Maybe<PyCallable> deleter = NONE;
       String doc = null;
       final String decoratorName = entry.getKey();
       for (PyFunction method : entry.getValue()) {
@@ -523,16 +646,16 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
                 }
               }
               if (PyNames.PROPERTY.equals(decoName)) {
-                getter = new Maybe<Callable>(method);
+                getter = new Maybe<PyCallable>(method);
               }
               else if (useAdvancedSyntax && qname.matches(decoratorName, PyNames.GETTER)) {
-                getter = new Maybe<Callable>(method);
+                getter = new Maybe<PyCallable>(method);
               }
               else if (useAdvancedSyntax && qname.matches(decoratorName, PyNames.SETTER)) {
-                setter = new Maybe<Callable>(method);
+                setter = new Maybe<PyCallable>(method);
               }
               else if (useAdvancedSyntax && qname.matches(decoratorName, PyNames.DELETER)) {
-                deleter = new Maybe<Callable>(method);
+                deleter = new Maybe<PyCallable>(method);
               }
             }
           }
@@ -547,14 +670,14 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return null;
   }
 
-  private Maybe<Callable> fromPacked(Maybe<String> maybeName) {
+  private Maybe<PyCallable> fromPacked(Maybe<String> maybeName) {
     if (maybeName.isDefined()) {
       final String value = maybeName.value();
       if (value == null || PyNames.NONE.equals(value)) {
         return NONE;
       }
       PyFunction method = findMethodByName(value, true);
-      if (method != null) return new Maybe<Callable>(method);
+      if (method != null) return new Maybe<PyCallable>(method);
     }
     return UNKNOWN_CALL;
   }
@@ -568,9 +691,9 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
           final PyTargetExpressionStub targetStub = (PyTargetExpressionStub)subStub;
           PropertyStubStorage prop = targetStub.getCustomStub(PropertyStubStorage.class);
           if (prop != null && (name == null || name.equals(targetStub.getName()))) {
-            Maybe<Callable> getter = fromPacked(prop.getGetter());
-            Maybe<Callable> setter = fromPacked(prop.getSetter());
-            Maybe<Callable> deleter = fromPacked(prop.getDeleter());
+            Maybe<PyCallable> getter = fromPacked(prop.getGetter());
+            Maybe<PyCallable> setter = fromPacked(prop.getSetter());
+            Maybe<PyCallable> deleter = fromPacked(prop.getDeleter());
             String doc = prop.getDoc();
             if (getter != NONE || setter != NONE || deleter != NONE) {
               final PropertyImpl property = new PropertyImpl(targetStub.getName(), getter, setter, deleter, doc, targetStub.getPsi());
@@ -585,7 +708,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
   @Nullable
   @Override
-  public Property findProperty(@NotNull final String name) {
+  public Property findProperty(@NotNull final String name, boolean inherited, @Nullable final TypeEvalContext context) {
     Property property = findLocalProperty(name);
     if (property != null) {
       return property;
@@ -593,20 +716,20 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     if (findMethodByName(name, false) != null || findClassAttribute(name, false) != null) {
       return null;
     }
-    for (PyClass aClass : getAncestorClasses()) {
-      final Property ancestorProperty = ((PyClassImpl)aClass).findLocalProperty(name);
-      if (ancestorProperty != null) {
-        return ancestorProperty;
+    if (inherited) {
+      for (PyClass aClass : getAncestorClasses(context)) {
+        final Property ancestorProperty = ((PyClassImpl)aClass).findLocalProperty(name);
+        if (ancestorProperty != null) {
+          return ancestorProperty;
+        }
       }
     }
     return null;
   }
 
   @Override
-  public Property findPropertyByCallable(Callable callable) {
-    if (myPropertyCache == null) {
-      myPropertyCache = initializePropertyCache();
-    }
+  public Property findPropertyByCallable(PyCallable callable) {
+    initProperties();
     for (Property property : myPropertyCache.values()) {
       if (property.getGetter().valueOrNull() == callable ||
           property.getSetter().valueOrNull() == callable ||
@@ -618,10 +741,14 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   }
 
   private Property findLocalProperty(String name) {
+    initProperties();
+    return myPropertyCache.get(name);
+  }
+
+  private synchronized void initProperties() {
     if (myPropertyCache == null) {
       myPropertyCache = initializePropertyCache();
     }
-    return myPropertyCache.get(name);
   }
 
   private Map<String, Property> initializePropertyCache() {
@@ -651,10 +778,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     // EA-32381: A tree-based instance may not have a parent element somehow, so getContainingFile() may be not appropriate
     final PsiFile file = getParentByStub() != null ? getContainingFile() : null;
     if (file != null) {
-      final VirtualFile vfile = file.getVirtualFile();
-      if (vfile != null) {
-        level = LanguageLevel.forFile(vfile);
-      }
+      level = LanguageLevel.forElement(file);
     }
     final boolean useAdvancedSyntax = level.isAtLeast(LanguageLevel.PYTHON26);
     final Property local = processPropertiesInClass(name, filter, useAdvancedSyntax);
@@ -665,7 +789,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       if (name != null && (findMethodByName(name, false) != null || findClassAttribute(name, false) != null)) {
         return null;
       }
-      for (PyClass cls : getAncestorClasses()) {
+      for (PyClass cls : getAncestorClasses(null)) {
         final Property property = ((PyClassImpl)cls).processPropertiesInClass(name, filter, useAdvancedSyntax);
         if (property != null) {
           return property;
@@ -675,13 +799,13 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return null;
   }
 
-  private static class PropertyImpl extends PropertyBunch<Callable> implements Property {
+  private static class PropertyImpl extends PropertyBunch<PyCallable> implements Property {
     private final String myName;
 
     private PropertyImpl(String name,
-                         Maybe<Callable> getter,
-                         Maybe<Callable> setter,
-                         Maybe<Callable> deleter,
+                         Maybe<PyCallable> getter,
+                         Maybe<PyCallable> setter,
+                         Maybe<PyCallable> deleter,
                          String doc,
                          PyTargetExpression site) {
       myName = name;
@@ -694,19 +818,19 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
     @NotNull
     @Override
-    public Maybe<Callable> getGetter() {
+    public Maybe<PyCallable> getGetter() {
       return filterNonStubExpression(myGetter);
     }
 
     @NotNull
     @Override
-    public Maybe<Callable> getSetter() {
+    public Maybe<PyCallable> getSetter() {
       return filterNonStubExpression(mySetter);
     }
 
     @NotNull
     @Override
-    public Maybe<Callable> getDeleter() {
+    public Maybe<PyCallable> getDeleter() {
       return filterNonStubExpression(myDeleter);
     }
 
@@ -720,7 +844,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
     @NotNull
     @Override
-    public Maybe<Callable> getByDirection(@NotNull AccessDirection direction) {
+    public Maybe<PyCallable> getByDirection(@NotNull AccessDirection direction) {
       switch (direction) {
         case READ:
           return getGetter();
@@ -741,40 +865,40 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
           return targetDocStringType;
         }
       }
-      final Callable callable = myGetter.valueOrNull();
+      final PyCallable callable = myGetter.valueOrNull();
       if (callable != null) {
         // Ignore return types of non stub-based elements if we are not allowed to use AST
         if (!(callable instanceof StubBasedPsiElement) && !context.maySwitchToAST(callable)) {
           return null;
         }
-        return callable.getReturnType(context, null);
+        return context.getReturnType(callable);
       }
       return null;
     }
 
     @NotNull
     @Override
-    protected Maybe<Callable> translate(@Nullable PyExpression expr) {
+    protected Maybe<PyCallable> translate(@Nullable PyExpression expr) {
       if (expr == null) {
         return NONE;
       }
       if (PyNames.NONE.equals(expr.getName())) return NONE; // short-circuit a common case
-      if (expr instanceof Callable) {
-        return new Maybe<Callable>((Callable)expr);
+      if (expr instanceof PyCallable) {
+        return new Maybe<PyCallable>((PyCallable)expr);
       }
       final PsiReference ref = expr.getReference();
       if (ref != null) {
         PsiElement something = ref.resolve();
-        if (something instanceof Callable) {
-          return new Maybe<Callable>((Callable)something);
+        if (something instanceof PyCallable) {
+          return new Maybe<PyCallable>((PyCallable)something);
         }
       }
       return NONE;
     }
 
     @NotNull
-    private static Maybe<Callable> filterNonStubExpression(@NotNull Maybe<Callable> maybeCallable) {
-      final Callable callable = maybeCallable.valueOrNull();
+    private static Maybe<PyCallable> filterNonStubExpression(@NotNull Maybe<PyCallable> maybeCallable) {
+      final PyCallable callable = maybeCallable.valueOrNull();
       if (callable != null) {
         if (!(callable instanceof StubBasedPsiElement)) {
           return UNKNOWN_CALL;
@@ -797,16 +921,16 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   }
 
   public boolean visitMethods(Processor<PyFunction> processor, boolean inherited) {
-    return visitMethods(processor, inherited, false);
+    return visitMethods(processor, inherited, false, null);
   }
 
   public boolean visitMethods(Processor<PyFunction> processor,
                               boolean inherited,
-                              boolean skipClassObj) {
-    PyFunction[] methods = getMethods();
+                              boolean skipClassObj, TypeEvalContext context) {
+    PyFunction[] methods = getMethods(false);
     if (!ContainerUtil.process(methods, processor)) return false;
     if (inherited) {
-      for (PyClass ancestor : getAncestorClasses()) {
+      for (PyClass ancestor : getAncestorClasses(context)) {
         if (skipClassObj && PyNames.FAKE_OLD_BASE.equals(ancestor.getName())) {
           continue;
         }
@@ -822,7 +946,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     PyClass[] nestedClasses = getNestedClasses();
     if (!ContainerUtil.process(nestedClasses, processor)) return false;
     if (inherited) {
-      for (PyClass ancestor : getAncestorClasses()) {
+      for (PyClass ancestor : getAncestorClasses(null)) {
         if (!((PyClassImpl)ancestor).visitNestedClasses(processor, false)) {
           return false;
         }
@@ -831,18 +955,27 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     return true;
   }
 
-  public boolean visitClassAttributes(Processor<PyTargetExpression> processor, boolean inherited) {
+  public boolean visitClassAttributes(Processor<PyTargetExpression> processor, boolean inherited, @Nullable final TypeEvalContext context) {
     List<PyTargetExpression> methods = getClassAttributes();
     if (!ContainerUtil.process(methods, processor)) return false;
     if (inherited) {
-      for (PyClass ancestor : getAncestorClasses()) {
-        if (!ancestor.visitClassAttributes(processor, false)) {
+      for (PyClass ancestor : getAncestorClasses(context)) {
+        // TODO: Why there is FALSE here? We support only one level of inheritance?
+        if (!ancestor.visitClassAttributes(processor, false, context)) {
           return false;
         }
       }
     }
     return true;
     // NOTE: sorry, not enough metaprogramming to generalize visitMethods and visitClassAttributes
+  }
+
+  @NotNull
+  @Override
+  public final List<PyTargetExpression> getClassAttributesInherited(@NotNull final TypeEvalContext context) {
+    final MyAttributesCollector attributesCollector = new MyAttributesCollector();
+    visitClassAttributes(attributesCollector, true, context);
+    return attributesCollector.getAttributes();
   }
 
   public List<PyTargetExpression> getClassAttributes() {
@@ -869,7 +1002,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   @Override
   public PyTargetExpression findClassAttribute(@NotNull String name, boolean inherited) {
     final NameFinder<PyTargetExpression> processor = new NameFinder<PyTargetExpression>(name);
-    visitClassAttributes(processor, inherited);
+    visitClassAttributes(processor, inherited, null);
     return processor.getResult();
   }
 
@@ -890,7 +1023,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       }
     }
     if (inherited) {
-      for (PyClass ancestor : getAncestorClasses()) {
+      for (PyClass ancestor : getAncestorClasses(null)) {
         final PyTargetExpression attribute = ancestor.findInstanceAttribute(name, false);
         if (attribute != null) {
           return attribute;
@@ -909,7 +1042,7 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       collectInstanceAttributes(initMethod, result);
     }
     Set<String> namesInInit = new HashSet<String>(result.keySet());
-    final PyFunction[] methods = getMethods();
+    final PyFunction[] methods = getMethods(false);
     for (PyFunction method : methods) {
       if (!PyNames.INIT.equals(method.getName())) {
         collectInstanceAttributes(method, result, namesInInit);
@@ -956,29 +1089,34 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     else {
       final PyStatementList statementList = function.getStatementList();
       final List<PyTargetExpression> result = new ArrayList<PyTargetExpression>();
-      if (statementList != null) {
-        statementList.accept(new PyRecursiveElementVisitor() {
-          @Override
-          public void visitPyClass(PyClass node) {}
+      statementList.accept(new PyRecursiveElementVisitor() {
+        @Override
+        public void visitPyClass(PyClass node) {
+        }
 
-          public void visitPyAssignmentStatement(final PyAssignmentStatement node) {
-            for (PyExpression expression : node.getTargets()) {
-              if (expression instanceof PyTargetExpression) {
-                result.add((PyTargetExpression)expression);
-              }
+        public void visitPyAssignmentStatement(final PyAssignmentStatement node) {
+          for (PyExpression expression : node.getTargets()) {
+            if (expression instanceof PyTargetExpression) {
+              result.add((PyTargetExpression)expression);
             }
           }
-        });
-      }
+        }
+      });
       return result;
     }
   }
 
-  public boolean isNewStyleClass() {
-    return myNewStyle.getValue().getValue();
+  public boolean isNewStyleClass(@Nullable TypeEvalContext context) {
+    return new NotNullLazyValue<ParameterizedCachedValue<Boolean, TypeEvalContext>>() {
+      @NotNull
+      @Override
+      protected ParameterizedCachedValue<Boolean, TypeEvalContext> compute() {
+        return CachedValuesManager.getManager(getProject()).createParameterizedCachedValue(new NewStyleCachedValueProvider(), false);
+      }
+    }.getValue().getValue(context);
   }
 
-  private boolean calculateNewStyleClass() {
+  private boolean calculateNewStyleClass(@Nullable TypeEvalContext context) {
     final PsiFile containingFile = getContainingFile();
     if (containingFile instanceof PyFile && ((PyFile)containingFile).getLanguageLevel().isPy3K()) {
       return true;
@@ -986,15 +1124,15 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
     final PyClass objClass = PyBuiltinCache.getInstance(this).getClass("object");
     if (this == objClass) return true; // a rare but possible case
     if (hasNewStyleMetaClass(this)) return true;
-    for (PyClassLikeType type : getOldStyleAncestorTypes(TypeEvalContext.codeInsightFallback())) {
+    TypeEvalContext contextToUse = (context != null ? context : TypeEvalContext.codeInsightFallback(getProject()));
+    for (PyClassLikeType type : getOldStyleAncestorTypes(contextToUse)) {
       if (type == null) {
         // unknown, assume new-style class
         return true;
       }
       if (type instanceof PyClassType) {
         final PyClass pyClass = ((PyClassType)type).getPyClass();
-        if (pyClass == objClass) return true;
-        if (hasNewStyleMetaClass(pyClass)) {
+        if (pyClass == objClass || hasNewStyleMetaClass(pyClass)) {
           return true;
         }
       }
@@ -1120,33 +1258,50 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
 
   @NotNull
   @Override
-  public List<PyClassLikeType> getSuperClassTypes(@NotNull TypeEvalContext context) {
+  public List<PyClassLikeType> getSuperClassTypes(@NotNull final TypeEvalContext context) {
     if (PyNames.FAKE_OLD_BASE.equals(getName())) {
       return Collections.emptyList();
     }
     final PyClassStub stub = getStub();
     final List<PyClassLikeType> result = new ArrayList<PyClassLikeType>();
-    if (stub != null) {
-      final PsiElement parent = stub.getParentStub().getPsi();
-      if (parent instanceof PyFile) {
-        final PyFile file = (PyFile)parent;
+    // In some cases stub may not provide all information, so we use stubs only if AST access id disabled
+    if (!context.maySwitchToAST(this) && stub != null) {
+      final PsiFile file = getContainingFile();
+      if (file instanceof PyFile) {
         for (QualifiedName name : stub.getSuperClasses()) {
-          result.add(name != null ? classTypeFromQName(name, file, context) : null);
+          result.add(name != null ? classTypeFromQName(name, (PyFile)file, context) : null);
         }
       }
     }
     else {
       for (PyExpression expression : getSuperClassExpressions()) {
+        context.getType(expression);
         expression = unfoldClass(expression);
         if (expression instanceof PyKeywordArgument) {
           continue;
         }
         final PyType type = context.getType(expression);
-        result.add(type instanceof PyClassLikeType ? (PyClassLikeType)type : null);
+        PyClassLikeType classLikeType = null;
+        if (type instanceof PyClassLikeType) {
+          classLikeType = (PyClassLikeType)type;
+        }
+        else {
+          final PsiReference ref = expression.getReference();
+          if (ref != null) {
+            final PsiElement resolved = ref.resolve();
+            if (resolved instanceof PyClass) {
+              final PyType resolvedType = context.getType((PyClass)resolved);
+              if (resolvedType instanceof PyClassLikeType) {
+                classLikeType = (PyClassLikeType)resolvedType;
+              }
+            }
+          }
+        }
+        result.add(classLikeType);
       }
     }
     final PyBuiltinCache builtinCache = PyBuiltinCache.getInstance(this);
-    if (result.isEmpty() && isValid() && !builtinCache.hasInBuiltins(this)) {
+    if (result.isEmpty() && isValid() && !builtinCache.isBuiltin(this)) {
       final String implicitSuperName = LanguageLevel.forElement(this).isPy3K() ? PyNames.OBJECT : PyNames.FAKE_OLD_BASE;
       final PyClass implicitSuper = builtinCache.getClass(implicitSuperName);
       if (implicitSuper != null) {
@@ -1162,28 +1317,123 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   @NotNull
   @Override
   public List<PyClassLikeType> getAncestorTypes(@NotNull TypeEvalContext context) {
-    // TODO: Return different cached copies depending on the type eval context parameters
-    final CachedValuesManager manager = CachedValuesManager.getManager(getProject());
-    return manager.getParameterizedCachedValue(this, myCachedValueKey, myCachedAncestorsProvider, false, context);
+    return getAncestorsCache().getValue(context);
+  }
+
+  @Nullable
+  @Override
+  public PyType getMetaClassType(@NotNull TypeEvalContext context) {
+    if (context.maySwitchToAST(this)) {
+      final PyExpression expression = getMetaClassExpression();
+      if (expression != null) {
+        final PyType type = context.getType(expression);
+        if (type != null) {
+          return type;
+        }
+      }
+    }
+    else {
+      final PyClassStub stub = getStub();
+      final QualifiedName name = stub != null ? stub.getMetaClass() : PyPsiUtils.asQualifiedName(getMetaClassExpression());
+      final PsiFile file = getContainingFile();
+      if (file instanceof PyFile) {
+        final PyFile pyFile = (PyFile)file;
+        if (name != null) {
+          return classTypeFromQName(name, pyFile, context);
+        }
+      }
+    }
+    final LanguageLevel level = LanguageLevel.forElement(this);
+    if (level.isOlderThan(LanguageLevel.PYTHON30)) {
+      final PsiFile file = getContainingFile();
+      if (file instanceof PyFile) {
+        final PyFile pyFile = (PyFile)file;
+        final PsiElement element = pyFile.getElementNamed(PyNames.DUNDER_METACLASS);
+        if (element instanceof PyTypedElement) {
+          return context.getType((PyTypedElement)element);
+        }
+      }
+    }
+    return null;
+  }
+
+  @Nullable
+  @Override
+  public PyExpression getMetaClassExpression() {
+    final LanguageLevel level = LanguageLevel.forElement(this);
+    if (level.isAtLeast(LanguageLevel.PYTHON30)) {
+      // Requires AST access
+      for (PyExpression expression : getSuperClassExpressions()) {
+        if (expression instanceof PyKeywordArgument) {
+          final PyKeywordArgument argument = (PyKeywordArgument)expression;
+          if (PyNames.METACLASS.equals(argument.getKeyword())) {
+            return argument.getValueExpression();
+          }
+        }
+      }
+    }
+    else {
+      final PyTargetExpression attribute = findClassAttribute(PyNames.DUNDER_METACLASS, false);
+      if (attribute != null) {
+        return attribute.findAssignedValue();
+      }
+    }
+    return null;
   }
 
   @NotNull
-  private List<PyClassLikeType> getMROAncestorTypes(@NotNull TypeEvalContext context) {
+  private List<PyClassLikeType> getMROAncestorTypes(@NotNull TypeEvalContext context) throws MROException {
     final PyType thisType = context.getType(this);
     if (thisType instanceof PyClassLikeType) {
-      try {
-        return mroLinearize((PyClassLikeType)thisType, new HashSet<PyClassLikeType>(), false, context);
+      final PyClassLikeType thisClassLikeType = (PyClassLikeType)thisType;
+      final List<PyClassLikeType> ancestorTypes =
+        mroLinearize(thisClassLikeType, false, context, new HashMap<PyClassLikeType, Ref<List<PyClassLikeType>>>());
+      if (isOverriddenMRO(ancestorTypes, context)) {
+        ancestorTypes.add(null);
       }
-      catch (IllegalStateException ignored) {
+      return ancestorTypes;
+    }
+    else {
+      return Collections.emptyList();
+    }
+  }
+
+  private boolean isOverriddenMRO(@NotNull List<PyClassLikeType> ancestorTypes, @NotNull TypeEvalContext context) {
+    final List<PyClass> classes = new ArrayList<PyClass>();
+    classes.add(this);
+    for (PyClassLikeType ancestorType : ancestorTypes) {
+      if (ancestorType instanceof PyClassType) {
+        final PyClassType classType = (PyClassType)ancestorType;
+        classes.add(classType.getPyClass());
       }
     }
-    return Collections.emptyList();
+
+    final PyClass typeClass = PyBuiltinCache.getInstance(this).getClass("type");
+
+    for (PyClass cls : classes) {
+      final PyType metaClassType = cls.getMetaClassType(context);
+      if (metaClassType instanceof PyClassType) {
+        final PyClass metaClass = ((PyClassType)metaClassType).getPyClass();
+        if (cls == metaClass) {
+          return false;
+        }
+        final PyFunction mroMethod = metaClass.findMethodByName(PyNames.MRO, true);
+        if (mroMethod != null) {
+          final PyClass mroClass = mroMethod.getContainingClass();
+          if (mroClass != null && mroClass != typeClass) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   @NotNull
   private List<PyClassLikeType> getOldStyleAncestorTypes(@NotNull TypeEvalContext context) {
     final List<PyClassLikeType> results = new ArrayList<PyClassLikeType>();
-    final List<PyClassLikeType> toProcess = new ArrayList<PyClassLikeType>();
+    final Deque<PyClassLikeType> toProcess = new LinkedList<PyClassLikeType>();
     final Set<PyClassLikeType> seen = new HashSet<PyClassLikeType>();
     final Set<PyClassLikeType> visited = new HashSet<PyClassLikeType>();
     final PyType thisType = context.getType(this);
@@ -1191,15 +1441,17 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       toProcess.add((PyClassLikeType)thisType);
     }
     while (!toProcess.isEmpty()) {
-      final PyClassLikeType currentType = toProcess.remove(0);
-      visited.add(currentType);
+      final PyClassLikeType currentType = toProcess.pollFirst();
+      if (!visited.add(currentType)) {
+        continue;
+      }
       for (PyClassLikeType superType : currentType.getSuperClassTypes(context)) {
         if (superType == null || !seen.contains(superType)) {
           results.add(superType);
           seen.add(superType);
         }
         if (superType != null && !visited.contains(superType)) {
-          toProcess.add(superType);
+          toProcess.addLast(superType);
         }
       }
     }
@@ -1207,47 +1459,67 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
   }
 
   @Nullable
-  private static PsiElement getElementQNamed(@NotNull NameDefiner nameDefiner, @NotNull QualifiedName qualifiedName) {
+  private static PsiElement getElementQNamed(@NotNull PyFile file, @NotNull QualifiedName qualifiedName, @NotNull TypeEvalContext context) {
     final int componentCount = qualifiedName.getComponentCount();
     final String fullName = qualifiedName.toString();
+    final PyType type = new PyModuleType(file);
     if (componentCount == 0) {
       return null;
     }
     else if (componentCount == 1) {
-      PsiElement element = nameDefiner.getElementNamed(fullName);
+      PsiElement element = resolveTypeMember(type, fullName, context);
       if (element == null) {
-        element = PyBuiltinCache.getInstance(nameDefiner).getByName(fullName);
+        element = PyBuiltinCache.getInstance(file).getByName(fullName);
       }
       return element;
     }
     else {
       final String name = qualifiedName.getLastComponent();
       final QualifiedName containingQName = qualifiedName.removeLastComponent();
-      NameDefiner definer = nameDefiner;
+      PyType currentType = type;
       for (String component : containingQName.getComponents()) {
-        PsiElement element = PyUtil.turnDirIntoInit(definer.getElementNamed(component));
-        if (element instanceof PyImportElement) {
-          element = ((PyImportElement)element).resolve();
-        }
-        if (element instanceof NameDefiner) {
-          definer = (NameDefiner)element;
-        }
-        else {
-          definer = null;
-          break;
+        currentType = getMemberType(currentType, component, context);
+        if (currentType == null) {
+          return null;
         }
       }
-      if (definer != null) {
-        return definer.getElementNamed(name);
+      if (name != null) {
+        return resolveTypeMember(currentType, name, context);
       }
       return null;
     }
   }
 
   @Nullable
+  private static PyType getMemberType(@NotNull PyType type, @NotNull String name, @NotNull TypeEvalContext context) {
+    final PyType result;
+    PsiElement element = resolveTypeMember(type, name, context);
+    if (element instanceof PyImportedModule) {
+      result = new PyImportedModuleType((PyImportedModule)element);
+    }
+    else if (element instanceof PyTypedElement) {
+      result = context.getType((PyTypedElement)element);
+    }
+    else {
+      return null;
+    }
+    if (result instanceof PyClassLikeType) {
+      return ((PyClassLikeType)result).toInstance();
+    }
+    return result;
+  }
+
+  @Nullable
+  private static PsiElement resolveTypeMember(@NotNull PyType type, @NotNull String name, @NotNull TypeEvalContext context) {
+    final PyResolveContext resolveContext = PyResolveContext.noImplicits().withTypeEvalContext(context);
+    final List<? extends RatedResolveResult> results = type.resolveMember(name, null, AccessDirection.READ, resolveContext);
+    return (results != null && !results.isEmpty()) ? results.get(0).getElement() : null;
+  }
+
+  @Nullable
   private static PyClassLikeType classTypeFromQName(@NotNull QualifiedName qualifiedName, @NotNull PyFile containingFile,
                                                     @NotNull TypeEvalContext context) {
-    final PsiElement element = getElementQNamed(containingFile, qualifiedName);
+    final PsiElement element = getElementQNamed(containingFile, qualifiedName, context);
     if (element instanceof PyTypedElement) {
       final PyType type = context.getType((PyTypedElement)element);
       if (type instanceof PyClassLikeType) {
@@ -1255,5 +1527,24 @@ public class PyClassImpl extends PyPresentableElementImpl<PyClassStub> implement
       }
     }
     return null;
+  }
+
+  @Nullable
+  @Override
+  public PyClassLikeType getType(@NotNull TypeEvalContext context) {
+    return PyUtil.as(context.getType(this), PyClassLikeType.class);
+  }
+
+  private static final class MyAttributesCollector implements Processor<PyTargetExpression> {
+    private final List<PyTargetExpression> myAttributes = new ArrayList<PyTargetExpression>();
+    @Override
+    public boolean process(final PyTargetExpression expression) {
+      myAttributes.add(expression);
+      return true;
+    }
+    @NotNull
+     List<PyTargetExpression> getAttributes() {
+      return Collections.unmodifiableList(myAttributes);
+    }
   }
 }

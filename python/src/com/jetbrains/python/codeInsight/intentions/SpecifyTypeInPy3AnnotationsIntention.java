@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,7 +102,7 @@ public class SpecifyTypeInPy3AnnotationsIntention extends TypeIntention {
   private void annotateReturnType(Project project, PsiElement resolved) {
     PyElementGenerator elementGenerator = PyElementGenerator.getInstance(project);
 
-    Callable callable = getCallable(resolved);
+    PyCallable callable = getCallable(resolved);
 
     if (callable instanceof PyFunction) {
       final String functionSignature = "def " + callable.getName() + callable.getParameterList().getText();

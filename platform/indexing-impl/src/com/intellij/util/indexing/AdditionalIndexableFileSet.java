@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,9 @@ public class AdditionalIndexableFileSet implements IndexableFileSet {
     myExtensions = extensions;
   }
 
+  public AdditionalIndexableFileSet() {
+  }
+
   private Set<VirtualFile> getDirectories() {
     Set<VirtualFile> directories = cachedDirectories;
     if (directories == null || filesInvalidated(directories) || filesInvalidated(cachedFiles)) {
@@ -70,17 +73,9 @@ public class AdditionalIndexableFileSet implements IndexableFileSet {
     return false;
   }
 
-  public AdditionalIndexableFileSet() {
-  }
-
   @Override
   public boolean isInSet(@NotNull VirtualFile file) {
-    for (final VirtualFile root : getDirectories()) {
-      if (VfsUtilCore.isAncestor(root, file, false)) {
-        return true;
-      }
-    }
-    return cachedFiles.contains(file);
+    return VfsUtilCore.isUnder(file, getDirectories()) || cachedFiles.contains(file);
   }
 
   @Override

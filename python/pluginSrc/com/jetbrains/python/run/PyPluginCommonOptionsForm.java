@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.jetbrains.python.run;
 
-import com.intellij.application.options.ModuleListCellRenderer;
+import com.intellij.application.options.ModulesComboBox;
 import com.intellij.execution.configuration.EnvironmentVariablesComponent;
 import com.intellij.execution.util.PathMappingsComponent;
 import com.intellij.ide.util.PropertiesComponent;
@@ -58,7 +58,7 @@ public class PyPluginCommonOptionsForm implements AbstractPyCommonOptionsForm {
   private RawCommandLineEditor myInterpreterOptionsTextField;
   private JComboBox myInterpreterComboBox;
   private JRadioButton myUseModuleSdkRadioButton;
-  private JComboBox myModuleComboBox;
+  private ModulesComboBox myModuleComboBox;
   private JPanel myMainPanel;
   private JRadioButton myUseSpecifiedSdkRadioButton;
   private JBLabel myPythonInterpreterJBLabel;
@@ -77,8 +77,8 @@ public class PyPluginCommonOptionsForm implements AbstractPyCommonOptionsForm {
     final List<Module> validModules = data.getValidModules();
     Collections.sort(validModules, new ModulesAlphaComparator());
     Module selection = validModules.size() > 0 ? validModules.get(0) : null;
-    myModuleComboBox.setModel(new CollectionComboBoxModel(validModules, selection));
-    myModuleComboBox.setRenderer(new ModuleListCellRenderer());
+    myModuleComboBox.setModules(validModules);
+    myModuleComboBox.setSelectedModule(selection);
 
     myInterpreterComboBox.setRenderer(new SdkListCellRenderer("<Project Default>"));
     myWorkingDirectoryTextField.addBrowseFolderListener("Select Working Directory", "", data.getProject(),
@@ -110,7 +110,7 @@ public class PyPluginCommonOptionsForm implements AbstractPyCommonOptionsForm {
         storeState();
       }
       private void storeState() {
-        PropertiesComponent.getInstance().setValue(EXPAND_PROPERTY_KEY, String.valueOf(isExpanded()));
+        PropertiesComponent.getInstance().setValue(EXPAND_PROPERTY_KEY, String.valueOf(isExpanded()), "true");
       }
     };
     myDecorator.setOn(PropertiesComponent.getInstance().getBoolean(EXPAND_PROPERTY_KEY, true));
@@ -181,11 +181,11 @@ public class PyPluginCommonOptionsForm implements AbstractPyCommonOptionsForm {
   }
 
   public Module getModule() {
-    return (Module)myModuleComboBox.getSelectedItem();
+    return myModuleComboBox.getSelectedModule();
   }
 
   public void setModule(Module module) {
-    myModuleComboBox.setSelectedItem(module);
+    myModuleComboBox.setSelectedModule(module);
   }
 
   public boolean isUseModuleSdk() {
@@ -255,23 +255,23 @@ public class PyPluginCommonOptionsForm implements AbstractPyCommonOptionsForm {
   }
 
   @Override
-  public boolean addContentRoots() {
+  public boolean shouldAddContentRoots() {
     return myAddContentRootsCheckbox.isSelected();
   }
 
   @Override
-  public boolean addSourceRoots() {
+  public boolean shouldAddSourceRoots() {
     return myAddSourceRootsCheckbox.isSelected();
   }
 
   @Override
-  public void addContentRoots(boolean add) {
-    myAddContentRootsCheckbox.setSelected(add);
+  public void setAddContentRoots(boolean flag) {
+    myAddContentRootsCheckbox.setSelected(flag);
   }
 
   @Override
-  public void addSourceRoots(boolean add) {
-    myAddSourceRootsCheckbox.setSelected(add);
+  public void setAddSourceRoots(boolean flag) {
+    myAddSourceRootsCheckbox.setSelected(flag);
   }
 
 }

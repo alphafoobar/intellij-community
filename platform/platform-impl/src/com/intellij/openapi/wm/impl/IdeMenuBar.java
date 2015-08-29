@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ import com.intellij.ui.Gray;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.util.ui.Animator;
+import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.UIUtil;
 import org.java.ayatana.ApplicationMenu;
 import org.jetbrains.annotations.NotNull;
@@ -154,14 +155,14 @@ public class IdeMenuBar extends JMenuBar implements IdeEventQueue.EventDispatche
   @Override
   public void doLayout() {
     super.doLayout();
-    if (myClockPanel != null) {
+    if (myClockPanel != null && myButton != null) {
       if (myState != State.EXPANDED) {
         myClockPanel.setVisible(true);
         myButton.setVisible(true);
-        Dimension preferredSize = myClockPanel.getPreferredSize();
-        myClockPanel.setBounds(getBounds().width - preferredSize.width, 0, preferredSize.width, preferredSize.height);
-        preferredSize = myButton.getPreferredSize();
-        myButton.setBounds(getBounds().width - preferredSize.width * 2 - myClockPanel.getWidth(), 0, preferredSize.width, preferredSize.height);
+        Dimension preferredSize = myButton.getPreferredSize();
+        myButton.setBounds(getBounds().width - preferredSize.width, 0, preferredSize.width, preferredSize.height);
+        preferredSize = myClockPanel.getPreferredSize();
+        myClockPanel.setBounds(getBounds().width - preferredSize.width - myButton.getWidth(), 0, preferredSize.width, preferredSize.height);
       }
       else {
         myClockPanel.setVisible(false);
@@ -196,22 +197,6 @@ public class IdeMenuBar extends JMenuBar implements IdeEventQueue.EventDispatche
       });
     }
     super.menuSelectionChanged(isIncluded);
-  }
-
-  private static boolean isDescendingFrom(@Nullable Component a, @NotNull Component b) {
-    while (a != null) {
-      if (a == b) {
-        return true;
-      }
-
-      if (a instanceof JPopupMenu) {
-        a = ((JPopupMenu)a).getInvoker();
-      }
-      else {
-        a = a.getParent();
-      }
-    }
-    return false;
   }
 
   private boolean isActivated() {
@@ -311,7 +296,7 @@ public class IdeMenuBar extends JMenuBar implements IdeEventQueue.EventDispatche
       Component component = findActualComponent(mouseEvent);
 
       if (myState != State.EXPANDED /*&& !myState.isInProgress()*/) {
-        boolean mouseInside = myActivated || isDescendingFrom(component, this);
+        boolean mouseInside = myActivated || UIUtil.isDescendingFrom(component, this);
         if (e.getID() == MouseEvent.MOUSE_EXITED && e.getSource() == SwingUtilities.windowForComponent(this) && !myActivated) mouseInside = false;
         if (mouseInside && myState == State.COLLAPSED) {
           setState(State.EXPANDING);
@@ -569,8 +554,7 @@ public class IdeMenuBar extends JMenuBar implements IdeEventQueue.EventDispatche
           Component item = ((IdeMenuBar)c).findComponentAt(p.x, size.height / 2);
           if (item instanceof JMenuItem) {
             // re-target border clicks as a menu item ones
-            item.dispatchEvent(
-              new MouseEvent(item, e.getID(), e.getWhen(), e.getModifiers(), 1, 1, e.getClickCount(), e.isPopupTrigger(), e.getButton()));
+            item.dispatchEvent(MouseEventAdapter.convert(e, item, 1, 1));
             e.consume();
             return;
           }

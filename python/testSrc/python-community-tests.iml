@@ -15,6 +15,12 @@
     <orderEntry type="module" module-name="spellchecker" scope="TEST" />
     <orderEntry type="module" module-name="python-ide-community" />
     <orderEntry type="module" module-name="python-helpers" scope="RUNTIME" />
+    <orderEntry type="library" name="Groovy" level="project" />
+    <orderEntry type="module" module-name="xdebugger-impl" scope="TEST" />
+    <orderEntry type="module" module-name="python-pydev" scope="TEST" />
+    <orderEntry type="module" module-name="smRunner" scope="TEST" />
+    <orderEntry type="library" scope="TEST" name="mockito" level="project" />
+    <orderEntry type="library" scope="TEST" name="Mocks" level="project" />
+    <orderEntry type="library" exported="" scope="TEST" name="hamcrest" level="project" />
   </component>
 </module>
-

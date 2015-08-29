@@ -15,7 +15,7 @@
  */
 package com.intellij.refactoring.typeMigration;
 
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -36,12 +36,12 @@ public class ChangeTypeSignatureHandler implements RefactoringActionHandler {
 
   public void invoke(@NotNull Project project, Editor editor, PsiFile file, DataContext dataContext) {
     editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
-    final int offset = TargetElementUtilBase.adjustOffset(file, editor.getDocument(), editor.getCaretModel().getOffset());
+    final int offset = TargetElementUtil.adjustOffset(file, editor.getDocument(), editor.getCaretModel().getOffset());
     final PsiElement element = file.findElementAt(offset);
     PsiTypeElement typeElement = PsiTreeUtil.getParentOfType(element, PsiTypeElement.class);
     while (typeElement != null) {
       final PsiElement parent = typeElement.getParent();
-      if (parent instanceof PsiVariable || parent instanceof PsiMember || (parent instanceof PsiReferenceParameterList && PsiTreeUtil.getParentOfType(parent, PsiMember.class) instanceof PsiClass)) {
+      if (parent instanceof PsiVariable || (parent instanceof PsiMember && !(parent instanceof PsiClass)) || isClassArgument(parent)) {
         invoke(project, parent, null, editor);
         return;
       }
@@ -60,13 +60,29 @@ public class ChangeTypeSignatureHandler implements RefactoringActionHandler {
   }
 
   public static boolean invokeOnElement(final Project project, final PsiElement element) {
-    if (element instanceof PsiVariable || element instanceof PsiMember || element instanceof PsiFile) {
+    if (element instanceof PsiVariable || (element instanceof PsiMember && !(element instanceof PsiClass)) || element instanceof PsiFile) {
       invoke(project, element, null, null);
       return true;
     }
-    if (element instanceof PsiReferenceParameterList && PsiTreeUtil.getParentOfType(element, PsiMember.class) instanceof PsiClass) {
+    if (isClassArgument(element)) {
       invoke(project, element, null, null);
       return true;
+    }
+    return false;
+  }
+
+  protected static boolean isClassArgument(PsiElement element) {
+    if (element instanceof PsiReferenceParameterList) {
+      final PsiMember member = PsiTreeUtil.getParentOfType(element, PsiMember.class);
+      if (member instanceof PsiAnonymousClass) {
+        return ((PsiAnonymousClass)member).getBaseClassReference().getParameterList() == element;
+      }
+      if (member instanceof PsiClass) {
+        final PsiReferenceList implementsList = ((PsiClass)member).getImplementsList();
+        final PsiReferenceList extendsList = ((PsiClass)member).getExtendsList();
+        return PsiTreeUtil.isAncestor(implementsList, element, false) || 
+               PsiTreeUtil.isAncestor(extendsList, element, false);
+      }
     }
     return false;
   }

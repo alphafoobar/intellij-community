@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,13 +51,13 @@ import java.util.List;
 public class CompositeElement extends TreeElement {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.tree.CompositeElement");
 
-  private TreeElement firstChild = null;
-  private TreeElement lastChild = null;
+  private TreeElement firstChild;
+  private TreeElement lastChild;
 
-  private volatile int myModificationsCount = 0;
+  private volatile int myModificationsCount;
   private volatile int myCachedLength = -1;
   private volatile int myHC = -1;
-  private volatile PsiElement myWrapper = null;
+  private volatile PsiElement myWrapper;
   private static final boolean ASSERT_THREADING = true;//DebugUtil.CHECK || ApplicationManagerEx.getApplicationEx().isInternal() || ApplicationManagerEx.getApplicationEx().isUnitTestMode();
 
   public CompositeElement(@NotNull IElementType type) {
@@ -68,6 +68,7 @@ public class CompositeElement extends TreeElement {
     return myModificationsCount;
   }
 
+  @NotNull
   @Override
   public CompositeElement clone() {
     CompositeElement clone = (CompositeElement)super.clone();
@@ -160,24 +161,33 @@ public class CompositeElement extends TreeElement {
   @Override
   public LeafElement findLeafElementAt(int offset) {
     TreeElement element = this;
+    if (element.getTreeParent() == null && offset >= element.getTextLength()) return null;
     startFind:
     while (true) {
       TreeElement child = element.getFirstChildNode();
+      TreeElement lastChild = element.getLastChildNode();
+      int elementTextLength = element.getTextLength();
+      boolean fwd = lastChild == null || elementTextLength / 2 > offset;
+      if (!fwd) {
+        child = lastChild;
+        offset = elementTextLength - offset;
+      }
       while (child != null) {
         final int textLength = child.getTextLength();
-        if (textLength > offset) {
+        if (textLength > offset || !fwd && textLength >= offset) {
           if (child instanceof LeafElement) {
             if (child instanceof ForeignLeafPsiElement) {
-              child = child.getTreeNext();
+              child = fwd ? child.getTreeNext() : child.getTreePrev();
               continue;
             }
             return (LeafElement)child;
           }
+          offset = fwd ? offset : textLength - offset;
           element = child;
           continue startFind;
         }
         offset -= textLength;
-        child = child.getTreeNext();
+        child = fwd ? child.getTreeNext() : child.getTreePrev();
       }
       return null;
     }
@@ -253,6 +263,7 @@ public class CompositeElement extends TreeElement {
     return StringFactory.createShared(textToCharArray());
   }
 
+  @NotNull
   @Override
   public CharSequence getChars() {
     return getText();
@@ -440,6 +451,7 @@ public class CompositeElement extends TreeElement {
     return 0; //ChildRole.NONE;
   }
 
+  @NotNull
   @Override
   public ASTNode[] getChildren(@Nullable TokenSet filter) {
     int count = countChildren(filter);
@@ -577,7 +589,8 @@ public class CompositeElement extends TreeElement {
     return myCachedLength;
   }
 
-  private static TreeElement drillDown(TreeElement start) {
+  @NotNull
+  private static TreeElement drillDown(@NotNull TreeElement start) {
     TreeElement cur = start;
     while (cur.getCachedLength() < 0) {
       TreeElement child = cur.getFirstChildNode();
@@ -770,8 +783,7 @@ public class CompositeElement extends TreeElement {
   }
 
   @Override
-  @Nullable
-  public <T extends PsiElement> T getPsi(Class<T> clazz) {
+  public <T extends PsiElement> T getPsi(@NotNull Class<T> clazz) {
     return LeafElement.getPsi(clazz, getPsi(), LOG);
   }
 
@@ -794,6 +806,10 @@ public class CompositeElement extends TreeElement {
 
   public void setPsi(@NotNull PsiElement psi) {
     myWrapper = psi;
+  }
+
+  protected void clearPsi() {
+    myWrapper = null;
   }
 
   public final void rawAddChildren(@NotNull TreeElement first) {

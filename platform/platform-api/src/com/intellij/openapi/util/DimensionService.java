@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,17 @@
  */
 package com.intellij.openapi.util;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.util.containers.hash.LinkedHashMap;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import gnu.trove.TObjectIntHashMap;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -39,9 +42,13 @@ import java.util.Map;
  */
 @State(
   name = "DimensionService",
-  storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/options.xml")})
-public class DimensionService implements PersistentStateComponent<Element>, ApplicationComponent {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.util.DimensionService");
+  storages = {
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/dimensions.xml", roamingType = RoamingType.DISABLED),
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/options.xml", deprecated = true)
+  }
+)
+public class DimensionService implements PersistentStateComponent<Element> {
+  private static final Logger LOG = Logger.getInstance(DimensionService.class);
 
   private final Map<String, Point> myKey2Location;
   private final Map<String, Dimension> myKey2Size;
@@ -57,7 +64,7 @@ public class DimensionService implements PersistentStateComponent<Element>, Appl
   @NonNls private static final String ATTRIBUTE_HEIGHT = "height";
 
   public static DimensionService getInstance() {
-    return ApplicationManager.getApplication().getComponent(DimensionService.class);
+    return ServiceManager.getService(DimensionService.class);
   }
 
   /**
@@ -67,14 +74,6 @@ public class DimensionService implements PersistentStateComponent<Element>, Appl
     myKey2Location = new LinkedHashMap<String, Point>();
     myKey2Size = new LinkedHashMap<String, Dimension>();
     myKey2ExtendedState = new TObjectIntHashMap<String>();
-  }
-
-  @Override
-  public void initComponent() {
-  }
-
-  @Override
-  public void disposeComponent() {
   }
 
   /**
@@ -231,16 +230,18 @@ public class DimensionService implements PersistentStateComponent<Element>, Appl
     }
   }
 
-  @Override
-  @NotNull
-  public String getComponentName() {
-    return "DimensionService";
-  }
-
+  @Deprecated
+  /**
+   * @deprecated Use {@link com.intellij.ide.util.PropertiesComponent}
+   */
   public void setExtendedState(String key, int extendedState) {
     myKey2ExtendedState.put(key, extendedState);
   }
 
+  @Deprecated
+  /**
+   * @deprecated Use {@link com.intellij.ide.util.PropertiesComponent}
+   */
   public int getExtendedState(String key) {
     if (!myKey2ExtendedState.containsKey(key)) return -1;
     return myKey2ExtendedState.get(key);
@@ -259,7 +260,17 @@ public class DimensionService implements PersistentStateComponent<Element>, Appl
       return key + ".headless";
     }
 
-    JFrame frame = project == null ? WindowManager.getInstance().findVisibleFrame() : WindowManager.getInstance().getFrame(project);
+    JFrame frame = null;
+    final Component owner = IdeFocusManager.findInstance().getFocusOwner();
+    if (owner != null) {
+      frame = UIUtil.getParentOfType(JFrame.class, owner);
+    }
+    if (frame == null) {
+      frame = WindowManager.getInstance().findVisibleFrame();
+    }
+    if (project != null && (frame == null || (frame instanceof IdeFrame && project != ((IdeFrame)frame).getProject()))) {
+      frame = WindowManager.getInstance().getFrame(project);
+    }
     Rectangle screen = new Rectangle(0, 0, 0, 0);
     if (frame != null) {
       final Point topLeft = frame.getLocation();
@@ -276,6 +287,10 @@ public class DimensionService implements PersistentStateComponent<Element>, Appl
       GraphicsConfiguration gc = env.getScreenDevices()[0].getDefaultConfiguration();
       screen = gc.getBounds();
     }
-    return key + '.' + screen.x + '.' + screen.y + '.' + screen.width + '.' + screen.height;
+    String realKey = key + '.' + screen.x + '.' + screen.y + '.' + screen.width + '.' + screen.height;
+    if (JBUI.isHiDPI()) {
+      realKey+= "@" + (((int)(96 * JBUI.scale(1f)))) + "dpi";
+    }
+    return realKey;
   }
 }

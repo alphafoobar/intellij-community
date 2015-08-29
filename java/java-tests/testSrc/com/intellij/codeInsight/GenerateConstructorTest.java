@@ -17,6 +17,7 @@ package com.intellij.codeInsight;
 
 import com.intellij.codeInsight.generation.ClassMember;
 import com.intellij.codeInsight.generation.GenerateConstructorHandler;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
@@ -36,6 +37,7 @@ public class GenerateConstructorTest extends LightCodeInsightTestCase {
   public void testSameNamedFields() throws Exception { doTest(); }
   public void testEnumWithAbstractMethod() throws Exception { doTest(); }
   public void testNoMoreConstructorsCanBeGenerated() throws Exception { doTest(); }
+  public void testBaseVarargs() throws Exception { doTest(); }
 
   public void testImmediatelyAfterRBrace() throws Exception {    // IDEADEV-28811
     CodeStyleSettingsManager.getInstance(getProject()).getCurrentSettings().CLASS_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE;
@@ -43,7 +45,9 @@ public class GenerateConstructorTest extends LightCodeInsightTestCase {
   }
 
   public void testBoundCommentsKeepsBlankLine() throws Exception {
-    CodeStyleSettingsManager.getInstance(getProject()).getCurrentSettings().BLANK_LINES_AFTER_CLASS_HEADER = 1;
+    CommonCodeStyleSettings javaSettings =
+      CodeStyleSettingsManager.getInstance(getProject()).getCurrentSettings().getCommonSettings(JavaLanguage.INSTANCE);
+    javaSettings.BLANK_LINES_AFTER_CLASS_HEADER = 1;
     doTest();
   }
 

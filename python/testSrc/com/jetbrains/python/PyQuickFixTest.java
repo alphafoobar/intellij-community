@@ -16,6 +16,7 @@
 package com.jetbrains.python;
 
 import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInspection.ex.InspectionProfileImpl;
 import com.intellij.testFramework.TestDataFile;
 import com.intellij.testFramework.TestDataPath;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
@@ -23,8 +24,12 @@ import com.jetbrains.python.documentation.DocStringFormat;
 import com.jetbrains.python.documentation.PyDocumentationSettings;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.inspections.*;
+import com.jetbrains.python.inspections.unresolvedReference.PyUnresolvedReferencesInspection;
 import com.jetbrains.python.psi.LanguageLevel;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * @author dcheryasov
@@ -32,24 +37,51 @@ import org.jetbrains.annotations.NonNls;
 @TestDataPath("$CONTENT_ROOT/../testData/inspections/")
 public class PyQuickFixTest extends PyTestCase {
 
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    InspectionProfileImpl.INIT_INSPECTIONS = true;
+  }
+
+  @Override
+  protected void tearDown() throws Exception {
+    InspectionProfileImpl.INIT_INSPECTIONS = false;
+    super.tearDown();
+  }
+
   public void testAddImport() {
-    doInspectionTest(new String[] { "AddImport.py", "ImportTarget.py" }, PyUnresolvedReferencesInspection.class, "Import 'ImportTarget'", true, true);
+    doInspectionTest(new String[]{"AddImport.py", "ImportTarget.py"}, PyUnresolvedReferencesInspection.class,
+                     "Import 'ImportTarget'", true, true);
   }
 
   public void testAddImportDoc() {
-    doInspectionTest(new String[] { "AddImportDoc.py", "ImportTarget.py" }, PyUnresolvedReferencesInspection.class, "Import 'ImportTarget'", true, true);
+    doInspectionTest(new String[]{"AddImportDoc.py", "ImportTarget.py"}, PyUnresolvedReferencesInspection.class,
+                     "Import 'ImportTarget'", true, true);
   }
 
-  public void testAddImportDocComment() {  // PY-728
-    doInspectionTest(new String[] { "AddImportDocComment.py", "ImportTarget.py" }, PyUnresolvedReferencesInspection.class, "Import 'ImportTarget'", true, true);
+  // PY-728
+  public void testAddImportDocComment() {
+    doInspectionTest(new String[]{"AddImportDocComment.py", "ImportTarget.py"}, PyUnresolvedReferencesInspection.class,
+                     "Import 'ImportTarget'", true, true);
   }
 
   public void testImportFromModule() {
-    doInspectionTest(new String[] { "importFromModule/foo/bar.py", "importFromModule/foo/baz.py", "importFromModule/foo/__init__.py" },
+    doInspectionTest(new String[]{"importFromModule/foo/bar.py", "importFromModule/foo/baz.py", "importFromModule/foo/__init__.py"},
                      PyUnresolvedReferencesInspection.class, "Import 'importFromModule.foo.baz'", true, true);
   }
 
-  public void testImportFromModuleStar() {  // PY-6302
+  // PY-14365
+  public void testObjectBaseIsNotShownInAutoImportQuickfix() {
+    myFixture.copyDirectoryToProject("objectBaseIsNotShownInAutoImportQuickfix", "");
+    myFixture.configureByFile("main.py");
+    myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
+    final IntentionAction intention = myFixture.findSingleIntention("Import");
+    assertNotNull(intention);
+    assertEquals("Import 'module.MyOldStyleClass'", intention.getText());
+  }
+
+  // PY-6302
+  public void testImportFromModuleStar() {
     myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
     myFixture.copyDirectoryToProject("importFromModuleStar", "");
     myFixture.configureFromTempProjectFile("source.py");
@@ -67,7 +99,8 @@ public class PyQuickFixTest extends PyTestCase {
     settings.PREFER_FROM_IMPORT = false;
     settings.HIGHLIGHT_UNUSED_IMPORTS = false;
     try {
-      doInspectionTest(new String[]{"QualifyByImport.py", "QualifyByImportFoo.py"}, PyUnresolvedReferencesInspection.class, PyBundle.message("ACT.qualify.with.module"), true, true);
+      doInspectionTest(new String[]{"QualifyByImport.py", "QualifyByImportFoo.py"}, PyUnresolvedReferencesInspection.class,
+                       PyBundle.message("ACT.qualify.with.module"), true, true);
     }
     finally {
       settings.PREFER_FROM_IMPORT = oldPreferFrom;
@@ -80,7 +113,8 @@ public class PyQuickFixTest extends PyTestCase {
     boolean oldHighlightUnused = settings.HIGHLIGHT_UNUSED_IMPORTS;
     settings.HIGHLIGHT_UNUSED_IMPORTS = false;
     try {
-      doInspectionTest(new String[]{"AddToImportFromList.py", "AddToImportFromFoo.py"}, PyUnresolvedReferencesInspection.class, "Import 'foo(a) from AddToImportFromFoo'", true, true);
+      doInspectionTest(new String[]{"AddToImportFromList.py", "AddToImportFromFoo.py"}, PyUnresolvedReferencesInspection.class,
+                       "Import 'foo(a) from AddToImportFromFoo'", true, true);
     }
     finally {
       settings.HIGHLIGHT_UNUSED_IMPORTS = oldHighlightUnused;
@@ -91,97 +125,86 @@ public class PyQuickFixTest extends PyTestCase {
   // TODO: add tests for stub indexes-based autoimport of unimported somehow.
 
   public void testAddSelf() {
-    doInspectionTest("AddSelf.py", PyMethodParametersInspection.class, PyBundle.message("QFIX.add.parameter.self", "self"), true, true);
+    doInspectionTest(PyMethodParametersInspection.class, PyBundle.message("QFIX.add.parameter.self", "self"), true, true);
   }
 
   public void testReplacePrint() {
-    doInspectionTest("ReplacePrint.py", PyCompatibilityInspection.class, PyBundle.message("QFIX.statement.effect"), true, true);
+    doInspectionTest(PyCompatibilityInspection.class, PyBundle.message("QFIX.statement.effect"), true, true);
   }
 
-  public void testAddSelfFunction() { //PY-4556
-    doInspectionTest("AddSelfFunction.py",
-                     PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference", "get_a", "self"), true, true);
+  // PY-4556
+  public void testAddSelfFunction() {
+    doInspectionTest("AddSelfFunction.py", PyUnresolvedReferencesInspection.class,
+                     PyBundle.message("QFIX.unresolved.reference", "get_a", "self"), true, true);
   }
 
-  public void testAddSelfToClassmethod() { //PY-9721
-    doInspectionTest("AddSelfToClassmethod.py",
-                     PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference", "foo", "cls"), true, true);
+  // PY-9721
+  public void testAddSelfToClassmethod() {
+    doInspectionTest("AddSelfToClassmethod.py", PyUnresolvedReferencesInspection.class,
+                     PyBundle.message("QFIX.unresolved.reference", "foo", "cls"), true, true);
   }
 
   public void testAddCls() {
-    doInspectionTest("AddCls.py", PyMethodParametersInspection.class, PyBundle.message("QFIX.add.parameter.self", "cls"), true, true);
+    doInspectionTest(PyMethodParametersInspection.class, PyBundle.message("QFIX.add.parameter.self", "cls"), true, true);
   }
 
   public void testRenameToSelf() {
-    doInspectionTest("RenameToSelf.py", PyMethodParametersInspection.class, PyBundle.message("QFIX.rename.parameter.to.$0", "self"), true,
-                     true);
+    doInspectionTest(PyMethodParametersInspection.class, PyBundle.message("QFIX.rename.parameter.to.$0", "self"), true, true);
   }
 
   public void testRemoveTrailingSemicolon() {
-    doInspectionTest("RemoveTrailingSemicolon.py", PyTrailingSemicolonInspection.class, PyBundle.message("QFIX.remove.trailing.semicolon"),
-                     true, true);
+    doInspectionTest(PyTrailingSemicolonInspection.class, PyBundle.message("QFIX.remove.trailing.semicolon"), true, true);
   }
 
   public void testDictCreation() {
-    doInspectionTest("DictCreation.py", PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
+    doInspectionTest(PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
   }
 
-  public void testDictCreationTuple() {  //PY-6283
-    doInspectionTest("DictCreationTuple.py", PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
+  // PY-6283
+  public void testDictCreationTuple() {
+    doInspectionTest(PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
   }
 
-  public void testDictCreationDuplicate() {  //PY-7318
-    doInspectionTest("DictCreationDuplicate.py", PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
+  // PY-7318
+  public void testDictCreationDuplicate() {
+    doInspectionTest(PyDictCreationInspection.class, PyBundle.message("QFIX.dict.creation"), true, true);
   }
 
   public void testTransformClassicClass() {
-    doInspectionTest("TransformClassicClass.py", PyClassicStyleClassInspection.class,
-                     PyBundle.message("QFIX.classic.class.transform"), true, true);
+    doInspectionTest(PyClassicStyleClassInspection.class, PyBundle.message("QFIX.classic.class.transform"), true, true);
   }
 
-  public void testAddGlobalQuickFix() {
-    doInspectionTest("AddGlobalStatement.py", PyUnboundLocalVariableInspection.class,
-                     PyBundle.message("QFIX.add.global"), true, true);
+  public void testAddGlobalStatement() {
+    doInspectionTest(PyUnboundLocalVariableInspection.class, PyBundle.message("QFIX.add.global"), true, true);
   }
 
-  public void testAddGlobalExistingQuickFix() {
-    doInspectionTest("AddGlobalExistingStatement.py", PyUnboundLocalVariableInspection.class,
-                     PyBundle.message("QFIX.add.global"), true, true);
+  public void testAddGlobalExistingStatement() {
+    doInspectionTest(PyUnboundLocalVariableInspection.class, PyBundle.message("QFIX.add.global"), true, true);
   }
 
-  public void testSimplifyBooleanCheckQuickFix() {
-    doInspectionTest("SimplifyBooleanCheck.py", PySimplifyBooleanCheckInspection.class,
-                     PyBundle.message("QFIX.simplify.$0", "b"), true, true);
+  public void testSimplifyBooleanCheck() {
+    doInspectionTest(PySimplifyBooleanCheckInspection.class, PyBundle.message("QFIX.simplify.$0", "b"), true, true);
   }
 
-  public void testFromFutureImportQuickFix() {
-    doInspectionTest("MoveFromFutureImport.py", PyFromFutureImportInspection.class,
-                     PyBundle.message("QFIX.move.from.future.import"), true, true);
+  public void testMoveFromFutureImport() {
+    doInspectionTest(PyFromFutureImportInspection.class, PyBundle.message("QFIX.move.from.future.import"), true, true);
   }
 
-  public void testFromFutureImportQuickFixDocString() {  // PY-10080
-    doInspectionTest("MoveFromFutureImportDocString.py", PyFromFutureImportInspection.class,
-                     PyBundle.message("QFIX.move.from.future.import"), true, true);
+  // PY-10080
+  public void testMoveFromFutureImportDocString() {
+    doInspectionTest(PyFromFutureImportInspection.class, PyBundle.message("QFIX.move.from.future.import"), true, true);
   }
 
-  public void testComparisonWithNoneQuickFix() {
-    doInspectionTest("ComparisonWithNone.py", PyComparisonWithNoneInspection.class,
-                     PyBundle.message("QFIX.replace.equality"), true, true);
+  public void testComparisonWithNone() {
+    doInspectionTest(PyComparisonWithNoneInspection.class, PyBundle.message("QFIX.replace.equality"), true, true);
   }
 
   public void testAddClassFix() {
     doInspectionTest("AddClass.py", PyUnresolvedReferencesInspection.class, "Create class 'Xyzzy'", true, true);
   }
 
-  public void testFieldFromUnusedParameter() {  // PY-1398
-    doInspectionTest("FieldFromUnusedParameter.py", PyUnusedLocalInspection.class, "Add field 'foo' to class A", true, true);
-  }
-
-  public void testFieldFromUnusedParameterKeyword() {  // PY-1602
-    doInspectionTest("FieldFromUnusedParameterKeyword.py", PyUnusedLocalInspection.class, "Add field 'foo' to class A", true, true);
-  }
-
-  public void testAddFunctionToModule() {  // PY-1602
+  // PY-1602
+  public void testAddFunctionToModule() {
     doInspectionTest(
       "AddFunctionToModule.py",
       PyUnresolvedReferencesInspection.class,
@@ -190,7 +213,8 @@ public class PyQuickFixTest extends PyTestCase {
     );
   }
 
-  public void testRedundantParentheses() {  // PY-1470
+  // PY-1470
+  public void testRedundantParentheses() {
     String[] testFiles = new String[]{"RedundantParentheses.py"};
     myFixture.enableInspections(PyRedundantParenthesesInspection.class);
     myFixture.configureByFiles(testFiles);
@@ -199,162 +223,228 @@ public class PyQuickFixTest extends PyTestCase {
     assertNotNull(intentionAction);
     myFixture.launchAction(intentionAction);
     myFixture.checkResultByFile(graftBeforeExt(testFiles[0], "_after"));
-
   }
 
-  public void testRedundantParenthesesBoolean() {  // PY-3095
-    doInspectionTest("RedundantParenthesesBoolean.py", PyRedundantParenthesesInspection.class,
-                          PyBundle.message("QFIX.redundant.parentheses"), true, true);
+  // PY-3095
+  public void testRedundantParenthesesBoolean() {
+    doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
   }
 
-  public void testRedundantParenthesesMore() {  // PY-3239
-    doInspectionTest("RedundantParenthesesMore.py", PyRedundantParenthesesInspection.class,
-                          PyBundle.message("QFIX.redundant.parentheses"), true, true);
+  // PY-3239
+  public void testRedundantParenthesesMore() {
+    doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
   }
 
-  public void testChainedComparisons() {  // PY-1020
-    doInspectionTest("ChainedComparisons.py", PyChainedComparisonsInspection.class,
-                          PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-12679
+  public void testRedundantParenthesesParenthesizedExpression() {
+    doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
   }
 
-  public void testChainedComparison1() {  // PY-3126
-    doInspectionTest("ChainedComparison1.py", PyChainedComparisonsInspection.class,
-                          PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-15506
+  public void testEmptyListOfBaseClasses() {
+    doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
   }
 
-  public void testChainedComparison2() {  // PY-3126
-    doInspectionTest("ChainedComparison2.py", PyChainedComparisonsInspection.class,
-                          PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-1020
+  public void testChainedComparisons() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testChainedComparison3() {  // PY-3126
-    doInspectionTest("ChainedComparison3.py", PyChainedComparisonsInspection.class,
-                          PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-3126
+  public void testChainedComparison1() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testChainedComparison4() {  // PY-5623
-    doInspectionTest("ChainedComparison4.py", PyChainedComparisonsInspection.class,
-                          PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-3126
+  public void testChainedComparison2() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testChainedComparison5() {  // PY-6467
-    doInspectionTest("ChainedComparison5.py", PyChainedComparisonsInspection.class,
-                     PyBundle.message("QFIX.chained.comparison"), true, true);
+  // PY-3126
+  public void testChainedComparison3() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testStatementEffect() {  // PY-1362, PY-2585
-    doInspectionTest("StatementEffect.py", PyStatementEffectInspection.class,
-                          PyBundle.message("QFIX.statement.effect"), true, true);
+  // PY-5623
+  public void testChainedComparison4() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testStatementEffectPrint() {
-    setLanguageLevel(LanguageLevel.PYTHON33);
-    try {
-      doInspectionTest("StatementEffectPrint.py", PyStatementEffectInspection.class,
-                          PyBundle.message("QFIX.statement.effect"), true, true);
-    } finally {
-      setLanguageLevel(LanguageLevel.getDefault());
-    }
+  // PY-6467
+  public void testChainedComparison5() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testStatementEffectIntroduceVariable() {  // PY-1265
-    doInspectionTest("StatementEffectIntroduceVariable.py", PyStatementEffectInspection.class,
-                          PyBundle.message("QFIX.statement.effect.introduce.variable"), true, true);
+  // PY-14002
+  public void testChainedComparisonWithCommonBinaryExpression() {
+    doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
   }
 
-  public void testUnresolvedWith() {  // PY-2083
-    setLanguageLevel(LanguageLevel.PYTHON25);
-    doInspectionTest("UnresolvedWith.py", PyUnresolvedReferencesInspection.class,
-                          PyBundle.message("QFIX.unresolved.reference.add.future"), true, true);
+  // PY-1362, PY-2585
+  public void testStatementEffect() {
+    doInspectionTest(PyStatementEffectInspection.class, PyBundle.message("QFIX.statement.effect"), true, true);
   }
 
-  public void testUnresolvedRefCreateFunction() {  // PY-2092
-    doInspectionTest("UnresolvedRefCreateFunction.py", PyUnresolvedReferencesInspection.class,
-                          PyBundle.message("QFIX.unresolved.reference.create.function.$0", "ref"), true, true);
+  // PY-1265
+  public void testStatementEffectIntroduceVariable() {
+    doInspectionTest(PyStatementEffectInspection.class, PyBundle.message("QFIX.statement.effect.introduce.variable"), true, true);
+  }
+
+  // PY-2083
+  public void testUnresolvedWith() {
+    runWithLanguageLevel(LanguageLevel.PYTHON25, new Runnable() {
+      @Override
+      public void run() {
+        doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference.add.future"), true, true);
+      }
+    });
+  }
+
+  // PY-2092
+  public void testUnresolvedRefCreateFunction() {
+    doInspectionTest(PyUnresolvedReferencesInspection.class,
+                     PyBundle.message("QFIX.unresolved.reference.create.function.$0", "ref"), true, true);
+  }
+
+  public void testUnresolvedRefNoCreateFunction() {
+    myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
+    myFixture.configureByFile("UnresolvedRefNoCreateFunction.py");
+    myFixture.checkHighlighting(true, false, false);
+    final IntentionAction intentionAction = myFixture.getAvailableIntention(PyBundle.message("QFIX.unresolved.reference.create.function.$0", "ref"));
+    assertNull(intentionAction);
   }
 
   public void testReplaceNotEqOperator() {
-    doInspectionTest("ReplaceNotEqOperator.py", PyCompatibilityInspection.class,
-                     PyBundle.message("INTN.replace.noteq.operator"), true, true);
+    doInspectionTest(PyCompatibilityInspection.class, PyBundle.message("INTN.replace.noteq.operator"), true, true);
   }
 
   public void testListCreation() {
-    doInspectionTest("ListCreation.py", PyListCreationInspection.class,
-                     PyBundle.message("QFIX.list.creation"), true, true);
+    doInspectionTest(PyListCreationInspection.class, PyBundle.message("QFIX.list.creation"), true, true);
   }
 
-  public void testConvertSingleQuotedDocstring() {                      //PY-1445
-    doInspectionTest("ConvertSingleQuotedDocstring.py", PySingleQuotedDocstringInspection.class,
-                     PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
+  // PY-1445
+  public void testConvertSingleQuotedDocstring() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
+    doInspectionTest(PySingleQuotedDocstringInspection.class, PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
   }
 
-  public void testConvertSingleQuotedDocstringEscape() {                      //PY-8926
-    doInspectionTest("ConvertSingleQuotedDocstringEscape.py", PySingleQuotedDocstringInspection.class,
-                     PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
+  // PY-8926
+  public void testConvertSingleQuotedDocstringEscape() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
+    doInspectionTest(PySingleQuotedDocstringInspection.class, PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
   }
 
-  public void testDefaultArgument() {                      //PY-3127
-    doInspectionTest("DefaultArgument.py", PyDefaultArgumentInspection.class,
-                     PyBundle.message("QFIX.default.argument"), true, true);
+  // PY-3127
+  public void testDefaultArgument() {
+    doInspectionTest(PyDefaultArgumentInspection.class, PyBundle.message("QFIX.default.argument"), true, true);
   }
 
-  public void testPyArgumentEqualDefault() {                      //PY-3125
-    doInspectionTest("ArgumentEqualDefault.py", PyArgumentEqualDefaultInspection.class,
-                     PyBundle.message("QFIX.remove.argument.equal.default"), true, true);
+  public void testDefaultArgumentEmptyList() {
+    doInspectionTest(PyDefaultArgumentInspection.class, PyBundle.message("QFIX.default.argument"), true, true);
   }
 
-  public void testAddCallSuper() {                      //PY-3315
-    doInspectionTest("AddCallSuper.py", PyMissingConstructorInspection.class,
-                     PyBundle.message("QFIX.add.super"), true, true);
+  // PY-3125
+  public void testArgumentEqualDefault() {
+    doInspectionTest(PyArgumentEqualDefaultInspection.class, PyBundle.message("QFIX.remove.argument.equal.default"), true, true);
   }
 
-  public void testAddCallSuper1() {                      //PY-4017
-    doInspectionTest("AddCallSuper1.py", PyMissingConstructorInspection.class,
-                     PyBundle.message("QFIX.add.super"), true, true);
+  // PY-3315
+  public void testAddCallSuper() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
   }
 
-  public void testAddCallSuperPass() {                      //PY-8654
-    doInspectionTest("AddCallSuperPass.py", PyMissingConstructorInspection.class,
-                     PyBundle.message("QFIX.add.super"), true, true);
+  // PY-4017
+  public void testAddCallSuper1() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
   }
 
-  public void testAddEncoding() {                      //PY-491
-    doInspectionTest("AddEncoding.py", PyMandatoryEncodingInspection.class,
-                     PyBundle.message("QFIX.add.encoding"), true, true);
+  // PY-8654
+  public void testAddCallSuperPass() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
   }
 
-  public void testRemoveDecorator() {                      //PY-3348
-    doInspectionTest("RemoveDecorator.py", PyDecoratorInspection.class,
-                     PyBundle.message("QFIX.remove.decorator"), true, true);
+  // PY-15867
+  public void testAddCallSuperOptionalAndRequiredParamsNameCollision() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-15927
+  public void testAddCallSuperConflictingTupleParam() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16036
+  public void testAddCallSuperSelfNamePreserved() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16420
+  public void testAddCallSuperRepeatedOptionalParamsPassedToSuperConstructor() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16420
+  public void testAddCallSuperRepeatedOptionalTupleParamsPassedToSuperConstructor() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+  
+  // PY-16258
+  public void testAddCallSuperCommentAfterColonPreserved() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16348
+  public void testAddCallSuperCommentsInFunctionBodyPreserved() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-491, PY-13297
+  public void testAddEncoding() {
+    doInspectionTest(PyMandatoryEncodingInspection.class, PyBundle.message("QFIX.add.encoding"), true, true);
+  }
+
+  // PY-13297
+  public void testAddEncodingAtLastLine() {
+    doInspectionTest(PyMandatoryEncodingInspection.class, PyBundle.message("QFIX.add.encoding"), true, true);
+  }
+
+  // PY-3348
+  public void testRemoveDecorator() {
+    doInspectionTest(PyDecoratorInspection.class, PyBundle.message("QFIX.remove.decorator"), true, true);
   }
 
   public void testAddParameter() {
-    doInspectionTest("AddParameter.py", PyUnresolvedReferencesInspection.class,
+    doInspectionTest(PyUnresolvedReferencesInspection.class,
                      PyBundle.message("QFIX.unresolved.reference.add.param.$0", "test"), true, true);
   }
 
-  public void testMoveDocstring() {                      //PY-4398
-    doInspectionTest("MoveDocstring.py", PyStatementEffectInspection.class,
-                     PyBundle.message("QFIX.statement.effect.move.docstring"), true, true);
+  // PY-6595
+  public void testRenameUnresolvedReference() {
+    doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.rename.unresolved.reference"), true, true);
   }
 
-  public void testRenameUnresolvedReference() {                      //PY-6595
-    doInspectionTest("RenameUnresolvedReference.py", PyUnresolvedReferencesInspection.class,
-                     PyBundle.message("QFIX.rename.unresolved.reference"), true, true);
+  // PY-3120
+  public void testSetFunctionToLiteral() {
+    runWithLanguageLevel(LanguageLevel.PYTHON27, new Runnable() {
+      @Override
+      public void run() {
+        doInspectionTest(PySetFunctionToLiteralInspection.class, PyBundle.message("QFIX.replace.function.set.with.literal"), true, true);
+      }
+    });
   }
 
-  public void testSetFunctionToLiteral() {                      //PY-3120
-    setLanguageLevel(LanguageLevel.PYTHON27);
-    doInspectionTest("SetFunctionToLiteral.py", PySetFunctionToLiteralInspection.class,
-                     PyBundle.message("QFIX.replace.function.set.with.literal"), true, true);
+  public void testDictComprehensionToCall() {
+    doInspectionTest(PyCompatibilityInspection.class, PyBundle.message("INTN.convert.dict.comp.to"), true, true);
   }
 
-  public void testDocstringParams() {                      //PY-3394
+  // PY-3394
+  public void testDocstringParams() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
     documentationSettings.setFormat(DocStringFormat.EPYTEXT);
     try {
-      doInspectionTest("DocstringParams.py", PyDocstringInspection.class,
-                     PyBundle.message("QFIX.docstring.add.$0", "b"), true, true);
+      doInspectionTest(PyDocstringInspection.class,
+                       PyBundle.message("QFIX.docstring.add.$0", "b"), true, true);
     }
     finally {
       documentationSettings.setFormat(DocStringFormat.PLAIN);
@@ -362,23 +452,23 @@ public class PyQuickFixTest extends PyTestCase {
   }
 
   public void testDocstringParams1() {
+    getCommonCodeStyleSettings().getIndentOptions().INDENT_SIZE = 2;
     PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
     documentationSettings.setFormat(DocStringFormat.EPYTEXT);
     try {
-      doInspectionTest("DocstringParams1.py", PyDocstringInspection.class,
-                     PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true);
+      doInspectionTest(PyDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true);
     }
     finally {
       documentationSettings.setFormat(DocStringFormat.PLAIN);
     }
   }
 
-  public void testDocstringParams2() {                      //PY-4964
+  // PY-4964
+  public void testDocstringParams2() {
     PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
     documentationSettings.setFormat(DocStringFormat.EPYTEXT);
     try {
-      doInspectionTest("DocstringParams2.py", PyDocstringInspection.class,
-                     PyBundle.message("QFIX.docstring.add.$0", "ham"), true, true);
+      doInspectionTest(PyDocstringInspection.class, PyBundle.message("QFIX.docstring.add.$0", "ham"), true, true);
     }
     finally {
       documentationSettings.setFormat(DocStringFormat.PLAIN);
@@ -396,9 +486,9 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.checkResultByFile(graftBeforeExt(testFiles[0], "_after"));
   }
 
-  public void testUnresolvedRefTrueFalse() {                      //PY-3051
-    doInspectionTest("UnresolvedRefTrueFalse.py", PyUnresolvedReferencesInspection.class,
-                     PyBundle.message("QFIX.unresolved.reference.replace.$0", "True"), true, true);
+  // PY-3051
+  public void testUnresolvedRefTrueFalse() {
+    doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference.replace.$0", "True"), true, true);
   }
 
   public void testUnnecessaryBackslashInArgumentList() {
@@ -436,15 +526,31 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.checkResultByFile(graftBeforeExt(fileName, "_after"));
   }
 
+  public void testIgnoreShadowingBuiltins() {
+    myFixture.configureByFile("IgnoreShadowingBuiltins.py");
+    myFixture.enableInspections(PyShadowingBuiltinsInspection.class);
+    final IntentionAction intentionAction = myFixture.getAvailableIntention("Ignore shadowed built-in name \"open\"");
+    assertNotNull(intentionAction);
+    myFixture.launchAction(intentionAction);
+    myFixture.checkHighlighting(true, false, true);
+  }
+
   @Override
   @NonNls
   protected String getTestDataPath() {
     return PythonTestUtil.getTestDataPath() + "/inspections/";
   }
 
-  protected void doInspectionTest(@TestDataFile @NonNls String testFileName,
-                                  final Class inspectionClass,
-                                  @NonNls String quickFixName,
+  private void doInspectionTest(@NotNull Class inspectionClass,
+                                @NotNull String quickFixName,
+                                boolean applyFix,
+                                boolean available) {
+    doInspectionTest(getTestName(false) + ".py", inspectionClass, quickFixName, applyFix, available);
+  }
+
+  protected void doInspectionTest(@TestDataFile @NonNls @NotNull String testFileName,
+                                  @NotNull Class inspectionClass,
+                                  @NonNls @NotNull String quickFixName,
                                   boolean applyFix,
                                   boolean available) {
     doInspectionTest(new String[]{testFileName}, inspectionClass, quickFixName, applyFix, available);
@@ -460,25 +566,25 @@ public class PyQuickFixTest extends PyTestCase {
    * @param available       true if the fix should be available, false if it should be explicitly not available.
    * @throws Exception
    */
-  protected void doInspectionTest(@NonNls String[] testFiles,
-                                  final Class inspectionClass,
-                                  @NonNls String quickFixName,
+  protected void doInspectionTest(@NonNls @NotNull String[] testFiles,
+                                  @NotNull Class inspectionClass,
+                                  @NonNls @NotNull String quickFixName,
                                   boolean applyFix,
                                   boolean available) {
     myFixture.enableInspections(inspectionClass);
     myFixture.configureByFiles(testFiles);
     myFixture.checkHighlighting(true, false, false);
-    final IntentionAction intentionAction = myFixture.findSingleIntention(quickFixName);
+    final List<IntentionAction> intentionActions = myFixture.filterAvailableIntentions(quickFixName);
     if (available) {
-      assertNotNull(intentionAction);
+      assertOneElement(intentionActions);
       if (applyFix) {
-        myFixture.launchAction(intentionAction);
+        myFixture.launchAction(intentionActions.get(0));
 
         myFixture.checkResultByFile(graftBeforeExt(testFiles[0], "_after"));
       }
     }
     else {
-      assertNull(intentionAction);
+      assertEmpty("Quick fix \"" + quickFixName + "\" should not be available", intentionActions);
     }
   }
 

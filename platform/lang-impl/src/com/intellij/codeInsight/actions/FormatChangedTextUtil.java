@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,37 +17,40 @@ package com.intellij.codeInsight.actions;
 
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.Result;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.module.ModifiableModuleModel;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
-import com.intellij.openapi.vcs.ex.LineStatusTracker;
-import com.intellij.openapi.vcs.ex.Range;
-import com.intellij.openapi.vcs.impl.LineStatusTrackerManager;
-import com.intellij.openapi.vcs.impl.LineStatusTrackerManagerI;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDirectory;
-import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.diff.FilesTooBigForDiffException;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.List;
 
-/**
- * Contains utility methods for 'format only changed text' (in terms of VCS changes).
- * 
- * @author Denis Zhdanov
- * @since 12/19/11 10:55 AM
- */
 public class FormatChangedTextUtil {
-  
-  private FormatChangedTextUtil() {
+  public static final Key<CharSequence> TEST_REVISION_CONTENT = Key.create("test.revision.content");
+  protected static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.actions.FormatChangedTextUtil");
+
+  protected FormatChangedTextUtil() {
+  }
+
+  @NotNull
+  public static FormatChangedTextUtil getInstance() {
+    return ServiceManager.getService(FormatChangedTextUtil.class);
   }
 
   /**
@@ -61,32 +64,7 @@ public class FormatChangedTextUtil {
     final VirtualFile virtualFile = file.getVirtualFile();
     if (virtualFile != null) {
       final Change change = ChangeListManager.getInstance(project).getChange(virtualFile);
-      if (change != null && change.getType() == Change.Type.NEW) {
-        return true;
-      }
-    }
-
-    final LineStatusTrackerManagerI manager = LineStatusTrackerManager.getInstance(project);
-    if (manager == null) {
-      return false;
-    }
-    
-    final Document document = PsiDocumentManager.getInstance(project).getDocument(file);
-    if (document == null) {
-      return false;
-    }
-    final LineStatusTracker lineStatusTracker = manager.getLineStatusTracker(document);
-    if (lineStatusTracker == null) {
-      return false;
-    }
-    final List<Range> ranges = lineStatusTracker.getRanges();
-    if (ranges == null || ranges.isEmpty()) {
-      return false;
-    } 
-    for (Range range : ranges) {
-      if (range.getType() != Range.DELETED) {
-        return true;
-      }
+      return change != null;
     }
     return false;
   }
@@ -120,6 +98,14 @@ public class FormatChangedTextUtil {
     return false;
   }
 
+  public static boolean hasChanges(@NotNull VirtualFile[] files, @NotNull Project project) {
+    for (VirtualFile file : files) {
+      if (hasChanges(file, project))
+        return true;
+    }
+    return false;
+  }
+
   /**
    * Allows to answer if any file that belongs to the given module has changes in comparison with VCS.
    * 
@@ -147,7 +133,7 @@ public class FormatChangedTextUtil {
   public static boolean hasChanges(@NotNull final Project project) {
     final ModifiableModuleModel moduleModel = new ReadAction<ModifiableModuleModel>() {
       @Override
-      protected void run(Result<ModifiableModuleModel> result) throws Throwable {
+      protected void run(@NotNull Result<ModifiableModuleModel> result) throws Throwable {
         result.setResult(ModuleManager.getInstance(project).getModifiableModel());
       }
     }.execute().getResultObject();
@@ -164,49 +150,43 @@ public class FormatChangedTextUtil {
     }
   }
 
-  /**
-   * Allows to ask for the changed text of the given file (in comparison with VCS).
-   * 
-   * @param file  target file
-   * @return      collection of changed regions for the given file
-   */
   @NotNull
-  public static Collection<TextRange> getChanges(@NotNull PsiFile file) {
-    final Set<TextRange> defaultResult = Collections.singleton(file.getTextRange());
-    final VirtualFile virtualFile = file.getVirtualFile();
-    if (virtualFile != null) {
-      final Change change = ChangeListManager.getInstance(file.getProject()).getChange(virtualFile);
-      if (change != null && change.getType() == Change.Type.NEW) {
-        return defaultResult;
-      }
+  public static List<PsiFile> getChangedFilesFromDirs(@NotNull Project project, @NotNull List<PsiDirectory> dirs)  {
+    ChangeListManager changeListManager = ChangeListManager.getInstance(project);
+    Collection<Change> changes = ContainerUtil.newArrayList();
+
+    for (PsiDirectory dir : dirs) {
+      changes.addAll(changeListManager.getChangesIn(dir.getVirtualFile()));
     }
 
-    final LineStatusTrackerManagerI manager = LineStatusTrackerManager.getInstance(file.getProject());
-    if (manager == null) {
-      return defaultResult;
-    }
-    final Document document = PsiDocumentManager.getInstance(file.getProject()).getDocument(file);
-    if (document == null) {
-      return defaultResult;
-    }
-    final LineStatusTracker lineStatusTracker = manager.getLineStatusTracker(document);
-    if (lineStatusTracker == null) {
-      return defaultResult;
-    }
-    final List<Range> ranges = lineStatusTracker.getRanges();
-    if (ranges == null || ranges.isEmpty()) {
-      return defaultResult;
-    }
-    
-    List<TextRange> result = new ArrayList<TextRange>();
-    for (Range range : ranges) {
-      if (range.getType() != Range.DELETED) {
-        final RangeHighlighter highlighter = range.getHighlighter();
-        if (highlighter != null) {
-          result.add(new TextRange(highlighter.getStartOffset(), highlighter.getEndOffset()));
-        }
+    return getChangedFiles(project, changes);
+  }
+
+  @NotNull
+  public static List<PsiFile> getChangedFiles(@NotNull final Project project, @NotNull Collection<Change> changes) {
+    Function<Change, PsiFile> changeToPsiFileMapper = new Function<Change, PsiFile>() {
+      private PsiManager myPsiManager = PsiManager.getInstance(project);
+
+      @Override
+      public PsiFile fun(Change change) {
+        VirtualFile vFile = change.getVirtualFile();
+        return vFile != null ? myPsiManager.findFile(vFile) : null;
       }
-    }
-    return result;
+    };
+
+    return ContainerUtil.mapNotNull(changes, changeToPsiFileMapper);
+  }
+
+  @NotNull
+  public List<TextRange> getChangedTextRanges(@NotNull Project project, @NotNull PsiFile file) throws FilesTooBigForDiffException {
+    return ContainerUtil.emptyList();
+  }
+
+  public int calculateChangedLinesNumber(@NotNull Document document, @NotNull CharSequence contentFromVcs) {
+    return -1;
+  }
+
+  public boolean isChangeNotTrackedForFile(@NotNull Project project, @NotNull PsiFile file) {
+    return false;
   }
 }

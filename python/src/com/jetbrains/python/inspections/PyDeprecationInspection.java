@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiPolyVariantReference;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.psi.*;
 import org.jetbrains.annotations.Nls;
@@ -58,7 +59,14 @@ public class PyDeprecationInspection extends PyInspection {
         final PyExpression exceptClass = exceptPart.getExceptClass();
         if (exceptClass != null && "ImportError".equals(exceptClass.getText())) return;
       }
-      PsiElement resolveResult = node.getReference(resolveWithoutImplicits()).resolve();
+      final PsiPolyVariantReference reference = node.getReference(getResolveContext());
+      if (reference == null) return;
+      final PsiElement resolveResult = reference.resolve();
+      final PyFromImportStatement importStatement = PsiTreeUtil.getParentOfType(node, PyFromImportStatement.class);
+      if (importStatement != null) {
+        final PsiElement element = importStatement.resolveImportSource();
+        if (resolveResult != null && element != resolveResult.getContainingFile()) return;
+      }
       String deprecationMessage = null;
       if (resolveResult instanceof PyFunction) {
         deprecationMessage = ((PyFunction) resolveResult).getDeprecationMessage();

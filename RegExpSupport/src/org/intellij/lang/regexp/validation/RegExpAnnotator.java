@@ -21,16 +21,24 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.annotation.Annotation;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
-import org.intellij.lang.regexp.*;
+import com.intellij.util.containers.ContainerUtil;
+import org.intellij.lang.regexp.RegExpLanguageHosts;
+import org.intellij.lang.regexp.RegExpTT;
 import org.intellij.lang.regexp.psi.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.math.BigInteger;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class RegExpAnnotator extends RegExpElementVisitor implements Annotator {
+  private static final Set<String> POSIX_CHARACTER_CLASSES = ContainerUtil.newHashSet(
+    "alnum", "alpha", "ascii", "blank", "cntrl", "digit", "graph", "lower", "print", "punct", "space", "upper", "word", "xdigit");
+  private static final String ILLEGAL_CHARACTER_RANGE_TO_FROM = "Illegal character range (to < from)";
   private AnnotationHolder myHolder;
   private final RegExpLanguageHosts myLanguageHosts;
 
@@ -59,7 +67,8 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
       final Character f = ((RegExpChar)from).getValue();
       if (t != null && f != null) {
         if (t < f) {
-          myHolder.createErrorAnnotation(range, "Illegal character range (to < from)");
+          if (handleSurrogates(range, f, t)) return;
+          myHolder.createErrorAnnotation(range, ILLEGAL_CHARACTER_RANGE_TO_FROM);
         }
         else if (t == f) {
           myHolder.createWarningAnnotation(range, "Redundant character range");
@@ -71,6 +80,44 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
     }
     else if (from.getText().equals(to.getText())) {
       myHolder.createWarningAnnotation(range, "Redundant character range");
+    }
+  }
+
+  private boolean handleSurrogates(RegExpCharRange range, Character f, Character t) {
+    // \ud800\udc00-\udbff\udfff
+    PsiElement prevSibling = range.getPrevSibling();
+    PsiElement nextSibling = range.getNextSibling();
+
+    if (prevSibling instanceof RegExpChar && nextSibling instanceof RegExpChar) {
+      Character prevSiblingValue = ((RegExpChar)prevSibling).getValue();
+      Character nextSiblingValue = ((RegExpChar)nextSibling).getValue();
+
+      if (prevSiblingValue != null && nextSiblingValue != null &&
+          Character.isSurrogatePair(prevSiblingValue, f) && Character.isSurrogatePair(t, nextSiblingValue)) {
+        if (Character.toCodePoint(prevSiblingValue, f) > Character.toCodePoint(t, nextSiblingValue)) {
+          TextRange prevSiblingRange = prevSibling.getTextRange();
+          TextRange nextSiblingRange = nextSibling.getTextRange();
+          TextRange errorRange = new TextRange(prevSiblingRange.getStartOffset(), nextSiblingRange.getEndOffset());
+          myHolder.createErrorAnnotation(errorRange, ILLEGAL_CHARACTER_RANGE_TO_FROM);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @Override
+  public void visitRegExpClass(RegExpClass regExpClass) {
+    final HashSet<Character> seen = new HashSet<Character>();
+    for (RegExpClassElement element : regExpClass.getElements()) {
+      if (!(element instanceof RegExpChar)) {
+        continue;
+      }
+      final RegExpChar regExpChar = (RegExpChar)element;
+      final Character value = regExpChar.getValue();
+      if (value != null && !seen.add(value)) {
+        myHolder.createWarningAnnotation(regExpChar, "Duplicate character '" + regExpChar.getText() + "' in character class");
+      }
     }
   }
 
@@ -104,6 +151,13 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
           registerFix(a, new RemoveRedundantEscapeAction(ch));
         }
       }
+      if (ch.getType() == RegExpChar.Type.HEX) {
+        if (text.charAt(text.length() - 1) == '}') {
+          if (!myLanguageHosts.supportsExtendedHexCharacter(ch)) {
+            myHolder.createErrorAnnotation(ch, "This hex character syntax is not supported");
+          }
+        }
+      }
     }
   }
 
@@ -124,14 +178,14 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
   public void visitRegExpBackref(final RegExpBackref backref) {
     final RegExpGroup group = backref.resolve();
     if (group == null) {
-      final Annotation a = myHolder.createErrorAnnotation(backref, "Unresolved backreference");
+      final Annotation a = myHolder.createErrorAnnotation(backref, "Unresolved back reference");
       if (a != null) {
         // IDEA-9381
         a.setHighlightType(ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
       }
     }
     else if (PsiTreeUtil.isAncestor(group, backref, true)) {
-      myHolder.createWarningAnnotation(backref, "Backreference is nested into the capturing group it refers to");
+      myHolder.createWarningAnnotation(backref, "Back reference is nested into the capturing group it refers to");
     }
   }
 
@@ -163,17 +217,17 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
   }
 
   @Override
-  public void visitRegExpPyNamedGroupRef(RegExpPyNamedGroupRef groupRef) {
-    /* the named group itself will be highlighted as unsupported; no need to highlight reference as well
-    RegExpLanguageHost host = findRegExpHost(groupRef);
-    if (host == null || !host.supportsPythonNamedGroups()) {
+  public void visitRegExpNamedGroupRef(RegExpNamedGroupRef groupRef) {
+    if (!myLanguageHosts.supportsNamedGroupRefSyntax(groupRef)) {
       myHolder.createErrorAnnotation(groupRef, "This named group reference syntax is not supported");
       return;
     }
-    */
+    if (groupRef.getGroupName() == null) {
+      return;
+    }
     final RegExpGroup group = groupRef.resolve();
     if (group == null) {
-      final Annotation a = myHolder.createErrorAnnotation(groupRef, "Unresolved backreference");
+      final Annotation a = myHolder.createErrorAnnotation(groupRef, "Unresolved named group reference");
       if (a != null) {
         // IDEA-9381
         a.setHighlightType(ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
@@ -215,7 +269,7 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
       String min = count.getMin();
       String max = count.getMax();
       if (max.equals(min)) {
-        if ("1".equals(max)) { // TODO: is this safe when reluctant or possesive modifier is present?
+        if ("1".equals(max)) { // TODO: is this safe when reluctant or possessive modifier is present?
           final Annotation a = myHolder.createWeakWarningAnnotation(quantifier, "Single repetition");
           registerFix(a, new SimplifyQuantifierAction(quantifier, null));
         }
@@ -255,6 +309,17 @@ public final class RegExpAnnotator extends RegExpElementVisitor implements Annot
     if (quantifier.getType() == RegExpQuantifier.Type.POSSESSIVE) {
       if (!myLanguageHosts.supportsPossessiveQuantifiers(quantifier)) {
         myHolder.createErrorAnnotation(quantifier, "Nested quantifier in regexp");
+      }
+    }
+  }
+
+  @Override
+  public void visitPosixBracketExpression(RegExpPosixBracketExpression posixBracketExpression) {
+    final String className = posixBracketExpression.getClassName();
+    if (!POSIX_CHARACTER_CLASSES.contains(className)) {
+      final Annotation annotation = myHolder.createErrorAnnotation(posixBracketExpression, "Unknown POSIX character class");
+      if (annotation != null) {
+        annotation.setHighlightType(ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
       }
     }
   }

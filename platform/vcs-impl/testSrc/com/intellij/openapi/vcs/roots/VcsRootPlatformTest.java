@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,6 @@ import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
 import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory;
@@ -52,11 +51,9 @@ import java.util.HashSet;
 import static com.intellij.openapi.vcs.Executor.cd;
 import static com.intellij.openapi.vcs.Executor.mkdir;
 
-
-/**
- * @author Nadya Zabrodina
- */
 public abstract class VcsRootPlatformTest extends UsefulTestCase {
+
+  public static final String DOT_MOCK = ".mock";
 
   private VcsRootChecker myExtension;
   @NotNull protected ProjectLevelVcsManagerImpl myVcsManager;
@@ -69,11 +66,6 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
   private RootModelImpl myRootModel;
   protected static final Collection<File> myFilesToDelete = new HashSet<File>();
   protected IdeaProjectTestFixture myProjectFixture;
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  protected VcsRootPlatformTest() {
-    PlatformTestCase.initPlatformLangPrefix();
-  }
 
   @Override
   protected void setUp() throws Exception {
@@ -88,6 +80,7 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
       .getInstance());
     myRootModel = ((ModuleRootManagerImpl)ModuleRootManager.getInstance(module)).getRootModel();
     mkdir(myRepositoryFolderName);
+    myProjectRoot.refresh(false, true);
     myRepository = myProjectRoot.findChild(myRepositoryFolderName);
     myVcs = new MockAbstractVcs(myProject);
     myVcsManager = (ProjectLevelVcsManagerImpl)ProjectLevelVcsManager.getInstance(myProject);
@@ -100,17 +93,18 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
 
       @Override
       public boolean isRoot(@NotNull String path) {
-        return new File(path, ".mock").exists();
+        return new File(path, DOT_MOCK).exists();
       }
 
       @Override
       public boolean isVcsDir(@Nullable String path) {
-        return path != null && path.toLowerCase().endsWith(".mock");
+        return path != null && path.toLowerCase().endsWith(DOT_MOCK);
       }
     };
     point.registerExtension(myExtension);
     myVcsManager.registerVcs(myVcs);
     myVcsName = myVcs.getName();
+    myRepository.refresh(false, true);
   }
 
   private static ExtensionPoint<VcsRootChecker> getExtensionPoint() {
@@ -119,13 +113,17 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
 
   @Override
   protected void tearDown() throws Exception {
-    getExtensionPoint().unregisterExtension(myExtension);
-    myVcsManager.unregisterVcs(myVcs);
-    for (File file : myFilesToDelete) {
-      delete(file);
+    try {
+      getExtensionPoint().unregisterExtension(myExtension);
+      myVcsManager.unregisterVcs(myVcs);
+      for (File file : myFilesToDelete) {
+        delete(file);
+      }
+      myProjectFixture.tearDown();
     }
-    myProjectFixture.tearDown();
-    super.tearDown();
+    finally {
+      super.tearDown();
+    }
   }
 
   private static void delete(File file) {
@@ -148,6 +146,7 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
     createProjectStructure(myProject, contentRoots);
     if (!contentRoots.isEmpty()) {
       for (String root : contentRoots) {
+        myProjectRoot.refresh(false, true);
         VirtualFile f = myProjectRoot.findFileByRelativePath(root);
         if (f != null) {
           myRootModel.addContentEntry(f);
@@ -161,6 +160,7 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
       cd(project.getBaseDir().getPath());
       File f = new File(project.getBaseDir().getPath(), path);
       f.mkdirs();
+      LocalFileSystem.getInstance().refreshAndFindFileByIoFile(f);
     }
   }
 
@@ -176,7 +176,7 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
     myFilesToDelete.add(moduleFile);
     return new WriteAction<Module>() {
       @Override
-      protected void run(Result<Module> result) throws Throwable {
+      protected void run(@NotNull Result<Module> result) throws Throwable {
         final VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(moduleFile);
         assert virtualFile != null;
         Module module = ModuleManager.getInstance(project).newModule(virtualFile.getPath(), moduleType.getId());
@@ -202,10 +202,11 @@ public abstract class VcsRootPlatformTest extends UsefulTestCase {
     for (String path : mockRoots) {
       File file = new File(projectDir, path);
       file.mkdirs();
-      File mockDir = new File(file, ".mock");
+      File mockDir = new File(file, DOT_MOCK);
       mockDir.mkdirs();
       myFilesToDelete.add(mockDir);
       mockDir.deleteOnExit();
+      LocalFileSystem.getInstance().refreshAndFindFileByIoFile(mockDir);
     }
   }
 

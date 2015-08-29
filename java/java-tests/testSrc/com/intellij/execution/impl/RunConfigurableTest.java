@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.execution.impl;
 
 import com.intellij.execution.application.ApplicationConfigurationType;
@@ -5,6 +20,7 @@ import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.UnknownConfigurationType;
 import com.intellij.execution.junit.JUnitConfigurationType;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.Trinity;
@@ -55,20 +71,24 @@ public class RunConfigurableTest extends LightIdeaTestCase {
     myTree = myConfigurable.myTree;
     myRoot = myConfigurable.myRoot;
     myModel = myConfigurable.myTreeModel;
-    doExpand();
   }
 
   @Override
   protected void tearDown() throws Exception {
-    myConfigurable.disposeUIResources();
-    myConfigurable = null;
-    myTree = null;
-    myRoot = null;
-    myModel = null;
-    super.tearDown();
+    try {
+      if (myConfigurable != null) myConfigurable.disposeUIResources();
+      myConfigurable = null;
+      myTree = null;
+      myRoot = null;
+      myModel = null;
+    }
+    finally {
+      super.tearDown();
+    }
   }
 
   public void testDND() throws Exception {
+    doExpand();
     int[] never = {-1, 0, 14, 22, 23, 999};
     for (int i = -1; i < 17; i++) {
       for (int j : never) {
@@ -112,7 +132,7 @@ public class RunConfigurableTest extends LightIdeaTestCase {
   private void doExpand() {
     List<DefaultMutableTreeNode> toExpand = new ArrayList<DefaultMutableTreeNode>();
     RunConfigurable.collectNodesRecursively(myRoot, toExpand, FOLDER);
-    assertEquals(toExpand.size(), 5);
+    assertEquals(5, toExpand.size());
     List<DefaultMutableTreeNode> toExpand2 = new ArrayList<DefaultMutableTreeNode>();
     RunConfigurable.collectNodesRecursively(myRoot, toExpand2, CONFIGURATION_TYPE);
     toExpand.addAll(toExpand2);
@@ -146,6 +166,7 @@ public class RunConfigurableTest extends LightIdeaTestCase {
   }
 
   public void testMoveUpDown() {
+    doExpand();
     checkPositionToMove(0, 1, null);
     checkPositionToMove(2, 1, Trinity.create(2, 3, BELOW));
     checkPositionToMove(2, -1, null);
@@ -176,11 +197,11 @@ public class RunConfigurableTest extends LightIdeaTestCase {
   }
 
   private static RunManagerImpl createRunManager(Element element) throws InvalidDataException {
-    RunManagerImpl runManager = new RunManagerImpl(getProject(), PropertiesComponent.getInstance());
+    Project project = getProject();
+    RunManagerImpl runManager = new RunManagerImpl(project, PropertiesComponent.getInstance(project));
     runManager.initializeConfigurationTypes(new ConfigurationType[]{ApplicationConfigurationType.getInstance(),
       JUnitConfigurationType.getInstance(), UnknownConfigurationType.INSTANCE});
-    runManager.initComponent();
-    runManager.readExternal(element);
+    runManager.loadState(element);
     return runManager;
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.xml.*;
@@ -76,9 +77,16 @@ public class ValidateXmlActionHandler {
     myErrorReporter = errorReporter;
   }
 
-  public VirtualFile getFile(String publicId, String systemId) {
+  public VirtualFile getProblemFile(SAXParseException ex) {
+    String publicId = ex.getPublicId();
+    String systemId = ex.getSystemId();
     if (publicId == null) {
       if (systemId != null) {
+        if (systemId.startsWith("file:/")) {
+          VirtualFile file = VirtualFileManager.getInstance()
+            .findFileByUrl(systemId.startsWith("file://") ? systemId : systemId.replace("file:/", "file://"));
+          if (file != null) return file;
+        }
         final String path = myXmlResourceResolver.getPathByPublicId(systemId);
         if (path != null) return UriUtil.findRelativeFile(path,null);
         final PsiFile file = myXmlResourceResolver.resolve(null, systemId);
@@ -95,7 +103,7 @@ public class ValidateXmlActionHandler {
 
   public String buildMessageString(SAXParseException ex) {
     String msg = "(" + ex.getLineNumber() + ":" + ex.getColumnNumber() + ") " + ex.getMessage();
-    final VirtualFile file = getFile(ex.getPublicId(), ex.getSystemId());
+    final VirtualFile file = getProblemFile(ex);
 
     if ( file != null && !file.equals(myFile.getVirtualFile())) {
       msg = file.getName() + ":" + msg;
@@ -138,24 +146,29 @@ public class ValidateXmlActionHandler {
   public void doParse() {
     try {
       myParser.parse(new InputSource(new StringReader(myFile.getText())), new DefaultHandler() {
+        @Override
         public void warning(SAXParseException e) throws SAXException {
           if (myErrorReporter.isUniqueProblem(e)) myErrorReporter.processError(e, ProblemType.WARNING);
         }
 
+        @Override
         public void error(SAXParseException e) throws SAXException {
           if (myErrorReporter.isUniqueProblem(e)) myErrorReporter.processError(e, ProblemType.ERROR);
         }
 
+        @Override
         public void fatalError(SAXParseException e) throws SAXException {
           if (myErrorReporter.isUniqueProblem(e)) myErrorReporter.processError(e, ProblemType.FATAL);
         }
 
+        @Override
         public InputSource resolveEntity(String publicId, String systemId) {
           final PsiFile psiFile = myXmlResourceResolver.resolve(null, systemId);
           if (psiFile == null) return null;
           return new InputSource(new StringReader(psiFile.getText()));
         }
 
+        @Override
         public void startDocument() throws SAXException {
           super.startDocument();
           myParser.setProperty(
@@ -173,7 +186,7 @@ public class ValidateXmlActionHandler {
         }
 
         myFile.putUserData(DEPENDENT_FILES_KEY, files);
-        myFile.putUserData(GRAMMAR_POOL_TIME_STAMP_KEY, new Long(calculateTimeStamp(files, myProject)));
+        myFile.putUserData(GRAMMAR_POOL_TIME_STAMP_KEY, calculateTimeStamp(files, myProject));
       }
        myFile.putUserData(KNOWN_NAMESPACES_KEY, getNamespaces(myFile));
     }

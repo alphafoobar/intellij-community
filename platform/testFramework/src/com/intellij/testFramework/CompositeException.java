@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,10 @@ public class CompositeException extends Exception {
     else {
       myExceptions.add(e);
     }
+  }
+
+  public void addAll(@NotNull List<Throwable> errors) {
+    myExceptions.addAll(errors);
   }
 
   public boolean isEmpty() {
@@ -130,7 +134,8 @@ public class CompositeException extends Exception {
       sb.append(line);
 
       line = exceptionProcessor.fun(exception);
-      if (!line.endsWith("\n")) line += '\n';
+      if (line == null) line = "null\n";
+      else if (!line.endsWith("\n")) line += '\n';
       stringProcessor.process(line);
       sb.append(line);
     }
@@ -140,5 +145,9 @@ public class CompositeException extends Exception {
     sb.append(line);
 
     return sb.toString();
+  }
+
+  public void throwIfNotEmpty() throws CompositeException {
+    if (!isEmpty()) throw this;
   }
 }

@@ -35,7 +35,7 @@ public class SmartType17CompletionTest extends LightFixtureCompletionTestCase {
   @NotNull
   @Override
   protected LightProjectDescriptor getProjectDescriptor() {
-    return JAVA_LATEST;
+    return JAVA_1_7;
   }
 
   public void testDiamondCollapsed() throws Exception {
@@ -60,7 +60,11 @@ public class SmartType17CompletionTest extends LightFixtureCompletionTestCase {
 
   public void testTryWithResourcesNoSemicolon() { doTest(); }
 
-  public void testTryWithResourcesThrowsException() { doTest(); }
+  public void testTryWithResourcesThrowsException() {
+    configureByFile("/" + getTestName(false) + ".java");
+    myFixture.type('\n');
+    checkResultByFile("/" + getTestName(false) + "-out.java");
+  }
 
   public void testDiamondPresentation() {
     configureByFile("/" + getTestName(false) + ".java");

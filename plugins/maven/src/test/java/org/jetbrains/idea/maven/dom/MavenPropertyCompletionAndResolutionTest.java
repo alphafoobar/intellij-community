@@ -27,6 +27,7 @@ import com.intellij.psi.xml.XmlTag;
 import org.jetbrains.idea.maven.dom.model.MavenDomProfiles;
 import org.jetbrains.idea.maven.dom.model.MavenDomProfilesModel;
 import org.jetbrains.idea.maven.dom.model.MavenDomSettingsModel;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.vfs.MavenPropertiesVirtualFileSystem;
 
 import java.util.Arrays;
@@ -329,7 +330,9 @@ public class MavenPropertyCompletionAndResolutionTest extends MavenDomTestCase {
 
                      "<name>${<caret>project.build.finalName}</name>");
 
-    assertResolved(myProjectPom, findTag(getMavenGeneralSettings().getEffectiveSuperPom(), "project.build.finalName"));
+    VirtualFile effectiveSuperPom = getMavenGeneralSettings().getEffectiveSuperPom();
+    assertNotNull(effectiveSuperPom);
+    assertResolved(myProjectPom, findTag(effectiveSuperPom, "project.build.finalName"));
   }
 
   public void testHandleResolutionRecursion() throws Exception {
@@ -933,7 +936,7 @@ public class MavenPropertyCompletionAndResolutionTest extends MavenDomTestCase {
     assertContain(variants, "project.groupId");
     assertDoNotContain(variants, "groupId");
   }
-  
+
   public void testCompletingAfterOpenBraceAndSomeTextWithDot() throws Exception {
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
@@ -955,7 +958,7 @@ public class MavenPropertyCompletionAndResolutionTest extends MavenDomTestCase {
   }
 
   private void readWithProfiles(String... profiles) {
-    myProjectsManager.setExplicitProfiles(Arrays.asList(profiles));
+    myProjectsManager.setExplicitProfiles(new MavenExplicitProfiles(Arrays.asList(profiles)));
     waitForReadingCompletion();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,9 @@ import org.jetbrains.annotations.NotNull;
 public abstract class ActionPlaces {
   public static final String UNKNOWN = "unknown";
 
+  /**
+   * consider to use {@link #isMainMenuOrActionSearch(String)} instead
+   */
   public static final String MAIN_MENU = "MainMenu";
   public static final String MAIN_TOOLBAR = "MainToolbar";
   public static final String EDITOR_POPUP = "EditorPopup";
@@ -35,6 +38,7 @@ public abstract class ActionPlaces {
   public static final String COMMANDER_POPUP = "CommanderPopup";
   public static final String COMMANDER_TOOLBAR = "CommanderToolbar";
   public static final String CONTEXT_TOOLBAR = "ContextToolbar";
+  public static final String TOOLWINDOW_TITLE = "ToolwindowTitle";
 
   public static final String PROJECT_VIEW_POPUP = "ProjectViewPopup";
   public static final String PROJECT_VIEW_TOOLBAR = "ProjectViewToolbar";
@@ -45,6 +49,7 @@ public abstract class ActionPlaces {
   public static final String STATUS_BAR_PLACE = "StatusBarPlace";
 
   public static final String SCOPE_VIEW_POPUP = "ScopeViewPopup";
+  public static final String ACTION_SEARCH = "GoToAction";
 
   public static final String TESTTREE_VIEW_POPUP = "TestTreeViewPopup";
   public static final String TESTTREE_VIEW_TOOLBAR = "TestTreeViewToolbar";
@@ -63,7 +68,9 @@ public abstract class ActionPlaces {
   public static final String USAGE_VIEW_TOOLBAR = "UsageViewToolbar";
   public static final String STRUCTURE_VIEW_POPUP = "StructureViewPopup";
   public static final String STRUCTURE_VIEW_TOOLBAR = "StructureViewToolbar";
-  public static final String NAVIGATION_BAR = "NavBar";
+  public static final String NAVIGATION_BAR_POPUP = "NavBar";
+  @Deprecated public static final String NAVIGATION_BAR = NAVIGATION_BAR_POPUP;
+  public static final String NAVIGATION_BAR_TOOLBAR = "NavBarToolbar";
 
   public static final String TODO_VIEW_POPUP = "TodoViewPopup";
   public static final String TODO_VIEW_TOOLBAR = "TodoViewToolbar";
@@ -74,6 +81,7 @@ public abstract class ActionPlaces {
   public static final String ANT_MESSAGES_TOOLBAR = "AntMessagesToolbar";
   public static final String ANT_EXPLORER_POPUP = "AntExplorerPopup";
   public static final String ANT_EXPLORER_TOOLBAR = "AntExplorerToolbar";
+  public static final String JS_BUILD_TOOL_POPUP = "JavaScriptBuildTool";
 
   //todo: probably these context should be splitted into several contexts
   public static final String CODE_INSPECTION = "CodeInspection";
@@ -109,9 +117,14 @@ public abstract class ActionPlaces {
   public static final String PHING_EXPLORER_POPUP = "PhingExplorerPopup";
   public static final String PHING_EXPLORER_TOOLBAR = "PhingExplorerToolbar";
   public static final String DOCK_MENU = "DockMenu";
-  public static String PHING_MESSAGES_TOOLBAR = "PhingMessagesToolbar";
+  public static final String PHING_MESSAGES_TOOLBAR = "PhingMessagesToolbar";
 
   public static final String CHANGES_LOCAL_DIFF_SETTINGS = "CHANGES_LOCAL_DIFF_SETTINGS";
+  public static final String DIFF_TOOLBAR = "DiffPopup";
+
+  public static final String V8_CPU_PROFILING_POPUP = "V8_CPU_PROFILING_POPUP";
+  public static final String V8_HEAP_PROFILING_POPUP = "V8_HEAP_PROFILING_POPUP";
+  public static final String V8_HEAP_DIFF_PROFILING_POPUP = "V8_HEAP_DIFF_PROFILING_POPUP";
 
   private static final String[] ourToolbarPlaces = {EDITOR_TOOLBAR, PROJECT_VIEW_TOOLBAR, TESTTREE_VIEW_TOOLBAR, MAIN_TOOLBAR,
     ANT_EXPLORER_TOOLBAR, ANT_MESSAGES_TOOLBAR, COMPILER_MESSAGES_TOOLBAR, TODO_VIEW_TOOLBAR, STRUCTURE_VIEW_TOOLBAR, USAGE_VIEW_TOOLBAR,
@@ -124,6 +137,10 @@ public abstract class ActionPlaces {
     return ArrayUtil.find(ourToolbarPlaces, place) != -1;
   }
 
+  public static boolean isMainMenuOrActionSearch(String place) {
+    return MAIN_MENU.equals(place) || ACTION_SEARCH.equals(place);
+  }
+
   private static final String[] ourPopupPlaces = {EDITOR_POPUP, EDITOR_TAB_POPUP, COMMANDER_POPUP,
     PROJECT_VIEW_POPUP, FAVORITES_VIEW_POPUP, SCOPE_VIEW_POPUP, TESTTREE_VIEW_POPUP, TESTSTATISTICS_VIEW_POPUP, TYPE_HIERARCHY_VIEW_POPUP,
     METHOD_HIERARCHY_VIEW_POPUP, CALL_HIERARCHY_VIEW_POPUP, J2EE_ATTRIBUTES_VIEW_POPUP, J2EE_VIEW_POPUP, USAGE_VIEW_POPUP,
@@ -131,7 +148,8 @@ public abstract class ActionPlaces {
     FILEVIEW_POPUP, CHECKOUT_POPUP, LVCS_DIRECTORY_HISTORY_POPUP, GUI_DESIGNER_EDITOR_POPUP, GUI_DESIGNER_COMPONENT_TREE_POPUP,
     GUI_DESIGNER_PROPERTY_INSPECTOR_POPUP,
     CREATE_EJB_POPUP, CHANGES_VIEW_POPUP, REMOTE_HOST_VIEW_POPUP, REMOTE_HOST_DIALOG_POPUP, TFS_TREE_POPUP,
-    ACTION_PLACE_VCS_QUICK_LIST_POPUP_ACTION, PHING_EXPLORER_POPUP, NAVIGATION_BAR
+    ACTION_PLACE_VCS_QUICK_LIST_POPUP_ACTION, PHING_EXPLORER_POPUP, NAVIGATION_BAR_POPUP, JS_BUILD_TOOL_POPUP, DIFF_TOOLBAR,
+    V8_CPU_PROFILING_POPUP, V8_HEAP_PROFILING_POPUP, V8_HEAP_PROFILING_POPUP
   };
 
   public static boolean isPopupPlace(@NotNull String place) {

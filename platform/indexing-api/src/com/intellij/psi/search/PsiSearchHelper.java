@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.util.Processor;
+import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -37,7 +38,7 @@ public interface PsiSearchHelper {
     private SERVICE() {
     }
 
-    public static PsiSearchHelper getInstance(Project project) {
+    public static PsiSearchHelper getInstance(@NotNull Project project) {
       return ServiceManager.getService(project, PsiSearchHelper.class);
     }
   }
@@ -57,7 +58,6 @@ public interface PsiSearchHelper {
    *
    * @param identifier  the identifier to search.
    * @param searchScope the scope in which occurrences are searched.
-   * @param processor
    * @return false if processor returned false, true otherwise
    */
   boolean processCommentsContainingIdentifier(@NotNull String identifier, @NotNull SearchScope searchScope, @NotNull Processor<PsiElement> processor);
@@ -85,7 +85,7 @@ public interface PsiSearchHelper {
                                       @NotNull GlobalSearchScope searchScope);
 
   /**
-   * Passes all occurrences of the specified full-qualified class name in plain text context in the
+   * Passes all occurrences of the specified fully qualified class name in plain text context in the
    * use scope of the specified element to the specified processor.
    *
    * @param originalElement the element whose use scope is used to restrict the search scope,
@@ -125,7 +125,7 @@ public interface PsiSearchHelper {
                                   final boolean caseSensitively);
 
   /**
-   * Passes all files containing the specified word in {@link UsageSearchContext#IN_PLAIN_TEXT code}
+   * Passes all files containing the specified word in {@link UsageSearchContext#IN_PLAIN_TEXT plain text}
    * context to the specified processor.
    *
    * @param word      the word to search.
@@ -166,13 +166,13 @@ public interface PsiSearchHelper {
   boolean processElementsWithWord(@NotNull TextOccurenceProcessor processor,
                                   @NotNull SearchScope searchScope,
                                   @NotNull String text,
-                                  short searchContext,
+                                  @MagicConstant(flagsFromClass = UsageSearchContext.class) short searchContext,
                                   boolean caseSensitive);
 
   boolean processElementsWithWord(@NotNull TextOccurenceProcessor processor,
                                   @NotNull SearchScope searchScope,
                                   @NotNull String text,
-                                  short searchContext,
+                                  @MagicConstant(flagsFromClass = UsageSearchContext.class) short searchContext,
                                   boolean caseSensitive,
                                   boolean processInjectedPsi);
 
@@ -188,7 +188,7 @@ public interface PsiSearchHelper {
   @NotNull
   SearchCostResult isCheapEnoughToSearch(@NotNull String name,
                                          @NotNull GlobalSearchScope scope,
-                                         @Nullable PsiFile fileToIgnoreOccurencesIn,
+                                         @Nullable PsiFile fileToIgnoreOccurrencesIn,
                                          @Nullable ProgressIndicator progress);
 
   enum SearchCostResult {

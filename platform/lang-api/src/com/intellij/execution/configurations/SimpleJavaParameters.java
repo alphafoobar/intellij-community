@@ -39,10 +39,16 @@ public class SimpleJavaParameters extends SimpleProgramParameters {
   private final ParametersList myVmParameters = new ParametersList();
   private Charset myCharset = CharsetToolkit.getDefaultSystemCharset();
   private boolean myUseDynamicClasspath;
+  private boolean myUseClasspathJar = false;
   private boolean myUseDynamicVMOptions;
-  
+  private String myJarPath;
+
   public String getMainClass() {
     return myMainClass;
+  }
+
+  public String getJarPath() {
+    return myJarPath;
   }
 
   /**
@@ -61,6 +67,9 @@ public class SimpleJavaParameters extends SimpleProgramParameters {
 
   public void setMainClass(@NonNls final String mainClass) {
     myMainClass = mainClass;
+  }
+  public void setJarPath(@NonNls final String jarPath) {
+    myJarPath = jarPath;
   }
 
   public PathsList getClassPath() {
@@ -90,6 +99,14 @@ public class SimpleJavaParameters extends SimpleProgramParameters {
 
   public boolean isDynamicVMOptions() {
     return myUseDynamicVMOptions;
+  }
+
+  public boolean isUseClasspathJar() {
+    return myUseClasspathJar;
+  }
+
+  public void setUseClasspathJar(boolean useClasspathJar) {
+    myUseClasspathJar = useClasspathJar;
   }
 
   public OSProcessHandler createOSProcessHandler() throws ExecutionException {

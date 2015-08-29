@@ -43,7 +43,7 @@ public class CommandParametersResolutionModule extends BaseCommandRuntimeModule 
     if (command.getWorkingDirectory() == null) {
       command.setWorkingDirectory(resolveWorkingDirectory(command));
     }
-    command.setConfigDir(myAuthCallback.getSpecialConfigDir());
+    command.setConfigDir(myAuthenticationService.getSpecialConfigDir());
     command.saveOriginalParameters();
   }
 
@@ -53,7 +53,7 @@ public class CommandParametersResolutionModule extends BaseCommandRuntimeModule 
     InfoCommandRepositoryProvider infoCommandProvider = new InfoCommandRepositoryProvider(myVcs, command.getTarget());
 
     Repository repository = urlMappingProvider.get();
-    if (repository == null && !SvnCommandName.info.equals(command.getName())) {
+    if (repository == null && !command.isLocalInfo()) {
       repository = infoCommandProvider.get();
     }
 
@@ -65,7 +65,7 @@ public class CommandParametersResolutionModule extends BaseCommandRuntimeModule 
     SvnTarget target = command.getTarget();
     File workingDirectory = target.isFile() ? target.getFile() : null;
     // TODO: Do we really need search existing parent - or just take parent directory if target is file???
-    workingDirectory = CommandUtil.correctUpToExistingParent(workingDirectory);
+    workingDirectory = CommandUtil.findExistingParent(workingDirectory);
 
     if (workingDirectory == null) {
       workingDirectory =

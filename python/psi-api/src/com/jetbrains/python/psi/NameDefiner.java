@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ public interface NameDefiner extends PsiElement {
       for (PyElement elt : it) {
         if (elt != null) {
           // qualified refs don't match by last name, and we're not checking FQNs here
-          if (elt instanceof PyQualifiedExpression && ((PyQualifiedExpression)elt).getQualifier() != null) continue;
+          if (elt instanceof PyQualifiedExpression && ((PyQualifiedExpression)elt).isQualified()) continue;
           if (name.equals(elt.getName())) { // plain name matches
             ret = elt;
             break;

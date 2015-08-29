@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,6 @@ import java.util.List;
 class NewChannelDialog extends AbstractUpdateDialog {
   private final UpdateChannel myChannel;
   private final BuildInfo myLatestBuild;
-  private boolean myShowUpgradeButton = false;
-  private String myLicenseInfo = null;
 
   public NewChannelDialog(@NotNull UpdateChannel channel) {
     super(false);
@@ -41,22 +39,7 @@ class NewChannelDialog extends AbstractUpdateDialog {
     myLatestBuild = channel.getLatestBuild();
     assert myLatestBuild != null;
 
-    LicensingFacade facade = LicensingFacade.getInstance();
-    if (facade != null) {
-      if (!myChannel.getLicensing().equals(UpdateChannel.LICENSING_EAP)) {
-        Boolean paidUpgrade = facade.isPaidUpgrade(myChannel.getMajorVersion(), myLatestBuild.getReleaseDate());
-        if (paidUpgrade == Boolean.TRUE) {
-          myShowUpgradeButton = true;
-          myLicenseInfo = IdeBundle.message("updates.channel.key.needed", myChannel.getEvalDays());
-        }
-        else if (paidUpgrade == Boolean.FALSE) {
-          myLicenseInfo = IdeBundle.message("updates.channel.existing.key");
-        }
-      }
-      else {
-        myLicenseInfo = IdeBundle.message("updates.channel.bundled.key");
-      }
-    }
+    initLicensingInfo(myChannel, myLatestBuild);
 
     init();
   }
@@ -71,13 +54,13 @@ class NewChannelDialog extends AbstractUpdateDialog {
   protected Action[] createActions() {
     List<Action> actions = ContainerUtil.newArrayList(getOKAction());
 
-    if (myShowUpgradeButton) {
+    if (myPaidUpgrade) {
       actions.add(new AbstractAction(IdeBundle.message("updates.buy.online.button")) {
         @Override
         public void actionPerformed(ActionEvent e) {
           LicensingFacade facade = LicensingFacade.getInstance();
           assert facade != null;
-          BrowserUtil.launchBrowser(facade.getUpgradeUrl());
+          BrowserUtil.browse(facade.getUpgradeUrl());
           doCancelAction();
         }
       });
@@ -108,7 +91,7 @@ class NewChannelDialog extends AbstractUpdateDialog {
 
   @Override
   protected void doOKAction() {
-    BrowserUtil.launchBrowser(myChannel.getHomePageUrl());
+    BrowserUtil.browse(myChannel.getHomePageUrl());
     super.doOKAction();
   }
 
@@ -119,10 +102,10 @@ class NewChannelDialog extends AbstractUpdateDialog {
 
     private NewChannelPanel() {
       String message = IdeBundle.message("updates.channel.name.message", myChannel.getName(), myLatestBuild.getMessage());
-      configureMessageArea(myMessageArea, message, null, new BrowserHyperlinkListener());
+      configureMessageArea(myMessageArea, message, null, BrowserHyperlinkListener.INSTANCE);
 
       if (myLicenseInfo != null) {
-        configureMessageArea(myLicenseArea, myLicenseInfo, null, new BrowserHyperlinkListener());
+        configureMessageArea(myLicenseArea, myLicenseInfo, null, BrowserHyperlinkListener.INSTANCE);
       }
       else {
         myLicenseArea.setVisible(false);

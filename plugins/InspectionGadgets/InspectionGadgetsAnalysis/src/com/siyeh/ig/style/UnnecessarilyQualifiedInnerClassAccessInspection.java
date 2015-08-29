@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2011 Bas Leijdekkers
+ * Copyright 2010-2014 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.siyeh.ig.style;
 
+import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ui.SingleCheckboxOptionsPanel;
@@ -32,8 +33,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
-public class UnnecessarilyQualifiedInnerClassAccessInspection
-  extends BaseInspection {
+public class UnnecessarilyQualifiedInnerClassAccessInspection extends BaseInspection implements CleanupLocalInspectionTool {
 
   @SuppressWarnings({"PublicField"})
   public boolean ignoreReferencesNeedingImport = false;
@@ -99,13 +99,30 @@ public class UnnecessarilyQualifiedInnerClassAccessInspection
       }
       final PsiClass aClass = (PsiClass)target;
       ImportUtils.addImportIfNeeded(aClass, element);
-      element.delete();
+      final String shortName = aClass.getName();
+      if (isReferenceToTarget(shortName, aClass, parent)) {
+        element.delete();
+      }
     }
   }
 
   @Override
   public BaseInspectionVisitor buildVisitor() {
     return new UnnecessarilyQualifiedInnerClassAccessVisitor();
+  }
+
+  private static boolean isReferenceToTarget(String referenceText, @NotNull PsiClass target, PsiElement context) {
+    final PsiJavaCodeReferenceElement reference =
+      JavaPsiFacade.getElementFactory(target.getProject()).createReferenceFromText(referenceText, context);
+    final JavaResolveResult[] results = reference.multiResolve(false);
+    if (results.length == 0) {
+      return true;
+    }
+    if (results.length > 1) {
+      return false;
+    }
+    final JavaResolveResult result = results[0];
+    return result.isAccessible() && target.equals(result.getElement());
   }
 
   private class UnnecessarilyQualifiedInnerClassAccessVisitor
@@ -139,9 +156,8 @@ public class UnnecessarilyQualifiedInnerClassAccessInspection
       if (referenceClass == null) {
         return;
       }
-      if (!referenceClass.equals(qualifierTarget) ||
-          PsiTreeUtil.isAncestor(referenceClass.getModifierList(),
-                                 reference, true)) {
+      final PsiElement brace = referenceClass.getLBrace();
+      if (!referenceClass.equals(qualifierTarget) || brace != null && brace.getTextOffset() > reference.getTextOffset()) {
         if (ignoreReferencesNeedingImport &&
             (PsiTreeUtil.isAncestor(referenceClass, qualifierTarget,
                                     true) ||
@@ -173,17 +189,6 @@ public class UnnecessarilyQualifiedInnerClassAccessInspection
     public void visitReferenceExpression(
       PsiReferenceExpression expression) {
       visitReferenceElement(expression);
-    }
-
-    private boolean isReferenceToTarget(String referenceText, PsiClass target, PsiElement context) {
-      final PsiManager manager = target.getManager();
-      final JavaPsiFacade facade =
-        JavaPsiFacade.getInstance(manager.getProject());
-      final PsiResolveHelper resolveHelper = facade.getResolveHelper();
-      final PsiClass referencedClass =
-        resolveHelper.resolveReferencedClass(referenceText,
-                                             context);
-      return manager.areElementsEquivalent(target, referencedClass);
     }
 
     private boolean isInImportOrPackage(PsiElement element) {

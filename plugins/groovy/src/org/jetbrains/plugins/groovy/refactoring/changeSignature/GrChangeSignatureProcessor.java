@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,25 +54,25 @@ public class GrChangeSignatureProcessor extends ChangeSignatureProcessorBase {
 
   @NotNull
   @Override
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new ChangeSignatureViewDescriptor(getChangeInfo().getMethod());
   }
 
   @Override
-  protected void refreshElements(PsiElement[] elements) {
+  protected void refreshElements(@NotNull PsiElement[] elements) {
     boolean condition = elements.length == 1 && elements[0] instanceof PsiMethod;
     LOG.assertTrue(condition);
     getChangeInfo().updateMethod((PsiMethod)elements[0]);
   }
 
   @Override
-  protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull Ref<UsageInfo[]> refUsages) {
     MultiMap<PsiElement, String> conflictDescriptions = new MultiMap<PsiElement, String>();
     for (ChangeSignatureUsageProcessor usageProcessor : ChangeSignatureUsageProcessor.EP_NAME.getExtensions()) {
       final MultiMap<PsiElement, String> conflicts = usageProcessor.findConflicts(myChangeInfo, refUsages);
       for (PsiElement key : conflicts.keySet()) {
         Collection<String> collection = conflictDescriptions.get(key);
-        if (collection.size() == 0) collection = new HashSet<String>();
+        if (collection.isEmpty()) collection = new HashSet<String>();
         collection.addAll(conflicts.get(key));
         conflictDescriptions.put(key, collection);
       }
@@ -88,8 +88,7 @@ public class GrChangeSignatureProcessor extends ChangeSignatureProcessorBase {
       }
 
       ConflictsDialog dialog = prepareConflictsDialog(conflictDescriptions, usagesIn);
-      dialog.show();
-      if (!dialog.isOK()) {
+      if (!dialog.showAndGet()) {
         if (dialog.isShowConflicts()) prepareSuccessful();
         return false;
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,16 +42,18 @@ public class RegistryValue {
   private Double myDoubleCachedValue;
   private Boolean myBooleanCachedValue;
 
-  RegistryValue(Registry registry, String key) {
+  RegistryValue(@NotNull Registry registry, @NotNull String key) {
     myRegistry = registry;
     myKey = key;
   }
 
+  @NotNull
   public String getKey() {
     return myKey;
   }
 
 
+  @NotNull
   public String asString() {
     final String value = get(myKey, null, true);
     assert value != null : myKey;
@@ -68,7 +70,14 @@ public class RegistryValue {
 
   public int asInteger() {
     if (myIntCachedValue == null) {
-      myIntCachedValue = Integer.valueOf(get(myKey, "0", true));
+      try {
+        myIntCachedValue = Integer.valueOf(get(myKey, "0", true));
+      }
+      catch (NumberFormatException e) {
+        String bundleValue = getBundleValue(myKey, true);
+        assert bundleValue != null;
+        myIntCachedValue = Integer.valueOf(bundleValue);
+      }
     }
 
     return myIntCachedValue.intValue();
@@ -76,7 +85,14 @@ public class RegistryValue {
 
   public double asDouble() {
     if (myDoubleCachedValue == null) {
-      myDoubleCachedValue = Double.valueOf(get(myKey, "0.0", true));
+      try {
+        myDoubleCachedValue = Double.valueOf(get(myKey, "0.0", true));
+      }
+      catch (NumberFormatException e) {
+        String bundleValue = getBundleValue(myKey, true);
+        assert bundleValue != null;
+        myDoubleCachedValue = Double.valueOf(bundleValue);
+      }
     }
 
     return myDoubleCachedValue.doubleValue();
@@ -97,6 +113,7 @@ public class RegistryValue {
     return defaultValue;
   }
 
+  @NotNull
   public String getDescription() {
     return get(myKey + ".description", "", false);
   }
@@ -106,45 +123,43 @@ public class RegistryValue {
   }
 
   public boolean isChangedFromDefault() {
-    return !asString().equals(getBundleValue(myKey, false));
+    return isChangedFromDefault(asString());
   }
 
-  private String get(String key, String defaultValue, boolean isValue) {
+  boolean isChangedFromDefault(@NotNull String newValue) {
+    return !newValue.equals(getBundleValue(myKey, false));
+  }
+
+  private String get(@NotNull String key, String defaultValue, boolean isValue) throws MissingResourceException {
     if (isValue) {
       if (myStringCachedValue == null) {
         myStringCachedValue = _get(key, defaultValue, isValue);
-      }
-      if (isBoolean()) {
-        myStringCachedValue = Boolean.valueOf(myStringCachedValue).toString();
+        if (isBoolean()) {
+          myStringCachedValue = Boolean.valueOf(myStringCachedValue).toString();
+        }
       }
       return myStringCachedValue;
     }
-    else {
-      return _get(key, defaultValue, isValue);
-    }
+    return _get(key, defaultValue, isValue);
   }
 
-  private String _get(String key, String defaultValue, boolean mustExistInBundle) {
+  private String _get(@NotNull String key, String defaultValue, boolean mustExistInBundle) throws MissingResourceException {
     final String userValue = myRegistry.getUserProperties().get(key);
-    if (userValue == null) {
-      String systemProperty = System.getProperty(key);
-      if (systemProperty != null) {
-        return systemProperty;
-      }
-      final String bundleValue = getBundleValue(key, mustExistInBundle);
-      if (bundleValue != null) {
-        return bundleValue;
-      }
-      else {
-        return defaultValue;
-      }
-    }
-    else {
+    if (userValue != null) {
       return userValue;
     }
+    String systemProperty = System.getProperty(key);
+    if (systemProperty != null) {
+      return systemProperty;
+    }
+    final String bundleValue = getBundleValue(key, mustExistInBundle);
+    if (bundleValue != null) {
+      return bundleValue;
+    }
+    return defaultValue;
   }
 
-  private String getBundleValue(String key, boolean mustExist) {
+  private static String getBundleValue(@NotNull String key, boolean mustExist) throws MissingResourceException {
     try {
       return Registry.getBundle().getString(key);
     }
@@ -215,6 +230,6 @@ public class RegistryValue {
   }
 
   public boolean isBoolean() {
-    return "true".equals(myStringCachedValue) || "false".equals(myStringCachedValue);
+    return "true".equals(asString()) || "false".equals(asString());
   }
 }

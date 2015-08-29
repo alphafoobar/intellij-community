@@ -17,10 +17,11 @@ package com.intellij.codeInsight.editorActions.smartEnter;
 
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
+
+import static com.intellij.psi.PsiModifier.*;
 
 /**
  * Created by IntelliJ IDEA.
@@ -35,8 +36,7 @@ public class MissingMethodBodyFixer implements Fixer {
     if (!(psiElement instanceof PsiMethod)) return;
     PsiMethod method = (PsiMethod) psiElement;
     final PsiClass containingClass = method.getContainingClass();
-    if (containingClass == null || containingClass.isInterface()
-        || method.hasModifierProperty(PsiModifier.ABSTRACT) || method.hasModifierProperty(PsiModifier.NATIVE)) return;
+    if (!shouldHaveBody(method)) return;
 
     final PsiCodeBlock body = method.getBody();
     final Document doc = editor.getDocument();
@@ -57,11 +57,19 @@ public class MissingMethodBodyFixer implements Fixer {
       }
       return;
     }
-    int endOffset = method.getTextRange().getEndOffset();
-    if (StringUtil.endsWithChar(method.getText(), ';')) {
-      doc.deleteString(endOffset - 1, endOffset);
-      endOffset--;
+    int endOffset = method.getThrowsList().getTextRange().getEndOffset();
+    if (endOffset < doc.getTextLength() && doc.getCharsSequence().charAt(endOffset) == ';') {
+      doc.deleteString(endOffset, endOffset + 1);
     }
     doc.insertString(endOffset, "{\n}");
+  }
+
+  static boolean shouldHaveBody(PsiMethod method) {
+    PsiClass containingClass = method.getContainingClass();
+    if (containingClass == null) return false;
+    if (method.hasModifierProperty(PRIVATE)) return true;
+    if (method.hasModifierProperty(ABSTRACT) || method.hasModifierProperty(NATIVE)) return false;
+    if (containingClass.isInterface() && !method.hasModifierProperty(DEFAULT) && !method.hasModifierProperty(STATIC)) return false;
+    return true;
   }
 }

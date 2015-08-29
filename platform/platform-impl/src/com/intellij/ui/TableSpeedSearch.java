@@ -20,13 +20,13 @@ import com.intellij.util.PairFunction;
 import com.intellij.util.containers.Convertor;
 
 import javax.swing.*;
-import javax.swing.table.TableModel;
 import java.util.ListIterator;
 
 public class TableSpeedSearch extends SpeedSearchBase<JTable> {
   private static final PairFunction<Object, Cell, String> TO_STRING = new PairFunction<Object, Cell, String>() {
+    @Override
     public String fun(Object o, Cell cell) {
-      return o == null ? "" : o.toString();
+      return o == null || o instanceof Boolean ? "" : o.toString();
     }
   };
   private final PairFunction<Object, Cell, String> myToStringConvertor;
@@ -46,11 +46,16 @@ public class TableSpeedSearch extends SpeedSearchBase<JTable> {
 
   public TableSpeedSearch(JTable table, final PairFunction<Object, Cell, String> toStringConvertor) {
     super(table);
+
     myToStringConvertor = toStringConvertor;
+    // edit on F2 & double click, do not interfere with quick search
+    table.putClientProperty("JTable.autoStartsEdit", Boolean.FALSE);
   }
 
+  @Override
   protected boolean isSpeedSearchEnabled() {
-    return !getComponent().isEditing() && super.isSpeedSearchEnabled();
+    boolean tableIsNotEmpty = myComponent.getRowCount() != 0 && myComponent.getColumnCount() != 0;
+    return tableIsNotEmpty && !myComponent.isEditing() && super.isSpeedSearchEnabled();
   }
 
   @Override
@@ -58,38 +63,46 @@ public class TableSpeedSearch extends SpeedSearchBase<JTable> {
     return new MyListIterator(startingIndex);
   }
 
+  @Override
   protected int getElementCount() {
-    final TableModel tableModel = myComponent.getModel();
-    return tableModel.getRowCount() * tableModel.getColumnCount();
+    return myComponent.getRowCount() * myComponent.getColumnCount();
   }
 
+  @Override
   protected void selectElement(Object element, String selectedText) {
-    final int index = ((Integer)element).intValue();
-    final TableModel model = myComponent.getModel();
-    final int row = index / model.getColumnCount();
-    final int col = index % model.getColumnCount();
-    myComponent.getSelectionModel().setSelectionInterval(row, row);
-    myComponent.getColumnModel().getSelectionModel().setSelectionInterval(col, col);
-    TableUtil.scrollSelectionToVisible(myComponent);
+    if (element instanceof Integer) {
+      final int index = ((Integer)element).intValue();
+      final int row = index / myComponent.getColumnCount();
+      final int col = index % myComponent.getColumnCount();
+      myComponent.getSelectionModel().setSelectionInterval(row, row);
+      myComponent.getColumnModel().getSelectionModel().setSelectionInterval(col, col);
+      TableUtil.scrollSelectionToVisible(myComponent);
+    }
+    else {
+      myComponent.getSelectionModel().clearSelection();
+      myComponent.getColumnModel().getSelectionModel().clearSelection();
+    }
   }
 
+  @Override
   protected int getSelectedIndex() {
     final int row = myComponent.getSelectedRow();
     final int col = myComponent.getSelectedColumn();
     // selected row is not enough as we want to select specific cell in a large multi-column table
-    return row > -1 && col > -1 ? row * myComponent.getModel().getColumnCount() + col : -1;
+    return row > -1 && col > -1 ? row * myComponent.getColumnCount() + col : -1;
   }
 
+  @Override
   protected Object[] getAllElements() {
     throw new UnsupportedOperationException("Not implemented");
   }
 
+  @Override
   protected String getElementText(Object element) {
     final int index = ((Integer)element).intValue();
-    final TableModel model = myComponent.getModel();
-    int row = myComponent.convertRowIndexToModel(index / model.getColumnCount());
-    int col = myComponent.convertColumnIndexToModel(index % model.getColumnCount());
-    Object value = model.getValueAt(row, col);
+    int row = index / myComponent.getColumnCount();
+    int col = index % myComponent.getColumnCount();
+    Object value = myComponent.getValueAt(row, col);
     return myToStringConvertor.fun(value, new Cell(row, col));
   }
 
@@ -102,38 +115,47 @@ public class TableSpeedSearch extends SpeedSearchBase<JTable> {
       myCursor = startingIndex < 0 ? total : startingIndex;
     }
 
+    @Override
     public boolean hasNext() {
       return myCursor < getElementCount();
     }
 
+    @Override
     public Object next() {
       return myCursor++;
     }
 
+    @Override
     public boolean hasPrevious() {
       return myCursor > 0;
     }
 
+    @Override
     public Object previous() {
       return (myCursor--) - 1;
     }
 
+    @Override
     public int nextIndex() {
       return myCursor;
     }
 
+    @Override
     public int previousIndex() {
       return myCursor - 1;
     }
 
+    @Override
     public void remove() {
       throw new AssertionError("Not Implemented");
     }
 
+    @Override
     public void set(Object o) {
       throw new AssertionError("Not Implemented");
     }
 
+    @Override
     public void add(Object o) {
       throw new AssertionError("Not Implemented");
     }

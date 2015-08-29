@@ -13,13 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.intellij.codeInsight.completion;
-
-import com.intellij.openapi.fileTypes.StdFileTypes;
-import com.intellij.psi.CommonClassNames;
-import com.intellij.psi.JavaCodeFragmentFactory;
+package com.intellij.codeInsight.completion
+import com.intellij.openapi.fileTypes.StdFileTypes
+import com.intellij.psi.CommonClassNames
+import com.intellij.psi.JavaCodeFragmentFactory
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiFile
-import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import com.intellij.psi.PsiType
+import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
+import com.intellij.util.PairFunction
 
 /**
  * @author peter
@@ -97,5 +100,53 @@ public class FragmentCompletionTest extends LightCodeInsightFixtureTestCase {
     myFixture.checkResult("o instanceof String && ((String) o).substring(<caret>)");
   }
 
+  public void testNoGenericQualifierCastingWithRuntimeType() throws Throwable {
+    final ctxText = "import java.util.*; class Bar {{ Map<Integer,Integer> map = new HashMap<Integer,Integer>(); map=null; }}"
+    final ctxFile = createLightFile(StdFileTypes.JAVA, ctxText)
+    final context = ctxFile.findElementAt(ctxText.indexOf("map="))
+    assert context
+    
+    PsiFile file = JavaCodeFragmentFactory.getInstance(project).createExpressionCodeFragment("map.entry<caret>", context, null, true);
+    myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+    myFixture.file.putCopyableUserData(JavaCompletionUtil.DYNAMIC_TYPE_EVALUATOR, new PairFunction<PsiExpression, CompletionParameters, PsiType>() {
+      @Override
+      PsiType fun(PsiExpression t, CompletionParameters v) {
+        return JavaPsiFacade.getElementFactory(t.project).createTypeByFQClassName(CommonClassNames.JAVA_UTIL_HASH_MAP)
+      }
+    })
+    assert !myFixture.completeBasic()
+    myFixture.checkResult("map.entrySet()<caret>");
+  }
+
+  public void "test no static after instance in expression fragment"() {
+    def ctxFile = myFixture.addClass("package foo; public class Class {{\n int a = 2; }}").containingFile
+    def context = ctxFile.findElementAt(ctxFile.text.indexOf('int'))
+
+    def text = "Double.valueOf(2).v<caret>"
+    PsiFile file = JavaCodeFragmentFactory.getInstance(project).createExpressionCodeFragment(text, context, null, true);
+    myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+    myFixture.completeBasic()
+    assert !myFixture.lookupElementStrings.contains('valueOf')
+  }
+
+  public void "test no class keywords in expression fragment"() {
+    def ctxFile = myFixture.addClass("package foo; public class Class {{\n int a = 2; }}").containingFile
+    def context = ctxFile.findElementAt(ctxFile.text.indexOf('int'))
+
+    PsiFile file = JavaCodeFragmentFactory.getInstance(project).createExpressionCodeFragment("", context, null, true);
+    myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+    myFixture.completeBasic()
+    assert !myFixture.lookupElementStrings.contains('enum')
+    assert !myFixture.lookupElementStrings.contains('class')
+  }
+
+  public void "test annotation context"() {
+    def ctxFile = myFixture.addClass("class Class { void foo(int context) { @Anno int a; } }").containingFile
+    def context = ctxFile.findElementAt(ctxFile.text.indexOf('Anno'))
+    PsiFile file = JavaCodeFragmentFactory.getInstance(project).createExpressionCodeFragment("c<caret>", context, null, true);
+    myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+    myFixture.completeBasic()
+    assert myFixture.lookupElementStrings.contains('context')
+  }
 
 }

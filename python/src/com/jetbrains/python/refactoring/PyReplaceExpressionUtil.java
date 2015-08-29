@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.jetbrains.python.refactoring;
 
-import com.intellij.lang.ASTNode;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
@@ -39,40 +38,64 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 
 import static com.jetbrains.python.PyTokenTypes.*;
-import static com.jetbrains.python.inspections.PyStringFormatParser.filterSubstitutions;
-import static com.jetbrains.python.inspections.PyStringFormatParser.parseNewStyleFormat;
-import static com.jetbrains.python.inspections.PyStringFormatParser.parsePercentFormat;
+import static com.jetbrains.python.inspections.PyStringFormatParser.*;
 
 /**
  * @author Dennis.Ushakov
  */
 public class PyReplaceExpressionUtil implements PyElementTypes {
+  /**
+   * This marker is added in cases where valid selection nevertheless breaks existing expression.
+   * It can happen in cases like (here {@code <start> and <end>} represent selection boundaries):
+   * <ul>
+   *   <li>Selection conflicts with operator precedence: {@code n = 1 * <start>2 + 3<end>}</li>
+   *   <li>Selection conflicts with operator associativity: {@code n = 1 + <start>2 + 3<end>}</li>
+   *   <li>Part of string literal is selected: {@code s = 'green <start>eggs<end> and ham'}</li>
+   * </ul>
+   */
   public static final Key<Pair<PsiElement, TextRange>> SELECTION_BREAKS_AST_NODE =
     new Key<Pair<PsiElement, TextRange>>("python.selection.breaks.ast.node");
 
   private PyReplaceExpressionUtil() {}
 
+  /**
+   * @param oldExpr old expression that will be substituted
+   * @param newExpr new expression to substitute with
+   * @return whether new expression should be wrapped in parenthesis to preserve original semantics
+   */
   public static boolean isNeedParenthesis(@NotNull final PyElement oldExpr, @NotNull final PyElement newExpr) {
     final PyElement parentExpr = (PyElement)oldExpr.getParent();
     if (parentExpr instanceof PyArgumentList) {
       return newExpr instanceof PyTupleExpression;
     }
-    if (!(parentExpr instanceof PyExpression)) {
+    if (parentExpr instanceof PyParenthesizedExpression || !(parentExpr instanceof PyExpression)) {
       return false;
     }
-    int newPriority = getExpressionPriority(newExpr);
-    int parentPriority = getExpressionPriority(parentExpr);
+    final int newPriority = getExpressionPriority(newExpr);
+    final int parentPriority = getExpressionPriority(parentExpr);
     if (parentPriority > newPriority) {
       return true;
-    } else if (parentPriority == newPriority && parentPriority != 0) {
-      if (parentExpr instanceof PyBinaryExpression) {
-        PyBinaryExpression binaryExpression = (PyBinaryExpression)parentExpr;
-        if (isNotAssociative(binaryExpression) && oldExpr.equals(binaryExpression.getRightExpression())) {
-          return true;
-        }
+    }
+    else if (parentPriority == newPriority && parentPriority != 0 && parentExpr instanceof PyBinaryExpression) {
+      final PyBinaryExpression binaryExpression = (PyBinaryExpression)parentExpr;
+      if (isNotAssociative(binaryExpression) && oldExpr == getLeastPrioritySide(binaryExpression)) {
+        return true;
       }
     }
+    else if (newExpr instanceof PyConditionalExpression && parentExpr instanceof PyConditionalExpression) {
+      return true;
+    }
     return false;
+  }
+
+  @Nullable
+  private static PyExpression getLeastPrioritySide(@NotNull PyBinaryExpression expression) {
+    if (expression.isOperator("**")) {
+      return expression.getLeftExpression();
+    }
+    else {
+      return expression.getRightExpression();
+    }
   }
 
   public static PsiElement replaceExpression(@NotNull final PsiElement oldExpression,
@@ -128,7 +151,7 @@ public class PyReplaceExpressionUtil implements PyElementTypes {
         return replaceSubstringWithDictFormatting(oldExpression, quotes, prefix, suffix, formatValue, newText);
       }
       else {
-        final TypeEvalContext context = TypeEvalContext.userInitiated(oldExpression.getContainingFile());
+        final TypeEvalContext context = TypeEvalContext.userInitiated(oldExpression.getProject(), oldExpression.getContainingFile());
         final PyType valueType = context.getType(formatValue);
         final PyBuiltinCache builtinCache = PyBuiltinCache.getInstance(oldExpression);
         final PyType tupleType = builtinCache.getTupleType();
@@ -251,9 +274,9 @@ public class PyReplaceExpressionUtil implements PyElementTypes {
     final int n = members.length;
     final int i = Math.min(n, Math.max(0, getPositionInRanges(PyStringFormatParser.substitutionsToRanges(substitutions), textRange)));
     final boolean last = i == n;
-    final ASTNode trailingComma = PyPsiUtils.getNextComma(members[n - 1].getNode());
+    final PsiElement trailingComma = PyPsiUtils.getNextComma(members[n - 1]);
     if (trailingComma != null) {
-      tupleFormatValue.getNode().removeChild(trailingComma);
+      trailingComma.delete();
     }
     final PyExpression before = last ? null : members[i];
     PyUtil.addListNode(tupleFormatValue, newExpression, before != null ? before.getNode() : null, i == 0 || !last, last, !last);
@@ -412,30 +435,35 @@ public class PyReplaceExpressionUtil implements PyElementTypes {
   private static boolean isNotAssociative(@NotNull final PyBinaryExpression binaryExpression) {
     final IElementType opType = getOperationType(binaryExpression);
     return COMPARISON_OPERATIONS.contains(opType) || binaryExpression instanceof PySliceExpression ||
-           opType == DIV || opType == PERC || opType == EXP;
+           opType == DIV || opType == FLOORDIV || opType == PERC || opType == EXP || opType == MINUS;
   }
 
   private static int getExpressionPriority(PyElement expr) {
     int priority = 0;
-    if (expr instanceof PySubscriptionExpression || expr instanceof PySliceExpression ||
+    if (expr instanceof PyReferenceExpression ||
+        expr instanceof PySubscriptionExpression ||
+        expr instanceof PySliceExpression ||
         expr instanceof PyCallExpression) priority = 1;
-    if (expr instanceof PyPrefixExpression) {
+    else if (expr instanceof PyPrefixExpression) {
       final IElementType opType = getOperationType(expr);
       if (opType == PLUS || opType == MINUS || opType == TILDE) priority = 2;
-      if (opType == NOT_KEYWORD) priority = 10;
+      if (opType == NOT_KEYWORD) priority = 11;
     }
-    if (expr instanceof PyBinaryExpression) {
+    else if (expr instanceof PyBinaryExpression) {
       final IElementType opType = getOperationType(expr);
       if (opType == EXP) priority =  3;
-      if (opType == MULT || opType == DIV || opType == PERC) priority =  4;
+      if (opType == MULT || opType == AT || opType == DIV || opType == PERC || opType == FLOORDIV) priority =  4;
       if (opType == PLUS || opType == MINUS) priority =  5;
       if (opType == LTLT || opType == GTGT) priority = 6;
       if (opType == AND) priority = 7;
-      if (opType == OR) priority = 8;
-      if (COMPARISON_OPERATIONS.contains(opType)) priority = 9;
-      if (opType == AND_KEYWORD) priority = 11;
+      if (opType == XOR) priority = 8;
+      if (opType == OR) priority = 9;
+      if (COMPARISON_OPERATIONS.contains(opType)) priority = 10;
+      if (opType == AND_KEYWORD) priority = 12;
+      if (opType == OR_KEYWORD) priority = 13;
     }
-    if (expr instanceof PyLambdaExpression) priority = 12; 
+    else if (expr instanceof PyConditionalExpression) priority = 14;
+    else if (expr instanceof PyLambdaExpression) priority = 15;
 
     return -priority;
   }

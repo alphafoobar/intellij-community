@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.codeInspection.miscGenerics;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
 import com.intellij.codeInsight.FileModificationService;
@@ -23,6 +24,7 @@ import com.intellij.codeInspection.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
+import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.util.InlineUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
@@ -30,6 +32,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -92,7 +95,8 @@ public class RedundantArrayForVarargsCallInspection extends GenericsInspectionTo
           return;
         }
         PsiMethod method = (PsiMethod)element;
-        if (!method.isVarArgs()) {
+        if (!method.isVarArgs() ||
+            AnnotationUtil.isAnnotated(method, Collections.singletonList("java.lang.invoke.MethodHandle.PolymorphicSignature"))) {
           return;
         }
         PsiParameter[] parameters = method.getParameterList().getParameters();
@@ -108,8 +112,13 @@ public class RedundantArrayForVarargsCallInspection extends GenericsInspectionTo
         PsiParameter lastParameter = parameters[args.length - 1];
         PsiType lastParamType = lastParameter.getType();
         LOG.assertTrue(lastParamType instanceof PsiEllipsisType);
-        if (!(lastArg instanceof PsiNewExpression) ||
-            !substitutor.substitute(((PsiEllipsisType)lastParamType).toArrayType()).equals(lastArg.getType())) {
+        if (!(lastArg instanceof PsiNewExpression)) {
+          return;
+        }
+        final PsiType substitutedLastParamType = substitutor.substitute(((PsiEllipsisType)lastParamType).toArrayType());
+        final PsiType lastArgType = lastArg.getType();
+        if (lastArgType == null || !lastArgType.equals(substitutedLastParamType) && 
+                                   !lastArgType.equals(TypeConversionUtil.erasure(substitutedLastParamType))) {
           return;
         }
         PsiExpression[] initializers = getInitializers((PsiNewExpression)lastArg);

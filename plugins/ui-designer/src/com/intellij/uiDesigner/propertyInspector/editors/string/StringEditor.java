@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,9 +26,9 @@ import com.intellij.ui.DocumentAdapter;
 import com.intellij.uiDesigner.UIDesignerBundle;
 import com.intellij.uiDesigner.designSurface.GuiEditor;
 import com.intellij.uiDesigner.lw.StringDescriptor;
-import com.intellij.uiDesigner.propertyInspector.PropertyEditor;
-import com.intellij.uiDesigner.propertyInspector.UIDesignerToolWindowManager;
+import com.intellij.uiDesigner.propertyInspector.DesignerToolWindowManager;
 import com.intellij.uiDesigner.propertyInspector.InplaceContext;
+import com.intellij.uiDesigner.propertyInspector.PropertyEditor;
 import com.intellij.uiDesigner.propertyInspector.properties.IntroStringProperty;
 import com.intellij.uiDesigner.radComponents.RadComponent;
 import com.intellij.util.ui.UIUtil;
@@ -170,7 +170,7 @@ public final class StringEditor extends PropertyEditor<StringDescriptor> {
     public void actionPerformed(final ActionEvent e) {
       // 1. Show editor dialog
 
-      final GuiEditor guiEditor = UIDesignerToolWindowManager.getInstance(myProject).getActiveFormEditor();
+      final GuiEditor guiEditor = DesignerToolWindowManager.getInstance(myProject).getActiveFormEditor();
       LOG.assertTrue(guiEditor != null);
 
       final StringEditorDialog dialog = new StringEditorDialog(
@@ -187,14 +187,13 @@ public final class StringEditor extends PropertyEditor<StringDescriptor> {
             if (!guiEditor.ensureEditable()) {
               return;
             }
-            dialog.show();
-            if(!dialog.isOK()){
+            if (!dialog.showAndGet()) {
               return;
             }
 
             // 2. Apply new value
             final StringDescriptor descriptor = dialog.getDescriptor();
-            if(descriptor == null){
+            if (descriptor == null) {
               return;
             }
             setValue(descriptor);

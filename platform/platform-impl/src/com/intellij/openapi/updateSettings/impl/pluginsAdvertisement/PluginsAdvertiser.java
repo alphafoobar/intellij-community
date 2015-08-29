@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,7 @@ import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.plugins.*;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.notification.*;
-import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationInfo;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.fileTypes.FileTypeFactory;
@@ -36,13 +33,18 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
-import com.intellij.openapi.updateSettings.impl.*;
+import com.intellij.openapi.updateSettings.impl.PluginDownloader;
+import com.intellij.openapi.updateSettings.impl.UpdateSettings;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.reference.SoftReference;
 import com.intellij.ui.EditorNotifications;
-import com.intellij.util.net.HttpConfigurable;
+import com.intellij.util.Function;
+import com.intellij.util.PlatformUtils;
+import com.intellij.util.containers.MultiMap;
+import com.intellij.util.io.HttpRequests;
 import com.intellij.util.xmlb.XmlSerializer;
 import com.intellij.util.xmlb.annotations.MapAnnotation;
 import com.intellij.util.xmlb.annotations.Tag;
@@ -55,18 +57,21 @@ import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
 import java.util.*;
 
 public class PluginsAdvertiser implements StartupActivity {
   @NonNls public static final String IGNORE_ULTIMATE_EDITION = "ignoreUltimateEdition";
   private static final Logger LOG = Logger.getInstance("#" + PluginsAdvertiser.class.getName());
-  private static final String FEATURE_IMPLEMENTATIONS_URL = "http://plugins.jetbrains.com/feature/getImplementations?";
+  private static final String FEATURE_IMPLEMENTATIONS_URL = "https://plugins.jetbrains.com/feature/getImplementations?";
   private static final String CASHED_EXTENSIONS = "extensions.xml";
 
+  public static final String IDEA_ULTIMATE_EDITION = "IntelliJ IDEA Ultimate Edition";
   public static final String ULTIMATE_EDITION_SUGGESTION = "Do not suggest Ultimate Edition";
-  public static final String CHECK_ULTIMATE_EDITION_TITLE = "Check IntelliJ IDEA Ultimate Edition";
+  public static final String CHECK_ULTIMATE_EDITION_TITLE = "Check " + IDEA_ULTIMATE_EDITION;
+  public static final String DISPLAY_ID = "Plugins Suggestion";
+  public static final NotificationGroup NOTIFICATION_GROUP = new NotificationGroup(DISPLAY_ID, NotificationDisplayType.STICKY_BALLOON, true);
+
+  private static SoftReference<KnownExtensions> ourKnownExtensions = new SoftReference<KnownExtensions>(null);
 
   public static List<Plugin> retrieve(UnknownFeature unknownFeature) {
     final String featureType = unknownFeature.getFeatureType();
@@ -76,32 +81,25 @@ public class PluginsAdvertiser implements StartupActivity {
                                        "featureType=" + featureType +
                                        "&implementationName=" + implementationName.replaceAll("#", "%23") +
                                        "&build=" + buildNumber;
-    try {
-      HttpURLConnection connection = HttpConfigurable.getInstance().openHttpConnection(pluginRepositoryUrl);
-      connection.connect();
-      final InputStreamReader streamReader = new InputStreamReader(connection.getInputStream());
-      try {
-        final JsonReader jsonReader = new JsonReader(streamReader);
+    return HttpRequests.request(pluginRepositoryUrl).connect(new HttpRequests.RequestProcessor<List<Plugin>>() {
+      @Override
+      public List<Plugin> process(@NotNull HttpRequests.Request request) throws IOException {
+        final JsonReader jsonReader = new JsonReader(request.getReader());
         jsonReader.setLenient(true);
         final JsonElement jsonRootElement = new JsonParser().parse(jsonReader);
         final List<Plugin> result = new ArrayList<Plugin>();
         for (JsonElement jsonElement : jsonRootElement.getAsJsonArray()) {
           final JsonObject jsonObject = jsonElement.getAsJsonObject();
           final JsonElement pluginId = jsonObject.get("pluginId");
+          final JsonElement pluginName = jsonObject.get("pluginName");
           final JsonElement bundled = jsonObject.get("bundled");
-          result.add(new Plugin(PluginId.getId(StringUtil.unquoteString(pluginId.toString())), 
+          result.add(new Plugin(PluginId.getId(StringUtil.unquoteString(pluginId.toString())),
+                                pluginName != null ? StringUtil.unquoteString(pluginName.toString()) : null,
                                 Boolean.parseBoolean(StringUtil.unquoteString(bundled.toString()))));
         }
         return result;
       }
-      finally {
-        streamReader.close();
-      }
-    }
-    catch (IOException e) {
-      LOG.info(e);
-      return null;
-    }
+    }, null, LOG);
   }
 
   private static Map<String, Set<Plugin>> loadSupportedExtensions(@NotNull List<IdeaPluginDescriptor> allPlugins) {
@@ -110,12 +108,10 @@ public class PluginsAdvertiser implements StartupActivity {
       availableIds.put(plugin.getPluginId().getIdString(), plugin);
     }
     final String pluginRepositoryUrl = FEATURE_IMPLEMENTATIONS_URL + "featureType=" + FileTypeFactory.FILE_TYPE_FACTORY_EP.getName();
-    try {
-      HttpURLConnection connection = HttpConfigurable.getInstance().openHttpConnection(pluginRepositoryUrl);
-      connection.connect();
-      final InputStreamReader streamReader = new InputStreamReader(connection.getInputStream());
-      try {
-        final JsonReader jsonReader = new JsonReader(streamReader);
+    return HttpRequests.request(pluginRepositoryUrl).connect(new HttpRequests.RequestProcessor<Map<String, Set<Plugin>>>() {
+      @Override
+      public Map<String, Set<Plugin>> process(@NotNull HttpRequests.Request request) throws IOException {
+        final JsonReader jsonReader = new JsonReader(request.getReader());
         jsonReader.setLenient(true);
         final JsonElement jsonRootElement = new JsonParser().parse(jsonReader);
         final Map<String, Set<Plugin>> result = new HashMap<String, Set<Plugin>>();
@@ -131,8 +127,12 @@ public class PluginsAdvertiser implements StartupActivity {
           final IdeaPluginDescriptor loadedPlugin = PluginManager.getPlugin(PluginId.getId(pluginId));
           if (loadedPlugin != null && loadedPlugin.isEnabled()) continue;
 
-          if (loadedPlugin != null && fromServerPluginDescription != null && 
-              StringUtil.compareVersionNumbers(loadedPlugin.getVersion(), fromServerPluginDescription.getVersion()) >= 0) continue;
+          if (loadedPlugin != null && fromServerPluginDescription != null &&
+              StringUtil.compareVersionNumbers(loadedPlugin.getVersion(), fromServerPluginDescription.getVersion()) >= 0) {
+            continue;
+          }
+
+          if (fromServerPluginDescription != null && PluginManagerCore.isBrokenPlugin(fromServerPluginDescription)) continue;
 
           final JsonElement ext = jsonObject.get("implementationName");
           final String extension = StringUtil.unquoteString(ext.toString());
@@ -141,19 +141,13 @@ public class PluginsAdvertiser implements StartupActivity {
             pluginIds = new HashSet<Plugin>();
             result.put(extension, pluginIds);
           }
-          pluginIds.add(new Plugin(PluginId.getId(pluginId), isBundled));
+          final JsonElement pluginNameElement = jsonObject.get("pluginName");
+          pluginIds.add(new Plugin(PluginId.getId(pluginId), pluginNameElement != null ? StringUtil.unquoteString(pluginNameElement.toString()) : null, isBundled));
         }
         saveExtensions(result);
         return result;
       }
-      finally {
-        streamReader.close();
-      }
-    }
-    catch (Throwable e) {
-      LOG.info(e);
-      return null;
-    }
+    }, null, LOG);
   }
 
   public static void ensureDeleted() {
@@ -161,11 +155,14 @@ public class PluginsAdvertiser implements StartupActivity {
   }
 
   public static KnownExtensions loadExtensions() {
+    KnownExtensions knownExtensions = ourKnownExtensions.get();
+    if (knownExtensions != null) return knownExtensions;
     try {
       File file = getExtensionsFile();
       if (file.isFile()) {
-        final Document document = JDOMUtil.loadDocument(file);
-        return XmlSerializer.deserialize(document, KnownExtensions.class);
+        knownExtensions = XmlSerializer.deserialize(JDOMUtil.load(file), KnownExtensions.class);
+        ourKnownExtensions = new SoftReference<KnownExtensions>(knownExtensions);
+        return knownExtensions;
       }
     }
     catch (Exception e) {
@@ -187,7 +184,7 @@ public class PluginsAdvertiser implements StartupActivity {
   }
 
   public static void openDownloadPage() {
-    BrowserUtil.open(ApplicationInfo.getInstance().getCompanyURL());    
+    BrowserUtil.browse(ApplicationInfo.getInstance().getCompanyURL());
   }
 
   static void enablePlugins(Project project, final Collection<IdeaPluginDescriptor> disabledPlugins) {
@@ -214,54 +211,97 @@ public class PluginsAdvertiser implements StartupActivity {
     return null;
   }
 
-  static boolean hasBundledNotInstalledPlugin(Collection<Plugin> plugins) {
+  static List<String> hasBundledPluginToInstall(Collection<Plugin> plugins) {
+    if (PlatformUtils.isIdeaUltimate()) return null;
+    final List<String> bundled = new ArrayList<String>();
     for (Plugin plugin : plugins) {
       if (plugin.myBundled && PluginManager.getPlugin(PluginId.getId(plugin.myPluginId)) == null) {
-        return true;
+        bundled.add(plugin.myPluginName != null ? plugin.myPluginName : plugin.myPluginId);
       }
     }
-    return false;
+    return bundled.isEmpty() ? null : bundled;
+  }
+
+  public static void installAndEnablePlugins(final @NotNull Set<String> pluginIds, final @NotNull Runnable onSuccess) {
+    ProgressManager.getInstance().run(new Task.Modal(null, "Search for plugins in repository", true) {
+      private final Set<PluginDownloader> myPlugins = new HashSet<PluginDownloader>();
+      private List<IdeaPluginDescriptor> myAllPlugins;
+
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        try {
+          myAllPlugins = RepositoryHelper.loadPluginsFromAllRepositories(indicator);
+          for (IdeaPluginDescriptor descriptor : PluginManagerCore.getPlugins()) {
+            if (!descriptor.isEnabled() && pluginIds.contains(descriptor.getPluginId().getIdString())) {
+              myPlugins.add(PluginDownloader.createDownloader(descriptor));
+            }
+          }
+          for (IdeaPluginDescriptor loadedPlugin : myAllPlugins) {
+            if (pluginIds.contains(loadedPlugin.getPluginId().getIdString())) {
+              myPlugins.add(PluginDownloader.createDownloader(loadedPlugin));
+            }
+          }
+        }
+        catch (Exception e) {
+          LOG.info(e);
+        }
+      }
+
+      @Override
+      public void onSuccess() {
+        final PluginsAdvertiserDialog advertiserDialog =
+          new PluginsAdvertiserDialog(null,
+                                      myPlugins.toArray(new PluginDownloader[myPlugins.size()]),
+                                      PluginManagerMain.mapToPluginIds(myAllPlugins));
+        if (advertiserDialog.showAndGet()) {
+          onSuccess.run();
+        }
+      }
+    });
   }
 
   @Override
   public void runActivity(@NotNull final Project project) {
-    if (!UpdateSettings.getInstance().CHECK_NEEDED) return;
+    if (!UpdateSettings.getInstance().isCheckNeeded()) {
+      return;
+    }
     final UnknownFeaturesCollector collectorSuggester = UnknownFeaturesCollector.getInstance(project);
     final Set<UnknownFeature> unknownFeatures = collectorSuggester.getUnknownFeatures();
     final KnownExtensions extensions = loadExtensions();
     if (extensions != null && unknownFeatures.isEmpty()) return;
     final Runnable runnable = new Runnable() {
+      @Override
       public void run() {
         final Application application = ApplicationManager.getApplication();
         if (application.isUnitTestMode() || application.isHeadlessEnvironment()) return;
-        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Search for non-bundled plugins in plugin repository...") {
+        ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
           private final Set<PluginDownloader> myPlugins = new HashSet<PluginDownloader>();
           private List<IdeaPluginDescriptor> myAllPlugins;
 
-          private Map<Plugin, IdeaPluginDescriptor> myDisabledPlugins = new HashMap<Plugin, IdeaPluginDescriptor>();
-          private boolean myBundledPlugins = false;
+          private final Map<Plugin, IdeaPluginDescriptor> myDisabledPlugins = new HashMap<Plugin, IdeaPluginDescriptor>();
+          private List<String> myBundledPlugin;
+          private final MultiMap<String, UnknownFeature> myFeatures = new MultiMap<String, UnknownFeature>();
 
           @Override
-          public void run(@NotNull ProgressIndicator indicator) {
+          public void run() {
             try {
-              myAllPlugins = RepositoryHelper.loadPluginsFromRepository(indicator);
+              myAllPlugins = RepositoryHelper.loadPluginsFromAllRepositories(null);
               if (project.isDisposed()) return;
               if (extensions == null) {
                 loadSupportedExtensions(myAllPlugins);
+                if (project.isDisposed()) return;
                 EditorNotifications.getInstance(project).updateAllNotifications();
               }
-              int idx = 0;
               final Map<String, Plugin> ids = new HashMap<String, Plugin>();
               for (UnknownFeature feature : unknownFeatures) {
-                indicator.setText("Searching for plugin supporting \'" + feature.getImplementationName() + "\'");
                 ProgressManager.checkCanceled();
                 final List<Plugin> pluginId = retrieve(feature);
                 if (pluginId != null) {
                   for (Plugin plugin : pluginId) {
                     ids.put(plugin.myPluginId, plugin);
+                    myFeatures.putValue(plugin.myPluginId, feature);
                   }
                 }
-                indicator.setFraction(((double)idx++) / unknownFeatures.size());
               }
 
               final List<String> disabledPlugins = PluginManagerCore.getDisabledPlugins();
@@ -273,29 +313,37 @@ public class PluginsAdvertiser implements StartupActivity {
                   if (pluginDescriptor != null) {
                     myDisabledPlugins.put(plugin, pluginDescriptor);
                   }
-                } 
+                }
               }
 
-              myBundledPlugins = hasBundledNotInstalledPlugin(ids.values());
+              myBundledPlugin = hasBundledPluginToInstall(ids.values());
 
               for (IdeaPluginDescriptor loadedPlugin : myAllPlugins) {
                 final PluginId pluginId = loadedPlugin.getPluginId();
-                if (ids.containsKey(pluginId.getIdString()) && !disabledPlugins.contains(pluginId.getIdString())) {
+                if (ids.containsKey(pluginId.getIdString()) && 
+                    !disabledPlugins.contains(pluginId.getIdString()) && 
+                    !PluginManagerCore.isBrokenPlugin(loadedPlugin)) {
                   myPlugins.add(PluginDownloader.createDownloader(loadedPlugin));
                 }
               }
+
+              ApplicationManager.getApplication().invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                  onSuccess();
+                }
+              }, ModalityState.NON_MODAL);
+
             }
             catch (Exception e) {
               LOG.info(e);
             }
           }
 
-          @Override
-          public void onSuccess() {
+          private void onSuccess() {
             String message = null;
             if (!myPlugins.isEmpty() || !myDisabledPlugins.isEmpty()) {
-              message = "Features covered by non-bundled plugins are detected.<br>";
-
+              message = getAddressedMessagePresentation();
               if (!myDisabledPlugins.isEmpty()) {
                 message += "<a href=\"enable\">Enable plugins...</a><br>";
               }
@@ -303,20 +351,48 @@ public class PluginsAdvertiser implements StartupActivity {
                 message += "<a href=\"configure\">Configure plugins...</a><br>";
               }
 
-              message += "<a href=\"ignore\">Ignore All</a>";
+              message += "<a href=\"ignore\">Ignore Unknown Features</a>";
             }
-            else if (myBundledPlugins && !PropertiesComponent.getInstance().isTrueValue(IGNORE_ULTIMATE_EDITION)) {
-              message = "Features covered by IntelliJ IDEA Ultimate Edition are detected.<br>" +
+            else if (myBundledPlugin != null && !PropertiesComponent.getInstance().isTrueValue(IGNORE_ULTIMATE_EDITION)) {
+              message = "Features covered by " + IDEA_ULTIMATE_EDITION +
+                        " (" + StringUtil.join(myBundledPlugin, ", ") + ") are detected.<br>" +
                         "<a href=\"open\">" + CHECK_ULTIMATE_EDITION_TITLE + "</a><br>" +
                         "<a href=\"ignoreUltimate\">" + ULTIMATE_EDITION_SUGGESTION + "</a>";
             }
 
             if (message != null) {
-              final String displayId = "Plugins Suggestion";
-              final ConfigurePluginsListener notificationListener = new ConfigurePluginsListener(unknownFeatures, project, myAllPlugins, myPlugins, myDisabledPlugins);
-              new NotificationGroup(displayId, NotificationDisplayType.STICKY_BALLOON, true)
-                                   .createNotification(displayId, message, NotificationType.INFORMATION, notificationListener).notify(project);
+              final ConfigurePluginsListener notificationListener = new ConfigurePluginsListener(unknownFeatures, project, PluginManagerMain.mapToPluginIds(myAllPlugins), myPlugins, myDisabledPlugins);
+              NOTIFICATION_GROUP.createNotification(DISPLAY_ID, message, NotificationType.INFORMATION, notificationListener).notify(project);
             }
+          }
+
+          @NotNull
+          private String getAddressedMessagePresentation() {
+            final MultiMap<String, String> addressedFeatures = MultiMap.createSet();
+            final Set<String> ids = new LinkedHashSet<String>();
+            for (PluginDownloader plugin : myPlugins) {
+              ids.add(plugin.getPluginId());
+            }
+            for (Plugin plugin : myDisabledPlugins.keySet()) {
+              ids.add(plugin.myPluginId);
+            }
+            for (String id : ids) {
+              for (UnknownFeature feature : myFeatures.get(id)) {
+                addressedFeatures.putValue(feature.getFeatureDisplayName(), feature.getImplementationName());
+              }
+            }
+            final String addressedFeaturesPresentation = StringUtil.join(addressedFeatures.entrySet(),
+                                                                         new Function<Map.Entry<String, Collection<String>>, String>() {
+                                                                           @Override
+                                                                           public String fun(Map.Entry<String, Collection<String>> entry) {
+                                                                             return entry.getKey() + "[" + StringUtil.join(entry.getValue(), ", ") + "]";
+                                                                           }
+                                                                         }, ", ");
+            final int addressedFeaturesNumber = addressedFeatures.keySet().size();
+            final int pluginsNumber = ids.size();
+            return "Unknown feature" + (addressedFeaturesNumber == 1 ? "" : "s") + 
+                   " (" + addressedFeaturesPresentation + ") covered by " + (myPlugins.isEmpty() ? "disabled" : "non-bundled") + " plugin" + (pluginsNumber == 1 ? "" : "s") + 
+                   " detected.<br>";
           }
         });
       }
@@ -330,6 +406,7 @@ public class PluginsAdvertiser implements StartupActivity {
     @MapAnnotation(surroundWithTag = false, surroundKeyWithTag = false, surroundValueWithTag = false)
     public Map<String, PluginSet> myExtensions = new HashMap<String, PluginSet>();
 
+    @SuppressWarnings("unused")
     public KnownExtensions() {
     }
 
@@ -352,6 +429,7 @@ public class PluginsAdvertiser implements StartupActivity {
   public static class PluginSet {
     public Set<Plugin> myPlugins = new HashSet<Plugin>();
 
+    @SuppressWarnings("unused")
     public PluginSet() {
     }
 
@@ -361,15 +439,17 @@ public class PluginsAdvertiser implements StartupActivity {
       }
     }
   }
-  
+
   @Tag("plugin")
   public static class Plugin implements Comparable<Plugin> {
     public String myPluginId;
+    public String myPluginName;
     public boolean myBundled;
 
-    public Plugin(PluginId pluginId, boolean bundled) {
+    public Plugin(PluginId pluginId, String pluginName, boolean bundled) {
       myPluginId = pluginId.getIdString();
       myBundled = bundled;
+      myPluginName = pluginName;
     }
 
     public Plugin() {
@@ -384,6 +464,7 @@ public class PluginsAdvertiser implements StartupActivity {
 
       if (myBundled != plugin.myBundled) return false;
       if (!myPluginId.equals(plugin.myPluginId)) return false;
+      if (myPluginName != null && !myPluginName.equals(plugin.myPluginName)) return false;
 
       return true;
     }
@@ -392,6 +473,7 @@ public class PluginsAdvertiser implements StartupActivity {
     public int hashCode() {
       int result = myPluginId.hashCode();
       result = 31 * result + (myBundled ? 1 : 0);
+      result = 31 * result + (myPluginName != null ? myPluginName.hashCode() : 0);
       return result;
     }
 
@@ -406,14 +488,14 @@ public class PluginsAdvertiser implements StartupActivity {
   private static class ConfigurePluginsListener implements NotificationListener {
     private final Set<UnknownFeature> myUnknownFeatures;
     private final Project myProject;
-    private final List<IdeaPluginDescriptor> myAllPlugins;
+    private final List<PluginId> myAllPlugins;
     private final Set<PluginDownloader> myPlugins;
     private final Map<Plugin, IdeaPluginDescriptor> myDisabledPlugins;
 
     public ConfigurePluginsListener(Set<UnknownFeature> unknownFeatures,
                                     Project project,
-                                    List<IdeaPluginDescriptor> allPlugins,
-                                    Set<PluginDownloader> plugins, 
+                                    List<PluginId> allPlugins,
+                                    Set<PluginDownloader> plugins,
                                     Map<Plugin, IdeaPluginDescriptor> disabledPlugins) {
       myUnknownFeatures = unknownFeatures;
       myProject = project;

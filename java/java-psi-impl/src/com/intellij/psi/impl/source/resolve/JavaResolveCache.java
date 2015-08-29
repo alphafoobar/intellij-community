@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,16 +30,15 @@ import com.intellij.psi.impl.AnyPsiChangeListener;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
 import com.intellij.psi.impl.source.PsiImmediateClassType;
+import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.util.TypeConversionUtil;
-import com.intellij.reference.SoftReference;
 import com.intellij.util.Function;
-import com.intellij.util.containers.ConcurrentWeakHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.lang.ref.Reference;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
@@ -53,23 +52,19 @@ public class JavaResolveCache {
     return INSTANCE_KEY.getValue(project);
   }
 
-  private final ConcurrentMap<PsiExpression, Reference<PsiType>> myCalculatedTypes = new ConcurrentWeakHashMap<PsiExpression, Reference<PsiType>>();
+  private final ConcurrentMap<PsiExpression, PsiType> myCalculatedTypes = ContainerUtil.createConcurrentWeakKeySoftValueMap();
 
-  private final Map<PsiVariable,Object> myVarToConstValueMapPhysical = new ConcurrentWeakHashMap<PsiVariable, Object>();
-  private final Map<PsiVariable,Object> myVarToConstValueMapNonPhysical = new ConcurrentWeakHashMap<PsiVariable, Object>();
+  private final Map<PsiVariable,Object> myVarToConstValueMapPhysical = ContainerUtil.createConcurrentWeakMap();
+  private final Map<PsiVariable,Object> myVarToConstValueMapNonPhysical = ContainerUtil.createConcurrentWeakMap();
 
   private static final Object NULL = Key.create("NULL");
 
   public JavaResolveCache(@Nullable("can be null in com.intellij.core.JavaCoreApplicationEnvironment.JavaCoreApplicationEnvironment") MessageBus messageBus) {
     if (messageBus != null) {
-      messageBus.connect().subscribe(PsiManagerImpl.ANY_PSI_CHANGE_TOPIC, new AnyPsiChangeListener() {
+      messageBus.connect().subscribe(PsiManagerImpl.ANY_PSI_CHANGE_TOPIC, new AnyPsiChangeListener.Adapter() {
         @Override
         public void beforePsiChanged(boolean isPhysical) {
           clearCaches(isPhysical);
-        }
-
-        @Override
-        public void afterPsiChanged(boolean isPhysical) {
         }
       });
     }
@@ -85,17 +80,17 @@ public class JavaResolveCache {
 
   @Nullable
   public <T extends PsiExpression> PsiType getType(@NotNull T expr, @NotNull Function<T, PsiType> f) {
-    PsiType type = getCachedType(expr);
+    final boolean isOverloadCheck = MethodCandidateInfo.isOverloadCheck();
+    PsiType type = isOverloadCheck ? null : myCalculatedTypes.get(expr);
     if (type == null) {
       final RecursionGuard.StackStamp dStackStamp = PsiDiamondType.ourDiamondGuard.markStack();
       final RecursionGuard.StackStamp gStackStamp = PsiResolveHelper.ourGraphGuard.markStack();
       type = f.fun(expr);
-      if (!dStackStamp.mayCacheNow() || !gStackStamp.mayCacheNow()) {
+      if (!dStackStamp.mayCacheNow() || !gStackStamp.mayCacheNow() || isOverloadCheck) {
         return type;
       }
       if (type == null) type = TypeConversionUtil.NULL_TYPE;
-      Reference<PsiType> ref = new SoftReference<PsiType>(type);
-      myCalculatedTypes.put(expr, ref);
+      myCalculatedTypes.put(expr, type);
 
       if (type instanceof PsiClassReferenceType) {
         // convert reference-based class type to the PsiImmediateClassType, since the reference may become invalid
@@ -122,11 +117,6 @@ public class JavaResolveCache {
     return type == TypeConversionUtil.NULL_TYPE ? null : type;
   }
 
-  private <T extends PsiExpression> PsiType getCachedType(T expr) {
-    Reference<PsiType> reference = myCalculatedTypes.get(expr);
-    return SoftReference.dereference(reference);
-  }
-
   @Nullable
   public Object computeConstantValueWithCaching(@NotNull PsiVariable variable, @NotNull ConstValueComputer computer, Set<PsiVariable> visitedVars){
     boolean physical = variable.isPhysical();
@@ -142,6 +132,6 @@ public class JavaResolveCache {
   }
 
   public interface ConstValueComputer{
-    Object execute(PsiVariable variable, Set<PsiVariable> visitedVars);
+    Object execute(@NotNull PsiVariable variable, Set<PsiVariable> visitedVars);
   }
 }

@@ -1,7 +1,22 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
@@ -11,6 +26,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.safeDelete.SafeDeleteHandler;
 import com.intellij.testFramework.PsiTestUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
 import org.jetbrains.jps.model.java.JpsJavaExtensionService;
 
@@ -20,6 +36,7 @@ public class SafeDeleteTest extends MultiFileTestCase {
     return JavaTestUtil.getJavaTestDataPath();
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/safeDelete/";
@@ -59,6 +76,50 @@ public class SafeDeleteTest extends MultiFileTestCase {
     doSingleFileTest();
   }
 
+  public void testDeepDeleteParameterSimple() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeepDeleteParameterOtherTypeInBinaryExpression() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testImpossibleToDeepDeleteParameter() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testNoDeepDeleteParameterUsedInCallQualifier() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testNoDeepDeleteParameterUsedInNextArgumentExpression() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testToDeepDeleteParameterOverriders() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeleteMethodCascade() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeleteMethodCascadeRecursive() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeleteMethodCascadeOverridden() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeleteParameterAndUpdateJavadocRef() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testDeleteConstructorParameterWithAnonymousClassUsage() throws Exception {
+    doSingleFileTest();
+  }
+
   public void testParameterInHierarchy() throws Exception {
     doTest("C2");
   }
@@ -66,6 +127,10 @@ public class SafeDeleteTest extends MultiFileTestCase {
 
   public void testTopLevelDocComment() throws Exception {
     doTest("foo.C1");
+  }
+
+  public void testOverloadedMethods() throws Exception {
+    doTest("foo.A");
   }
 
   public void testTopParameterInHierarchy() throws Exception {
@@ -86,6 +151,10 @@ public class SafeDeleteTest extends MultiFileTestCase {
 
   public void testSafeDeleteStaticImports() throws Exception {
     doTest("A");
+  }
+
+  public void testSafeDeleteImports() throws Exception {
+    doTest("B");
   }
 
   public void testRemoveOverridersInspiteOfUnsafeUsages() throws Exception {
@@ -115,6 +184,46 @@ public class SafeDeleteTest extends MultiFileTestCase {
       String message = e.getMessage();
       assertEquals("method <b><code>Super.foo()</code></b> has 1 usage that is not safe to delete.", message);
     }
+  }
+
+  public void testParameterFromFunctionalInterface() throws Exception {
+    try {
+      LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
+      doSingleFileTest();
+      fail("Conflict was not detected");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      String message = e.getMessage();
+      assertEquals("class <b><code>SAM</code></b> has 1 usage that is not safe to delete.", message);
+    }
+  }
+
+  public void testFunctionalInterfaceMethod() throws Exception {
+    try {
+      LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
+      doSingleFileTest();
+      fail("Conflict was not detected");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      String message = e.getMessage();
+      assertEquals("class <b><code>SAM</code></b> has 1 usage that is not safe to delete.", message);
+    }
+  }
+
+  public void testAmbiguityAfterParameterDelete() throws Exception {
+    try {
+      doSingleFileTest();
+      fail("Conflict was not detected");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      String message = e.getMessage();
+      assertEquals("Method foo() is already defined in the class <b><code>Test</code></b>", message);
+    }
+  }
+
+  public void testFunctionalInterfaceDefaultMethod() throws Exception {
+    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
+    doSingleFileTest();
   }
 
   public void testMethodDeepHierarchy() throws Exception {
@@ -163,13 +272,22 @@ public class SafeDeleteTest extends MultiFileTestCase {
   public void testStripOverride() throws Exception {
     doSingleFileTest();
   }
-  
+
+  public void testEmptyIf() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testTypeParameterWithinMethodHierarchy() throws Exception {
+    doSingleFileTest();
+  }
+
+  public void testClassWithInnerStaticImport() throws Exception {
+    doTest("ClassWithInnerStaticImport");
+  }
+
   private void doTest(@NonNls final String qClassName) throws Exception {
-    doTest(new PerformAction() {
-      @Override
-      public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
-        SafeDeleteTest.this.performAction(qClassName);
-      }
+    doTest((rootDir, rootAfter) -> {
+      SafeDeleteTest.this.performAction(qClassName);
     });
   }
 
@@ -204,8 +322,8 @@ public class SafeDeleteTest extends MultiFileTestCase {
   }
 
   private void performAction() {
-    final PsiElement psiElement = TargetElementUtilBase
-      .findTargetElement(myEditor, TargetElementUtilBase.ELEMENT_NAME_ACCEPTED | TargetElementUtilBase.REFERENCED_ELEMENT_ACCEPTED);
+    final PsiElement psiElement = TargetElementUtil
+      .findTargetElement(myEditor, TargetElementUtil.ELEMENT_NAME_ACCEPTED | TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED);
     assertNotNull("No element found in text:\n" + getFile().getText(), psiElement);
     SafeDeleteHandler.invoke(getProject(), new PsiElement[]{psiElement}, true);
   }

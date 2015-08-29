@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.openapi.application.ex;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.InvalidDataException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,26 +33,66 @@ public interface ApplicationEx extends Application {
   /**
    * Loads the application configuration from the specified path
    *
-   * @param optionsPath Path to /config folder
-   * @throws IOException
-   * @throws InvalidDataException
+   * @param configPath Path to /config folder
    */
-  void load(String optionsPath) throws IOException, InvalidDataException;
+  void load(@Nullable String configPath);
+
+  void load() throws IOException;
+
   boolean isLoaded();
 
   @NotNull
   String getName();
 
+  /**
+   * @return true if this thread is inside read action.
+   * @see #runReadAction(Runnable)
+   */
   boolean holdsReadLock();
+
+  /**
+   * @return true if the EDT is performing write action right now.
+   * @see #runWriteAction(Runnable)
+   */
+  boolean isWriteActionInProgress();
+
+  /**
+   * @return true if the EDT started to acquire write action but has not acquired it yet.
+   * @see #runWriteAction(Runnable)
+   */
+  boolean isWriteActionPending();
 
   void doNotSave();
   void doNotSave(boolean value);
   boolean isDoNotSave();
 
-  //force exit
-  void exit(boolean force);
+  /**
+   * Executes {@code process} in a separate thread in the application thread pool (see {@link #executeOnPooledThread(Runnable)}).
+   * The process is run inside read action (see {@link #runReadAction(Runnable)})
+   * It is guaranteed that no other read or write action is run before the process start running.
+   * If the process is running for too long, a progress window shown with {@code progressTitle} and a button with {@code cancelText}.
+   * This method can be called from the EDT only.
+   * @return true if process run successfully and was not canceled.
+   */
+  boolean runProcessWithProgressSynchronouslyInReadAction(@Nullable Project project,
+                                                          @NotNull String progressTitle,
+                                                          boolean canBeCanceled,
+                                                          String cancelText,
+                                                          JComponent parentComponent,
+                                                          @NotNull Runnable process);
 
-  void restart(boolean force);
+  /**
+   * @param force if true, no additional confirmations will be shown. The application is guaranteed to exit
+   * @param exitConfirmed if true, suppresses any shutdown confirmation. However, if there are any background processes or tasks running,
+   *                      a corresponding confirmation will be shown with the possibility to cancel the operation
+   */
+  void exit(boolean force, boolean exitConfirmed);
+
+  /**
+   * @param exitConfirmed if true, suppresses any shutdown confirmation. However, if there are any background processes or tasks running,
+   *                      a corresponding confirmation will be shown with the possibility to cancel the operation
+   */
+  void restart(boolean exitConfirmed);
 
   /**
    * Runs modal process. For internal use only, see {@link Task}
@@ -89,7 +128,7 @@ public interface ApplicationEx extends Application {
   void runEdtSafeAction(@NotNull Runnable runnable);
 
   /**
-   * Grab the lock and run the action, in a non-blocking fashion
+   * Tries to acquire the read lock and run the {@code action}
    *
    * @return true if action was run while holding the lock, false if was unable to get the lock and action was not run
    */

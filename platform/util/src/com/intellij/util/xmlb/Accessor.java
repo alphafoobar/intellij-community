@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,22 +13,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.xmlb;
+
+import org.jetbrains.annotations.NotNull;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 
 public interface Accessor {
-  Object read(Object o);
+  Object read(@NotNull Object o);
 
-  void write(Object o, Object value);
-
-  Annotation[] getAnnotations();
+  <T extends Annotation> T getAnnotation(@NotNull Class<T> annotationClass);
 
   String getName();
 
   Class<?> getValueClass();
 
   Type getGenericType();
+
+  boolean isFinal();
+
+  /**
+   * @deprecated use {@link MutableAccessor#set(Object, Object)} instead
+   */
+  void write(Object o, Object value);
 }

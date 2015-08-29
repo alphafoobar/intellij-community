@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,12 @@ import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.codeInsight.lookup.LookupValueFactory;
 import com.intellij.codeInspection.InspectionProfile;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.patterns.PlatformPatterns;
-import com.intellij.patterns.PsiElementPattern;
+import com.intellij.patterns.PatternCondition;
+import com.intellij.patterns.PsiJavaElementPattern;
+import com.intellij.patterns.PsiJavaPatterns;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
-import com.intellij.psi.filters.ElementFilter;
-import com.intellij.psi.filters.position.FilterPattern;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
@@ -45,120 +43,52 @@ import com.theoryinpractice.testng.util.TestNGUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.testng.annotations.DataProvider;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class TestNGReferenceContributor extends PsiReferenceContributor {
-  private static PsiElementPattern.Capture<PsiLiteralExpression> getElementPattern(String annotation) {
-    return PlatformPatterns.psiElement(PsiLiteralExpression.class).and(new FilterPattern(new TestAnnotationFilter(annotation)));
+  private static PsiJavaElementPattern.Capture<PsiLiteralExpression> getElementPattern(String annotationParamName) {
+    return PsiJavaPatterns.literalExpression().
+      annotationParam(annotationParamName, PsiJavaPatterns.psiAnnotation().with(new PatternCondition<PsiAnnotation>("isTestNGAnnotation") {
+        @Override
+        public boolean accepts(@NotNull PsiAnnotation annotation, ProcessingContext context) {
+          return TestNGUtil.isTestNGAnnotation(annotation);
+        }
+      }));
   }
 
-  public void registerReferenceProviders(PsiReferenceRegistrar registrar) {
+  public void registerReferenceProviders(@NotNull PsiReferenceRegistrar registrar) {
     registrar.registerReferenceProvider(getElementPattern("dependsOnMethods"), new PsiReferenceProvider() {
       @NotNull
       public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull final ProcessingContext context) {
-        return new MethodReference[]{new MethodReference((PsiLiteralExpression)element)};
+        return new MethodReference[]{new MethodReference((PsiLiteral)element)};
       }
     });
 
     registrar.registerReferenceProvider(getElementPattern("dataProvider"), new PsiReferenceProvider() {
       @NotNull
       public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull final ProcessingContext context) {
-        return new DataProviderReference[]{new DataProviderReference((PsiLiteralExpression)element)};
+        return new DataProviderReference[]{new DataProviderReference((PsiLiteral)element)};
       }
     });
     registrar.registerReferenceProvider(getElementPattern("groups"), new PsiReferenceProvider() {
       @NotNull
       public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull final ProcessingContext context) {
-        return new GroupReference[]{new GroupReference(element.getProject(), (PsiLiteralExpression)element)};
+        return new GroupReference[]{new GroupReference(element.getProject(), (PsiLiteral)element)};
       }
     });
     registrar.registerReferenceProvider(getElementPattern("dependsOnGroups"), new PsiReferenceProvider() {
       @NotNull
       public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull final ProcessingContext context) {
-        return new GroupReference[]{new GroupReference(element.getProject(), (PsiLiteralExpression)element)};
+        return new GroupReference[]{new GroupReference(element.getProject(), (PsiLiteral)element)};
       }
     });
   }
 
-  private static class DataProviderReference extends PsiReferenceBase<PsiLiteralExpression> {
+  private static class MethodReference extends PsiReferenceBase<PsiLiteral> {
 
-    public DataProviderReference(PsiLiteralExpression element) {
-      super(element, false);
-    }
-
-    @Nullable
-    public PsiElement resolve() {
-      final PsiClass cls = getProviderClass(PsiUtil.getTopLevelClass(getElement()));
-      if (cls != null) {
-        PsiMethod[] methods = cls.getAllMethods();
-        @NonNls String val = getValue();
-        for (PsiMethod method : methods) {
-          PsiAnnotation dataProviderAnnotation = AnnotationUtil.findAnnotation(method, DataProvider.class.getName());
-          if (dataProviderAnnotation != null) {
-            final PsiAnnotationMemberValue dataProviderMethodName = dataProviderAnnotation.findDeclaredAttributeValue("name");
-            if (dataProviderMethodName != null && val.equals(StringUtil.unquoteString(dataProviderMethodName.getText()))) {
-              return method;
-            }
-            if (val.equals(method.getName())) {
-              return method;
-            }
-          }
-        }
-      }
-      return null;
-    }
-
-    @NotNull
-    public Object[] getVariants() {
-      final List<Object> list = new ArrayList<Object>();
-      final PsiClass topLevelClass = PsiUtil.getTopLevelClass(getElement());
-      final PsiClass cls = getProviderClass(topLevelClass);
-      final boolean needToBeStatic = cls != topLevelClass;
-      if (cls != null) {
-        final PsiMethod current = PsiTreeUtil.getParentOfType(getElement(), PsiMethod.class);
-        final PsiMethod[] methods = cls.getAllMethods();
-        for (PsiMethod method : methods) {
-          if (current != null && method.getName().equals(current.getName())) continue;
-          if (needToBeStatic) {
-            if (!method.hasModifierProperty(PsiModifier.STATIC)) continue;
-          } else {
-            if (cls != method.getContainingClass() && method.hasModifierProperty(PsiModifier.PRIVATE)) continue;
-          }
-          final PsiAnnotation dataProviderAnnotation = AnnotationUtil.findAnnotation(method, DataProvider.class.getName());
-          if (dataProviderAnnotation != null) {
-            final PsiAnnotationMemberValue memberValue = dataProviderAnnotation.findDeclaredAttributeValue("name");
-            if (memberValue != null) {
-              list.add(LookupValueFactory.createLookupValue(StringUtil.unquoteString(memberValue.getText()), null));
-              list.add(LookupValueFactory.createLookupValue(method.getName(), null));
-            }
-          }
-        }
-      }
-      return list.toArray();
-    }
-
-    private PsiClass getProviderClass(final PsiClass topLevelClass) {
-      final PsiAnnotation annotation = PsiTreeUtil.getParentOfType(getElement(), PsiAnnotation.class);
-      if (annotation != null) {
-        final PsiAnnotationMemberValue value = annotation.findDeclaredAttributeValue("dataProviderClass");
-        if (value instanceof PsiClassObjectAccessExpression) {
-          final PsiTypeElement operand = ((PsiClassObjectAccessExpression)value).getOperand();
-          final PsiClass psiClass = PsiUtil.resolveClassInType(operand.getType());
-          if (psiClass != null) {
-            return psiClass;
-          }
-        }
-      }
-      return topLevelClass;
-    }
-  }
-
-  private static class MethodReference extends PsiReferenceBase<PsiLiteralExpression> {
-
-    public MethodReference(PsiLiteralExpression element) {
+    public MethodReference(PsiLiteral element) {
       super(element, false);
     }
 
@@ -170,7 +100,7 @@ public class TestNGReferenceContributor extends PsiReferenceContributor {
       if (cls != null) {
         PsiMethod[] methods = cls.findMethodsByName(methodName, true);
         for (PsiMethod method : methods) {
-          if (TestNGUtil.hasTest(method) || TestNGUtil.hasConfig(method)) {
+          if (TestNGUtil.hasTest(method, false) || TestNGUtil.hasConfig(method)) {
             return method;
           }
         }
@@ -181,7 +111,7 @@ public class TestNGReferenceContributor extends PsiReferenceContributor {
     @Nullable
     private PsiClass getDependsClass(String val) {
       final String className = StringUtil.getPackageName(val);
-      final PsiLiteralExpression element = getElement();
+      final PsiLiteral element = getElement();
       return StringUtil.isEmpty(className) ? PsiUtil.getTopLevelClass(element)
                                            : JavaPsiFacade.getInstance(element.getProject()).findClass(className, element.getResolveScope());
     }
@@ -213,10 +143,10 @@ public class TestNGReferenceContributor extends PsiReferenceContributor {
     }
   }
 
-  private static class GroupReference extends PsiReferenceBase<PsiLiteralExpression> {
+  private static class GroupReference extends PsiReferenceBase<PsiLiteral> {
     private final Project myProject;
 
-    public GroupReference(Project project, PsiLiteralExpression element) {
+    public GroupReference(Project project, PsiLiteral element) {
       super(element, false);
       myProject = project;
     }
@@ -242,29 +172,6 @@ public class TestNGReferenceContributor extends PsiReferenceContributor {
         return list.toArray();
       }
       return ArrayUtil.EMPTY_OBJECT_ARRAY;
-    }
-  }
-
-  private static class TestAnnotationFilter implements ElementFilter {
-
-    private final String myParameterName;
-
-    public TestAnnotationFilter(@NotNull @NonNls String parameterName) {
-      myParameterName = parameterName;
-    }
-
-    public boolean isAcceptable(Object element, PsiElement context) {
-      PsiNameValuePair pair = PsiTreeUtil.getParentOfType(context, PsiNameValuePair.class);
-      if (null == pair) return false;
-      if (!myParameterName.equals(pair.getName())) return false;
-      PsiAnnotation annotation = PsiTreeUtil.getParentOfType(pair, PsiAnnotation.class);
-      if (annotation == null) return false;
-      if (!TestNGUtil.isTestNGAnnotation(annotation)) return false;
-      return true;
-    }
-
-    public boolean isClassAcceptable(Class hintClass) {
-      return PsiLiteralExpression.class.isAssignableFrom(hintClass);
     }
   }
 }

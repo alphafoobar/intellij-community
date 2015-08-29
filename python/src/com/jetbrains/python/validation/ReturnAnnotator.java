@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,25 @@
 package com.jetbrains.python.validation;
 
 import com.intellij.psi.util.PsiTreeUtil;
+import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.psi.*;
 
 /**
- * Highlights incorrect return statements: 'return' and 'yield' outside functions, returning values from generators;
+ * Highlights incorrect return statements: 'return' and 'yield' outside functions, returning values from generators.
  */
 public class ReturnAnnotator extends PyAnnotator {
   public void visitPyReturnStatement(final PyReturnStatement node) {
     PyFunction function = PsiTreeUtil.getParentOfType(node, PyFunction.class, false, PyClass.class);
     if (function == null) {
       getHolder().createErrorAnnotation(node, "'return' outside of function");
-      return;
     }
   }
 
   public void visitPyYieldExpression(final PyYieldExpression node) {
-    if (PsiTreeUtil.getParentOfType(node, PyFunction.class, false, PyClass.class) == null) {
+    final ScopeOwner owner = ScopeUtil.getScopeOwner(node);
+    if (!(owner instanceof PyFunction || owner instanceof PyLambdaExpression)) {
       getHolder().createErrorAnnotation(node, "'yield' outside of function");
     }
-    /* this is now allowed in python 2.5
-    if (node.getContainingElement(PyTryFinallyStatement.class) != null) {
-      getHolder().createErrorAnnotation(node, "'yield' not allowed in a 'try' block with a 'finally' clause");
-    }
-    */
   }
 }

@@ -19,6 +19,7 @@ package com.intellij.ide.actions;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.OccurenceNavigator;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.Condition;
@@ -68,19 +69,24 @@ abstract class OccurenceNavigatorActionBase extends AnAction implements DumbAwar
     if (project == null) {
       presentation.setEnabled(false);
       // make it invisible only in main menu to avoid initial invisibility in toolbars
-      presentation.setVisible(!ActionPlaces.MAIN_MENU.equals(event.getPlace()));
+      presentation.setVisible(!ActionPlaces.isMainMenuOrActionSearch(event.getPlace()));
       return;
     }
     OccurenceNavigator navigator = getNavigator(event.getDataContext());
     if (navigator == null) {
       presentation.setEnabled(false);
       // make it invisible only in main menu to avoid initial invisibility in toolbars
-      presentation.setVisible(!ActionPlaces.MAIN_MENU.equals(event.getPlace()));
+      presentation.setVisible(!ActionPlaces.isMainMenuOrActionSearch(event.getPlace()));
       return;
     }
     presentation.setVisible(true);
-    presentation.setEnabled(hasOccurenceToGo(navigator));
-    presentation.setText(getDescription(navigator));
+    try {
+      presentation.setEnabled(hasOccurenceToGo(navigator));
+      presentation.setText(getDescription(navigator));
+    }
+    catch (IndexNotReadyException e) {
+      presentation.setEnabled(false);
+    }
   }
 
   protected abstract OccurenceNavigator.OccurenceInfo go(OccurenceNavigator navigator);

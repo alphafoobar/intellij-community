@@ -27,17 +27,14 @@ import com.intellij.ide.fileTemplates.JavaTemplateUtil;
 import com.intellij.ide.fileTemplates.ui.CreateFromTemplateDialog;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.StdFileTypes;
-import com.intellij.openapi.module.LanguageLevelUtil;
-import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.JavaPsiImplementationHelper;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
@@ -91,7 +88,7 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     String templateName = JavaTemplateUtil.INTERNAL_INTERFACE_TEMPLATE_NAME;
     PsiClass someClass = createClassFromTemplate(dir, name, templateName);
     if (!someClass.isInterface()) {
-      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName));
+      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName, dir.getProject()));
     }
     return someClass;
   }
@@ -102,7 +99,7 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     String templateName = JavaTemplateUtil.INTERNAL_ENUM_TEMPLATE_NAME;
     PsiClass someClass = createClassFromTemplate(dir, name, templateName);
     if (!someClass.isEnum()) {
-      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName));
+      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName, dir.getProject()));
     }
     return someClass;
   }
@@ -113,7 +110,7 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     String templateName = JavaTemplateUtil.INTERNAL_ANNOTATION_TYPE_TEMPLATE_NAME;
     PsiClass someClass = createClassFromTemplate(dir, name, templateName);
     if (!someClass.isAnnotationType()) {
-      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName));
+      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName, dir.getProject()));
     }
     return someClass;
   }
@@ -128,9 +125,10 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
                                                   boolean askToDefineVariables, @NotNull Map<String, String> additionalProperties) throws IncorrectOperationException {
     //checkCreateClassOrInterface(dir, name);
 
-    FileTemplate template = FileTemplateManager.getInstance().getInternalTemplate(templateName);
+    Project project = dir.getProject();
+    FileTemplate template = FileTemplateManager.getInstance(project).getInternalTemplate(templateName);
 
-    Properties defaultProperties = FileTemplateManager.getInstance().getDefaultProperties(dir.getProject());
+    Properties defaultProperties = FileTemplateManager.getInstance(project).getDefaultProperties();
     Properties properties = new Properties(defaultProperties);
     properties.setProperty(FileTemplate.ATTRIBUTE_NAME, name);
     for (Map.Entry<String, String> entry : additionalProperties.entrySet()) {
@@ -142,7 +140,7 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
 
     PsiElement element;
     try {
-      element = askToDefineVariables ? new CreateFromTemplateDialog(dir.getProject(), dir, template, null, properties).create()
+      element = askToDefineVariables ? new CreateFromTemplateDialog(project, dir, template, null, properties).create()
                                      : FileTemplateUtil.createFromTemplate(template, fileName, properties, dir);
     }
     catch (IncorrectOperationException e) {
@@ -156,14 +154,14 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     final PsiJavaFile file = (PsiJavaFile)element.getContainingFile();
     PsiClass[] classes = file.getClasses();
     if (classes.length < 1) {
-      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName));
+      throw new IncorrectOperationException(getIncorrectTemplateMessage(templateName, project));
     }
     return classes[0];
   }
 
-  private static String getIncorrectTemplateMessage(String templateName) {
-    return PsiBundle.message("psi.error.incorroect.class.template.message",
-                             FileTemplateManager.getInstance().internalTemplateToSubject(templateName), templateName);
+  private static String getIncorrectTemplateMessage(String templateName, Project project) {
+    return PsiBundle.message("psi.error.incorrect.class.template.message",
+                             FileTemplateManager.getInstance(project).internalTemplateToSubject(templateName), templateName);
   }
 
   @Override
@@ -177,7 +175,7 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     String fileName = name + "." + StdFileTypes.JAVA.getDefaultExtension();
     directory.checkCreateFile(fileName);
 
-    PsiNameHelper helper = JavaPsiFacade.getInstance(directory.getProject()).getNameHelper();
+    PsiNameHelper helper = PsiNameHelper.getInstance(directory.getProject());
     PsiPackage aPackage = JavaDirectoryService.getInstance().getPackage(directory);
     String qualifiedName = aPackage == null ? null : aPackage.getQualifiedName();
     if (!StringUtil.isEmpty(qualifiedName) && !helper.isQualifiedName(qualifiedName)) {
@@ -192,28 +190,9 @@ public class JavaDirectoryServiceImpl extends CoreJavaDirectoryService {
     return file.equals(sourceRoot);
   }
 
-  private static final Key<LanguageLevel> LANG_LEVEL_IN_DIRECTORY = new Key<LanguageLevel>("LANG_LEVEL_IN_DIRECTORY");
   @Override
   public LanguageLevel getLanguageLevel(@NotNull PsiDirectory dir) {
-    synchronized (PsiLock.LOCK) {
-      LanguageLevel level = dir.getUserData(LANG_LEVEL_IN_DIRECTORY);
-      if (level == null) {
-        level = getLanguageLevelInner(dir);
-        dir.putUserData(LANG_LEVEL_IN_DIRECTORY, level);
-      }
-      return level;
-    }
-  }
-
-  private static LanguageLevel getLanguageLevelInner(@NotNull PsiDirectory dir) {
-    final VirtualFile virtualFile = dir.getVirtualFile();
-    final Project project = dir.getProject();
-    final Module module = ProjectRootManager.getInstance(project).getFileIndex().getModuleForFile(virtualFile);
-    if (module != null) {
-      return LanguageLevelUtil.getEffectiveLanguageLevel(module);
-    }
-
-    return LanguageLevelProjectExtension.getInstance(project).getLanguageLevel();
+    return JavaPsiImplementationHelper.getInstance(dir.getProject()).getEffectiveLanguageLevel(dir.getVirtualFile());
   }
 
 }

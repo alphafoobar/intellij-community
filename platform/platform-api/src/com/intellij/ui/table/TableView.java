@@ -15,7 +15,10 @@
  */
 package com.intellij.ui.table;
 
+import com.intellij.ui.BooleanTableCellRenderer;
+import com.intellij.ui.GuiUtils;
 import com.intellij.ui.TableUtil;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.ListTableModel;
@@ -28,12 +31,14 @@ import javax.swing.*;
 import javax.swing.event.TableModelEvent;
 import javax.swing.table.*;
 import java.awt.*;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
 public class TableView<Item> extends BaseTableView implements ItemsProvider, SelectionProvider {
+
+  private boolean myInStopEditing = false;
+
   public TableView() {
     this(new ListTableModel<Item>(ColumnInfo.EMPTY_ARRAY));
   }
@@ -43,7 +48,8 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
     setModelAndUpdateColumns(model);
   }
 
-  public void setModel(final TableModel dataModel) {
+  @Override
+  public void setModel(@NotNull final TableModel dataModel) {
     assert dataModel instanceof SortableColumnModel : "SortableColumnModel required";
     super.setModel(dataModel);
   }
@@ -56,7 +62,7 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
   public void setModel(final ListTableModel<Item> model) {
     setModelAndUpdateColumns(model);
   }
-  
+
   public void setModelAndUpdateColumns(final ListTableModel<Item> model) {
     super.setModel(model);
     createDefaultColumnsFromModel();
@@ -67,9 +73,10 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
     return (ListTableModel<Item>)super.getModel();
   }
 
+  @Override
   public TableCellRenderer getCellRenderer(int row, int column) {
     final ColumnInfo<Item, ?> columnInfo = getListTableModel().getColumnInfos()[convertColumnIndexToModel(column)];
-    final Item item = getListTableModel().getItems().get(convertRowIndexToModel(row));
+    final Item item = getRow(row);
     final TableCellRenderer renderer = columnInfo.getCustomizedRenderer(item, columnInfo.getRenderer(item));
     if (renderer == null) {
       return super.getCellRenderer(row, column);
@@ -79,6 +86,7 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
     }
   }
 
+  @Override
   public void tableChanged(TableModelEvent e) {
     if (isEditing()) getCellEditor().cancelCellEditing();
     super.tableChanged(e);
@@ -97,10 +105,12 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
 
     final RowSorter<? extends TableModel> sorter = getRowSorter();
     final RowSorter.SortKey sortKey = sorter == null ? null : ContainerUtil.getFirstItem(sorter.getSortKeys());
-    ColumnInfo[] columns = getListTableModel().getColumnInfos();
-    int[] sizeMode = new int[columns.length];
-    int[] headers = new int[columns.length];
-    int[] widths = new int[columns.length];
+    ColumnInfo[] columnInfos = getListTableModel().getColumnInfos();
+    TableColumnModel columnModel = getColumnModel();
+    int visibleColumnCount = columnModel.getColumnCount();
+    int[] sizeMode = new int[visibleColumnCount];
+    int[] headers = new int[visibleColumnCount];
+    int[] widths = new int[visibleColumnCount];
     int allColumnWidth = 0;
     int allColumnCurrent = 0;
     int varCount = 0;
@@ -108,9 +118,9 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
     Icon sortIcon = UIManager.getIcon("Table.ascendingSortIcon");
 
     // calculate
-    for (int i = 0; i < columns.length; i++) {
-      final ColumnInfo columnInfo = columns[i];
-      final TableColumn column = getColumnModel().getColumn(i);
+    for (int i = 0; i < visibleColumnCount; i++) {
+      final TableColumn column = columnModel.getColumn(i);
+      final ColumnInfo columnInfo = columnInfos[column.getModelIndex()];
 
       TableCellRenderer columnHeaderRenderer = column.getHeaderRenderer();
       if (columnHeaderRenderer == null) {
@@ -158,8 +168,8 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
                               allColumnWidth < (1 - gold) * viewWidth ? (1 - gold) * viewWidth :
                               viewWidth) - allColumnWidth) / varCount;
 
-    for (int i=0 ; i<columns.length; i ++) {
-      TableColumn column = getColumnModel().getColumn(i);
+    for (int i = 0 ; i < visibleColumnCount; i++) {
+      TableColumn column = columnModel.getColumn(i);
       int width = widths[i];
       if (sizeMode[i] == 1) {
         column.setMaxWidth(width);
@@ -181,62 +191,67 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
   }
 
 
+  @Override
   public Collection<Item> getSelection() {
-    ArrayList<Item> result = new ArrayList<Item>();
-    int[] selectedRows = getSelectedRows();
-    if (selectedRows == null) return result;
-    final List<Item> items = getItems();
-    if (! items.isEmpty()) {
-      for (int selectedRow : selectedRows) {
-        final int modelIndex = convertRowIndexToModel(selectedRow);
-        if (modelIndex >= 0 && modelIndex < items.size()) {
-          result.add(items.get(modelIndex));
+    return getSelectedObjects();
+  }
+
+  @Nullable
+  public Item getSelectedObject() {
+    final int row = getSelectedRow();
+    ListTableModel<Item> model = getListTableModel();
+    return row >= 0 && row < model.getRowCount() ? model.getRowValue(convertRowIndexToModel(row)) : null;
+  }
+
+  @NotNull
+  public List<Item> getSelectedObjects() {
+    ListSelectionModel selectionModel = getSelectionModel();
+    int minSelectionIndex = selectionModel.getMinSelectionIndex();
+    int maxSelectionIndex = selectionModel.getMaxSelectionIndex();
+    if (minSelectionIndex == -1 || maxSelectionIndex == -1) {
+      return Collections.emptyList();
+    }
+
+    List<Item> result = new SmartList<Item>();
+    ListTableModel<Item> model = getListTableModel();
+    for (int i = minSelectionIndex; i <= maxSelectionIndex; i++) {
+      if (selectionModel.isSelectedIndex(i)) {
+        int modelIndex = convertRowIndexToModel(i);
+        if (modelIndex >= 0 && modelIndex < model.getRowCount()) {
+          result.add(model.getRowValue(modelIndex));
         }
       }
     }
     return result;
   }
 
-  @Nullable
-  public Item getSelectedObject() {
-    final int row = getSelectedRow();
-    final List<Item> list = getItems();
-    return row >= 0 && row < list.size() ? list.get(convertRowIndexToModel(row)) : null;
-  }
-
-  @NotNull
-  public List<Item> getSelectedObjects() {
-    final int[] selectedRows = getSelectedRows();
-    if (selectedRows == null || (selectedRows.length == 0)) return Collections.emptyList();
-    final List<Item> items = getItems();
-    final List<Item> result = new ArrayList<Item>();
-    for (int selectedRow : selectedRows) {
-      result.add(items.get(convertRowIndexToModel(selectedRow)));
-    }
-    return result;
-  }
-
+  @Override
   public void addSelection(Object item) {
-    List items = getItems();
-    if (!items.contains(item)) return;
-    int index = items.indexOf(item);
+    @SuppressWarnings("unchecked")
+    int index = getListTableModel().indexOf((Item)item);
+    if (index < 0) {
+      return;
+    }
+
     getSelectionModel().addSelectionInterval(convertRowIndexToView(index), convertRowIndexToView(index));
     // fix cell selection case
     getColumnModel().getSelectionModel().addSelectionInterval(0, getColumnCount()-1);
   }
 
+  @Override
   public TableCellEditor getCellEditor(int row, int column) {
-    final ColumnInfo<Item, ?> columnInfo = getListTableModel().getColumnInfos()[convertColumnIndexToModel(column)];
-    final TableCellEditor editor = columnInfo.getEditor(getListTableModel().getItems().get(convertRowIndexToModel(row)));
+    @SuppressWarnings("unchecked")
+    TableCellEditor editor = getListTableModel().getColumnInfos()[convertColumnIndexToModel(column)].getEditor(getRow(row));
     return editor == null ? super.getCellEditor(row, column) : editor;
   }
 
+  @Override
   public List<Item> getItems() {
     return getListTableModel().getItems();
   }
 
   public Item getRow(int row) {
-    return getItems().get(convertRowIndexToModel(row));
+    return getListTableModel().getRowValue(convertRowIndexToModel(row));
   }
 
   public void setMinRowHeight(int i) {
@@ -247,11 +262,55 @@ public class TableView<Item> extends BaseTableView implements ItemsProvider, Sel
     return this;
   }
 
-  public TableViewModel getTableViewModel() {
+  public TableViewModel<Item> getTableViewModel() {
     return getListTableModel();
   }
 
   public void stopEditing() {
-    TableUtil.stopEditing(this);
+    if (!myInStopEditing) {
+      try {
+        myInStopEditing = true;
+        TableUtil.stopEditing(this);
+      }
+      finally {
+        myInStopEditing = false;
+      }
+    }
+  }
+
+  @Override
+  protected void createDefaultRenderers() {
+    super.createDefaultRenderers();
+
+    UIDefaults.LazyValue booleanRenderer = new UIDefaults.LazyValue() {
+      @Override
+      public Object createValue(@NotNull UIDefaults table) {
+        DefaultCellEditor editor = new DefaultCellEditor(GuiUtils.createUndoableTextField());
+        editor.setClickCountToStart(1);
+        return new BooleanTableCellRenderer();
+      }
+    };
+    //noinspection unchecked
+    defaultRenderersByColumnClass.put(boolean.class, booleanRenderer);
+    //noinspection unchecked
+    defaultRenderersByColumnClass.put(Boolean.class, booleanRenderer);
+  }
+
+  @Override
+  protected void createDefaultEditors() {
+    super.createDefaultEditors();
+
+    //noinspection unchecked
+    defaultEditorsByColumnClass.put(String.class, new UIDefaults.LazyValue() {
+      @Override
+      public Object createValue(@NotNull UIDefaults table) {
+        DefaultCellEditor editor = new DefaultCellEditor(GuiUtils.createUndoableTextField());
+        editor.setClickCountToStart(1);
+        return editor;
+      }
+    });
+
+    //noinspection unchecked
+    defaultEditorsByColumnClass.put(boolean.class, defaultEditorsByColumnClass.get(Boolean.class));
   }
 }

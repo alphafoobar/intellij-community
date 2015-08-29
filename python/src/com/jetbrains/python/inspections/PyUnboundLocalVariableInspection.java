@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ public class PyUnboundLocalVariableInspection extends PyInspection {
         return;
       }
       // Ignore qualifier inspections
-      if (node.getQualifier() != null) {
+      if (node.isQualified()) {
         return;
       }
       // Ignore import subelements
@@ -127,12 +127,12 @@ public class PyUnboundLocalVariableInspection extends PyInspection {
         if (!isFirstUnboundRead(node, owner)) {
           return;
         }
-        final PsiPolyVariantReference ref = node.getReference(resolveWithoutImplicits());
+        final PsiPolyVariantReference ref = node.getReference(getResolveContext());
         if (ref == null) {
           return;
         }
         final PsiElement resolved = ref.resolve();
-        final boolean isBuiltin = PyBuiltinCache.getInstance(node).hasInBuiltins(resolved);
+        final boolean isBuiltin = PyBuiltinCache.getInstance(node).isBuiltin(resolved);
         if (owner instanceof PyClass) {
           if (isBuiltin || ScopeUtil.getDeclarationScopeOwner(owner, name) != null) {
             return;

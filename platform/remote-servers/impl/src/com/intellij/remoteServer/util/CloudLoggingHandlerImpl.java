@@ -15,17 +15,23 @@
  */
 package com.intellij.remoteServer.util;
 
-import com.intellij.remoteServer.agent.util.CloudLoggingHandler;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.remoteServer.agent.util.CloudAgentLoggingHandler;
 import com.intellij.remoteServer.agent.util.log.LogListener;
+import com.intellij.remoteServer.agent.util.log.TerminalListener;
 import com.intellij.remoteServer.runtime.deployment.DeploymentLogManager;
 import com.intellij.remoteServer.runtime.log.LoggingHandler;
+import com.intellij.remoteServer.runtime.log.TerminalHandler;
+import org.jetbrains.annotations.Nullable;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.HashMap;
 
 /**
  * @author michael.golubev
  */
-public class CloudLoggingHandlerImpl implements CloudLoggingHandler {
+public class CloudLoggingHandlerImpl implements CloudAgentLoggingHandler {
 
   private final HashMap<String, LogListener> myPipeName2LogListener;
 
@@ -49,15 +55,87 @@ public class CloudLoggingHandlerImpl implements CloudLoggingHandler {
     LogListener logListener = myPipeName2LogListener.get(pipeName);
     if (logListener == null) {
       final LoggingHandler loggingHandler = myLogManager.addAdditionalLog(pipeName);
-      logListener = new LogListener() {
-
-        @Override
-        public void lineLogged(String line, String deploymentName, String kind) {
-          loggingHandler.print(line + "\n");
-        }
-      };
+      logListener = new LogListenerImpl(loggingHandler);
       myPipeName2LogListener.put(pipeName, logListener);
     }
     return logListener;
+  }
+
+  @Override
+  public LogListener getOrCreateEmptyLogListener(String pipeName) {
+    LogListenerImpl result = (LogListenerImpl)getOrCreateLogListener(pipeName);
+    result.clear();
+    return result;
+  }
+
+  @Override
+  public LogListener createConsole(String pipeName, final OutputStream consoleInput) {
+    final LoggingHandler loggingHandler = myLogManager.addAdditionalLog(pipeName);
+    loggingHandler.attachToProcess(new ProcessHandler() {
+
+      @Override
+      protected void destroyProcessImpl() {
+
+      }
+
+      @Override
+      protected void detachProcessImpl() {
+
+      }
+
+      @Override
+      public boolean detachIsDefault() {
+        return false;
+      }
+
+      @Nullable
+      @Override
+      public OutputStream getProcessInput() {
+        return consoleInput;
+      }
+    });
+
+    return new LogListener() {
+
+      @Override
+      public void lineLogged(String line) {
+        loggingHandler.print(line);
+      }
+    };
+  }
+
+  @Override
+  public boolean isTtySupported() {
+    return myLogManager.isTtySupported();
+  }
+
+  @Override
+  public TerminalListener createTerminal(final String pipeName, OutputStream terminalInput, InputStream terminalOutput) {
+    final TerminalHandler terminalHandler = myLogManager.addTerminal(pipeName, terminalOutput, terminalInput);
+    return new TerminalListener() {
+
+      @Override
+      public void close() {
+        terminalHandler.close();
+      }
+    };
+  }
+
+  private static class LogListenerImpl implements LogListener {
+
+    private final LoggingHandler myLoggingHandler;
+
+    public LogListenerImpl(LoggingHandler loggingHandler) {
+      myLoggingHandler = loggingHandler;
+    }
+
+    @Override
+    public void lineLogged(String line) {
+      myLoggingHandler.print(line + "\n");
+    }
+
+    public void clear() {
+      myLoggingHandler.clear();
+    }
   }
 }

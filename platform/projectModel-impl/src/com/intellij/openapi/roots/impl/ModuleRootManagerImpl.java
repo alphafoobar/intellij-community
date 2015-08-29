@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 
 package com.intellij.openapi.roots.impl;
 
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.module.ModifiableModuleModel;
-import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleComponent;
-import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.module.*;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.*;
@@ -50,22 +50,19 @@ public class ModuleRootManagerImpl extends ModuleRootManager implements ModuleCo
   private final ProjectRootManagerImpl myProjectRootManager;
   private final VirtualFilePointerManager myFilePointerManager;
   private RootModelImpl myRootModel;
-  private final ModuleFileIndexImpl myFileIndex;
   private boolean myIsDisposed = false;
+  private boolean myLoaded = false;
   private boolean isModuleAdded = false;
   private final OrderRootsCache myOrderRootsCache;
   private final Map<RootModelImpl, Throwable> myModelCreations = new THashMap<RootModelImpl, Throwable>();
 
 
   public ModuleRootManagerImpl(Module module,
-                               DirectoryIndex directoryIndex,
                                ProjectRootManagerImpl projectRootManager,
                                VirtualFilePointerManager filePointerManager) {
     myModule = module;
     myProjectRootManager = projectRootManager;
     myFilePointerManager = filePointerManager;
-
-    myFileIndex = new ModuleFileIndexImpl(myModule, directoryIndex);
 
     myRootModel = new RootModelImpl(this, myProjectRootManager, myFilePointerManager);
     myOrderRootsCache = new OrderRootsCache(module);
@@ -80,7 +77,7 @@ public class ModuleRootManagerImpl extends ModuleRootManager implements ModuleCo
   @Override
   @NotNull
   public ModuleFileIndex getFileIndex() {
-    return myFileIndex;
+    return ModuleServiceManager.getService(myModule, ModuleFileIndex.class);
   }
 
   @Override
@@ -344,12 +341,14 @@ public class ModuleRootManagerImpl extends ModuleRootManager implements ModuleCo
   }
 
   public void loadState(ModuleRootManagerState object) {
-    loadState(object, myRootModel != null);
+    loadState(object, myLoaded || isModuleAdded);
+    myLoaded = true;
   }
 
   protected void loadState(ModuleRootManagerState object, boolean throwEvent) {
+    AccessToken token = throwEvent ? WriteAction.start() : ReadAction.start();
     try {
-      final RootModelImpl newModel = new RootModelImpl(object.getRootModelElement(), this, myProjectRootManager, myFilePointerManager);
+      final RootModelImpl newModel = new RootModelImpl(object.getRootModelElement(), this, myProjectRootManager, myFilePointerManager, throwEvent);
 
       if (throwEvent) {
         makeRootsChange(new Runnable() {
@@ -360,6 +359,7 @@ public class ModuleRootManagerImpl extends ModuleRootManager implements ModuleCo
         });
       }
       else {
+        myRootModel.dispose();
         myRootModel = newModel;
       }
 
@@ -368,21 +368,24 @@ public class ModuleRootManagerImpl extends ModuleRootManager implements ModuleCo
     catch (InvalidDataException e) {
       LOG.error(e);
     }
+    finally {
+      token.finish();
+    }
   }
 
   public static class ModuleRootManagerState implements JDOMExternalizable {
     private RootModelImpl myRootModel;
-    private Element myRootModelElement = null;
+    private Element myRootModelElement;
 
     public ModuleRootManagerState() {
     }
 
-    public ModuleRootManagerState(final RootModelImpl rootModel) {
+    public ModuleRootManagerState(RootModelImpl rootModel) {
       myRootModel = rootModel;
     }
 
     @Override
-    public void readExternal(Element element) throws InvalidDataException {
+    public void readExternal(Element element) {
       myRootModelElement = element;
     }
 

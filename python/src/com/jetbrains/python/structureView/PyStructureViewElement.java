@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,17 +23,14 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.ui.LayeredIcon;
-import com.intellij.util.Function;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.psi.*;
 import icons.PythonIcons;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.*;
-
-import static com.intellij.openapi.util.text.StringUtil.join;
-import static com.intellij.openapi.util.text.StringUtil.notNullize;
 
 /**
  * Handles nodes in Structure View.
@@ -120,13 +117,14 @@ public class PyStructureViewElement implements StructureViewTreeElement {
     return name != null ? name.hashCode() : 0;
   }
 
+  @NotNull
   public StructureViewTreeElement[] getChildren() {
     final Collection<StructureViewTreeElement> children = new ArrayList<StructureViewTreeElement>();
     for (PyElement e : getElementChildren(myElement)) {
       children.add(createChild(e, getElementVisibility(e), false, elementIsField(e)));
     }
     if (myElement instanceof PyClass && myElement.isValid()) {
-      for (PyClass c : ((PyClass)myElement).getAncestorClasses()) {
+      for (PyClass c : ((PyClass)myElement).getAncestorClasses(null)) {
         for (PyElement e: getElementChildren(c)) {
           final StructureViewTreeElement inherited = createChild(e, getElementVisibility(e), true, elementIsField(e));
           if (!children.contains(inherited)) {
@@ -220,7 +218,7 @@ public class PyStructureViewElement implements StructureViewTreeElement {
     if (element instanceof PyClass || element instanceof PyFunction) {
       return true;
     }
-    if (!(parent instanceof PyClass) && (element instanceof PyTargetExpression) && ((PyTargetExpression)element).getQualifier() == null) {
+    if (!(parent instanceof PyClass) && (element instanceof PyTargetExpression) && !((PyTargetExpression)element).isQualified()) {
       PsiElement e = element.getParent();
       if (e instanceof PyAssignmentStatement) {
         e = e.getParent();
@@ -232,34 +230,18 @@ public class PyStructureViewElement implements StructureViewTreeElement {
     return false;
   }
 
+  @NotNull
   @Override
   public ItemPresentation getPresentation() {
+    final ItemPresentation presentation = myElement.getPresentation();
     return new ColoredItemPresentation() {
+      @Nullable
+      @Override
       public String getPresentableText() {
-        final String unnamed = "<unnamed>";
-        if (myElement instanceof PyFunction) {
-          PyParameterList argList = ((PyFunction) myElement).getParameterList();
-          StringBuilder result = new StringBuilder(notNullize(myElement.getName(), unnamed));
-          result.append(argList.getPresentableText(true));
-          return result.toString();
+        if (myElement instanceof PyFile) {
+          return myElement.getName();
         }
-        else if (myElement instanceof PyClass && myElement.isValid()) {
-          PyClass c = (PyClass) myElement;
-          StringBuilder result = new StringBuilder(notNullize(c.getName(), unnamed));
-          PyExpression[] superClassExpressions = c.getSuperClassExpressions();
-          if (superClassExpressions.length > 0) {
-            result.append("(");
-            result.append(join(Arrays.asList(superClassExpressions), new Function<PyExpression, String>() {
-              public String fun(PyExpression expr) {
-                String name = expr.getText();
-                return notNullize(name, unnamed);
-              }
-            }, ", "));
-            result.append(")");
-          }
-          return result.toString();
-        }
-        return notNullize(myElement.getName(), unnamed);
+        return presentation != null ? presentation.getPresentableText() : PyNames.UNNAMED_ELEMENT;
       }
 
       @Nullable

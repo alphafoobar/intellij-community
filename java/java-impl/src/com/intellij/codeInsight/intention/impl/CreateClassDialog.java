@@ -17,7 +17,7 @@ package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.CommonBundle;
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.daemon.impl.quickfix.CreateClassKind;
+import com.intellij.codeInsight.daemon.impl.quickfix.ClassKind;
 import com.intellij.ide.util.PackageUtil;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -35,6 +35,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiNameHelper;
 import com.intellij.refactoring.MoveDestination;
 import com.intellij.refactoring.PackageWrapper;
 import com.intellij.refactoring.RefactoringBundle;
@@ -88,7 +89,7 @@ public class CreateClassDialog extends DialogWrapper {
                            @NotNull String title,
                            @NotNull String targetClassName,
                            @NotNull String targetPackageName,
-                           @NotNull CreateClassKind kind,
+                           @NotNull ClassKind kind,
                            boolean classNameEditable,
                            @Nullable Module defaultModule) {
     super(project, true);
@@ -166,7 +167,7 @@ public class CreateClassDialog extends DialogWrapper {
       myTfClassName.getDocument().addDocumentListener(new DocumentAdapter() {
         @Override
         protected void textChanged(DocumentEvent e) {
-          getOKAction().setEnabled(JavaPsiFacade.getInstance(myProject).getNameHelper().isIdentifier(myTfClassName.getText()));
+          getOKAction().setEnabled(PsiNameHelper.getInstance(myProject).isIdentifier(myTfClassName.getText()));
         }
       });
       getOKAction().setEnabled(StringUtil.isNotEmpty(myClassName));

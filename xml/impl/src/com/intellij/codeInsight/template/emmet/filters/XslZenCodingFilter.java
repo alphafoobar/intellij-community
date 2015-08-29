@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.intellij.codeInsight.template.emmet.generators.XmlZenCodingGeneratorI
 import com.intellij.codeInsight.template.emmet.nodes.GenerationNode;
 import com.intellij.codeInsight.template.emmet.tokens.TemplateToken;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.util.Pair;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlDocument;
@@ -29,9 +28,6 @@ import com.intellij.psi.xml.XmlTag;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * @author Eugene.Kudelevsky
- */
 public class XslZenCodingFilter extends ZenCodingFilter {
   private final XmlZenCodingGenerator myDelegate = new XmlZenCodingGeneratorImpl();
   @NonNls private static final String SELECT_ATTR_NAME = "select";
@@ -45,10 +41,8 @@ public class XslZenCodingFilter extends ZenCodingFilter {
       if (document != null) {
         final XmlTag tag = document.getRootTag();
         if (tag != null) {
-          for (Pair<String, String> pair : token.getAttribute2Value()) {
-            if (SELECT_ATTR_NAME.equals(pair.first)) {
-              return node;
-            }
+          if (token.getAttributes().containsKey(SELECT_ATTR_NAME)) {
+            return node;
           }
           ApplicationManager.getApplication().runWriteAction(new Runnable() {
             @Override
@@ -90,6 +84,12 @@ public class XslZenCodingFilter extends ZenCodingFilter {
 
   @Override
   public boolean isAppliedByDefault(@NotNull PsiElement context) {
-    return XslTextContextType.isXslOrXsltFile(context.getContainingFile());
+    return XslTextContextType.isXslOrXsltFile(context.getContainingFile()) || super.isAppliedByDefault(context);
+  }
+
+  @NotNull
+  @Override
+  public String getDisplayName() {
+    return "XSL tuning";
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,16 +21,21 @@ import com.intellij.find.impl.FindInProjectUtil;
 import com.intellij.find.replaceInProject.ReplaceInProjectManager;
 import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.psi.PropertiesFile;
-import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.ex.PathManagerEx;
 import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileTypes.FileTypes;
+import com.intellij.openapi.fileTypes.PlainTextFileType;
+import com.intellij.openapi.project.DumbServiceImpl;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.ProperTextRange;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -49,8 +54,11 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.WaitFor;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -143,7 +151,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
                                   final int offset,
                                   final FindResult[] op_result){
     op_result[0] = null;
-    Thread findThread = new Thread(){
+    Thread findThread = new Thread("find man test"){
       @Override
       public void run(){
         op_result[0] = findManager.findString(text, offset, model);
@@ -185,11 +193,10 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     assertEquals(expectedResults, usages.size());
   }
 
-  private List<UsageInfo> findUsages(final FindModel findModel) {
-    PsiDirectory psiDirectory = FindInProjectUtil.getPsiDirectory(findModel, myProject);
-    List<UsageInfo> result = new ArrayList<UsageInfo>();
-    final CommonProcessors.CollectProcessor<UsageInfo> collector = new CommonProcessors.CollectProcessor<UsageInfo>(result);
-    FindInProjectUtil.findUsages(findModel, psiDirectory, myProject, true, collector, new FindUsagesProcessPresentation());
+  private List<UsageInfo> findUsages(@NotNull FindModel findModel) {
+    List<UsageInfo> result = new ArrayList<>();
+    final CommonProcessors.CollectProcessor<UsageInfo> collector = new CommonProcessors.CollectProcessor<>(result);
+    FindInProjectUtil.findUsages(findModel, myProject, collector, new FindUsagesProcessPresentation(FindInProjectUtil.setupViewPresentation(true, findModel)));
     return result;
   }
 
@@ -279,6 +286,98 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     assertSize(2, findUsages(findModel));
   }
 
+  public void testFindInOpenedFilesIncludesNoneProjectButOpenedFile() throws IOException {
+    File dir = createTempDirectory();
+    File file = new File(dir.getPath(), "A.test1234");
+    file.createNewFile();
+    FileUtil.writeToFile(file, "foo fo foo");
+    VirtualFile nonProjectFile = VfsUtil.findFileByIoFile(file, true);
+    assertNotNull(nonProjectFile);
+
+    FindModel findModel = new FindModel();
+    findModel.setStringToFind("fo");
+    findModel.setWholeWordsOnly(true);
+    findModel.setFromCursor(false);
+    findModel.setGlobal(true);
+    findModel.setMultipleFiles(true);
+    findModel.setCustomScope(true);
+    findModel.setCustomScope(new GlobalSearchScope.FilesScope(myProject, ContainerUtil.list(nonProjectFile)));
+
+    assertSize(1, findUsages(findModel));
+  }
+
+  public void testWholeWordsInNonIndexedFiles() throws Exception {
+    createFile(myModule, "A.test123", "foo fo foo");
+
+    // don't use createFile here because it creates PsiFile and runs file type autodetection
+    // in real life some files might not be autodetected as plain text until the search starts 
+    VirtualFile custom = new WriteCommandAction<VirtualFile>(myProject) {
+      @Override
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
+        File dir = createTempDirectory();
+        File file = new File(dir.getPath(), "A.test1234");
+        file.createNewFile();
+        FileUtil.writeToFile(file, "foo fo foo");
+        addSourceContentToRoots(myModule, VfsUtil.findFileByIoFile(dir, true));
+        result.setResult(VfsUtil.findFileByIoFile(file, true));
+      }
+    }.execute().getResultObject();
+    
+    assertNull(FileDocumentManager.getInstance().getCachedDocument(custom));
+    assertEquals(PlainTextFileType.INSTANCE, custom.getFileType());
+
+    FindModel findModel = new FindModel();
+    findModel.setWholeWordsOnly(true);
+    findModel.setFromCursor(false);
+    findModel.setGlobal(true);
+    findModel.setMultipleFiles(true);
+    findModel.setProjectScope(true);
+
+    findModel.setStringToFind("fo");
+    assertSize(2, findUsages(findModel));
+    
+    // and we should get the same with text loaded
+    assertNotNull(FileDocumentManager.getInstance().getDocument(custom));
+    assertEquals(FileTypes.PLAIN_TEXT, custom.getFileType());
+
+    assertSize(2, findUsages(findModel));
+  }
+
+  public void testNonRecursiveDirectory() throws Exception {
+    VirtualFile root = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(createTempDirectory());
+    addSourceContentToRoots(myModule, root);
+
+    VirtualFile foo = createChildDirectory(root, "foo");
+    VirtualFile bar = createChildDirectory(foo, "bar");
+    createFile(myModule, root, "A.txt", "goo doo");
+    createFile(myModule, foo, "A.txt", "goo doo");
+    createFile(myModule, bar, "A.txt", "doo goo");
+
+    FindModel findModel = FindManagerTestUtils.configureFindModel("done");
+    findModel.setProjectScope(false);
+    findModel.setDirectoryName(foo.getPath());
+    findModel.setStringToFind("doo");
+
+    findModel.setWithSubdirectories(true);
+    assertSize(2, findUsages(findModel));
+
+    findModel.setWithSubdirectories(false);
+    assertSize(1, findUsages(findModel));
+  }
+
+  public void testNonSourceContent() throws Exception {
+    VirtualFile root = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(createTempDirectory());
+    PsiTestUtil.addContentRoot(myModule, root);
+
+    createFile(myModule, root, "A.txt", "goo doo");
+
+    FindModel findModel = FindManagerTestUtils.configureFindModel("goo");
+    findModel.setProjectScope(false);
+    findModel.setModuleName(myModule.getName());
+
+    assertSize(1, findUsages(findModel));
+  }
+
   public void testReplaceRegexp() {
     FindModel findModel = new FindModel();
     findModel.setStringToFind("bug_(?=here)");
@@ -323,6 +422,22 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     assertEquals(text, getEditor().getDocument().getText());
   }
 
+  public void testReplaceWithLocalLowerCase() {
+    doTestRegexpReplace("SOMETHING", "ome", "\\l$0", "SoMETHING");
+  }
+
+  public void testReplaceWithLocalUpperCase() {
+    doTestRegexpReplace("something", "ome", "\\u$0", "sOmething");
+  }
+
+  public void testReplaceWithRegionLowerCase() {
+    doTestRegexpReplace("SOMETHING", "ome", "\\L$0\\E", "SomeTHING");
+  }
+
+  public void testReplaceWithRegionUpperCase() {
+    doTestRegexpReplace("something", "ome", "\\U$0\\E", "sOMEthing");
+  }
+
   public void testReplaceRegexpWithNewLine() {
     FindModel findModel = new FindModel();
     findModel.setStringToFind("xxx");
@@ -345,29 +460,30 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     assertEquals(text+"\n", getEditor().getDocument().getText());
   }
 
+  public void testReplaceWithRegExp() {
+    doTestRegexpReplace("#  Base", "(?<!^) ", "  ", "#    Base");
+  }
+
   private  void initProject(String folderName, final String... sourceDirs) {
     final String testDir = JavaTestUtil.getJavaTestDataPath() + "/find/" + folderName;
-    ApplicationManager.getApplication().runWriteAction(new Runnable(){
-      @Override
-      public void run(){
-        try{
-          mySourceDirs = new VirtualFile[sourceDirs.length];
-          for (int i = 0; i < sourceDirs.length; i++){
-            String sourcePath = testDir + "/" + sourceDirs[i];
-            mySourceDirs[i] = LocalFileSystem.getInstance().refreshAndFindFileByPath(FileUtil.toSystemIndependentName(sourcePath));
-          }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      try{
+        mySourceDirs = new VirtualFile[sourceDirs.length];
+        for (int i = 0; i < sourceDirs.length; i++){
+          String sourcePath = testDir + "/" + sourceDirs[i];
+          mySourceDirs[i] = LocalFileSystem.getInstance().refreshAndFindFileByPath(FileUtil.toSystemIndependentName(sourcePath));
+        }
 
-          VirtualFile projectDir = LocalFileSystem.getInstance().refreshAndFindFileByPath(FileUtil.toSystemIndependentName(testDir));
-          Sdk jdk = IdeaTestUtil.getMockJdk17();
-          PsiTestUtil.removeAllRoots(myModule, jdk);
-          PsiTestUtil.addContentRoot(myModule, projectDir);
-          for (VirtualFile sourceDir : mySourceDirs) {
-            PsiTestUtil.addSourceRoot(myModule, sourceDir);
-          }
+        VirtualFile projectDir = LocalFileSystem.getInstance().refreshAndFindFileByPath(FileUtil.toSystemIndependentName(testDir));
+        Sdk jdk = IdeaTestUtil.getMockJdk17();
+        PsiTestUtil.removeAllRoots(myModule, jdk);
+        PsiTestUtil.addContentRoot(myModule, projectDir);
+        for (VirtualFile sourceDir : mySourceDirs) {
+          PsiTestUtil.addSourceRoot(myModule, sourceDir);
         }
-        catch (Exception e){
-          throw new RuntimeException(e);
-        }
+      }
+      catch (Exception e){
+        throw new RuntimeException(e);
       }
     });
   }
@@ -394,16 +510,13 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
 
     final List<Usage> usages = FindUtil.findAll(getProject(), myEditor, findModel);
     assertNotNull(usages);
-    CommandProcessor.getInstance().executeCommand(getProject(), new Runnable() {
-      @Override
-      public void run() {
-        for (Usage usage : usages) {
-          try {
-            ReplaceInProjectManager.getInstance(getProject()).replaceUsage(usage, findModel, Collections.<Usage>emptySet(), false);
-          }
-          catch (FindManager.MalformedReplacementStringException e) {
-            throw new RuntimeException(e);
-          }
+    CommandProcessor.getInstance().executeCommand(getProject(), () -> {
+      for (Usage usage : usages) {
+        try {
+          ReplaceInProjectManager.getInstance(getProject()).replaceUsage(usage, findModel, Collections.<Usage>emptySet(), false);
+        }
+        catch (FindManager.MalformedReplacementStringException e) {
+          throw new RuntimeException(e);
         }
       }
     }, "", null);
@@ -451,13 +564,9 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
       findModel.setFromCursor(false);
       findModel.setGlobal(true);
       findModel.setMultipleFiles(true);
+      findModel.setCustomScope(true);
 
-      ThrowableRunnable test = new ThrowableRunnable() {
-        @Override
-        public void run() throws Throwable {
-          assertSize(lineCount, findUsages(findModel));
-        }
-      };
+      ThrowableRunnable test = () -> assertSize(lineCount, findUsages(findModel));
 
       findModel.setCustomScope(GlobalSearchScope.fileScope(psiFile));
       PlatformTestUtil.startPerformanceTest("slow", 400, test).attempts(2).cpuBound().usesAllCPUCores().assertTiming();
@@ -480,6 +589,45 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     FindManagerTestUtils.runFindInCommentsAndLiterals(myFindManager, findModel, text);
   }
 
+  public void testReplacePreserveCase() {
+    configureByText(FileTypes.PLAIN_TEXT, "Bar bar BAR");
+    FindModel model = new FindModel();
+    model.setStringToFind("bar");
+    model.setStringToReplace("foo");
+    model.setPromptOnReplace(false);
+    model.setPreserveCase(true);
+
+    FindUtil.replace(myProject, myEditor, 0, model);
+    assertEquals("Foo foo FOO", myEditor.getDocument().getText());
+
+    configureByText(FileTypes.PLAIN_TEXT, "Bar bar");
+
+    model.setStringToFind("bar");
+    model.setStringToReplace("fooBar");
+
+    FindUtil.replace(myProject, myEditor, 0, model);
+    assertEquals("FooBar fooBar", myEditor.getDocument().getText());
+  }
+
+  public void testFindWholeWords() {
+    configureByText(FileTypes.PLAIN_TEXT, "-- -- ---");
+    FindModel model = new FindModel();
+    model.setStringToFind("--");
+    model.setWholeWordsOnly(true);
+
+    List<Usage> usages = FindUtil.findAll(myProject, myEditor, model);
+    assertNotNull(usages);
+    assertEquals(2, usages.size());
+
+    configureByText(FileTypes.PLAIN_TEXT, "myproperty=@AspectJ");
+    model = new FindModel();
+    model.setStringToFind("@AspectJ");
+    model.setWholeWordsOnly(true);
+    usages = FindUtil.findAll(myProject, myEditor, model);
+    assertNotNull(usages);
+    assertEquals(1, usages.size());
+  }
+
   public void testFindInCurrentFileOutsideProject() throws Exception {
     final TempDirTestFixture tempDirFixture = new TempDirTestFixtureImpl();
     tempDirFixture.setUp();
@@ -487,6 +635,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
       VirtualFile file = tempDirFixture.createFile("a.txt", "foo bar foo");
       FindModel findModel = FindManagerTestUtils.configureFindModel("foo");
       findModel.setWholeWordsOnly(true);
+      findModel.setCustomScope(true);
       findModel.setCustomScope(new LocalSearchScope(PsiManager.getInstance(myProject).findFile(file)));
       assertSize(2, findUsages(findModel));
     }
@@ -495,11 +644,41 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     }
   }
 
+  public void testFindInDirectoryOutsideProject() throws Exception {
+    final TempDirTestFixture tempDirFixture = new TempDirTestFixtureImpl();
+    tempDirFixture.setUp();
+    try {
+      tempDirFixture.createFile("a.txt", "foo bar foo");
+      FindModel findModel = FindManagerTestUtils.configureFindModel("foo");
+      findModel.setWholeWordsOnly(true);
+      findModel.setProjectScope(false);
+      findModel.setDirectoryName(tempDirFixture.getFile("").getPath());
+      assertSize(2, findUsages(findModel));
+    }
+    finally {
+      tempDirFixture.tearDown();
+    }
+  }
+
+  public void testFindInExcludedDirectory() throws Exception {
+    VirtualFile root = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(createTempDirectory());
+    addSourceContentToRoots(myModule, root);
+    VirtualFile excluded = createChildDirectory(root, "excluded");
+    createFile(myModule, excluded, "a.txt", "foo bar foo");
+    PsiTestUtil.addExcludedRoot(myModule, excluded);
+
+    FindModel findModel = FindManagerTestUtils.configureFindModel("foo");
+    findModel.setWholeWordsOnly(true);
+    findModel.setProjectScope(false);
+    findModel.setDirectoryName(excluded.getPath());
+    assertSize(2, findUsages(findModel));
+  }
+
   public void testFindInJavaDocs() {
     FindModel findModel = FindManagerTestUtils.configureFindModel("done");
     String text = "/** done done done */";
 
-    findModel.setInCommentsOnly(true);
+    findModel.setSearchContext(FindModel.SearchContext.IN_COMMENTS);
     FindManagerTestUtils.runFindForwardAndBackward(myFindManager, findModel, text);
 
     findModel.setRegularExpressions(true);
@@ -512,7 +691,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     String prefix = "/*";
     String text = prefix + "done*/";
 
-    findModel.setInCommentsOnly(true);
+    findModel.setSearchContext(FindModel.SearchContext.IN_COMMENTS);
     LightVirtualFile file = new LightVirtualFile("A.java", text);
 
     FindResult findResult = myFindManager.findString(text, prefix.length(), findModel, file);
@@ -535,8 +714,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     FindModel findModel = FindManagerTestUtils.configureFindModel("^done$");
 
     findModel.setRegularExpressions(true);
-    findModel.setInStringLiteralsOnly(true);
-    findModel.setInCommentsOnly(false);
+    findModel.setSearchContext(FindModel.SearchContext.IN_STRING_LITERALS);
     String text = "\"done\"; 'done'; 'done' \"done2\"";
     FindManagerTestUtils.runFindForwardAndBackward(myFindManager, findModel, text, "java");
 
@@ -553,7 +731,106 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
 
     String text = "/** do ne do ne do ne */";
 
-    findModel.setInCommentsOnly(true);
+    findModel.setSearchContext(FindModel.SearchContext.IN_COMMENTS);
     FindManagerTestUtils.runFindForwardAndBackward(myFindManager, findModel, text, "java");
+  }
+
+  public void testPlusWholeWordsOnly() throws Exception {
+    createFile(myModule, "A.java", "3 + '+' + 2");
+
+    FindModel findModel = FindManagerTestUtils.configureFindModel("'+' +");
+    findModel.setMultipleFiles(true);
+
+    assertSize(1, findUsages(findModel));
+
+    findModel.setCaseSensitive(true);
+    assertSize(1, findUsages(findModel));
+
+    findModel.setWholeWordsOnly(true);
+    assertSize(1, findUsages(findModel));
+  }
+
+  public void testFindExceptComments() {
+    FindModel findModel = FindManagerTestUtils.configureFindModel("done");
+
+    String prefix = "/*";
+    String text = prefix + "done*/done";
+
+    findModel.setSearchContext(FindModel.SearchContext.EXCEPT_COMMENTS);
+    LightVirtualFile file = new LightVirtualFile("A.java", text);
+
+    FindResult findResult = myFindManager.findString(text, prefix.length(), findModel, file);
+    assertTrue(findResult.isStringFound());
+    assertTrue(findResult.getStartOffset() > prefix.length());
+
+    findModel.setRegularExpressions(true);
+    findResult = myFindManager.findString(text, prefix.length(), findModel, file);
+    assertTrue(findResult.isStringFound());
+    assertTrue(findResult.getStartOffset() > prefix.length());
+  }
+
+  public void testFindExceptComments2() {
+    FindModel findModel = FindManagerTestUtils.configureFindModel("oo");
+
+    String text = "//oooo";
+
+    findModel.setSearchContext(FindModel.SearchContext.EXCEPT_COMMENTS);
+    LightVirtualFile file = new LightVirtualFile("A.java", text);
+
+    FindResult findResult = myFindManager.findString(text, 0, findModel, file);
+    assertFalse(findResult.isStringFound());
+  }
+
+  public void testFindExceptLiterals() {
+    FindModel findModel = FindManagerTestUtils.configureFindModel("done");
+
+    String prefix = "\"";
+    String text = prefix + "done\"done";
+
+    findModel.setSearchContext(FindModel.SearchContext.EXCEPT_STRING_LITERALS);
+    LightVirtualFile file = new LightVirtualFile("A.java", text);
+
+    FindResult findResult = myFindManager.findString(text, prefix.length(), findModel, file);
+    assertTrue(findResult.isStringFound());
+    assertTrue(findResult.getStartOffset() > prefix.length());
+
+    findModel.setRegularExpressions(true);
+    findResult = myFindManager.findString(text, prefix.length(), findModel, file);
+    assertTrue(findResult.isStringFound());
+    assertTrue(findResult.getStartOffset() > prefix.length());
+  }
+
+  public void testNoExceptionDuringReplaceAll() {
+    configureByText(FileTypes.PLAIN_TEXT, "something\telse");
+    FindModel model = new FindModel();
+    model.setStringToFind("m");
+    model.setStringToReplace("M");
+    model.setPromptOnReplace(false);
+    FindUtil.replace(myProject, myEditor, 0, model);
+    assertEquals("soMething\telse", myEditor.getDocument().getText());
+  }
+
+  public void testSearchInDumbMode() throws Exception {
+    createFile("a.java", "foo bar foo true");
+    FindModel findModel = FindManagerTestUtils.configureFindModel("true");
+    findModel.setWholeWordsOnly(true);
+    DumbServiceImpl.getInstance(getProject()).setDumb(true);
+    try {
+      assertSize(1, findUsages(findModel));
+    }
+    finally {
+      DumbServiceImpl.getInstance(getProject()).setDumb(false);
+    }
+  }
+
+  private void doTestRegexpReplace(String initialText, String searchString, String replaceString, String expectedResult) {
+    configureByText(FileTypes.PLAIN_TEXT, initialText);
+    FindModel model = new FindModel();
+    model.setRegularExpressions(true);
+    model.setStringToFind(searchString);
+    model.setStringToReplace(replaceString);
+    model.setPromptOnReplace(false);
+    assertTrue(FindUtil.replace(myProject, myEditor, 0, model));
+    assertEquals(expectedResult, myEditor.getDocument().getText());
   }
 }

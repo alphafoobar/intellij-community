@@ -21,7 +21,8 @@ import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.openapi.vcs.FilePathImpl;
+import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.openapi.vcs.changes.Change;
@@ -29,6 +30,7 @@ import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentBinaryContentRevision;
 import com.intellij.openapi.vcs.changes.TextRevisionNumber;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
+import com.intellij.vcsUtil.VcsUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,9 +50,14 @@ public class ShelvedBinaryFile implements JDOMExternalizable {
 
   public ShelvedBinaryFile(final String beforePath, final String afterPath, @Nullable final String shelvedPath) {
     assert beforePath != null || afterPath != null;
-    BEFORE_PATH = beforePath;
-    AFTER_PATH = afterPath;
-    SHELVED_PATH = shelvedPath;
+    BEFORE_PATH = convertToSystemIndependent(beforePath);
+    AFTER_PATH = convertToSystemIndependent(afterPath);
+    SHELVED_PATH = convertToSystemIndependent(shelvedPath);
+  }
+
+  @Nullable
+  private static String convertToSystemIndependent(@Nullable String beforePath) {
+    return beforePath != null ? FileUtil.toSystemIndependentName(beforePath) : null;
   }
 
   public void readExternal(Element element) throws InvalidDataException {
@@ -76,8 +83,7 @@ public class ShelvedBinaryFile implements JDOMExternalizable {
     ContentRevision after = null;
     final File baseDir = new File(project.getBaseDir().getPath());
     if (BEFORE_PATH != null) {
-      final FilePathImpl file = new FilePathImpl(new File(baseDir, BEFORE_PATH), false);
-      file.refresh();
+      final FilePath file = VcsUtil.getFilePath(new File(baseDir, BEFORE_PATH), false);
       before = new CurrentBinaryContentRevision(file) {
         @NotNull
         @Override
@@ -87,8 +93,7 @@ public class ShelvedBinaryFile implements JDOMExternalizable {
       };
     }
     if (AFTER_PATH != null) {
-      final FilePathImpl file = new FilePathImpl(new File(baseDir, AFTER_PATH), false);
-      file.refresh();
+      final FilePath file = VcsUtil.getFilePath(new File(baseDir, AFTER_PATH), false);
       after = new ShelvedBinaryContentRevision(file, SHELVED_PATH);
     }
     return new Change(before, after);

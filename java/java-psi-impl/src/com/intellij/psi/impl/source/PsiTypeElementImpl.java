@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package com.intellij.psi.impl.source;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.*;
+import com.intellij.psi.augment.PsiAugmentProvider;
 import com.intellij.psi.impl.PsiImplUtil;
-import com.intellij.psi.impl.source.codeStyle.CodeEditUtil;
 import com.intellij.psi.impl.source.tree.CompositePsiElement;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
@@ -76,6 +76,11 @@ public class PsiTypeElementImpl extends CompositePsiElement implements PsiTypeEl
   }
 
   private PsiType calculateType() {
+    final PsiType inferredType = PsiAugmentProvider.getInferredType(this);
+    if (inferredType != null) {
+      return inferredType;
+    }
+
     PsiType type = null;
     SmartList<PsiAnnotation> annotations = new SmartList<PsiAnnotation>();
 
@@ -118,7 +123,8 @@ public class PsiTypeElementImpl extends CompositePsiElement implements PsiTypeEl
         type = PsiEllipsisType.createEllipsis(type, array);
       }
 
-      if (PsiUtil.isJavaToken(child, JavaTokenType.QUEST)) {
+      if (PsiUtil.isJavaToken(child, JavaTokenType.QUEST) ||
+          child instanceof ASTNode && ((ASTNode)child).getElementType() == JavaElementType.DUMMY_ELEMENT && "any".equals(child.getText())) {
         assert type == null : this;
         PsiElement boundKind = PsiTreeUtil.skipSiblingsForward(child, PsiComment.class, PsiWhiteSpace.class);
         PsiElement boundType = PsiTreeUtil.skipSiblingsForward(boundKind, PsiComment.class, PsiWhiteSpace.class);
@@ -139,7 +145,7 @@ public class PsiTypeElementImpl extends CompositePsiElement implements PsiTypeEl
       if (PsiUtil.isJavaToken(child, JavaTokenType.AND)) {
         List<PsiType> types = collectTypes();
         assert !types.isEmpty() : this;
-        type = PsiIntersectionType.createIntersection(types);
+        type = PsiIntersectionType.createIntersection(false, types.toArray(PsiType.createArray(types.size())));
         break;
       }
 
@@ -239,41 +245,10 @@ public class PsiTypeElementImpl extends CompositePsiElement implements PsiTypeEl
 
   @Override
   public PsiElement replace(@NotNull PsiElement newElement) throws IncorrectOperationException {
+    // neighbouring type annotations are logical part of this type element and should be dropped
+    PsiImplUtil.markTypeAnnotations(this);
     PsiElement result = super.replace(newElement);
-
-    // We want to reformat method call arguments on method return type change because there is a possible situation that they are aligned
-    // and the change breaks the alignment.
-    // Example:
-    //     Object test(1,
-    //                 2) {}
-    // Suppose we're changing return type to 'MyCustomClass'. We get the following if parameter list is not reformatted:
-    //     MyCustomClass test(1,
-    //                 2) {}
-    PsiElement parent = result.getParent();
-    if (parent instanceof PsiMethod) {
-      PsiMethod method = (PsiMethod)parent;
-      CodeEditUtil.markToReformat(method.getParameterList().getNode(), true);
-    }
-
-    // We cover situation like below here:
-    //     int test(int i, int j) {}
-    //     ...
-    //     int i = test(1,
-    //                  2);
-    // I.e. the point is to avoid code like below during changing 'test()' return type from 'int' to 'long':
-    //     long i = test(1,
-    //                  2);
-    else if (parent instanceof PsiVariable) {
-      PsiVariable variable = (PsiVariable)parent;
-      if (variable.hasInitializer()) {
-        PsiExpression methodCallCandidate = variable.getInitializer();
-        if (methodCallCandidate instanceof PsiMethodCallExpression) {
-          PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)methodCallCandidate;
-          CodeEditUtil.markToReformat(methodCallExpression.getArgumentList().getNode(), true);
-        }
-      }
-    }
-
+    PsiImplUtil.deleteTypeAnnotations((PsiTypeElement)result);
     return result;
   }
 

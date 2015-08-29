@@ -20,7 +20,6 @@ import com.intellij.ide.DataManager;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.*;
@@ -28,10 +27,10 @@ import com.intellij.openapi.command.undo.*;
 import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.diff.FragmentContent;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
@@ -96,11 +95,11 @@ public class UndoManagerImpl extends UndoManager implements ProjectComponent, Ap
   }
 
   public static int getGlobalUndoLimit() {
-    return Registry.intValue("undo.globalUndoLimit", 10);
+    return Registry.intValue("undo.globalUndoLimit");
   }
 
   public static int getDocumentUndoLimit() {
-    return Registry.intValue("undo.documentUndoLimit", 100);
+    return Registry.intValue("undo.documentUndoLimit");
   }
 
   public UndoManagerImpl(Application application, CommandProcessor commandProcessor) {
@@ -325,6 +324,12 @@ public class UndoManagerImpl extends UndoManager implements ProjectComponent, Ap
     FileEditor editor = myEditorProvider.getCurrentEditor();
     if (editor == null) {
       return null;
+    }
+    if (editor instanceof TextEditor) {
+      Editor e = ((TextEditor)editor).getEditor();
+      if (e instanceof EditorImpl && ((EditorImpl)e).myUseNewRendering && e.isDisposed()) {
+        return null;
+      }
     }
     return new EditorAndState(editor, editor.getState(FileEditorStateLevel.UNDO));
   }
@@ -571,12 +576,12 @@ public class UndoManagerImpl extends UndoManager implements ProjectComponent, Ap
   }
 
   static Document getOriginal(Document document) {
-    Document result = document.getUserData(FragmentContent.ORIGINAL_DOCUMENT);
+    Document result = document.getUserData(ORIGINAL_DOCUMENT);
     return result == null ? document : result;
   }
 
   static boolean isCopy(Document d) {
-    return d.getUserData(FragmentContent.ORIGINAL_DOCUMENT) != null;
+    return d.getUserData(ORIGINAL_DOCUMENT) != null;
   }
 
   protected void compact() {

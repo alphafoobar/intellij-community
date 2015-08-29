@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,26 @@
 package com.intellij.execution.impl;
 
 import com.intellij.execution.*;
-import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.runners.ProgramRunner;
-import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Ref;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBList;
@@ -47,6 +50,8 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.*;
 import java.util.List;
 
@@ -133,20 +138,20 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
   }
 
   @NotNull
-  private List<RunnerAndConfigurationSettings> getAvailableConfigurations(RunConfiguration runConfiguration) {
+  private static List<RunnerAndConfigurationSettings> getAvailableConfigurations(@NotNull RunConfiguration runConfiguration) {
     Project project = runConfiguration.getProject();
-    if (project == null || !project.isInitialized())
+    if (project == null || !project.isInitialized()) {
       return Collections.emptyList();
-    final RunManagerImpl runManager = RunManagerImpl.getInstanceImpl(project);
+    }
 
-    final ArrayList<RunnerAndConfigurationSettings> configurations
-      = new ArrayList<RunnerAndConfigurationSettings>(runManager.getSortedConfigurations());
+    List<RunnerAndConfigurationSettings> configurations = new ArrayList<RunnerAndConfigurationSettings>(RunManagerImpl.getInstanceImpl(project).getSortedConfigurations());
     String executorId = DefaultRunExecutor.getRunExecutorInstance().getId();
     for (Iterator<RunnerAndConfigurationSettings> iterator = configurations.iterator(); iterator.hasNext();) {
       RunnerAndConfigurationSettings settings = iterator.next();
-      final ProgramRunner runner = ProgramRunnerUtil.getRunner(executorId, settings);
-      if (runner == null || settings.getConfiguration() == runConfiguration)
+      ProgramRunner runner = ProgramRunnerUtil.getRunner(executorId, settings);
+      if (runner == null || settings.getConfiguration() == runConfiguration) {
         iterator.remove();
+      }
     }
     return configurations;
   }
@@ -160,9 +165,7 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
     }
     String executorId = DefaultRunExecutor.getRunExecutorInstance().getId();
     final ProgramRunner runner = ProgramRunnerUtil.getRunner(executorId, settings);
-    if (runner == null)
-      return false;
-    return runner.canRun(executorId, settings.getConfiguration());
+    return runner != null && runner.canRun(executorId, settings.getConfiguration());
   }
 
   @Override
@@ -175,47 +178,71 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
       return false;
     }
     final Executor executor = DefaultRunExecutor.getRunExecutorInstance();
-    String executorId = executor.getId();
-    final ProgramRunner runner = ProgramRunnerUtil.getRunner(executorId, settings);
-    if (runner == null)
+    final String executorId = executor.getId();
+    ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder.createOrNull(executor, settings);
+    if (builder == null) {
       return false;
-    final ExecutionEnvironment environment = new ExecutionEnvironment(executor, runner, settings, myProject);
+    }
+    final ExecutionEnvironment environment = builder.target(env.getExecutionTarget()).build();
     environment.setExecutionId(env.getExecutionId());
-    if (!ExecutionTargetManager.canRun(settings, env.getExecutionTarget())) {
+    if (!ExecutionTargetManager.canRun(settings, environment.getExecutionTarget())) {
       return false;
     }
 
-    if (!runner.canRun(executorId, environment.getRunProfile())) {
+    if (!environment.getRunner().canRun(executorId, environment.getRunProfile())) {
       return false;
     }
-
     else {
+      beforeRun(environment);
+
       final Semaphore targetDone = new Semaphore();
-      final boolean[] result = new boolean[1];
+      final Ref<Boolean> result = new Ref<Boolean>(false);
+      final Disposable disposable = Disposer.newDisposable();
+
+      myProject.getMessageBus().connect(disposable).subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionAdapter() {
+        @Override
+        public void processStartScheduled(final String executorIdLocal, final ExecutionEnvironment environmentLocal) {
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            targetDone.down();
+          }
+        }
+
+        @Override
+        public void processNotStarted(final String executorIdLocal, @NotNull final ExecutionEnvironment environmentLocal) {
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            Boolean skipRun = environment.getUserData(ExecutionManagerImpl.EXECUTION_SKIP_RUN);
+            if (skipRun != null && skipRun) {
+              result.set(true);
+            }
+            targetDone.up();
+          }
+        }
+
+        @Override
+        public void processStarted(final String executorIdLocal,
+                                   @NotNull final ExecutionEnvironment environmentLocal,
+                                   @NotNull final ProcessHandler handler) {
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            handler.addProcessListener(new ProcessAdapter() {
+              @Override
+              public void processTerminated(ProcessEvent event) {
+                result.set(event.getExitCode() == 0);
+                targetDone.up();
+              }
+            });
+          }
+        }
+      });
+
       try {
         ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-
           @Override
           public void run() {
-            targetDone.down();
             try {
-              runner.execute(environment, new ProgramRunner.Callback() {
-                @Override
-                public void processStarted(RunContentDescriptor descriptor) {
-                  ProcessHandler processHandler = descriptor != null ? descriptor.getProcessHandler() : null;
-                  if (processHandler != null) {
-                    processHandler.addProcessListener(new ProcessAdapter() {
-                      @Override
-                      public void processTerminated(ProcessEvent event) {
-                        result[0] = event.getExitCode() == 0;
-                        targetDone.up();
-                      }
-                    });
-                  }
-                }
-              });
+              environment.getRunner().execute(environment);
             }
             catch (ExecutionException e) {
+              targetDone.up();
               LOG.error(e);
             }
           }
@@ -223,14 +250,24 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
       }
       catch (Exception e) {
         LOG.error(e);
+        Disposer.dispose(disposable);
         return false;
       }
+
       targetDone.waitFor();
-      return result[0];
+      Disposer.dispose(disposable);
+
+      return result.get();
     }
   }
 
-  class RunConfigurableBeforeRunTask extends BeforeRunTask<RunConfigurableBeforeRunTask> {
+  private static void beforeRun(@NotNull ExecutionEnvironment environment) {
+    for (RunConfigurationBeforeRunProviderDelegate delegate : Extensions.getExtensions(RunConfigurationBeforeRunProviderDelegate.EP_NAME)) {
+      delegate.beforeRun(environment);
+    }
+  }
+
+  public class RunConfigurableBeforeRunTask extends BeforeRunTask<RunConfigurableBeforeRunTask> {
     private String myConfigurationName;
     private String myConfigurationType;
     private boolean myInitialized = false;
@@ -267,26 +304,17 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
       if (myInitialized) {
         return;
       }
-      if (myConfigurationName != null && myConfigurationType != null) {
-        Collection<RunnerAndConfigurationSettings> configurations = RunManagerImpl.getInstanceImpl(myProject).getSortedConfigurations();
-        for (RunnerAndConfigurationSettings runConfiguration : configurations) {
-          ConfigurationType type = runConfiguration.getType();
-          if (myConfigurationName.equals(runConfiguration.getName())
-              && type != null
-              && myConfigurationType.equals(type.getId())) {
-            setSettings(runConfiguration);
-            return;
-          }
-        }
+      if (myConfigurationType != null && myConfigurationName != null) {
+        setSettings(RunManagerImpl.getInstanceImpl(myProject).findConfigurationByTypeAndName(myConfigurationType, myConfigurationName));
       }
     }
 
-    void setSettings(RunnerAndConfigurationSettings settings) {
+    public void setSettings(RunnerAndConfigurationSettings settings) {
       mySettings = settings;
       myInitialized = true;
     }
 
-    RunnerAndConfigurationSettings getSettings() {
+    public RunnerAndConfigurationSettings getSettings() {
       init();
       return mySettings;
     }
@@ -326,6 +354,14 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
       mySettings = settings;
       init();
       myJBList.setSelectedValue(mySelectedSettings, true);
+      myJBList.addMouseListener(new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent e) {
+          if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() ==2) {
+            doOKAction();
+          }
+        }
+      });
       FontMetrics fontMetrics = myJBList.getFontMetrics(myJBList.getFont());
       int maxWidth = fontMetrics.stringWidth("m") * 30;
       for (RunnerAndConfigurationSettings setting : settings) {

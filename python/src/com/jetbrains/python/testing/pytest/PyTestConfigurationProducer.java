@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.testing.pytest;
 
+import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Location;
 import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.openapi.module.Module;
@@ -28,10 +29,8 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFileSystemItem;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.webcore.packaging.PackageVersionComparator;
-import com.jetbrains.python.packaging.PyExternalProcessException;
 import com.jetbrains.python.packaging.PyPackage;
 import com.jetbrains.python.packaging.PyPackageManager;
-import com.jetbrains.python.packaging.PyPackageManagerImpl;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.PyFunction;
@@ -97,9 +96,9 @@ public class PyTestConfigurationProducer extends PythonTestConfigurationProducer
     if (pyFunction != null) {
       keywords = pyFunction.getName();
       if (pyClass != null) {
-        final PyPackageManagerImpl packageManager = (PyPackageManagerImpl)PyPackageManager.getInstance(sdk);
+        final PyPackageManager packageManager = PyPackageManager.getInstance(sdk);
         try {
-          final PyPackage pytestPackage = packageManager.findPackage("pytest");
+          final PyPackage pytestPackage = packageManager.findPackage("pytest", false);
           if (pytestPackage != null && PackageVersionComparator.VERSION_COMPARATOR.compare(pytestPackage.getVersion(), "2.3.3") >= 0) {
             keywords = pyClass.getName() + " and " + keywords;
           }
@@ -107,7 +106,7 @@ public class PyTestConfigurationProducer extends PythonTestConfigurationProducer
             keywords = pyClass.getName() + "." + keywords;
           }
         }
-        catch (PyExternalProcessException e) {
+        catch (ExecutionException e) {
           keywords = pyClass.getName() + "." + keywords;
         }
       }

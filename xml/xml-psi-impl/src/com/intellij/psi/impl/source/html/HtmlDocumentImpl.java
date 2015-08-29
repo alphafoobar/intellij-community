@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.psi.impl.source.html;
 
 import com.intellij.psi.impl.source.xml.XmlDocumentImpl;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.xml.XmlElementType;
 import com.intellij.psi.xml.XmlTag;
 
@@ -27,6 +28,11 @@ public class HtmlDocumentImpl extends XmlDocumentImpl {
     super(XmlElementType.HTML_DOCUMENT);
   }
 
+  public HtmlDocumentImpl(IElementType type) {
+    super(type);
+  }
+
+  @Override
   public XmlTag getRootTag() {
     return (XmlTag)findElementByTokenType(XmlElementType.HTML_TAG);
   }

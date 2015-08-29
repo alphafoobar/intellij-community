@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,24 +16,32 @@
 package com.jetbrains.python.testing.nosetest;
 
 import com.intellij.execution.Location;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.testIntegration.TestLocationProvider;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.jetbrains.python.testing.PythonTestLocator;
 import com.jetbrains.python.testing.PythonUnitTestUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
 import java.util.List;
 
-public class PythonNoseTestUrlProvider implements TestLocationProvider {
-  @NonNls
-  private static final String PROTOCOL_ID = "python_nosetestid";
+public class PythonNoseTestUrlProvider implements PythonTestLocator, DumbAware {
+  public static final String PROTOCOL_ID = "python_nosetestid";
+
+  public static final PythonNoseTestUrlProvider INSTANCE = new PythonNoseTestUrlProvider();
 
   @NotNull
-  public List<Location> getLocation(@NotNull final String protocolId, @NotNull final String path,
-                                    final Project project) {
-    if (!PROTOCOL_ID.equals(protocolId)) {
+  @Override
+  public final String getProtocolId() {
+    return PROTOCOL_ID;
+  }
+
+  @NotNull
+  @Override
+  public List<Location> getLocation(@NotNull String protocol, @NotNull String path, @NotNull Project project, @NotNull GlobalSearchScope scope) {
+    if (!PROTOCOL_ID.equals(protocol)) {
       return Collections.emptyList();
     }
 
@@ -43,11 +51,14 @@ public class PythonNoseTestUrlProvider implements TestLocationProvider {
     }
     final int listSize = list.size();
 
-    // parse path as [ns.]*fileName.className[.methodName]
+    // parse path as [ns.]*fileName[.className][.methodName]
     if (listSize == 2) {
     final List<Location> classes = PythonUnitTestUtil.findLocations(project, list.get(0), list.get(1), null);
     if (classes.size() > 0)
       return classes;
+    final List<Location> functions = PythonUnitTestUtil.findLocations(project, list.get(0), null, list.get(1));
+    if (functions.size() > 0)
+      return functions;
     }
     
     if (listSize > 2) {

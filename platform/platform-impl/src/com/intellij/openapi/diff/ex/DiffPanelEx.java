@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,9 @@ package com.intellij.openapi.diff.ex;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diff.DiffPanel;
 import com.intellij.openapi.diff.impl.ComparisonPolicy;
+import com.intellij.openapi.diff.impl.processing.HighlightMode;
 import com.intellij.openapi.editor.Editor;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public interface DiffPanelEx extends DiffPanel, Disposable {
@@ -38,7 +40,16 @@ public interface DiffPanelEx extends DiffPanel, Disposable {
 
   DiffPanelOptions getOptions();
 
-  void setComparisonPolicy(ComparisonPolicy comparisonPolicy);
+  void setComparisonPolicy(@NotNull ComparisonPolicy comparisonPolicy);
 
   ComparisonPolicy getComparisonPolicy();
+
+  void setAutoScrollEnabled(boolean enabled);
+
+  boolean isAutoScrollEnabled();
+
+  void setHighlightMode(@NotNull HighlightMode highlightMode);
+
+  @NotNull
+  HighlightMode getHighlightMode();
 }

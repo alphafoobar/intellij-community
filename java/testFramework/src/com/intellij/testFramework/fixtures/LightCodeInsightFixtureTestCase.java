@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 package com.intellij.testFramework.fixtures;
 
 import com.intellij.lang.Language;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.LanguageLevelModuleExtension;
 import com.intellij.openapi.roots.ModifiableRootModel;
@@ -35,16 +37,39 @@ import java.io.File;
  * @author peter
  */
 public abstract class LightCodeInsightFixtureTestCase extends UsefulTestCase{
+  public static final LightProjectDescriptor JAVA_1_4 = new DefaultLightProjectDescriptor() {
+    @Override
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
+      model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.JDK_1_4);
+    }
+  };
+  public static final LightProjectDescriptor JAVA_1_5 = new DefaultLightProjectDescriptor() {
+    @Override
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
+      model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.JDK_1_5);
+    }
+  };
   public static final LightProjectDescriptor JAVA_1_6 = new DefaultLightProjectDescriptor() {
     @Override
-    public void configureModule(Module module, ModifiableRootModel model, ContentEntry contentEntry) {
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
       model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.JDK_1_6);
     }
   };
   public static final LightProjectDescriptor JAVA_1_7 = new DefaultLightProjectDescriptor() {
     @Override
-    public void configureModule(Module module, ModifiableRootModel model, ContentEntry contentEntry) {
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
       model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.JDK_1_7);
+    }
+  };
+  public static final LightProjectDescriptor JAVA_8 = new DefaultLightProjectDescriptor() {
+    @Override
+    public Sdk getSdk() {
+      return IdeaTestUtil.getMockJdk18();
+    }
+
+    @Override
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
+      model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.JDK_1_8);
     }
   };
   public static final LightProjectDescriptor JAVA_LATEST = new DefaultLightProjectDescriptor();
@@ -55,12 +80,10 @@ public abstract class LightCodeInsightFixtureTestCase extends UsefulTestCase{
 
   @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
   protected LightCodeInsightFixtureTestCase() {
-    IdeaTestCase.initPlatformPrefix();
   }
 
   @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
   public LightCodeInsightFixtureTestCase(String classToTest, String prefix) {
-    PlatformTestCase.initPlatformPrefix(classToTest, prefix);
   }
 
   @Override
@@ -109,11 +132,17 @@ public abstract class LightCodeInsightFixtureTestCase extends UsefulTestCase{
 
   @Override
   protected void tearDown() throws Exception {
-    myFixture.tearDown();
-    myFixture = null;
-    myModule = null;
-    super.tearDown();
+    try {
+      myFixture.tearDown();
+    }
+    finally {
+      myFixture = null;
+      myModule = null;
+
+      super.tearDown();
+    }
   }
+
   protected final void runTestBare() throws Throwable {
     LightCodeInsightFixtureTestCase.super.runTest();
   }
@@ -121,6 +150,10 @@ public abstract class LightCodeInsightFixtureTestCase extends UsefulTestCase{
   protected Project getProject() {
     return myFixture.getProject();
   }
+
+  protected PsiFile getFile() { return myFixture.getFile(); }
+
+  protected Editor getEditor() { return myFixture.getEditor(); }
 
   protected PsiManager getPsiManager() {
     return PsiManager.getInstance(getProject());

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,10 +41,13 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.*;
-import com.intellij.slicer.*;
+import com.intellij.slicer.DuplicateMap;
+import com.intellij.slicer.SliceAnalysisParams;
+import com.intellij.slicer.SliceRootNode;
+import com.intellij.slicer.SliceUsage;
 import com.intellij.util.Function;
 import com.intellij.util.Processor;
-import com.intellij.util.containers.ConcurrentSoftValueHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.Nls;
@@ -110,7 +113,8 @@ public class MagicConstantInspection extends BaseJavaLocalInspectionTool {
       public void visitReturnStatement(PsiReturnStatement statement) {
         PsiExpression value = statement.getReturnValue();
         if (value == null) return;
-        PsiMethod method = PsiTreeUtil.getParentOfType(statement, PsiMethod.class);
+        PsiElement element = PsiTreeUtil.getParentOfType(statement, PsiMethod.class, PsiLambdaExpression.class);
+        PsiMethod method = element instanceof PsiMethod ? (PsiMethod)element : LambdaUtil.getFunctionalInterfaceMethod(element);
         if (method == null) return;
         checkExpression(value, method, value.getType(), holder);
       }
@@ -375,7 +379,7 @@ public class MagicConstantInspection extends BaseJavaLocalInspectionTool {
   }
   
   static AllowedValues getAllowedValues(@NotNull PsiModifierListOwner element, PsiType type, Set<PsiClass> visited) {
-    PsiAnnotation[] annotations = AnnotationUtil.getAllAnnotations(element, true, null);
+    PsiAnnotation[] annotations = getAllAnnotations(element);
     PsiManager manager = element.getManager();
     for (PsiAnnotation annotation : annotations) {
       AllowedValues values;
@@ -396,6 +400,17 @@ public class MagicConstantInspection extends BaseJavaLocalInspectionTool {
     }
 
     return parseBeanInfo(element, manager);
+  }
+
+  private static PsiAnnotation[] getAllAnnotations(final PsiModifierListOwner element) {
+    return CachedValuesManager.getCachedValue(element, new CachedValueProvider<PsiAnnotation[]>() {
+      @Nullable
+      @Override
+      public Result<PsiAnnotation[]> compute() {
+        return Result.create(AnnotationUtil.getAllAnnotations(element, true, null),
+                             PsiModificationTracker.MODIFICATION_COUNT);
+      }
+    });
   }
 
   private static AllowedValues parseBeanInfo(@NotNull PsiModifierListOwner owner, @NotNull PsiManager manager) {
@@ -585,7 +600,7 @@ public class MagicConstantInspection extends BaseJavaLocalInspectionTool {
   private static PsiExpression getLiteralExpression(@NotNull PsiExpression context, @NotNull PsiManager manager, @NotNull String text) {
     Map<String, PsiExpression> cache = LITERAL_EXPRESSION_CACHE.get(manager);
     if (cache == null) {
-      cache = new ConcurrentSoftValueHashMap<String, PsiExpression>();
+      cache = ContainerUtil.createConcurrentSoftValueMap();
       cache = manager.putUserDataIfAbsent(LITERAL_EXPRESSION_CACHE, cache);
     }
     PsiExpression expression = cache.get(text);

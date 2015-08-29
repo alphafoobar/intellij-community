@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,13 +49,8 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
   @NotNull
   @Override
   protected String buildErrorString(Object... infos) {
-    final PsiType type = (PsiType)infos[1];
+    final PsiType type = (PsiType)infos[0];
     return InspectionGadgetsBundle.message("try.with.identical.catches.problem.descriptor", type.getPresentableText());
-  }
-
-  @Override
-  public BaseInspectionVisitor buildVisitor() {
-    return new TryWithIdenticalCatchesVisitor();
   }
 
   @Nls
@@ -66,8 +61,13 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
   }
 
   @Override
-  protected InspectionGadgetsFix buildFix(Object... infos) {
-    return new CollapseCatchSectionsFix(((Integer)infos[0]).intValue());
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel7OrHigher(file);
+  }
+
+  @Override
+  public BaseInspectionVisitor buildVisitor() {
+    return new TryWithIdenticalCatchesVisitor();
   }
 
   private static class TryWithIdenticalCatchesVisitor extends BaseInspectionVisitor {
@@ -75,9 +75,6 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
     @Override
     public void visitTryStatement(PsiTryStatement statement) {
       super.visitTryStatement(statement);
-      if (!PsiUtil.isLanguageLevel7OrHigher(statement)) {
-        return;
-      }
       final PsiCatchSection[] catchSections = statement.getCatchSections();
       if (catchSections.length < 2) {
         return;
@@ -120,12 +117,13 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
           if (parameterValues != null && (parameterValues.size() != 1 || !(parameterValues.get(0) instanceof PsiReferenceExpression))) {
             continue;
           }
-          if (!canCollapse(parameters, i, j)) {
+          if (j > i ? !canCollapse(parameters, i, j) : !canCollapse(parameters, j, i)) {
             continue;
           }
           final PsiJavaToken rParenth = otherSection.getRParenth();
           if (rParenth != null) {
-            registerErrorAtOffset(otherSection, 0, rParenth.getStartOffsetInParent() + 1, Integer.valueOf(i), parameter.getType());
+            registerErrorAtOffset(otherSection, 0, rParenth.getStartOffsetInParent() + 1, parameter.getType(),
+                                  Integer.valueOf(i), Integer.valueOf(j));
           }
           duplicates[i] = true;
           duplicates[j] = true;
@@ -134,35 +132,31 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
     }
 
     private static boolean canCollapse(PsiParameter[] parameters, int index1, int index2) {
-      if (index2 > index1) {
-        final PsiType type = parameters[index2].getType();
-        for (int i = index1 + 1; i < index2; i++) {
-          final PsiType otherType = parameters[i].getType();
-          if (TypeConversionUtil.isAssignable(type, otherType)) {
-            return false;
-          }
+      if (index2 <= index1) throw new IllegalArgumentException();
+      final PsiType type = parameters[index2].getType();
+      for (int i = index1 + 1; i < index2; i++) {
+        final PsiType otherType = parameters[i].getType();
+        if (TypeConversionUtil.isAssignable(type, otherType)) {
+          return false;
         }
-        return true;
       }
-      else {
-        final PsiType type = parameters[index1].getType();
-        for (int i = index2 + 1; i < index1; i++) {
-          final PsiType otherType = parameters[i].getType();
-          if (TypeConversionUtil.isAssignable(otherType, type)) {
-            return false;
-          }
-        }
-        return true;
-      }
+      return true;
     }
+  }
+
+  @Override
+  protected InspectionGadgetsFix buildFix(Object... infos) {
+    return new CollapseCatchSectionsFix(((Integer)infos[1]).intValue(), ((Integer)infos[2]).intValue());
   }
 
   private static class CollapseCatchSectionsFix extends InspectionGadgetsFix {
 
     private final int myCollapseIntoIndex;
+    private final int mySectionIndex;
 
-    public CollapseCatchSectionsFix(int collapseIntoIndex) {
+    public CollapseCatchSectionsFix(int collapseIntoIndex, int sectionIndex) {
       myCollapseIntoIndex = collapseIntoIndex;
+      mySectionIndex = sectionIndex;
     }
 
     @Override
@@ -179,13 +173,15 @@ public class TryWithIdenticalCatchesInspection extends BaseInspection {
 
     @Override
     protected void doFix(Project project, ProblemDescriptor descriptor) throws IncorrectOperationException {
-      final PsiCatchSection section = (PsiCatchSection)descriptor.getPsiElement();
-      final PsiTryStatement tryStatement = (PsiTryStatement)section.getParent();
+      // smart psi pointer lost correct catch section when multiple catch section were collapsed in batch mode
+      // so use index of catch section to retrieve it instead.
+      final PsiTryStatement tryStatement = (PsiTryStatement)descriptor.getPsiElement().getParent();
       final PsiCatchSection[] catchSections = tryStatement.getCatchSections();
-      if (myCollapseIntoIndex >= catchSections.length) {
+      if (myCollapseIntoIndex >= catchSections.length || mySectionIndex >= catchSections.length) {
         return;   // something has gone stale
       }
       final PsiCatchSection collapseInto = catchSections[myCollapseIntoIndex];
+      final PsiCatchSection section = catchSections[mySectionIndex];
       final PsiParameter parameter1 = collapseInto.getParameter();
       final PsiParameter parameter2 = section.getParameter();
       if (parameter1 == null || parameter2 == null) {

@@ -9,22 +9,22 @@ def test():
         return xs
     def f_2(xs):
         """
-        :type xs: Sequence of int
+        :type xs: collections.Sequence of int
         """
         return xs
     def f_3(xs):
         """
-        :type xs: Container of int
+        :type xs: collections.Container of int
         """
         return xs
     def f_4(xs):
         """
-        :type xs: Iterator of int
+        :type xs: collections.Iterator of int
         """
         return xs
     def f_5(xs):
         """
-        :type xs: Iterable of int
+        :type xs: collections.Iterable of int
         """
         return xs
     def f_6(xs):
@@ -34,22 +34,22 @@ def test():
         return xs
     def f_7(xs):
         """
-        :type xs: Sequence
+        :type xs: collections.Sequence
         """
         return xs
     def f_8(xs):
         """
-        :type xs: Container
+        :type xs: collections.Container
         """
         return xs
     def f_9(xs):
         """
-        :type xs: Iterator
+        :type xs: collections.Iterator
         """
         return xs
     def f_10(xs):
         """
-        :type xs: Iterable
+        :type xs: collections.Iterable
         """
         return xs
     def f_11(xs):
@@ -59,22 +59,22 @@ def test():
         return xs
     def f_12(xs):
         """
-        :type xs: Sequence of string
+        :type xs: collections.Sequence of string
         """
         return xs
     def f_13(xs):
         """
-        :type xs: Container of string
+        :type xs: collections.Container of string
         """
         return xs
     def f_14(xs):
         """
-        :type xs: Iterator of string
+        :type xs: collections.Iterator of string
         """
         return xs
     def f_15(xs):
         """
-        :type xs: Iterable of string
+        :type xs: collections.Iterable of string
         """
         return xs
     return [
@@ -89,9 +89,9 @@ def test():
         f_8(<warning descr="Expected type 'Container', got '__generator[str]' instead">gen(11)</warning>),
         f_9(gen(11)),
         f_10(gen(11)),
-        f_11(<warning descr="Expected type 'list[str | unicode]', got '__generator[str]' instead">gen(11)</warning>),
-        f_12(<warning descr="Expected type 'Sequence[str | unicode]', got '__generator[str]' instead">gen(11)</warning>),
-        f_13(<warning descr="Expected type 'Container[str | unicode]', got '__generator[str]' instead">gen(11)</warning>),
+        f_11(<warning descr="Expected type 'list[Union[str, unicode]]', got '__generator[str]' instead">gen(11)</warning>),
+        f_12(<warning descr="Expected type 'Sequence[Union[str, unicode]]', got '__generator[str]' instead">gen(11)</warning>),
+        f_13(<warning descr="Expected type 'Container[Union[str, unicode]]', got '__generator[str]' instead">gen(11)</warning>),
         f_14(gen(11)),
         f_15(gen(11)),
         f_15('foo'.split('o')),

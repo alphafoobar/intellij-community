@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@ import com.intellij.idea.IdeaApplication;
 import com.intellij.idea.Main;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.ComponentsPackage;
 import com.intellij.openapi.diagnostic.ErrorLogger;
+import com.intellij.openapi.diagnostic.ExceptionWithAttachments;
 import com.intellij.openapi.diagnostic.IdeaLoggingEvent;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -63,7 +65,7 @@ public class DialogAppender extends AppenderSkeleton {
           Application application = ApplicationManager.getApplication();
           if (application != null) {
             if (application.isHeadlessEnvironment() || application.isDisposed()) return;
-            ContainerUtil.addAll(loggers, application.getComponents(ErrorLogger.class));
+            ContainerUtil.addAll(loggers, ComponentsPackage.getComponents(application, ErrorLogger.class));
           }
 
           appendToLoggers(event, loggers.toArray(new ErrorLogger[loggers.size()]));
@@ -100,11 +102,7 @@ public class DialogAppender extends AppenderSkeleton {
       if (info == null) {
         return;
       }
-      Throwable throwable = info.getThrowable();
-      //noinspection ThrowableResultOfMethodCallIgnored
-      Throwable rootCause = ExceptionUtil.getRootCause(throwable);
-      ideaEvent = rootCause instanceof LogEventException ? ((LogEventException)rootCause).getLogMessage() : 
-                  new IdeaLoggingEvent(message == null ? "<null> " : message.toString(), throwable);
+      ideaEvent = extractLoggingEvent(message, info.getThrowable());
     }
     for (int i = errorLoggers.length - 1; i >= 0; i--) {
       final ErrorLogger logger = errorLoggers[i];
@@ -125,13 +123,29 @@ public class DialogAppender extends AppenderSkeleton {
 
       final Application app = ApplicationManager.getApplication();
       if (app == null) {
-        new Thread(myDialogRunnable).start();
+        new Thread(myDialogRunnable, "dialog appender logger").start();
       }
       else {
         app.executeOnPooledThread(myDialogRunnable);
       }
       break;
     }
+  }
+
+  private static IdeaLoggingEvent extractLoggingEvent(Object message, Throwable throwable) {
+    //noinspection ThrowableResultOfMethodCallIgnored
+    Throwable rootCause = ExceptionUtil.getRootCause(throwable);
+    if (rootCause instanceof LogEventException) {
+      return ((LogEventException)rootCause).getLogMessage();
+    }
+
+    String strMessage = message == null ? "<null> " : message.toString();
+    ExceptionWithAttachments withAttachments = ExceptionUtil.findCause(throwable, ExceptionWithAttachments.class);
+    if (withAttachments != null) {
+      return LogMessageEx.createEvent(strMessage, ExceptionUtil.getThrowableText(throwable), withAttachments.getAttachments());
+    }
+
+    return new IdeaLoggingEvent(strMessage, throwable);
   }
 
   @TestOnly

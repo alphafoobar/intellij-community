@@ -1,5 +1,21 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.completion;
 
+import com.intellij.application.options.editor.WebEditorOptions;
 import com.intellij.codeInsight.CodeInsightSettings;
 import com.intellij.codeInsight.completion.impl.CamelHumpMatcher;
 import com.intellij.codeInsight.lookup.Lookup;
@@ -12,11 +28,11 @@ import com.intellij.javaee.ExternalResourceManagerEx;
 import com.intellij.javaee.ExternalResourceManagerExImpl;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.psi.PsiReference;
 import com.intellij.psi.statistics.StatisticsManager;
 import com.intellij.psi.statistics.impl.StatisticsManagerImpl;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
 import com.intellij.xml.util.XmlUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
@@ -67,7 +83,7 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
   protected void runTest() throws Throwable {
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         XmlCompletionTest.super.runTest();
       }
     }.execute();
@@ -86,8 +102,8 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     myFixture.checkResultByFile(s);
   }
 
-  private void complete() {
-    myFixture.completeBasic();
+  private LookupElement[] complete() {
+    return myFixture.completeBasic();
   }
 
   private void configureByFiles(String... files) {
@@ -200,7 +216,7 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     myFixture.type(c);
   }
 
-  private void doCompletionTest(final String ext, final String url, final String location) throws Exception {
+  private void doCompletionTest(final String ext, final String url, final String location) {
     final String testName = getTestName(false);
     addResource(url, location);
 
@@ -332,6 +348,18 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     checkResultByFile(getTestName(true) + ".xml");
   }
 
+  public void testAttributeNoQuotes() throws Throwable {
+    boolean oldInsertQuotes = WebEditorOptions.getInstance().isInsertQuotesForAttributeValue();
+    WebEditorOptions.getInstance().setInsertQuotesForAttributeValue(false);
+    try {
+      configureByFile(getTestName(false) + ".xml");
+      selectItem(myFixture.getLookupElements()[0], '\t');
+      checkResultByFile(getTestName(false) + "_after.xml");
+    } finally {
+      WebEditorOptions.getInstance().setInsertQuotesForAttributeValue(oldInsertQuotes);
+    }
+  }
+
   public void testBeforeAttributeNameWithPrefix() throws Exception {
     configureByFile(getTestName(true) + ".xml");
     selectItem(myFixture.getLookupElements()[0], '\t');
@@ -340,9 +368,8 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
 
   public void testUrlCompletionInDtd() throws Exception {
     configureByFile("20.xml");
-    final PsiReference referenceAt = myFixture.getFile().findReferenceAt(myFixture.getEditor().getCaretModel().getOffset() - 1);
-    assertNotNull(referenceAt);
-    assertTrue(referenceAt.getVariants().length > 0);
+    complete();
+    checkResultByFile("20_after.xml");
   }
 
   public void testElementFromSchemaIncludeCompletion() throws Exception {
@@ -411,7 +438,7 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     basicDoTest("");
   }
 
-  private void basicDoTest(String ext) throws Exception {
+  private void basicDoTest(String ext) {
     final String testName = getTestName(false) + ext;
     configureByFile(testName + ".xml");
     checkResultByFile(testName + "_after.xml");
@@ -518,7 +545,7 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     checkResultByFile(testName + "_after.xml");
   }
 
-  public void _testIDEADEV_32773() throws Exception {
+  public void _testIDEADEV_32773() {
     final String testName = getTestName(false);
 
     configureByFiles(testName + ".xml",
@@ -685,6 +712,55 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     myFixture.configureByFile("tagValue/enumerated.xsd");
     myFixture.testCompletionVariants("tagValue/completeEnum.xml", "none", "standard");
     myFixture.testCompletionVariants("tagValue/completeBoolean.xml", "false", "true");
+  }
+
+  public void testInheritedAttribute() throws Exception {
+    myFixture.configureByFiles("InheritedAttr/test.xsd", "InheritedAttr/library.xsd");
+    myFixture.testCompletionVariants("InheritedAttr/test.xml", "buz",
+    "library:boo",
+    "xml:base",
+    "xml:id",
+    "xml:lang",
+    "xml:space");
+  }
+
+  public void testSchemaLocation() throws Exception {
+    myFixture.configureByFiles("spring-beans.xsd");
+    myFixture.testCompletionVariants("SchemaLocation.xml", "http://www.springframework.org/schema/beans ",
+                                     "http://www.w3.org/2001/XMLSchema ", "http://www.w3.org/2001/XMLSchema-instance ");
+    myFixture.testCompletionVariants("SchemaLocation2.xml", "http://www.w3.org/2001/XMLSchema.xsd");
+  }
+
+  public void testNamespaceCompletion() throws Exception {
+    myFixture.configureByText("foo.xml", "<schema xmlns=\"<caret>\"/>");
+    LookupElement[] elements = myFixture.completeBasic();
+    assertEquals("http://www.w3.org/2001/XMLSchema", elements[0].getLookupString());
+
+    myFixture.configureByText("unknown.xml", "<unknown_tag_name xmlns=\"<caret>\"/>");
+    myFixture.completeBasic();
+    assertTrue(myFixture.getLookupElementStrings().size() > 3); // all standard schemas actually
+  }
+
+  public void testRootTagCompletion() throws Exception {
+    boolean old = CodeInsightSettings.getInstance().AUTOCOMPLETE_ON_CODE_COMPLETION;
+    CodeInsightSettings.getInstance().AUTOCOMPLETE_ON_CODE_COMPLETION = false;
+    try {
+      myFixture.configureByText("foo.xml", "<schem<caret>");
+      myFixture.completeBasic();
+      myFixture.type('\n');
+      myFixture.checkResult("<schema xmlns=\"http://www.w3.org/2001/XMLSchema\"<caret>");
+    }
+    finally {
+      CodeInsightSettings.getInstance().AUTOCOMPLETE_ON_CODE_COMPLETION = old;
+    }
+  }
+
+  public void testPi() throws Exception {
+    myFixture.configureByText("foo.xml", "<<caret>");
+    myFixture.completeBasic();
+    myFixture.type('?');
+    myFixture.type('\n');
+    myFixture.checkResult("<?xml version=\"1.0\" encoding=\"<caret>\" ?>");
   }
 }
 

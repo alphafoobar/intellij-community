@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.extractclass.ExtractClassProcessor;
 import com.intellij.refactoring.util.classMembers.MemberInfo;
 import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,6 +37,7 @@ import java.util.TreeSet;
 
 public class ExtractEnumTest extends MultiFileTestCase {
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/extractEnum/";
@@ -48,6 +50,16 @@ public class ExtractEnumTest extends MultiFileTestCase {
   public void testDependantConstants() throws Exception {
     doTest(new RefactoringTestUtil.MemberDescriptor("FOO", PsiField.class, true),
            new RefactoringTestUtil.MemberDescriptor("BAR", PsiField.class, true));
+  }
+  
+  public void testConstructorCall() throws Exception {
+    doTest(new RefactoringTestUtil.MemberDescriptor("STATE_STARTED", PsiField.class, true),
+           new RefactoringTestUtil.MemberDescriptor("STATE_STOPPED", PsiField.class, true));
+  }
+ 
+  public void testCondition() throws Exception {
+    doTest(new RefactoringTestUtil.MemberDescriptor("STATE_STARTED", PsiField.class, true),
+           new RefactoringTestUtil.MemberDescriptor("STATE_STOPPED", PsiField.class, true));
   }
 
   public void testReferencesOnEnumConstantInEnum() throws Exception {
@@ -142,53 +154,50 @@ public class ExtractEnumTest extends MultiFileTestCase {
   private void doTest(final String conflicts,
                       final boolean generateAccessors,
                       final RefactoringTestUtil.MemberDescriptor... memberDescriptors) throws Exception {
-    doTest(new PerformAction() {
-      @Override
-      public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
-        final PsiClass aClass = myJavaFacade.findClass("Test", GlobalSearchScope.projectScope(myProject));
-        assertNotNull("Class Test not found", aClass);
+    doTest((rootDir, rootAfter) -> {
+      final PsiClass aClass = myJavaFacade.findClass("Test", GlobalSearchScope.projectScope(myProject));
+      assertNotNull("Class Test not found", aClass);
 
-        final ArrayList<PsiField> fields = new ArrayList<PsiField>();
-        final ArrayList<PsiMethod> methods = new ArrayList<PsiMethod>();
-        final List<MemberInfo> enumConstants = new ArrayList<MemberInfo>();
-        for (MemberInfo memberInfo : RefactoringTestUtil.findMembers(aClass, memberDescriptors)) {
-          final PsiMember member = memberInfo.getMember();
-          if (member instanceof PsiField) {
-            fields.add((PsiField)member);
-            if (member.hasModifierProperty(PsiModifier.STATIC) && member.hasModifierProperty(PsiModifier.FINAL) && ((PsiField)member).hasInitializer()) {
-              if (memberInfo.isToAbstract()) {
-                enumConstants.add(memberInfo);
-                memberInfo.setChecked(true);
-              }
+      final ArrayList<PsiField> fields = new ArrayList<>();
+      final ArrayList<PsiMethod> methods = new ArrayList<>();
+      final List<MemberInfo> enumConstants = new ArrayList<>();
+      for (MemberInfo memberInfo : RefactoringTestUtil.findMembers(aClass, memberDescriptors)) {
+        final PsiMember member = memberInfo.getMember();
+        if (member instanceof PsiField) {
+          fields.add((PsiField)member);
+          if (member.hasModifierProperty(PsiModifier.STATIC) && member.hasModifierProperty(PsiModifier.FINAL) && ((PsiField)member).hasInitializer()) {
+            if (memberInfo.isToAbstract()) {
+              enumConstants.add(memberInfo);
+              memberInfo.setChecked(true);
             }
           }
-          else if (member instanceof PsiMethod) {
-            methods.add((PsiMethod)member);
-          }
         }
-        try {
-          final ExtractClassProcessor processor =
-            new ExtractClassProcessor(aClass, fields, methods, new ArrayList<PsiClass>(), "", null, "EEnum",
-                                      null, generateAccessors, enumConstants);
+        else if (member instanceof PsiMethod) {
+          methods.add((PsiMethod)member);
+        }
+      }
+      try {
+        final ExtractClassProcessor processor =
+          new ExtractClassProcessor(aClass, fields, methods, new ArrayList<>(), "", null, "EEnum",
+                                    null, generateAccessors, enumConstants);
 
-          processor.run();
-          LocalFileSystem.getInstance().refresh(false);
-          FileDocumentManager.getInstance().saveAllDocuments();
-        }
-        catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
-          if (conflicts != null) {
-            TreeSet expectedConflictsSet = new TreeSet(Arrays.asList(conflicts.split("\n")));
-            TreeSet actualConflictsSet = new TreeSet(Arrays.asList(e.getMessage().split("\n")));
-            Assert.assertEquals(expectedConflictsSet, actualConflictsSet);
-            return;
-          }
-          else {
-            fail(e.getMessage());
-          }
-        }
+        processor.run();
+        LocalFileSystem.getInstance().refresh(false);
+        FileDocumentManager.getInstance().saveAllDocuments();
+      }
+      catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
         if (conflicts != null) {
-          fail("Conflicts were not detected: " + conflicts);
+          TreeSet expectedConflictsSet = new TreeSet(Arrays.asList(conflicts.split("\n")));
+          TreeSet actualConflictsSet = new TreeSet(Arrays.asList(e.getMessage().split("\n")));
+          Assert.assertEquals(expectedConflictsSet, actualConflictsSet);
+          return;
         }
+        else {
+          fail(e.getMessage());
+        }
+      }
+      if (conflicts != null) {
+        fail("Conflicts were not detected: " + conflicts);
       }
     });
   }

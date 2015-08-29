@@ -61,6 +61,44 @@ $some_long_variable_name<caret>
 
   }
 
+  public void testFromAnotherFile2() {
+    myFixture.configureByText "b.txt", '''
+foo function foo2
+'''
+    myFixture.configureByText "a.txt", '''
+f<caret>
+'''
+
+    complete()
+    myFixture.checkResult '''
+foo2<caret>
+'''
+    complete()
+    myFixture.checkResult '''
+function<caret>
+'''
+    complete()
+    myFixture.checkResult '''
+foo<caret>
+'''
+    myFixture.configureByText "a.txt", '''
+f<caret>
+'''
+    backComplete()
+    myFixture.checkResult '''
+foo<caret>
+'''
+
+    backComplete()
+    myFixture.checkResult '''
+function<caret>
+'''
+    backComplete()
+    myFixture.checkResult '''
+foo2<caret>
+'''
+  }
+
   public void "test no middle matching"() {
     myFixture.configureByText "a.txt", '''
 fooExpression
@@ -151,7 +189,54 @@ class Xoo {
 class Xoo {
 }
 '''
+  }
 
+  public void "test cpp indirection"() {
+    myFixture.configureByText "a.c", '''f<caret>
+foo->bar
+'''
+    complete()
+    myFixture.checkResult '''foo<caret>
+foo->bar
+'''
+  }
+
+  public void "test numbers"() {
+    myFixture.configureByText "a.c", '''246<caret>
+24601
+'''
+    complete()
+    myFixture.checkResult '''24601<caret>
+24601
+'''
+  }
+
+  public void "test inside word"() {
+    myFixture.configureByText "a.c", 'foo fox f<caret>bar'
+    complete()
+    myFixture.checkResult 'foo fox fox<caret>bar'
+    complete()
+    myFixture.checkResult 'foo fox foo<caret>bar'
+  }
+
+  public void "test multiple carets"() {
+    myFixture.configureByText "a.txt", "fox food floor f<caret> f<caret>"
+    complete()
+    myFixture.checkResult "fox food floor floor<caret> floor<caret>"
+    complete()
+    myFixture.checkResult "fox food floor food<caret> food<caret>"
+    complete()
+    myFixture.checkResult "fox food floor fox<caret> fox<caret>"
+  }
+
+  public void "test multiple carets backward"() {
+    myFixture.configureByText "a.txt", "f<caret> f<caret> fox food floor"
+    backComplete()
+    myFixture.checkResult "fox<caret> fox<caret> fox food floor"
+    backComplete()
+    myFixture.checkResult "food<caret> food<caret> fox food floor"
+    backComplete()
+    myFixture.checkResult "floor<caret> floor<caret> fox food floor"
   }
 
   private void complete() {

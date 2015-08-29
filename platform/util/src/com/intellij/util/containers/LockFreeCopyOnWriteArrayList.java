@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.concurrency.AtomicFieldUpdater;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.*;
 
@@ -31,11 +32,10 @@ import java.util.*;
  * - less-garbage (does not create Object[0] arrays)
  * - non-cloneable, non-serializable, no-subList-method variant of {@link java.util.concurrent.CopyOnWriteArrayList}.
  * It generally is faster than COWAL in case of low write-contention.
- * (Note that it is not advisable to use COWAL in high write-contention code anyway, consider using {@link ConcurrentHashMap}) instead)
+ * (Note that it is not advisable to use COWAL in high write-contention code anyway, consider using {@link java.util.concurrent.ConcurrentHashMap}) instead)
  */
-class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
-  @SuppressWarnings("FieldMayBeFinal")
-  private volatile Object[] array;
+class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess, ConcurrentList<E> {
+  @NotNull private volatile Object[] array;
 
   LockFreeCopyOnWriteArrayList() {
     array = ArrayUtil.EMPTY_OBJECT_ARRAY;
@@ -45,6 +45,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
   }
 
   @NotNull
+  @TestOnly
   Object[] getArray() {
     return array;
   }
@@ -500,7 +501,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    * @param fromIndex index of first element to be removed
    * @param toIndex   index after last element to be removed
    * @throws IndexOutOfBoundsException if fromIndex or toIndex out of range
-   *                                   ({@code{fromIndex < 0 || toIndex > size() || toIndex < fromIndex})
+   *                                   ({@code {fromIndex < 0 || toIndex > size() || toIndex < fromIndex})
    */
   private void removeRange(int fromIndex, int toIndex) {
     Object[] elements;
@@ -532,6 +533,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    * @param e element to be added to this list, if absent
    * @return <tt>true</tt> if the element was added
    */
+  @Override
   public boolean addIfAbsent(E e) {
     Object[] elements;
     Object[] newElements;
@@ -593,6 +595,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    */
   @Override
   public boolean removeAll(@NotNull Collection<?> c) {
+    if (c.isEmpty()) return false;
     while (true) {
       Object[] elements = array;
       Object[] newElements = createArrayRemoveAll(elements, c);
@@ -679,6 +682,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    * @throws NullPointerException if the specified collection is null
    * @see #addIfAbsent(Object)
    */
+  @Override
   public int addAllAbsent(@NotNull Collection<? extends E> c) {
     Object[] cs = c.toArray();
     if (cs.length == 0) {
@@ -730,6 +734,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    */
   @Override
   public boolean addAll(@NotNull Collection<? extends E> c) {
+    if (c.isEmpty()) return false;
     Object[] cs = c.toArray();
     if (cs.length == 0) {
       return false;
@@ -811,6 +816,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    *
    * @return a string representation of this list
    */
+  @Override
   @NotNull
   public String toString() {
     return Arrays.toString(array);
@@ -826,11 +832,12 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    * be the same if they have the same length and corresponding
    * elements at the same position in the sequence are <em>equal</em>.
    * Two elements {@code e1} and {@code e2} are considered
-   * <em>equal</em> if {@code (e1==null ? e2==null : e1.equals(e2))}.
+   * <em>equal</em> if {@code (e1 == null ? e2 == null : e1.equals(e2))}.
    *
    * @param o the object to be compared for equality with this list
    * @return {@code true} if the specified object is equal to this list
    */
+  @Override
   public boolean equals(Object o) {
     if (o == this) {
       return true;
@@ -856,6 +863,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
    *
    * @return the hash code value for this list
    */
+  @Override
   public int hashCode() {
     int hashCode = 1;
     for (Object obj : array) {
@@ -880,7 +888,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
     Object[] elements = array;
     if (elements.length == 0) return EmptyIterator.getInstance();
 
-    return new COWIterator<E>(elements, 0);
+    return new COWIterator(elements, 0);
   }
 
   /**
@@ -916,10 +924,10 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
       throw new IndexOutOfBoundsException("Index: " + index);
     }
 
-    return elements.length == 0 ? EmptyListIterator.<E>getInstance() : new COWIterator<E>(elements, index);
+    return elements.length == 0 ? EmptyListIterator.<E>getInstance() : new COWIterator(elements, index);
   }
 
-  private static class COWIterator<E> implements ListIterator<E> {
+  private class COWIterator implements ListIterator<E> {
     /**
      * Snapshot of the array
      */
@@ -928,6 +936,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
      * Index of element to be returned by subsequent call to next.
      */
     private int cursor;
+    private int lastRet = -1; // index of last element returned; -1 if no such
 
     private COWIterator(@NotNull Object[] elements, int initialCursor) {
       cursor = initialCursor;
@@ -950,6 +959,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
       if (!hasNext()) {
         throw new NoSuchElementException();
       }
+      lastRet = cursor;
       return (E)snapshot[cursor++];
     }
 
@@ -959,7 +969,7 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
       if (!hasPrevious()) {
         throw new NoSuchElementException();
       }
-      return (E)snapshot[--cursor];
+      return (E)snapshot[lastRet = --cursor];
     }
 
     @Override
@@ -974,7 +984,13 @@ class LockFreeCopyOnWriteArrayList<E> implements List<E>, RandomAccess {
 
     @Override
     public void remove() {
-      throw new UnsupportedOperationException();
+      if (lastRet < 0) {
+        throw new NoSuchElementException();
+      }
+      @SuppressWarnings("unchecked")
+      E e = (E)snapshot[lastRet];
+      lastRet = -1;
+      LockFreeCopyOnWriteArrayList.this.remove(e);
     }
 
     @Override

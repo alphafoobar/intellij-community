@@ -16,7 +16,18 @@
 
 <idea-plugin>
   <name>JUnit</name>
-  <description>Provides possibility to run JUnit 3.x and 4.x tests and view their results</description>
+  <description>
+      <![CDATA[
+      This plugin supports <a href="https://github.com/junit-team/junit">JUnit tests</a>.
+      The following features are available:
+        <ul>
+        <li>Ability to create JUnit 3.x or JUnit 4.x tests.</li>
+        <li>Navigation between a test and test subject.</li>
+        <li>Running tests.</li>
+        <li>Viewing test results in the dedicated Test Runner tab of the Run tool window.</li>
+        </ul>
+      ]]>
+   </description>
   <version>1.0</version>
   <vendor>JetBrains</vendor>
   <extensions defaultExtensionNs="com.intellij">
@@ -44,7 +55,15 @@
     <stacktrace.fold substring="at org.junit.Assert.assert"/>
     <stacktrace.fold substring="at com.intellij.junit3."/>
     <stacktrace.fold substring="at com.intellij.junit4."/>
+    <stacktrace.fold substring="at junit.framework.TestSuite.run"/>
+    <stacktrace.fold substring="at junit.framework.TestCase.run"/>
+    <stacktrace.fold substring="at junit.framework.TestResult"/>
 
+    <programRunner implementation="com.intellij.execution.junit.JUnitDebuggerRunner"/>
+    <codeInsight.externalLibraryResolver implementation="com.intellij.execution.junit.codeInsight.JUnitExternalLibraryResolver"/>
+    <junitListener implementation="com.intellij.junit4.JUnitTestDiscoveryListener"/>
+    <configurationType implementation="com.intellij.execution.junit.testDiscovery.JUnitTestDiscoveryConfigurationType"/>
+    <runConfigurationProducer implementation="com.intellij.execution.junit.testDiscovery.JUnitTestDiscoveryConfigurationProducer"/>
   </extensions>
 
   <extensionPoints>
@@ -53,18 +72,13 @@
 
   <actions>
     <group>
-      <action class="com.intellij.execution.junit.ExcludeFromRunAction" text="Exclude from suite" id="excludeFromSuite"/>
+      <action class="com.intellij.execution.junit.JUnitExcludeFromRunAction" text="Exclude from suite" id="excludeFromSuite"/>
       <separator/>
       <add-to-group relative-to-action="openAssertEqualsDiff" anchor="after" group-id="TestTreePopupMenu"/>
     </group>
     <group>
-      <separator/>
-      <action id="JUnitTesting.SelectInTree" class="com.intellij.execution.junit2.ui.actions.SelectInTreeAction" text="Select in Tree" description="Navigate from tests statistics to tests tree"/>
-      <add-to-group anchor="last" group-id="TestStatisticsTablePopupMenu"/>
-    </group>
-    <group>
-      <action class="com.intellij.execution.junit.AddToTestsPatternAction" id="AddToISuite" text="Add to temp suite"/>
-      <add-to-group anchor="first" group-id="RunContextGroup"/>
+      <action class="com.intellij.execution.junit.JUnitAddToTestsPatternAction" id="AddToISuite" text="Add to pattern suite"/>
+      <add-to-group anchor="last" group-id="RunContextGroup"/>
     </group>
   </actions>
 </idea-plugin>

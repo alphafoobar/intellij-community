@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package com.jetbrains.python.refactoring.changeSignature;
 
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.refactoring.changeSignature.MethodDescriptor;
-import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.impl.PyNamedParameterImpl;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyNamedParameter;
+import com.jetbrains.python.psi.PyParameter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,10 +48,22 @@ public class PyMethodDescriptor implements MethodDescriptor<PyParameterInfo, Str
     for (int i = 0; i < parameters.length; i++) {
       PyParameter parameter = parameters[i];
       final PyExpression defaultValue = parameter.getDefaultValue();
-      String name = parameter instanceof PySingleStarParameter || parameter instanceof PyTupleParameter ||
-                    ((PyNamedParameterImpl)parameter).isPositionalContainer() ||
-                    ((PyNamedParameterImpl)parameter).isKeywordContainer()? parameter.getText() : parameter.getName();
-      parameterInfos.add(new PyParameterInfo(i, name, defaultValue == null? null : defaultValue.getText(),
+      final String name;
+      if (parameter instanceof PyNamedParameter) {
+        if (((PyNamedParameter)parameter).isPositionalContainer()) {
+          name = "*" + parameter.getName();
+        }
+        else if (((PyNamedParameter)parameter).isKeywordContainer()) {
+          name = "**" + parameter.getName();
+        }
+        else {
+          name = parameter.getName();
+        }
+      }
+      else {
+        name = parameter.getText();
+      }
+      parameterInfos.add(new PyParameterInfo(i, name, defaultValue == null ? null : defaultValue.getText(),
                                              defaultValue != null && !StringUtil.isEmptyOrSpaces(defaultValue.getText())));
     }
     return parameterInfos;

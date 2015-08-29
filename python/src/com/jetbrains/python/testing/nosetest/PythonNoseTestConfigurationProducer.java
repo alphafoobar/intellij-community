@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,12 +41,11 @@ public class PythonNoseTestConfigurationProducer extends
       module = modules[0];
     }
     final Sdk sdk = PythonSdkType.findPythonSdk(module);
-    return (TestRunnerService.getInstance(module).getProjectConfiguration().equals(
-      PythonTestConfigurationsModel.PYTHONS_NOSETEST_NAME) && sdk != null);
+    return (PythonTestConfigurationsModel.PYTHONS_NOSETEST_NAME.equals(TestRunnerService.getInstance(module).getProjectConfiguration()) && sdk != null);
   }
 
   @Override
   protected boolean isTestFunction(@NotNull final PyFunction pyFunction, @Nullable final AbstractPythonTestRunConfiguration configuration) {
-    return PythonUnitTestUtil.isTestCaseFunction(pyFunction, false);
+    return PythonUnitTestUtil.isTestCaseFunction(pyFunction, true);
   }
 }

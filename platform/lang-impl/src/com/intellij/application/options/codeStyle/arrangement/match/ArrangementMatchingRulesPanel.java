@@ -16,13 +16,15 @@
 package com.intellij.application.options.codeStyle.arrangement.match;
 
 import com.intellij.application.options.codeStyle.arrangement.ArrangementConstants;
-import com.intellij.psi.codeStyle.arrangement.std.ArrangementStandardSettingsManager;
 import com.intellij.application.options.codeStyle.arrangement.color.ArrangementColorsProvider;
 import com.intellij.application.options.codeStyle.arrangement.util.TitleWithToolbar;
 import com.intellij.ide.ui.customization.CustomizationUtil;
+import com.intellij.lang.Language;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.application.ApplicationBundle;
-import com.intellij.psi.codeStyle.arrangement.match.StdArrangementMatchRule;
+import com.intellij.psi.codeStyle.arrangement.match.ArrangementSectionRule;
+import com.intellij.psi.codeStyle.arrangement.std.StdArrangementRuleAliasToken;
+import com.intellij.psi.codeStyle.arrangement.std.ArrangementStandardSettingsManager;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.GridBag;
 import org.jetbrains.annotations.NonNls;
@@ -31,6 +33,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -39,16 +42,17 @@ import java.util.List;
  */
 public class ArrangementMatchingRulesPanel extends JPanel implements DataProvider {
 
-  @NotNull private final ArrangementMatchingRulesControl myControl;
+  @NotNull protected final ArrangementSectionRulesControl myControl;
 
-  public ArrangementMatchingRulesPanel(@NotNull ArrangementStandardSettingsManager settingsManager,
+  public ArrangementMatchingRulesPanel(@NotNull Language language,
+                                       @NotNull ArrangementStandardSettingsManager settingsManager,
                                        @NotNull ArrangementColorsProvider colorsProvider)
   {
     super(new GridBagLayout());
     
     JBScrollPane scrollPane = new JBScrollPane();
     final JViewport viewport = scrollPane.getViewport();
-    ArrangementMatchingRulesControl.RepresentationCallback callback = new ArrangementMatchingRulesControl.RepresentationCallback() {
+    ArrangementSectionRulesControl.RepresentationCallback callback = new ArrangementSectionRulesControl.RepresentationCallback() {
       @Override
       public void ensureVisible(@NotNull Rectangle r) {
         Rectangle visibleRect = viewport.getViewRect();
@@ -67,7 +71,7 @@ public class ArrangementMatchingRulesPanel extends JPanel implements DataProvide
         }
       }
     };
-    myControl = new ArrangementMatchingRulesControl(settingsManager, colorsProvider, callback);
+    myControl = createRulesControl(language, settingsManager, colorsProvider, callback);
     scrollPane.setViewportView(myControl);
     CustomizationUtil.installPopupHandler(
       myControl, ArrangementConstants.ACTION_GROUP_MATCHING_RULES_CONTEXT_MENU, ArrangementConstants.MATCHING_RULES_CONTROL_PLACE
@@ -83,19 +87,39 @@ public class ArrangementMatchingRulesPanel extends JPanel implements DataProvide
     add(scrollPane, new GridBag().fillCell().weightx(1).weighty(1).insets(0, ArrangementConstants.HORIZONTAL_PADDING, 0, 0));
   }
 
-  @NotNull
-  public List<StdArrangementMatchRule> getRules() {
-    return myControl.getRules();
+  protected ArrangementSectionRulesControl createRulesControl(@NotNull Language language,
+                                                               @NotNull ArrangementStandardSettingsManager settingsManager,
+                                                               @NotNull ArrangementColorsProvider colorsProvider,
+                                                               @NotNull ArrangementSectionRulesControl.RepresentationCallback callback) {
+    return new ArrangementSectionRulesControl(language, settingsManager, colorsProvider, callback);
   }
-  
-  public void setRules(@Nullable List<StdArrangementMatchRule> rules) {
-    myControl.setRules(rules);
+
+  @NotNull
+  public List<ArrangementSectionRule> getSections() {
+    return myControl.getSections();
+  }
+
+  public void setSections(@Nullable List<ArrangementSectionRule> rules) {
+    myControl.setSections(rules);
+  }
+
+  @Nullable
+  public Collection<StdArrangementRuleAliasToken> getRulesAliases() {
+    return myControl.getRulesAliases();
+  }
+
+  public void setRulesAliases(@Nullable Collection<StdArrangementRuleAliasToken> aliases) {
+    myControl.setRulesAliases(aliases);
+  }
+
+  public void hideEditor() {
+    myControl.hideEditor();
   }
 
   @Nullable
   @Override
   public Object getData(@NonNls String dataId) {
-    if (ArrangementMatchingRulesControl.KEY.is(dataId)) {
+    if (ArrangementSectionRulesControl.KEY.is(dataId)) {
       return myControl;
     }
     return null;

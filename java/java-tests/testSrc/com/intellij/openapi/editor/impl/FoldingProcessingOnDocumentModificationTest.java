@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.codeInsight.folding.CodeFoldingManager;
+import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.testFramework.TestFileType;
@@ -26,7 +27,7 @@ import java.io.IOException;
  * @author Denis Zhdanov
  * @since 11/18/10 7:42 PM
  */
-public class FoldingProcessingOnDocumentModificationTest extends AbstractEditorProcessingOnDocumentModificationTest {
+public class FoldingProcessingOnDocumentModificationTest extends AbstractEditorTest {
   
   public void testUnexpectedClassLevelJavadocExpandingOnClassSignatureChange() throws IOException {
     // Inspired by IDEA-61275
@@ -55,7 +56,31 @@ public class FoldingProcessingOnDocumentModificationTest extends AbstractEditorP
     assertFalse(foldRegion.isExpanded());
   }
   
+  public void testCollapseAllHappensBeforeFirstCodeFoldingPass() throws Exception {
+    init("class Foo {\n" +
+         "    void m() {\n" +
+         "        System.out.println();\n" +
+         "        System.out.println();\n" +
+         "    }\n" +
+         "}", TestFileType.JAVA);
+    
+    buildInitialFoldRegions();
+    executeAction(IdeActions.ACTION_COLLAPSE_ALL_REGIONS);
+    runFoldingPass(true);
+    assertEquals(1, myEditor.getFoldingModel().getAllFoldRegions().length);
+  }
+  
+  private static void buildInitialFoldRegions() {
+    CodeFoldingManager.getInstance(getProject()).buildInitialFoldings(myEditor);
+  }
+  
   private static void updateFoldRegions() {
     CodeFoldingManager.getInstance(getProject()).updateFoldRegions(myEditor);
+  }
+  
+  private static void runFoldingPass(boolean firstTime) {
+    Runnable runnable = CodeFoldingManager.getInstance(getProject()).updateFoldRegionsAsync(myEditor, firstTime);
+    assertNotNull(runnable);
+    runnable.run();
   }
 }

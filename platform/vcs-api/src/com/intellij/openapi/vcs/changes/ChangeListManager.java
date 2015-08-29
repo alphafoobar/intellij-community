@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import java.util.List;
  * @author max
  */
 public abstract class ChangeListManager implements ChangeListModification {
+  @NotNull
   public static ChangeListManager getInstance(Project project) {
     return PeriodicalTasksCloser.getInstance().safeGetComponent(project, ChangeListManager.class);
   }
@@ -134,6 +135,7 @@ public abstract class ChangeListManager implements ChangeListModification {
   public abstract List<CommitExecutor> getRegisteredExecutors();
 
   public abstract void addFilesToIgnore(final IgnoredFileBean... ignoredFiles);
+  public abstract void addDirectoryToIgnoreImplicitly(@NotNull String path);
   public abstract void setFilesToIgnore(final IgnoredFileBean... ignoredFiles);
   public abstract IgnoredFileBean[] getFilesToIgnore();
   public abstract boolean isIgnoredFile(@NotNull VirtualFile file);
@@ -157,5 +159,6 @@ public abstract class ChangeListManager implements ChangeListModification {
 
   public abstract List<VirtualFile> getModifiedWithoutEditing();
 
-  public abstract ThreeState haveChangesUnder(VirtualFile vf);
+  @NotNull
+  public abstract ThreeState haveChangesUnder(@NotNull VirtualFile vf);
 }

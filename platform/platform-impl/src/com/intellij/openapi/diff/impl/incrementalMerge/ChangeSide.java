@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.diff.impl.incrementalMerge;
 
 import com.intellij.openapi.diff.impl.util.DocumentUtil;
+import org.jetbrains.annotations.NotNull;
 
 /**
 * @author Kirill Likhodedov
@@ -30,16 +31,20 @@ public abstract class ChangeSide {
     return DocumentUtil.getStartLine(getRange());
   }
 
-  public String getText() {
-    return DocumentUtil.getText(getRange());
+  @NotNull
+  public CharSequence getText() {
+    DiffRangeMarker range = getRange();
+    return range.getDocument().getCharsSequence().subSequence(range.getStartOffset(), range.getEndOffset());
   }
 
   public int getEndLine() {
     return DocumentUtil.getEndLine(getRange());
   }
 
+  @NotNull
   public abstract DiffRangeMarker getRange();
 
+  @NotNull
   public abstract ChangeHighlighterHolder getHighlighterHolder();
 
   public boolean contains(int offset) {

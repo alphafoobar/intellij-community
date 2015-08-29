@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,13 +20,13 @@ import java.util.List;
 import java.util.StringTokenizer;
 
 /**
- * Splits input String to tokens being aware of quoted tokens ("foo bar") and escaped spaces (foo\ bar),
+ * Splits input String to tokens being aware of quoted tokens ("foo bar") and escaped spaces & quotes (\"foo\ bar\"),
  * usually used for splitting command line to separate arguments that may contain space symbols.
- * Escaped symbols are not handled so there's no way to get token that itself contains quotation mark.
+ * Space and quote are the only symbols that can be escaped
  */
 public class CommandLineTokenizer extends StringTokenizer {
 
-    private static String DEFAULT_DELIMITERS = " \t\n\r\f";
+    private static final String DEFAULT_DELIMITERS = " \t\n\r\f";
     // keep source level 1.4
     private List myTokens = new ArrayList();
     private int myCurrentToken = 0;
@@ -99,12 +99,14 @@ public class CommandLineTokenizer extends StringTokenizer {
 
         int i;
         int quotationMarks = 0;
-        final StringBuffer buffer = new StringBuffer();
+        final StringBuilder buffer = new StringBuilder();
 
         do {
             while ((i = nextToken.indexOf('"')) >= 0) {
-                quotationMarks++;
-                buffer.append(nextToken.substring(0, i));
+                boolean isEscapedQuote = isEscapedAtPos(nextToken, i);
+                if (!isEscapedQuote) quotationMarks++;
+                buffer.append(nextToken.substring(0, isEscapedQuote ? i - 1 : i));
+                if (isEscapedQuote) buffer.append('"');
                 nextToken = nextToken.substring(i + 1);
             }
 
@@ -118,7 +120,7 @@ public class CommandLineTokenizer extends StringTokenizer {
               buffer.append(nextToken);
             }
 
-            if ((isEscapedWhitespace || quotationMarks % 2 == 1) && super.hasMoreTokens()) {
+            if ((isEscapedWhitespace || (quotationMarks & 1) == 1) && super.hasMoreTokens()) {
                 nextToken = super.nextToken();
             } else {
                 nextToken = null;
@@ -126,5 +128,15 @@ public class CommandLineTokenizer extends StringTokenizer {
         } while (nextToken != null);
 
         return buffer.toString();
+    }
+
+    private static boolean isEscapedAtPos(String token, int pos) {
+        int escapeCount = 0;
+        --pos;
+        while (pos >= 0 && token.charAt(pos) == '\\') {
+            ++escapeCount;
+            --pos;
+        }
+        return (escapeCount & 1) == 1;
     }
 }

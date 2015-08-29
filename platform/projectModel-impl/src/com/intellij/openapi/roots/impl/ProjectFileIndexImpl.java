@@ -17,6 +17,7 @@
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.injected.editor.VirtualFileWindow;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.module.Module;
@@ -26,10 +27,13 @@ import com.intellij.openapi.roots.ContentIterator;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
@@ -51,21 +55,14 @@ public class ProjectFileIndexImpl extends FileIndexBase implements ProjectFileIn
 
   @Override
   public boolean iterateContent(@NotNull ContentIterator iterator) {
-    Module[] modules = ModuleManager.getInstance(myProject).getModules();
-    for (Module module : modules) {
-      if (module.isDisposed()) continue;
-      VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-      for (VirtualFile contentRoot : contentRoots) {
-        DirectoryInfo info = getInfoForFileOrDirectory(contentRoot);
-        if (info == null) continue; // is excluded or ignored
-        if (!module.equals(info.getModule())) continue; // maybe 2 modules have the same content root?
-
-        VirtualFile parent = contentRoot.getParent();
-        if (parent != null) {
-          DirectoryInfo parentInfo = getInfoForFileOrDirectory(parent);
-          if (parentInfo != null && parentInfo.getModule() != null) continue; // inner content - skip it
-        }
-
+    Module[] modules = ApplicationManager.getApplication().runReadAction(new Computable<Module[]>() {
+      @Override
+      public Module[] compute() {
+        return ModuleManager.getInstance(myProject).getModules();
+      }
+    });
+    for (final Module module : modules) {
+      for (VirtualFile contentRoot : getRootsToIterate(module)) {
         boolean finished = VfsUtilCore.iterateChildrenRecursively(contentRoot, myContentFilter, iterator);
         if (!finished) return false;
       }
@@ -74,69 +71,95 @@ public class ProjectFileIndexImpl extends FileIndexBase implements ProjectFileIn
     return true;
   }
 
+  private List<VirtualFile> getRootsToIterate(final Module module) {
+    return ApplicationManager.getApplication().runReadAction(new Computable<List<VirtualFile>>() {
+      @Override
+      public List<VirtualFile> compute() {
+        if (module.isDisposed()) return Collections.emptyList();
+
+        List<VirtualFile> result = ContainerUtil.newArrayList();
+        for (VirtualFile contentRoot : ModuleRootManager.getInstance(module).getContentRoots()) {
+          DirectoryInfo info = getInfoForFileOrDirectory(contentRoot);
+          if (!info.isInProject()) continue; // is excluded or ignored
+          if (!module.equals(info.getModule())) continue; // maybe 2 modules have the same content root?
+
+          VirtualFile parent = contentRoot.getParent();
+          if (parent != null) {
+            DirectoryInfo parentInfo = getInfoForFileOrDirectory(parent);
+            if (parentInfo.isInProject() && parentInfo.getModule() != null) continue;
+          }
+          result.add(contentRoot);
+        }
+
+        return result;
+      }
+    });
+  }
+
   @Override
   public boolean iterateContentUnderDirectory(@NotNull VirtualFile dir, @NotNull ContentIterator iterator) {
     return VfsUtilCore.iterateChildrenRecursively(dir, myContentFilter, iterator);
   }
 
   @Override
-  public boolean isIgnored(@NotNull VirtualFile file) {
-    if (myFileTypeRegistry.isFileIgnored(file)) return true;
-    if (myExclusionManager != null && myExclusionManager.isExcluded(file)) return true;
-    VirtualFile dir = file.isDirectory() ? file : file.getParent();
-    if (dir == null) return false;
+  public boolean isExcluded(@NotNull VirtualFile file) {
+    DirectoryInfo info = getInfoForFileOrDirectory(file);
+    return info.isIgnored() || info.isExcluded();
+  }
 
-    DirectoryInfo info = getInfoForFileOrDirectory(dir);
-    if (info != null) return false;
-    if (myDirectoryIndex.isProjectExcludeRoot(dir)) return true;
-
-    VirtualFile parent = dir.getParent();
-    while (true) {
-      if (parent == null) return false;
-      DirectoryInfo parentInfo = getInfoForFileOrDirectory(parent);
-      if (parentInfo != null) return true;
-      if (myDirectoryIndex.isProjectExcludeRoot(parent)) return true;
-      parent = parent.getParent();
-    }
+  @Override
+  public boolean isUnderIgnored(@NotNull VirtualFile file) {
+    return getInfoForFileOrDirectory(file).isIgnored();
   }
 
   @Override
   public Module getModuleForFile(@NotNull VirtualFile file) {
+    return getModuleForFile(file, true);
+  }
+
+  @Nullable
+  @Override
+  public Module getModuleForFile(@NotNull VirtualFile file, boolean honorExclusion) {
     if (file instanceof VirtualFileWindow) file = ((VirtualFileWindow)file).getDelegate();
-    VirtualFile dir = file.isDirectory() ? file : file.getParent();
-    if (dir == null) return null;
-    DirectoryInfo info = getInfoForFileOrDirectory(dir);
-    if (info == null) return null;
-    return info.getModule();
+    DirectoryInfo info = getInfoForFileOrDirectory(file);
+    if (info.isInProject() || !honorExclusion && info.isExcluded()) {
+      return info.getModule();
+    }
+    return null;
   }
 
   @Override
   @NotNull
   public List<OrderEntry> getOrderEntriesForFile(@NotNull VirtualFile file) {
-    DirectoryInfo info = getInfoForFileOrDirectory(file);
-    if (info == null) return Collections.emptyList();
-    return Arrays.asList(info.getOrderEntries());
+    return Arrays.asList(myDirectoryIndex.getOrderEntries(getInfoForFileOrDirectory(file)));
   }
 
   @Override
   public VirtualFile getClassRootForFile(@NotNull VirtualFile file) {
     final DirectoryInfo info = getInfoForFileOrDirectory(file);
-    if (info == null) return null;
+    if (!info.isInProject()) return null;
     return info.getLibraryClassRoot();
   }
 
   @Override
   public VirtualFile getSourceRootForFile(@NotNull VirtualFile file) {
     final DirectoryInfo info = getInfoForFileOrDirectory(file);
-    if (info == null) return null;
+    if (!info.isInProject()) return null;
     return info.getSourceRoot();
   }
 
   @Override
   public VirtualFile getContentRootForFile(@NotNull VirtualFile file) {
+    return getContentRootForFile(file, true);
+  }
+
+  @Override
+  public VirtualFile getContentRootForFile(@NotNull VirtualFile file, final boolean honorExclusion) {
     final DirectoryInfo info = getInfoForFileOrDirectory(file);
-    if (info == null) return null;
-    return info.getContentRoot();
+    if (info.isInProject() || !honorExclusion && info.isExcluded()) {
+      return info.getContentRoot();
+    }
+    return null;
   }
 
   @Override
@@ -148,64 +171,72 @@ public class ProjectFileIndexImpl extends FileIndexBase implements ProjectFileIn
   @Override
   public boolean isLibraryClassFile(@NotNull VirtualFile file) {
     if (file.isDirectory()) return false;
-    if (myFileTypeRegistry.isFileIgnored(file)) return false;
     DirectoryInfo parentInfo = getInfoForFileOrDirectory(file);
-    return parentInfo != null && parentInfo.hasLibraryClassRoot();
+    return parentInfo.isInProject() && parentInfo.hasLibraryClassRoot();
   }
 
   @Override
   public boolean isInSource(@NotNull VirtualFile fileOrDir) {
     DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && (info.isInModuleSource() || info.isInLibrarySource());
+    return info.isInModuleSource() || info.isInLibrarySource();
   }
 
   @Override
   public boolean isInLibraryClasses(@NotNull VirtualFile fileOrDir) {
     DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.hasLibraryClassRoot();
+    return info.isInProject() && info.hasLibraryClassRoot();
   }
 
   @Override
   public boolean isInLibrarySource(@NotNull VirtualFile fileOrDir) {
-    DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.isInLibrarySource();
+    return getInfoForFileOrDirectory(fileOrDir).isInLibrarySource();
+  }
+
+  @Override
+  public boolean isIgnored(@NotNull VirtualFile file) {
+    return isExcluded(file);
   }
 
   @Override
   public boolean isInContent(@NotNull VirtualFile fileOrDir) {
     DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.getModule() != null;
+    return info.isInProject() && info.getModule() != null;
   }
 
   @Override
   public boolean isInSourceContent(@NotNull VirtualFile fileOrDir) {
-    DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.isInModuleSource();
+    return getInfoForFileOrDirectory(fileOrDir).isInModuleSource();
   }
 
   @Override
   public boolean isInTestSourceContent(@NotNull VirtualFile fileOrDir) {
     DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.isInModuleSource() && JavaModuleSourceRootTypes.isTestSourceOrResource(myDirectoryIndex.getSourceRootType(info));
+    return info.isInModuleSource() && JavaModuleSourceRootTypes.isTestSourceOrResource(myDirectoryIndex.getSourceRootType(info));
   }
 
   @Override
   public boolean isUnderSourceRootOfType(@NotNull VirtualFile fileOrDir, @NotNull Set<? extends JpsModuleSourceRootType<?>> rootTypes) {
     DirectoryInfo info = getInfoForFileOrDirectory(fileOrDir);
-    return info != null && info.isInModuleSource() && rootTypes.contains(myDirectoryIndex.getSourceRootType(info));
+    return info.isInModuleSource() && rootTypes.contains(myDirectoryIndex.getSourceRootType(info));
   }
 
   private class ContentFilter implements VirtualFileFilter {
     @Override
-    public boolean accept(@NotNull VirtualFile file) {
-      if (file.isDirectory()) {
-        DirectoryInfo info = getInfoForFileOrDirectory(file);
-        return info != null && info.getModule() != null;
-      }
-      else {
-        return (myExclusionManager == null || !myExclusionManager.isExcluded(file))
-               && !myFileTypeRegistry.isFileIgnored(file);
-      }
+    public boolean accept(@NotNull final VirtualFile file) {
+      return ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+        @Override
+        public Boolean compute() {
+          DirectoryInfo info = getInfoForFileOrDirectory(file);
+          if (!info.isInProject() || info.getModule() == null) return false;
+
+          if (file.isDirectory()) {
+            return true;
+          }
+          else {
+            return !myFileTypeRegistry.isFileIgnored(file);
+          }
+        }
+      });
     }
   }
 }

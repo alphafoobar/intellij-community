@@ -16,6 +16,7 @@
 package com.intellij.psi.impl.source.resolve.graphInference;
 
 import com.intellij.psi.*;
+import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import org.jetbrains.annotations.Nullable;
@@ -29,8 +30,7 @@ import java.util.Set;
  */
 public class PsiPolyExpressionUtil {
   public static boolean hasStandaloneForm(PsiExpression expression) {
-    if (expression instanceof PsiLambdaExpression ||
-        expression instanceof PsiMethodReferenceExpression ||
+    if (expression instanceof PsiFunctionalExpression ||
         expression instanceof PsiParenthesizedExpression ||
         expression instanceof PsiConditionalExpression ||
         expression instanceof PsiCallExpression) {
@@ -40,7 +40,7 @@ public class PsiPolyExpressionUtil {
   }
 
   public static boolean isPolyExpression(final PsiExpression expression) {
-    if (expression instanceof PsiLambdaExpression || expression instanceof PsiMethodReferenceExpression) {
+    if (expression instanceof PsiFunctionalExpression) {
       return true;
     } 
     else if (expression instanceof PsiParenthesizedExpression) {
@@ -58,7 +58,8 @@ public class PsiPolyExpressionUtil {
         }
       }
     } else if (expression instanceof PsiMethodCallExpression) {
-      return isMethodCallPolyExpression(expression, ((PsiMethodCallExpression)expression).resolveMethod());
+      final MethodCandidateInfo.CurrentCandidateProperties candidateProperties = MethodCandidateInfo.getCurrentMethod(((PsiMethodCallExpression)expression).getArgumentList());
+      return isMethodCallPolyExpression(expression, candidateProperties != null ? candidateProperties.getMethod() : ((PsiMethodCallExpression)expression).resolveMethod());
     }
     else if (expression instanceof PsiConditionalExpression) {
       final ConditionalKind conditionalKind = isBooleanOrNumeric(expression);
@@ -124,14 +125,17 @@ public class PsiPolyExpressionUtil {
   }
 
   private static boolean isInAssignmentOrInvocationContext(PsiExpression expr) {
-    final PsiElement context = expr.getParent();
-    return context instanceof PsiExpressionList || context instanceof PsiConditionalExpression || isAssignmentContext(expr, context);
+    final PsiElement context = PsiUtil.skipParenthesizedExprUp(expr.getParent());
+    return context instanceof PsiExpressionList || 
+           context instanceof PsiArrayInitializerExpression || 
+           context instanceof PsiConditionalExpression && (expr instanceof PsiCallExpression || isPolyExpression((PsiExpression)context)) || 
+           isAssignmentContext(expr, context);
   }
 
   private static boolean isAssignmentContext(PsiExpression expr, PsiElement context) {
     return PsiUtil.isCondition(expr, context) ||
            context instanceof PsiReturnStatement ||
-           context instanceof PsiAssignmentExpression ||
+           context instanceof PsiAssignmentExpression && ((PsiAssignmentExpression)context).getOperationTokenType() == JavaTokenType.EQ ||
            context instanceof PsiVariable ||
            context instanceof PsiLambdaExpression;
   }

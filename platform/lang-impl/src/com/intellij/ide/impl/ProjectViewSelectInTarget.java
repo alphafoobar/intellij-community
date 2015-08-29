@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.ide.projectView.impl.ProjectViewPane;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -35,11 +36,11 @@ import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtilBase;
+import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
@@ -55,12 +56,13 @@ public abstract class ProjectViewSelectInTarget extends SelectInTargetPsiWrapper
     select(myProject, selector, getMinorViewId(), mySubId, virtualFile, requestFocus);
   }
 
+  @NotNull
   public static ActionCallback select(@NotNull Project project,
-                            final Object toSelect,
-                            @Nullable final String viewId,
-                            @Nullable final String subviewId,
-                            final VirtualFile virtualFile,
-                            final boolean requestFocus) {
+                                      final Object toSelect,
+                                      @Nullable final String viewId,
+                                      @Nullable final String subviewId,
+                                      final VirtualFile virtualFile,
+                                      final boolean requestFocus) {
     final ActionCallback result = new ActionCallback();
 
 
@@ -76,17 +78,25 @@ public abstract class ProjectViewSelectInTarget extends SelectInTargetPsiWrapper
     final Runnable runnable = new Runnable() {
       @Override
       public void run() {
+        Runnable r = new Runnable() {
+          @Override
+          public void run() {
+            projectView.selectCB(toSelect, virtualFile, requestFocus).notify(result);
+          }
+        };
         if (requestFocus) {
-          projectView.changeView(viewId, subviewId);
+          projectView.changeViewCB(ObjectUtils.chooseNotNull(viewId, ProjectViewPane.ID), subviewId).doWhenProcessed(r);
         }
-
-        projectView.selectCB(toSelect, virtualFile, requestFocus).notify(result);
+        else {
+          r.run();
+        }
       }
     };
 
     if (requestFocus) {
       projectViewToolWindow.activate(runnable, false);
-    } else {
+    }
+    else {
       projectViewToolWindow.show(runnable);
     }
 
@@ -96,7 +106,7 @@ public abstract class ProjectViewSelectInTarget extends SelectInTargetPsiWrapper
 
   @Override
   @NotNull
-  public Collection<SelectInTarget> getSubTargets(SelectInContext context) {
+  public Collection<SelectInTarget> getSubTargets(@NotNull SelectInContext context) {
     List<SelectInTarget> result = new ArrayList<SelectInTarget>();
     AbstractProjectViewPane pane = ProjectView.getInstance(myProject).getProjectViewPaneById(getMinorViewId());
     int index = 0;
@@ -141,13 +151,19 @@ public abstract class ProjectViewSelectInTarget extends SelectInTargetPsiWrapper
       }
     }
     if (toSelect == null) return;
-    PsiElement originalElement = toSelect.getOriginalElement();
+    PsiElement originalElement;
+    try {
+      originalElement = toSelect.getOriginalElement();
+    }
+    catch (IndexNotReadyException e) {
+      originalElement = toSelect;
+    }
     final VirtualFile virtualFile = PsiUtilBase.getVirtualFile(originalElement);
     select(originalElement, virtualFile, requestFocus);
   }
 
   private TreeStructureProvider[] getProvidersDumbAware() {
-    List<TreeStructureProvider> allProviders = Arrays.asList(Extensions.getExtensions(TreeStructureProvider.EP_NAME, myProject));
+    TreeStructureProvider[] allProviders = Extensions.getExtensions(TreeStructureProvider.EP_NAME, myProject);
     List<TreeStructureProvider> dumbAware = DumbService.getInstance(myProject).filterByDumbAwareness(allProviders);
     return dumbAware.toArray(new TreeStructureProvider[dumbAware.size()]);
   }
@@ -164,5 +180,9 @@ public abstract class ProjectViewSelectInTarget extends SelectInTargetPsiWrapper
 
   public final void setSubId(String subId) {
     mySubId = subId;
+  }
+
+  public final String getSubId() {
+    return mySubId;
   }
 }

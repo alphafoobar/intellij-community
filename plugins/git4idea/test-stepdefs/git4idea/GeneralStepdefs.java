@@ -17,9 +17,9 @@ package git4idea;/*
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.util.text.StringUtil;
-import cucumber.annotation.en.And;
-import cucumber.annotation.en.Given;
-import cucumber.annotation.en.Then;
+import cucumber.api.java.en.And;
+import cucumber.api.java.en.Given;
+import cucumber.api.java.en.Then;
 
 import java.util.Arrays;
 import java.util.List;
@@ -70,14 +70,15 @@ public class GeneralStepdefs {
                             notificationType.equals("error") ? NotificationType.ERROR : null;
     Notification actualNotification = lastNotification();
     assertNotNull("Notification should be shown", actualNotification);
-    assertEquals("Notification type is incorrect", type, actualNotification.getType());
-    assertEquals("Notification title is incorrect", title, actualNotification.getTitle());
+    assertEquals("Notification type is incorrect in " + actualNotification, type, actualNotification.getType());
+    assertEquals("Notification title is incorrect in" + actualNotification, title, actualNotification.getTitle());
     assertNotificationContent(content, actualNotification.getContent());
   }
 
   private static void assertNotificationContent(String expected, String actual) {
     expected = virtualCommits.replaceVirtualHashes(expected);
-    assertEquals("Notification content is incorrect", StringUtil.convertLineSeparators(expected), StringUtil.convertLineSeparators(adjustNotificationContent(actual)));
+    assertEquals("Notification content is incorrect", StringUtil.convertLineSeparators(expected),
+                 StringUtil.convertLineSeparators(adjustNotificationContent(actual)));
   }
 
   private static String adjustNotificationContent(String content) {

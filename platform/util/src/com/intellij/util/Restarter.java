@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,10 @@ public class Restarter {
   }
 
   public static boolean isSupported() {
-    return getRestartCode() != 0 || SystemInfo.isWindows || SystemInfo.isMac;
+    if (getRestartCode() != 0) return true;
+    if (SystemInfo.isWindows) return new File(PathManager.getBinPath(), "restarter.exe").exists();
+    if (SystemInfo.isMac) return PathManager.getHomePath().contains(".app");
+    return false;
   }
 
   public static int scheduleRestart(@NotNull String... beforeRestart) throws IOException {
@@ -86,8 +89,8 @@ public class Restarter {
     try {
       Process process = Runtime.getRuntime().exec(beforeRestart);
 
-      Thread outThread = new Thread(new StreamRedirector(process.getInputStream(), System.out));
-      Thread errThread = new Thread(new StreamRedirector(process.getErrorStream(), System.err));
+      Thread outThread = new Thread(new StreamRedirector(process.getInputStream(), System.out),"restarter redirector out");
+      Thread errThread = new Thread(new StreamRedirector(process.getErrorStream(), System.err),"restarter redirector err");
       outThread.start();
       errThread.start();
 
@@ -125,21 +128,19 @@ public class Restarter {
     // Since the process ID is passed through the command line, we want to make sure that we don't exit before the "restarter"
     // process has a chance to open the handle to our process, and that it doesn't wait for the termination of an unrelated
     // process which happened to have the same process ID.
-    try {
-      Thread.sleep(500);
-    }
-    catch (InterruptedException ignore) {
-    }
+    TimeoutUtil.sleep(500);
   }
 
   private static void restartOnMac(@NotNull final String... beforeRestart) throws IOException {
-    final String homePath = PathManager.getHomePath();
-    if (!StringUtil.endsWithIgnoreCase(homePath, ".app")) throw new IOException("Application bundle not found: " + homePath);
+    String homePath = PathManager.getHomePath();
+    int p = homePath.indexOf(".app");
+    if (p < 0) throw new IOException("Application bundle not found: " + homePath);
 
+    final String bundlePath = homePath.substring(0, p + 4);
     doScheduleRestart(new File(PathManager.getBinPath(), "restarter"), new Consumer<List<String>>() {
       @Override
       public void consume(List<String> commands) {
-        Collections.addAll(commands, homePath);
+        Collections.addAll(commands, bundlePath);
         Collections.addAll(commands, beforeRestart);
       }
     });
@@ -149,14 +150,19 @@ public class Restarter {
     List<String> commands = new ArrayList<String>();
     commands.add(createTempExecutable(restarterFile).getPath());
     argumentsBuilder.consume(commands);
-    Runtime.getRuntime().exec(commands.toArray(new String[commands.size()]));
+    Runtime.getRuntime().exec(ArrayUtil.toStringArray(commands));
   }
 
   public static File createTempExecutable(File executable) throws IOException {
-    String ext = FileUtilRt.getExtension(executable.getName());
-    File copy = FileUtilRt.createTempFile(FileUtilRt.getNameWithoutExtension(executable.getName()),
-                                          StringUtil.isEmptyOrSpaces(ext) ? ".tmp" : ("." + ext),
-                                          false);
+    File executableDir = new File(System.getProperty("user.home") + "/." + System.getProperty("idea.paths.selector") + "/restart");
+    if (!FileUtilRt.createDirectory(executableDir)) throw new IOException("Cannot create dir: " + executableDir);
+    File copy = new File(executableDir.getPath() + "/" + executable.getName());
+    if (!FileUtilRt.ensureCanCreateFile(copy) || (copy.exists() && !copy.delete())) {
+       String ext = FileUtilRt.getExtension(executable.getName());
+       copy = FileUtilRt.createTempFile(executableDir, FileUtilRt.getNameWithoutExtension(copy.getName()),
+                                        StringUtil.isEmptyOrSpaces(ext) ? ".tmp" : ("." + ext),
+                                        true, false);
+    }
     FileUtilRt.copy(executable, copy);
     if (!copy.setExecutable(executable.canExecute())) throw new IOException("Cannot make file executable: " + copy);
     return copy;
@@ -188,8 +194,7 @@ public class Restarter {
       try {
         StreamUtil.copyStreamContent(myIn, myOut);
       }
-      catch (IOException ignore) {
-      }
+      catch (IOException ignore) { }
     }
   }
 }

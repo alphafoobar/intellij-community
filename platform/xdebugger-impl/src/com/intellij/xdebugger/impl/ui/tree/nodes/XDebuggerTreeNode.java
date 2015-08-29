@@ -15,7 +15,7 @@
  */
 package com.intellij.xdebugger.impl.ui.tree.nodes;
 
-import com.intellij.ui.SimpleColoredComponent;
+import com.intellij.ui.ColoredTextContainer;
 import com.intellij.ui.SimpleColoredText;
 import com.intellij.ui.TreeSpeedSearch;
 import com.intellij.util.ArrayUtilRt;
@@ -49,8 +49,7 @@ public abstract class XDebuggerTreeNode implements TreeNode, TreeSpeedSearch.Pat
 
   @Override
   public TreeNode getChildAt(final int childIndex) {
-    if (isLeaf()) return null;
-    return getChildren().get(childIndex);
+    return isLeaf() ? null : getChildren().get(childIndex);
   }
 
   @Override
@@ -64,7 +63,7 @@ public abstract class XDebuggerTreeNode implements TreeNode, TreeSpeedSearch.Pat
   }
 
   @Override
-  public int getIndex(final TreeNode node) {
+  public int getIndex(@NotNull TreeNode node) {
     if (isLeaf()) return -1;
     return getChildren().indexOf(node);
   }
@@ -181,12 +180,16 @@ public abstract class XDebuggerTreeNode implements TreeNode, TreeSpeedSearch.Pat
 
   public abstract void clearChildren();
 
-  public void appendToComponent(SimpleColoredComponent component) {
+  public void appendToComponent(@NotNull ColoredTextContainer component) {
     getText().appendToComponent(component);
 
     XDebuggerTreeNodeHyperlink link = getLink();
     if (link != null) {
       component.append(link.getLinkText(), link.getTextAttributes(), link);
     }
+  }
+
+  void invokeNodeUpdate(Runnable runnable) {
+    myTree.getLaterInvocator().offer(runnable);
   }
 }

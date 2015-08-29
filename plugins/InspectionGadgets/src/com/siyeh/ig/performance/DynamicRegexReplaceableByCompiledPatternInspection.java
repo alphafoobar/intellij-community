@@ -1,5 +1,5 @@
 /*
- * Copyright 2009-2012 Bas Leijdekkers
+ * Copyright 2009-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
-import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
 import com.siyeh.ig.psiutils.ClassUtils;
@@ -48,8 +47,7 @@ public class DynamicRegexReplaceableByCompiledPatternInspection extends DynamicR
     }
 
     @Override
-    protected void doFix(Project project, ProblemDescriptor descriptor)
-      throws IncorrectOperationException {
+    protected void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
       final PsiClass aClass = ClassUtils.getContainingStaticClass(element);
       if (aClass == null) {
@@ -73,47 +71,52 @@ public class DynamicRegexReplaceableByCompiledPatternInspection extends DynamicR
       if (expressionsLength > 0) {
         fieldText.append(expressions[0].getText());
       }
+      @NonNls final String methodName = methodExpression.getReferenceName();
+      final boolean literalReplacement = "replace".equals(methodName);
+      if (literalReplacement) {
+        fieldText.append(", java.util.regex.Pattern.LITERAL");
+      }
       fieldText.append(");");
-      final PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
-      final PsiField newField = factory.createFieldFromText(fieldText.toString(), element);
-      final PsiElement field = aClass.add(newField);
 
       @NonNls final StringBuilder expressionText = new StringBuilder("PATTERN.");
-      @NonNls final String methodName = methodExpression.getReferenceName();
       final PsiExpression qualifier = methodExpression.getQualifierExpression();
-      @NonNls final String qualifierText;
-      if (qualifier == null) {
-        qualifierText = "this";
-      }
-      else {
-        qualifierText = qualifier.getText();
-      }
+      @NonNls final String qualifierText = (qualifier == null) ? "this" : qualifier.getText();
       if ("split".equals(methodName)) {
         expressionText.append(methodName);
         expressionText.append('(');
         expressionText.append(qualifierText);
         for (int i = 1; i < expressionsLength; i++) {
-          expressionText.append(',');
-          expressionText.append(expressions[i].getText());
+          expressionText.append(',').append(expressions[i].getText());
         }
         expressionText.append(')');
       }
       else {
-        expressionText.append("matcher(");
-        expressionText.append(qualifierText);
-        expressionText.append(").");
-        expressionText.append(methodName);
+        expressionText.append("matcher(").append(qualifierText).append(").");
+        if (literalReplacement) {
+          expressionText.append("replaceAll");
+        }
+        else {
+          expressionText.append(methodName);
+        }
         expressionText.append('(');
+        if (literalReplacement) {
+          expressionText.append("java.util.regex.Matcher.quoteReplacement(");
+        }
         if (expressionsLength > 1) {
           expressionText.append(expressions[1].getText());
           for (int i = 2; i < expressionsLength; i++) {
-            expressionText.append(',');
-            expressionText.append(expressions[i].getText());
+            expressionText.append(',').append(expressions[i].getText());
           }
+        }
+        if (literalReplacement) {
+          expressionText.append(')');
         }
         expressionText.append(')');
       }
 
+      final PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+      final PsiField newField = factory.createFieldFromText(fieldText.toString(), element);
+      final PsiElement field = aClass.add(newField);
       final PsiExpression newExpression = factory.createExpressionFromText(expressionText.toString(), element);
       PsiMethodCallExpression newMethodCallExpression = (PsiMethodCallExpression)methodCallExpression.replace(newExpression);
       newMethodCallExpression = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(newMethodCallExpression);

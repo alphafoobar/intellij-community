@@ -29,8 +29,7 @@ public class GroovyBuilderService extends BuilderService {
   @NotNull
   @Override
   public List<? extends ModuleLevelBuilder> createModuleLevelBuilders() {
-    return Arrays.asList(new GroovyBuilder(true),
-                         new GroovyBuilder(false));
+    return Arrays.asList(new GroovyBuilder(true), new GroovyBuilder(false), new GreclipseBuilder());
   }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,15 @@ import com.intellij.openapi.util.Pair;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
 import gnu.trove.TIntHashSet;
-import org.jetbrains.asm4.*;
-import org.jetbrains.asm4.signature.SignatureReader;
-import org.jetbrains.asm4.signature.SignatureVisitor;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.org.objectweb.asm.*;
+import org.jetbrains.org.objectweb.asm.signature.SignatureReader;
+import org.jetbrains.org.objectweb.asm.signature.SignatureVisitor;
 
 import java.lang.annotation.RetentionPolicy;
-import java.util.*;
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * @author: db
@@ -32,6 +35,7 @@ import java.util.*;
  */
 
 class ClassfileAnalyzer {
+  public static final String LAMBDA_FACTORY_CLASS = "java/lang/invoke/LambdaMetafactory";
   private final DependencyContext myContext;
 
   ClassfileAnalyzer(DependencyContext context) {
@@ -53,7 +57,7 @@ class ClassfileAnalyzer {
   private class ClassCrawler extends ClassVisitor {
     private class AnnotationRetentionPolicyCrawler extends AnnotationVisitor {
       private AnnotationRetentionPolicyCrawler() {
-        super(Opcodes.ASM4);
+        super(Opcodes.ASM5);
       }
 
       public void visit(String name, Object value) {
@@ -77,7 +81,7 @@ class ClassfileAnalyzer {
 
     private class AnnotationTargetCrawler extends AnnotationVisitor {
       private AnnotationTargetCrawler() {
-        super(Opcodes.ASM4);
+        super(Opcodes.ASM5);
       }
 
       public void visit(String name, Object value) {
@@ -106,7 +110,7 @@ class ClassfileAnalyzer {
       private final TIntHashSet myUsedArguments = new TIntHashSet();
 
       private AnnotationCrawler(final TypeRepr.ClassType type, final ElemType target) {
-        super(Opcodes.ASM4);
+        super(Opcodes.ASM5);
         this.myType = type;
         this.myTarget = target;
         final Set<ElemType> targets = myAnnotationTargets.get(type);
@@ -158,9 +162,7 @@ class ClassfileAnalyzer {
           return "()D;";
         }
 
-        final String s = "()L" + name + ";";
-
-        return s;
+        return "()L" + name + ";";
       }
 
       public void visit(String name, Object value) {
@@ -169,14 +171,11 @@ class ClassfileAnalyzer {
 
         if (value instanceof Type) {
           final String className = ((Type)value).getClassName().replace('.', '/');
-
-          if (className != null) {
-            myUsages.add(UsageRepr.createClassUsage(myContext, myContext.get(className)));
-          }
+          myUsages.add(UsageRepr.createClassUsage(myContext, myContext.get(className)));
         }
 
         myUsages.add(UsageRepr.createMethodUsage(myContext, methodName, myType.className, methodDescr));
-        myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, myType.className, methodDescr));
+        myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, myType.className));
 
         myUsedArguments.add(methodName);
       }
@@ -186,7 +185,7 @@ class ClassfileAnalyzer {
         final String methodDescr = "()" + desc;
 
         myUsages.add(UsageRepr.createMethodUsage(myContext, methodName, myType.className, methodDescr));
-        myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, myType.className, methodDescr));
+        myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, myType.className));
 
         myUsedArguments.add(methodName);
       }
@@ -218,66 +217,21 @@ class ClassfileAnalyzer {
       }
     }
 
-    private final SignatureVisitor mySignatureCrawler = new SignatureVisitor(Opcodes.ASM4) {
-      public void visitFormalTypeParameter(String name) {
-        return;
-      }
-
+    private final SignatureVisitor mySignatureCrawler = new BaseSignatureVisitor() {
       public SignatureVisitor visitClassBound() {
-        return this;
+        return mySignatureWithGenericBoundUsageCrawler;
       }
 
       public SignatureVisitor visitInterfaceBound() {
-        return this;
-      }
-
-      public SignatureVisitor visitSuperclass() {
-        return this;
-      }
-
-      public SignatureVisitor visitInterface() {
-        return this;
-      }
-
-      public SignatureVisitor visitParameterType() {
-        return this;
-      }
-
-      public SignatureVisitor visitReturnType() {
-        return this;
-      }
-
-      public SignatureVisitor visitExceptionType() {
-        return this;
-      }
-
-      public void visitBaseType(char descriptor) {
-        return;
-      }
-
-      public void visitTypeVariable(String name) {
-        return;
-      }
-
-      public SignatureVisitor visitArrayType() {
-        return this;
-      }
-
-      public void visitInnerClassType(String name) {
-        return;
-      }
-
-      public void visitTypeArgument() {
-        return;
+        return mySignatureWithGenericBoundUsageCrawler;
       }
 
       public SignatureVisitor visitTypeArgument(char wildcard) {
-        return this;
+        return mySignatureWithGenericBoundUsageCrawler;
       }
+    };
 
-      public void visitEnd() {
-      }
-
+    private final SignatureVisitor mySignatureWithGenericBoundUsageCrawler = new BaseSignatureVisitor() {
       public void visitClassType(String name) {
         final int className = myContext.get(name);
         myUsages.add(UsageRepr.createClassUsage(myContext, className));
@@ -314,7 +268,7 @@ class ClassfileAnalyzer {
     final Map<TypeRepr.ClassType, Set<ElemType>> myAnnotationTargets = new THashMap<TypeRepr.ClassType, Set<ElemType>>();
 
     public ClassCrawler(final int fn) {
-      super(Opcodes.ASM4);
+      super(Opcodes.ASM5);
       myFileName = fn;
     }
 
@@ -334,7 +288,7 @@ class ClassfileAnalyzer {
         repr.updateClassUsages(myContext, myUsages);
       }
 
-      return new Pair<ClassRepr, Set<UsageRepr.Usage>>(repr, myUsages);
+      return Pair.create(repr, myUsages);
     }
 
     @Override
@@ -398,14 +352,14 @@ class ClassfileAnalyzer {
     }
 
     @Override
-    public FieldVisitor visitField(int access, String n, String desc, String signature, Object value) {
+    public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
       processSignature(signature);
 
       if ((access & Opcodes.ACC_SYNTHETIC) == 0) {
-        myFields.add(new FieldRepr(myContext, access, myContext.get(n), myContext.get(desc), myContext.get(signature), value));
+        myFields.add(new FieldRepr(myContext, access, myContext.get(name), myContext.get(desc), myContext.get(signature), value));
       }
 
-      return new FieldVisitor(Opcodes.ASM4) {
+      return new FieldVisitor(Opcodes.ASM5) {
         @Override
         public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
           return new AnnotationCrawler((TypeRepr.ClassType)TypeRepr.getType(myContext, myContext.get(desc)), ElemType.FIELD);
@@ -419,7 +373,7 @@ class ClassfileAnalyzer {
 
       processSignature(signature);
 
-      return new MethodVisitor(Opcodes.ASM4) {
+      return new MethodVisitor(Opcodes.ASM5) {
         @Override
         public void visitEnd() {
           if ((access & Opcodes.ACC_SYNTHETIC) == 0 || (access & Opcodes.ACC_BRIDGE) > 0) {
@@ -436,7 +390,7 @@ class ClassfileAnalyzer {
 
         @Override
         public AnnotationVisitor visitAnnotationDefault() {
-          return new AnnotationVisitor(Opcodes.ASM4) {
+          return new AnnotationVisitor(Opcodes.ASM5) {
             public void visit(String name, Object value) {
               defaultValue.set(value);
             }
@@ -512,32 +466,100 @@ class ClassfileAnalyzer {
 
         @Override
         public void visitFieldInsn(int opcode, String owner, String name, String desc) {
-          final int fieldName = myContext.get(name);
-          final int fieldOwner = myContext.get(owner);
-          final int descr = myContext.get(desc);
-
-          if (opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) {
-            myUsages.add(UsageRepr.createFieldAssignUsage(myContext, fieldName, fieldOwner, descr));
-          }
-
-          if (opcode == Opcodes.GETFIELD || opcode == Opcodes.GETSTATIC) {
-            addClassUsage(TypeRepr.getType(myContext, descr));
-          }
-
-          myUsages.add(UsageRepr.createFieldUsage(myContext, fieldName, fieldOwner, descr));
+          registerFieldUsage(opcode, owner, name, desc);
           super.visitFieldInsn(opcode, owner, name, desc);
         }
 
         @Override
-        public void visitMethodInsn(int opcode, String owner, String name, String desc) {
-          final int methodName = myContext.get(name);
+        public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
+          registerMethodUsage(owner, name, desc);
+          super.visitMethodInsn(opcode, owner, name, desc, itf);
+        }
+
+        @Override
+        public void visitInvokeDynamicInsn(String methodName, String desc, Handle bsm, Object... bsmArgs) {
+          final Type returnType = Type.getReturnType(desc);
+          addClassUsage(TypeRepr.getType(myContext, returnType));
+          
+          // common args processing 
+          for (Object arg : bsmArgs) {
+            if (arg instanceof Type) {
+              final Type type = (Type)arg;
+              if (type.getSort() == Type.METHOD) {
+                for (Type argType : type.getArgumentTypes()) {
+                  addClassUsage(TypeRepr.getType(myContext, argType));
+                }
+                addClassUsage(TypeRepr.getType(myContext, type.getReturnType()));
+              }
+              else {
+                addClassUsage(TypeRepr.getType(myContext, type));
+              }
+            }
+            else if (arg instanceof Handle) {
+              processMethodHandle((Handle)arg);
+            }
+          }
+          
+          if (LAMBDA_FACTORY_CLASS.equals(bsm.getOwner())) {
+            // This invokeDynamic implements a lambda or method reference usage.
+            // Need to register method usage for the corresponding SAM-type.  
+            // First three arguments to the bootstrap methods are provided automatically by VM.
+            // Arguments in args array are expected to be as following:
+            // [0]: Type: Signature and return type of method to be implemented by the function object.
+            // [1]: Handle: implementation method handle
+            // [2]: Type: The signature and return type that should be enforced dynamically at invocation time. May be the same as samMethodType, or may be a specialization of it
+            // [...]: optional additional arguments
+            
+            if (returnType.getSort() == Type.OBJECT && bsmArgs.length >= 3) {
+              if (bsmArgs[0] instanceof Type) {
+                final Type samMethodType = (Type)bsmArgs[0];
+                if (samMethodType.getSort() == Type.METHOD) {
+                  registerMethodUsage(returnType.getInternalName(), methodName, samMethodType.getDescriptor());
+                }
+              }
+            }
+          }
+
+          super.visitInvokeDynamicInsn(methodName, desc, bsm, bsmArgs);
+        }
+
+        private void processMethodHandle(Handle handle) {
+          final String memberOwner = handle.getOwner();
+          if (myContext.get(memberOwner) != myName) {
+            // do not register access to own class members
+            final String memberName = handle.getName();
+            final String memberDescriptor = handle.getDesc();
+            final int opCode = getFieldAccessOpcode(handle);
+            if (opCode > 0) {
+              registerFieldUsage(opCode, memberOwner, memberName, memberDescriptor);
+            }
+            else {
+              registerMethodUsage(memberOwner, memberName, memberDescriptor);
+            }
+          }
+        }
+
+        private void registerFieldUsage(int opcode, String owner, String fName, String desc) {
+          final int fieldName = myContext.get(fName);
+          final int fieldOwner = myContext.get(owner);
+          final int descr = myContext.get(desc);
+          if (opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) {
+            myUsages.add(UsageRepr.createFieldAssignUsage(myContext, fieldName, fieldOwner, descr));
+          }
+          if (opcode == Opcodes.GETFIELD || opcode == Opcodes.GETSTATIC) {
+            addClassUsage(TypeRepr.getType(myContext, descr));
+          }
+          myUsages.add(UsageRepr.createFieldUsage(myContext, fieldName, fieldOwner, descr));
+        }
+
+        private void registerMethodUsage(String owner, String name, @Nullable String desc) {
           final int methodOwner = myContext.get(owner);
-
-          myUsages.add(UsageRepr.createMethodUsage(myContext, methodName, methodOwner, desc));
-          myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, methodOwner, desc));
-          addClassUsage(TypeRepr.getType(myContext, Type.getReturnType(desc)));
-
-          super.visitMethodInsn(opcode, owner, name, desc);
+          final int methodName = myContext.get(name);
+          myUsages.add(UsageRepr.createMetaMethodUsage(myContext, methodName, methodOwner));
+          if (desc != null) {
+            myUsages.add(UsageRepr.createMethodUsage(myContext, methodName, methodOwner, desc));
+            addClassUsage(TypeRepr.getType(myContext, Type.getReturnType(desc)));
+          }
         }
 
         private void addClassUsage(final TypeRepr.AbstractType type) {
@@ -559,6 +581,20 @@ class ClassfileAnalyzer {
       };
     }
 
+    /**
+     * @param handle
+     * @return corresponding field access opcode or -1 if the handle does not represent field access handle
+     */
+    private int getFieldAccessOpcode(Handle handle) {
+      switch (handle.getTag()) {
+        case Opcodes.H_GETFIELD: return Opcodes.GETFIELD;
+        case Opcodes.H_GETSTATIC: return Opcodes.GETSTATIC;
+        case Opcodes.H_PUTFIELD: return Opcodes.PUTFIELD;
+        case Opcodes.H_PUTSTATIC: return Opcodes.PUTSTATIC;
+        default: return -1;
+      }
+    }
+
     @Override
     public void visitInnerClass(String name, String outerName, String innerName, int access) {
       if (outerName != null) {
@@ -575,6 +611,72 @@ class ClassfileAnalyzer {
 
       if (name != null) {
         myLocalClassFlag.set(true);
+      }
+    }
+
+    private class BaseSignatureVisitor extends SignatureVisitor {
+
+      public BaseSignatureVisitor() {
+        super(Opcodes.ASM5);
+      }
+
+      public void visitFormalTypeParameter(String name) {
+      }
+
+      public SignatureVisitor visitClassBound() {
+        return this;
+      }
+
+      public SignatureVisitor visitInterfaceBound() {
+        return this;
+      }
+
+      public SignatureVisitor visitSuperclass() {
+        return this;
+      }
+
+      public SignatureVisitor visitInterface() {
+        return this;
+      }
+
+      public SignatureVisitor visitParameterType() {
+        return this;
+      }
+
+      public SignatureVisitor visitReturnType() {
+        return this;
+      }
+
+      public SignatureVisitor visitExceptionType() {
+        return this;
+      }
+
+      public void visitBaseType(char descriptor) {
+      }
+
+      public void visitTypeVariable(String name) {
+      }
+
+      public SignatureVisitor visitArrayType() {
+        return this;
+      }
+
+      public void visitInnerClassType(String name) {
+      }
+
+      public void visitTypeArgument() {
+      }
+
+      public SignatureVisitor visitTypeArgument(char wildcard) {
+        return this;
+      }
+
+      public void visitEnd() {
+      }
+
+      public void visitClassType(String name) {
+        final int className = myContext.get(name);
+        myUsages.add(UsageRepr.createClassUsage(myContext, className));
       }
     }
   }

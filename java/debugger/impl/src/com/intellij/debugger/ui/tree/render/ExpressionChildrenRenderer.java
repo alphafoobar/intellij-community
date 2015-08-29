@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
 import com.intellij.debugger.engine.evaluation.EvaluationContext;
 import com.intellij.debugger.engine.evaluation.TextWithImports;
 import com.intellij.debugger.engine.evaluation.expression.ExpressionEvaluator;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
+import com.intellij.debugger.ui.impl.watch.DebuggerTreeNodeExpression;
 import com.intellij.debugger.ui.tree.DebuggerTreeNode;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
 import com.intellij.debugger.ui.tree.NodeManager;
@@ -32,6 +34,7 @@ import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiExpression;
 import com.sun.jdi.BooleanValue;
 import com.sun.jdi.Value;
@@ -81,11 +84,7 @@ public class ExpressionChildrenRenderer extends ReferenceRenderer implements Chi
         evaluationContext.createEvaluationContext(value), parentDescriptor
       );
 
-      NodeRenderer renderer = getLastChildrenRenderer(parentDescriptor);
-      if (renderer == null || childrenValue == null || !renderer.isApplicable(childrenValue.type())) {
-        renderer = DebugProcessImpl.getDefaultRenderer(childrenValue != null ? childrenValue.type() : null);
-        parentDescriptor.putUserData(LAST_CHILDREN_RENDERER, renderer);
-      }
+      NodeRenderer renderer = getChildrenRenderer(childrenValue, parentDescriptor);
       renderer.buildChildren(childrenValue, builder, evaluationContext);
     }
     catch (final EvaluateException e) {
@@ -108,6 +107,8 @@ public class ExpressionChildrenRenderer extends ReferenceRenderer implements Chi
     final ExpressionEvaluator evaluator = myChildrenExpression.getEvaluator(context.getProject());
 
     Value value = evaluator.evaluate(context);
+    DebuggerUtilsEx.keep(value, context);
+
     descriptor.putUserData(EXPRESSION_VALUE, value);
     return value;
   }
@@ -135,24 +136,32 @@ public class ExpressionChildrenRenderer extends ReferenceRenderer implements Chi
   }
 
   public PsiExpression getChildValueExpression(DebuggerTreeNode node, DebuggerContext context) throws EvaluateException {
-    ValueDescriptor descriptor = (ValueDescriptor) node.getParent().getDescriptor();
-    Value expressionValue = descriptor.getUserData(EXPRESSION_VALUE);
-    if(expressionValue == null) {
+    Value expressionValue = node.getParent().getDescriptor().getUserData(EXPRESSION_VALUE);
+    if (expressionValue == null) {
       throw EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("error.unable.to.evaluate.expression"));
     }
 
-    ChildrenRenderer defaultChildrenRenderer = ((DebugProcessImpl)context.getDebugProcess()).getDefaultRenderer(expressionValue.type());
+    NodeRenderer childrenRenderer = getChildrenRenderer(expressionValue, (ValueDescriptor) node.getParent().getDescriptor());
 
-    return DebuggerUtils.getInstance().substituteThis(
-            defaultChildrenRenderer.getChildValueExpression(node, context),
-            (PsiExpression)myChildrenExpression.getPsiExpression(node.getProject()).copy(),
-            expressionValue, context);
+    return DebuggerTreeNodeExpression.substituteThis(
+      childrenRenderer.getChildValueExpression(node, context),
+      (PsiExpression)myChildrenExpression.getPsiExpression(node.getProject()).copy(),
+      expressionValue);
+  }
+
+  private static NodeRenderer getChildrenRenderer(Value childrenValue, ValueDescriptor parentDescriptor) {
+    NodeRenderer renderer = getLastChildrenRenderer(parentDescriptor);
+    if (renderer == null || childrenValue == null || !renderer.isApplicable(childrenValue.type())) {
+      renderer = DebugProcessImpl.getDefaultRenderer(childrenValue != null ? childrenValue.type() : null);
+      setPreferableChildrenRenderer(parentDescriptor, renderer);
+    }
+    return renderer;
   }
 
   public boolean isExpandable(Value value, final EvaluationContext context, NodeDescriptor parentDescriptor) {
     final EvaluationContext evaluationContext = context.createEvaluationContext(value);
 
-    if(!"".equals(myChildrenExpandable.getReferenceExpression().getText())) {
+    if(!StringUtil.isEmpty(myChildrenExpandable.getReferenceExpression().getText())) {
       try {
         Value expanded = myChildrenExpandable.getEvaluator(evaluationContext.getProject()).evaluate(evaluationContext);
         if(expanded instanceof BooleanValue) {
@@ -166,9 +175,7 @@ public class ExpressionChildrenRenderer extends ReferenceRenderer implements Chi
 
     try {
       Value children = evaluateChildren(evaluationContext, parentDescriptor);
-
-      ChildrenRenderer defaultChildrenRenderer = ((DebugProcessImpl)evaluationContext.getDebugProcess()).getDefaultRenderer(value.type());
-
+      ChildrenRenderer defaultChildrenRenderer = DebugProcessImpl.getDefaultRenderer(value.type());
       return defaultChildrenRenderer.isExpandable(children, evaluationContext, parentDescriptor);
     }
     catch (EvaluateException e) {

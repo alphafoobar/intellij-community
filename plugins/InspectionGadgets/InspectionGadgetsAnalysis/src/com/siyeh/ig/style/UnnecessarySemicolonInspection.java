@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2009 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 package com.siyeh.ig.style;
 
+import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.lang.LanguageUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
@@ -29,7 +32,7 @@ import com.siyeh.ig.InspectionGadgetsFix;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public class UnnecessarySemicolonInspection extends BaseInspection {
+public class UnnecessarySemicolonInspection extends BaseInspection implements CleanupLocalInspectionTool {
 
   @Override
   @NotNull
@@ -108,9 +111,11 @@ public class UnnecessarySemicolonInspection extends BaseInspection {
     }
 
     private void findTopLevelSemicolons(PsiElement element) {
+      if (LanguageUtil.isInTemplateLanguageFile(element)) return;
+      
       for (PsiElement sibling = element.getFirstChild(); sibling != null; sibling = skipForwardWhiteSpacesAndComments(sibling)) {
         if (PsiUtil.isJavaToken(sibling, JavaTokenType.SEMICOLON)) {
-          registerError(sibling);
+          registerError(sibling, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
         }
       }
     }
@@ -148,7 +153,7 @@ public class UnnecessarySemicolonInspection extends BaseInspection {
       if (next == null || !next.equals(aClass.getRBrace())) {
         return;
       }
-      registerError(element);
+      registerError(element, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
     }
 
     private void findUnnecessarySemicolonsAfterEnumConstants(
@@ -170,11 +175,11 @@ public class UnnecessarySemicolonInspection extends BaseInspection {
                 if (!JavaTokenType.COMMA.equals(prevTokenType)
                     && !JavaTokenType.LBRACE.equals(
                   prevTokenType)) {
-                  registerError(child);
+                  registerError(child, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
                 }
               }
               else {
-                registerError(child);
+                registerError(child, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
               }
             }
           }
@@ -206,7 +211,7 @@ public class UnnecessarySemicolonInspection extends BaseInspection {
         if (semicolon == null) {
           return;
         }
-        registerError(semicolon);
+        registerError(semicolon, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
       }
     }
 
@@ -217,7 +222,7 @@ public class UnnecessarySemicolonInspection extends BaseInspection {
       if (last instanceof PsiJavaToken && ((PsiJavaToken)last).getTokenType() == JavaTokenType.RPARENTH) {
         final PsiElement prev = skipBackwardWhiteSpacesAndComments(last);
         if (prev instanceof PsiJavaToken && ((PsiJavaToken)prev).getTokenType() == JavaTokenType.SEMICOLON) {
-          registerError(prev);
+          registerError(prev, ProblemHighlightType.LIKE_UNUSED_SYMBOL);
         }
       }
     }

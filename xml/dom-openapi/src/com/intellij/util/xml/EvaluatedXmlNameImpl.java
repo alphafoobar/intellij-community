@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.xml.*;
 import com.intellij.util.containers.ConcurrentFactoryMap;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FactoryMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -38,7 +38,8 @@ import java.util.Map;
  */
 public class EvaluatedXmlNameImpl implements EvaluatedXmlName {
   private static final Key<CachedValue<FactoryMap<String,List<String>>>> NAMESPACE_PROVIDER_KEY = Key.create("NamespaceProvider");
-  private static final Map<EvaluatedXmlNameImpl,EvaluatedXmlNameImpl> ourInterned = new ConcurrentHashMap<EvaluatedXmlNameImpl,EvaluatedXmlNameImpl>();
+  private static final Map<EvaluatedXmlNameImpl, EvaluatedXmlNameImpl> ourInterned =
+    ContainerUtil.newConcurrentMap();
 
   private final XmlName myXmlName;
   private final String myNamespaceKey;
@@ -55,10 +56,12 @@ public class EvaluatedXmlNameImpl implements EvaluatedXmlName {
     return myXmlName.getLocalName();
   }
 
+  @Override
   public final XmlName getXmlName() {
     return myXmlName;
   }
 
+  @Override
   public final EvaluatedXmlName evaluateChildName(@NotNull final XmlName name) {
     String namespaceKey = name.getNamespaceKey();
     final boolean equalToParent = Comparing.equal(namespaceKey, myNamespaceKey);
@@ -105,8 +108,10 @@ public class EvaluatedXmlNameImpl implements EvaluatedXmlName {
     CachedValue<FactoryMap<String, List<String>>> value = file.getUserData(NAMESPACE_PROVIDER_KEY);
     if (value == null) {
       file.putUserData(NAMESPACE_PROVIDER_KEY, value = CachedValuesManager.getManager(file.getProject()).createCachedValue(new CachedValueProvider<FactoryMap<String, List<String>>>() {
+          @Override
           public Result<FactoryMap<String, List<String>>> compute() {
             final FactoryMap<String, List<String>> map = new ConcurrentFactoryMap<String, List<String>>() {
+              @Override
               protected List<String> create(final String key) {
                 final DomFileDescription<?> description = DomManager.getDomManager(file.getProject()).getDomFileDescription(file);
                 if (description == null) return Collections.emptyList();
@@ -128,10 +133,12 @@ public class EvaluatedXmlNameImpl implements EvaluatedXmlName {
 
   }
 
+  @Override
   public final boolean isNamespaceAllowed(String namespace, final XmlFile file, boolean qualified) {
     return myNamespaceKey == null || myEqualToParent && !qualified || isNamespaceAllowed(namespace, getNamespaceList(file));
   }
 
+  @Override
   @NotNull @NonNls
   public final String getNamespace(@NotNull XmlElement parentElement, final XmlFile file) {
     final String xmlElementNamespace = getXmlElementNamespace(parentElement);

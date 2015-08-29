@@ -39,6 +39,59 @@ public class EqualsBetweenInconvertibleTypesInspectionTest extends LightInspecti
            "}");
   }
 
+  public void testJavaUtilObjectsEquals() {
+    doStatementTest("java.util.Objects./*'equals()' between objects of inconvertible types 'Integer' and 'String'*/equals/**/(Integer.valueOf(1), \"string\");");
+  }
+
+  public void testComGoogleCommonBaseObjects() {
+    doStatementTest("com.google.common.base.Objects./*'equal()' between objects of inconvertible types 'Integer' and 'String'*/equal/**/(Integer.valueOf(1), \"string\");");
+  }
+
+  public void testCollection() {
+    doTest(
+      "import java.util.Collection;" +
+      "class XXX {" +
+      "  interface A {}" +
+      "  interface B extends A {}" +
+      "  boolean m(Collection<A> c1, Collection<B> c2) {" +
+      "    return c2.equals(c1);" +
+      "  }" +
+      "" +
+      "  boolean n(Collection<Integer> c1, Collection<String> c2) {" +
+      "     return c1./*'equals()' between objects of inconvertible types 'Collection<String>' and 'Collection<Integer>'*/equals/**/(c2);" +
+      "  }" +
+      "}");
+  }
+  
+  public void testRaw() {
+    doTest(
+      "import java.util.Collection;" +
+      "class XXX {" +
+      "  interface A {}" +
+      "  boolean m(Collection c1, Collection<A> c2) {" +
+      "    return c2.equals(c1);" +
+      "  }" +
+      "}");
+  }
+
+  @Override
+  protected String[] getEnvironmentClasses() {
+    return new String[] {
+      "package java.util;" +
+      "public final class Objects {" +
+      "  public static boolean equals(Object a, Object b) {" +
+      "    return (a == b) || (a != null && a.equals(b));" +
+      "  }" +
+      "}",
+      "package com.google.common.base;" +
+      "public final class Objects {" +
+      "  public static boolean equal(Object a, Object b) {" +
+      "    return true;" +
+      "  }" +
+      "}"
+    };
+  }
+
   @Override
   protected InspectionProfileEntry getInspection() {
     return new EqualsBetweenInconvertibleTypesInspection();

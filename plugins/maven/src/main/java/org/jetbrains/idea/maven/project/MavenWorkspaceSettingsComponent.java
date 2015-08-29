@@ -15,11 +15,15 @@
  */
 package org.jetbrains.idea.maven.project;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
+import org.jetbrains.idea.maven.server.MavenServerManager;
 
-@State(name = "MavenImportPreferences", storages = {@Storage( file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "MavenImportPreferences", storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)})
 public class MavenWorkspaceSettingsComponent implements PersistentStateComponent<MavenWorkspaceSettings> {
   private MavenWorkspaceSettings mySettings = new MavenWorkspaceSettings();
 
@@ -27,6 +31,7 @@ public class MavenWorkspaceSettingsComponent implements PersistentStateComponent
 
   public MavenWorkspaceSettingsComponent(Project project) {
     myProject = project;
+    applyDefaults(mySettings);
   }
 
   public static MavenWorkspaceSettingsComponent getInstance(Project project) {
@@ -35,15 +40,28 @@ public class MavenWorkspaceSettingsComponent implements PersistentStateComponent
 
   @NotNull
   public MavenWorkspaceSettings getState() {
-    mySettings.setEnabledProfiles(MavenProjectsManager.getInstance(myProject).getExplicitProfiles());
+    MavenExplicitProfiles profiles = MavenProjectsManager.getInstance(myProject).getExplicitProfiles();
+    mySettings.setEnabledProfiles(profiles.getEnabledProfiles());
+    mySettings.setDisabledProfiles(profiles.getDisabledProfiles());
     return mySettings;
   }
 
   public void loadState(MavenWorkspaceSettings state) {
     mySettings = state;
+    applyDefaults(mySettings);
   }
 
   public MavenWorkspaceSettings getSettings() {
     return mySettings;
+  }
+
+  private static void applyDefaults(MavenWorkspaceSettings settings) {
+    if(StringUtil.isEmptyOrSpaces(settings.generalSettings.getMavenHome())) {
+      if(MavenServerManager.getInstance().isUsedMaven2ForProjectImport() || ApplicationManager.getApplication().isUnitTestMode()) {
+        settings.generalSettings.setMavenHome(MavenServerManager.BUNDLED_MAVEN_2);
+      } else {
+        settings.generalSettings.setMavenHome(MavenServerManager.BUNDLED_MAVEN_3);
+      }
+    }
   }
 }

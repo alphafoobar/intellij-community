@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
@@ -40,34 +41,39 @@ public class PyCharmInitialConfigurator {
   @NonNls private static final String DISPLAYED_PROPERTY = "PyCharm.initialConfigurationShown";
 
   public PyCharmInitialConfigurator(MessageBus bus, final PropertiesComponent propertiesComponent, final FileTypeManager fileTypeManager) {
-    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration", false)) {
+    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration")) {
       propertiesComponent.setValue("PyCharm.InitialConfiguration", "true");
       EditorSettingsExternalizable.getInstance().setVirtualSpace(false);
     }
-    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V2", false)) {
-      propertiesComponent.setValue("PyCharm.InitialConfiguration.V2", "true");
+    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V2")) {
+      propertiesComponent.setValue("PyCharm.InitialConfiguration.V2", true);
       final CodeStyleSettings settings = CodeStyleSettingsManager.getInstance().getCurrentSettings();
       settings.ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
       settings.getCommonSettings(PythonLanguage.getInstance()).ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
       UISettings.getInstance().SHOW_DIRECTORY_FOR_NON_UNIQUE_FILENAMES = true;
     }
-    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V3", false)) {
+    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V3")) {
       propertiesComponent.setValue("PyCharm.InitialConfiguration.V3", "true");
       UISettings.getInstance().SHOW_MEMORY_INDICATOR = false;
       final String ignoredFilesList = fileTypeManager.getIgnoredFilesList();
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      ApplicationManager.getApplication().invokeLater(new Runnable() {
         @Override
         public void run() {
-          FileTypeManager.getInstance().setIgnoredFilesList(ignoredFilesList + ";*$py.class");
+          ApplicationManager.getApplication().runWriteAction(new Runnable() {
+            @Override
+            public void run() {
+              FileTypeManager.getInstance().setIgnoredFilesList(ignoredFilesList + ";*$py.class");
+            }
+          });
         }
       });
     }
-    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V4", false)) {
-      propertiesComponent.setValue("PyCharm.InitialConfiguration.V4", "true");
+    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V4")) {
+      propertiesComponent.setValue("PyCharm.InitialConfiguration.V4", true);
       PyCodeInsightSettings.getInstance().SHOW_IMPORT_POPUP = false;
     }
-    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V5", false)) {
-      propertiesComponent.setValue("PyCharm.InitialConfiguration.V5", "true");
+    if (!propertiesComponent.getBoolean("PyCharm.InitialConfiguration.V5")) {
+      propertiesComponent.setValue("PyCharm.InitialConfiguration.V5", true);
       CodeInsightSettings.getInstance().REFORMAT_ON_PASTE = CodeInsightSettings.NO_REFORMAT;
     }
     if (!propertiesComponent.isValueSet(DISPLAYED_PROPERTY)) {
@@ -83,6 +89,8 @@ public class PyCharmInitialConfigurator {
         }
       });
     }
+
+    Registry.get("ide.scratch.enabled").setValue(true);
   }
 
   private static void showInitialConfigurationDialog() {

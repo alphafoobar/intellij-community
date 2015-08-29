@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,11 @@ import git4idea.commands.Git;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiUtil;
+import org.jetbrains.plugins.github.api.GithubConnection;
 import org.jetbrains.plugins.github.api.GithubRepo;
-import org.jetbrains.plugins.github.exceptions.GithubAuthenticationCanceledException;
-import org.jetbrains.plugins.github.util.GithubAuthData;
+import org.jetbrains.plugins.github.util.GithubAuthDataHolder;
 import org.jetbrains.plugins.github.util.GithubNotifications;
+import org.jetbrains.plugins.github.util.GithubUrlUtil;
 import org.jetbrains.plugins.github.util.GithubUtil;
 
 import java.io.File;
@@ -57,19 +58,20 @@ public class GithubCheckoutProvider implements CheckoutProvider {
     try {
       availableRepos = GithubUtil
         .computeValueInModal(project, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, List<GithubRepo>, IOException>() {
+          @NotNull
           @Override
           public List<GithubRepo> convert(ProgressIndicator indicator) throws IOException {
-            return GithubUtil.runWithValidAuth(project, indicator, new ThrowableConvertor<GithubAuthData, List<GithubRepo>, IOException>() {
-              @Override
-              public List<GithubRepo> convert(GithubAuthData authData) throws IOException {
-                return GithubApiUtil.getAvailableRepos(authData);
-              }
-            });
+            return GithubUtil.runTask(project, GithubAuthDataHolder.createFromSettings(), indicator,
+                                      new ThrowableConvertor<GithubConnection, List<GithubRepo>, IOException>() {
+                                        @NotNull
+                                        @Override
+                                        public List<GithubRepo> convert(@NotNull GithubConnection connection) throws IOException {
+                                          return GithubApiUtil.getAvailableRepos(connection);
+                                        }
+                                      }
+            );
           }
         });
-    }
-    catch (GithubAuthenticationCanceledException e) {
-      return;
     }
     catch (IOException e) {
       GithubNotifications.showError(project, "Couldn't get the list of GitHub repositories", e);
@@ -86,11 +88,10 @@ public class GithubCheckoutProvider implements CheckoutProvider {
     final GitCloneDialog dialog = new GitCloneDialog(project);
     // Add predefined repositories to history
     dialog.prependToHistory("-----------------------------------------------");
-    for (int i = availableRepos.size() - 1; i>=0; i--){
-      dialog.prependToHistory(availableRepos.get(i).getCloneUrl());
+    for (int i = availableRepos.size() - 1; i >= 0; i--) {
+      dialog.prependToHistory(GithubUrlUtil.getCloneUrl(availableRepos.get(i).getFullPath()));
     }
-    dialog.show();
-    if (!dialog.isOK()) {
+    if (!dialog.showAndGet()) {
       return;
     }
     dialog.rememberSettings();

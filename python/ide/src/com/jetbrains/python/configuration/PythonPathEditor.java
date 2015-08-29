@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.ui.ListUtil;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.ArrayUtil;
+import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.codeInsight.userSkeletons.PyUserSkeletonsUtil;
 import com.jetbrains.python.sdk.PythonSdkAdditionalData;
 import com.jetbrains.python.sdk.PythonSdkType;
@@ -126,7 +127,7 @@ public class PythonPathEditor extends SdkPathEditor {
 
   @Override
   protected void addToolbarButtons(ToolbarDecorator toolbarDecorator) {
-    AnActionButton reloadButton = new AnActionButton("Reload List of Paths", AllIcons.Actions.Refresh) {
+    AnActionButton reloadButton = new AnActionButton(PyBundle.message("sdk.paths.dialog.reload.paths"), AllIcons.Actions.Refresh) {
       @Override
       public void actionPerformed(AnActionEvent e) {
         onReloadButtonClicked();
@@ -227,10 +228,10 @@ public class PythonPathEditor extends SdkPathEditor {
 
     public String getPresentationSuffix(VirtualFile file) {
       if (myAdded.contains(file)) {
-        return "(added by user)";
+        return PyBundle.message("sdk.paths.dialog.added.by.user.suffix");
       }
       if (myExcluded.contains(file)) {
-        return "(removed by user)";
+        return PyBundle.message("sdk.paths.dialog.removed.by.user.suffix");
       }
       return "";
     }
@@ -258,6 +259,7 @@ public class PythonPathEditor extends SdkPathEditor {
         setAdded(data.getAddedPathFiles());
         setExcluded(data.getExcludedPathFiles());
         result.addAll(myExcluded);
+        result.addAll(myAdded);
       }
       else if (modificator.getSdkAdditionalData() == null) {
         myAdded.clear();
@@ -300,7 +302,7 @@ public class PythonPathEditor extends SdkPathEditor {
   }
 
 
-  private static class PythonPathListCellRenderer extends ListCellRendererWrapper<VirtualFile> {
+  private class PythonPathListCellRenderer extends ListCellRendererWrapper<VirtualFile> {
     private final PathListModel model;
 
     public PythonPathListCellRenderer(final ListCellRenderer listCellRenderer, PathListModel model) {
@@ -314,7 +316,11 @@ public class PythonPathEditor extends SdkPathEditor {
       if (suffix.length() > 0) {
         suffix = "  " + suffix;
       }
-      setText(value != null ? value.getPresentableUrl() + suffix : "");
+      setText(value != null ? getPresentablePath(value) + suffix : "");
     }
+  }
+
+  protected String getPresentablePath(VirtualFile value) {
+    return value.getPresentableUrl();
   }
 }

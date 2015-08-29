@@ -17,6 +17,7 @@ package com.intellij.ui.speedSearch;
 
 import com.intellij.psi.codeStyle.NameUtil;
 import com.intellij.util.text.Matcher;
+import org.jetbrains.annotations.Nullable;
 
 import java.awt.event.KeyEvent;
 
@@ -57,7 +58,7 @@ public class SpeedSearch {
     }
     else {
       final char ch = e.getKeyChar();
-      if (Character.isLetterOrDigit(ch) || ch == ' ' || ch == '*' || ch == '_' || ch == '-' || ch == '"' || ch == '\'') {
+      if (Character.isLetterOrDigit(ch) || ch == ' ' || ch == '*' || ch == '_' || ch == '-' || ch == '"' || ch == '\'' || ch == '/' || ch == '.') {
         type(Character.toString(ch));
         e.consume();
       }
@@ -105,5 +106,10 @@ public class SpeedSearch {
     catch (Exception e) {
       myMatcher = null;
     }
+  }
+
+  @Nullable
+  public Matcher getMatcher() {
+    return myMatcher;
   }
 }

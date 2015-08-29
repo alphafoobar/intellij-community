@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,29 +22,44 @@ import com.intellij.openapi.editor.impl.event.DocumentEventImpl;
 import com.intellij.openapi.editor.markup.HighlighterTargetArea;
 import com.intellij.openapi.editor.markup.MarkupModel;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.util.DocumentUtil;
 import com.intellij.util.diff.FilesTooBigForDiffException;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Implementation of the markup element for the editor and document.
  * @author max
  */
 class PersistentRangeHighlighterImpl extends RangeHighlighterImpl implements RangeHighlighterEx {
-  PersistentRangeHighlighterImpl(@NotNull MarkupModel model,
-                                 int offset,
-                                 int layer,
-                                 @NotNull HighlighterTargetArea target,
-                                 TextAttributes textAttributes) {
-    super(model, model.getDocument().getLineStartOffset(model.getDocument().getLineNumber(offset)), model.getDocument().getLineEndOffset(model.getDocument().getLineNumber(offset)),layer, target, textAttributes,
-          false, false);
-    setLine(model.getDocument().getLineNumber(offset));
+  private int myLine; // for PersistentRangeHighlighterImpl only
+  static PersistentRangeHighlighterImpl create(@NotNull MarkupModel model,
+                                               int offset,
+                                               int layer,
+                                               @NotNull HighlighterTargetArea target,
+                                               @Nullable TextAttributes textAttributes,
+                                               boolean normalizeStartOffset) {
+    int line = model.getDocument().getLineNumber(offset);
+    int startOffset = normalizeStartOffset ? model.getDocument().getLineStartOffset(line) : offset;
+    return new PersistentRangeHighlighterImpl(model, startOffset, line, layer, target, textAttributes);
+  }
+
+  private PersistentRangeHighlighterImpl(@NotNull MarkupModel model,
+                                         int startOffset,
+                                         int line,
+                                         int layer,
+                                         @NotNull HighlighterTargetArea target,
+                                         @Nullable TextAttributes textAttributes) {
+    super(model, startOffset, model.getDocument().getLineEndOffset(line), layer, target, textAttributes, false, false);
+
+    myLine = line;
   }
 
   @Override
-  protected void changedUpdateImpl(DocumentEvent e) {
+  protected void changedUpdateImpl(@NotNull DocumentEvent e) {
     // todo Denis Zhdanov
     DocumentEventImpl event = (DocumentEventImpl)e;
-    final boolean shouldTranslateViaDiff = PersistentRangeMarkerUtil.shouldTranslateViaDiff(event, this);
+    final boolean shouldTranslateViaDiff = isValid() && PersistentRangeMarkerUtil.shouldTranslateViaDiff(event, this);
     boolean wasTranslatedViaDiff = shouldTranslateViaDiff;
     if (shouldTranslateViaDiff) {
       wasTranslatedViaDiff = translatedViaDiff(e, event);
@@ -52,33 +67,33 @@ class PersistentRangeHighlighterImpl extends RangeHighlighterImpl implements Ran
     if (!wasTranslatedViaDiff) {
       super.changedUpdateImpl(e);
       if (isValid()) {
-        setLine(getDocument().getLineNumber(getStartOffset()));
+        myLine = getDocument().getLineNumber(getStartOffset());
         int endLine = getDocument().getLineNumber(getEndOffset());
-        if (endLine != getLine()) {
-          setIntervalEnd(getDocument().getLineEndOffset(getLine()));
+        if (endLine != myLine) {
+          setIntervalEnd(getDocument().getLineEndOffset(myLine));
         }
       }
     }
     if (isValid() && getTargetArea() == HighlighterTargetArea.LINES_IN_RANGE) {
-      setIntervalStart(getDocument().getLineStartOffset(getLine()));
-      setIntervalEnd(getDocument().getLineEndOffset(getLine()));
+      setIntervalStart(DocumentUtil.getFirstNonSpaceCharOffset(getDocument(), myLine));
+      setIntervalEnd(getDocument().getLineEndOffset(myLine));
     }
   }
 
   private boolean translatedViaDiff(DocumentEvent e, DocumentEventImpl event) {
     try {
-      setLine(event.translateLineViaDiff(getLine()));
+      myLine = event.translateLineViaDiff(myLine);
     }
-    catch (FilesTooBigForDiffException e1) {
+    catch (FilesTooBigForDiffException ignored) {
       return false;
     }
-    if (getLine() < 0 || getLine() >= getDocument().getLineCount()) {
+    if (myLine < 0 || myLine >= getDocument().getLineCount()) {
       invalidate(e);
     }
     else {
       DocumentEx document = getDocument();
-      setIntervalStart(document.getLineStartOffset(getLine()));
-      setIntervalEnd(document.getLineEndOffset(getLine()));
+      setIntervalStart(document.getLineStartOffset(myLine));
+      setIntervalEnd(document.getLineEndOffset(myLine));
     }
     return true;
   }
@@ -87,16 +102,7 @@ class PersistentRangeHighlighterImpl extends RangeHighlighterImpl implements Ran
   public String toString() {
     return "PersistentRangeHighlighter" +
            (isGreedyToLeft() ? "[" : "(") +
-           (isValid() ? "valid" : "invalid") + "," + getStartOffset() + "," + getEndOffset() + " - " + getLine() +
+           (isValid() ? "valid" : "invalid") + "," + getStartOffset() + "," + getEndOffset() + " - " + myLine +
            (isGreedyToRight() ? "]" : ")");
-  }
-
-  // delegates
-  private int getLine() {
-    return getData().myLine;
-  }
-
-  private void setLine(int line) {
-    getData().myLine = line;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,17 @@ package com.intellij.xdebugger;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.ExecutionConsole;
-import com.intellij.execution.ui.RunnerLayoutUi;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler;
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider;
+import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
+import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XValueMarkerProvider;
 import com.intellij.xdebugger.stepping.XSmartStepIntoHandler;
 import com.intellij.xdebugger.ui.XDebugTabLayouter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.Promise;
 
 import javax.swing.event.HyperlinkListener;
 
@@ -93,6 +95,16 @@ public abstract class XDebugProcess {
   public abstract void startStepOver();
 
   /**
+   * Steps into suppressed call
+   *
+   * Resume execution and call {@link XDebugSession#positionReached}
+   * when next line is reached.
+   * Do not call this method directly. Use {@link XDebugSession#forceStepInto} instead
+   */
+  public void startForceStepInto(){
+    startStepInto();
+  }
+  /**
    * Resume execution and call {@link XDebugSession#positionReached}
    * when next line is reached.
    * Do not call this method directly. Use {@link XDebugSession#stepInto} instead
@@ -119,7 +131,15 @@ public abstract class XDebugProcess {
    * Stop debugging and dispose resources.
    * Do not call this method directly. Use {@link XDebugSession#stop} instead
    */
-  public abstract void stop();
+  public void stop() {
+    throw new AbstractMethodError();
+  }
+
+  @NotNull
+  public Promise stopAsync() {
+    stop();
+    return Promise.DONE;
+  }
 
   /**
    * Resume execution.
@@ -181,16 +201,9 @@ public abstract class XDebugProcess {
   }
 
   /**
-   * @deprecated override {@link #createTabLayouter()} and {@link com.intellij.xdebugger.ui.XDebugTabLayouter#registerAdditionalContent} instead
-   */
-  @Deprecated
-  public void registerAdditionalContent(@NotNull RunnerLayoutUi ui) {
-  }
-
-  /**
    * Override this method to provide additional actions in 'Debug' tool window
    */
-  public void registerAdditionalActions(@NotNull DefaultActionGroup leftToolbar, @NotNull DefaultActionGroup topToolbar) {
+  public void registerAdditionalActions(@NotNull DefaultActionGroup leftToolbar, @NotNull DefaultActionGroup topToolbar, @NotNull DefaultActionGroup settings) {
   }
 
   /**
@@ -211,10 +224,6 @@ public abstract class XDebugProcess {
   @NotNull
   public XDebugTabLayouter createTabLayouter() {
     return new XDebugTabLayouter() {
-      @Override
-      public void registerAdditionalContent(@NotNull RunnerLayoutUi ui) {
-        XDebugProcess.this.registerAdditionalContent(ui);
-      }
     };
   }
 
@@ -226,4 +235,9 @@ public abstract class XDebugProcess {
     return false;
   }
 
+  @Nullable
+  public XDebuggerEvaluator getEvaluator() {
+    XStackFrame frame = getSession().getCurrentStackFrame();
+    return frame == null ? null : frame.getEvaluator();
+  }
 }

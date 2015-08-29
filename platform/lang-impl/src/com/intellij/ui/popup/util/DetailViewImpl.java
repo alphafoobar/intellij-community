@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.SideBorder;
-import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.UIBundle;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -41,46 +42,34 @@ import javax.swing.*;
 import java.awt.*;
 
 /**
-* Created with IntelliJ IDEA.
-* User: zajac
-* Date: 5/6/12
-* Time: 2:04 AM
-* To change this template use File | Settings | File Templates.
+* @author zajac
+* @since 6.05.2012
 */
 public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder {
   private final Project myProject;
+  private final UserDataHolderBase myDataHolderBase = new UserDataHolderBase();
+  private final JLabel myLabel = new JLabel("", SwingConstants.CENTER);
+
   private Editor myEditor;
-
   private ItemWrapper myWrapper;
-
   private JPanel myDetailPanel;
-  private JBScrollPane myDetailScrollPanel;
-
   private JPanel myDetailPanelWrapper;
   private RangeHighlighter myHighlighter;
   private PreviewEditorState myEditorState = PreviewEditorState.EMPTY;
-  private JComponent myParentComponent;
-  private final JLabel myLabel = new JLabel("", SwingConstants.CENTER);
-
-
-  public void setDoneRunnable(Runnable doneRunnable, JComponent parent) {
-    myParentComponent = parent;
-    myDoneRunnable = doneRunnable;
-  }
-
-  private Runnable myDoneRunnable;
+  private String myEmptyLabel = UIBundle.message("message.nothingToShow");
 
   public DetailViewImpl(Project project) {
     super(new BorderLayout());
     myProject = project;
-    setPreferredSize(new Dimension(700, 400));
+
+    setPreferredSize(JBUI.size(600, 300));
     myLabel.setVerticalAlignment(SwingConstants.CENTER);
   }
 
   @Override
   public void clearEditor() {
     if (getEditor() != null) {
-      clearHightlighting();
+      clearHighlighting();
       remove(getEditor().getComponent());
       EditorFactory.getInstance().releaseEditor(getEditor());
       myEditorState = PreviewEditorState.EMPTY;
@@ -127,8 +116,6 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
 
   @Override
   public void navigateInPreviewEditor(PreviewEditorState editorState) {
-    myEditorState = editorState;
-
     final VirtualFile file = editorState.getFile();
     final LogicalPosition positionToNavigate = editorState.getNavigate();
     final TextAttributes lineAttributes = editorState.getAttributes();
@@ -136,6 +123,7 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
     Project project = myProject;
 
     clearEditor();
+    myEditorState = editorState;
     remove(myLabel);
     if (document != null) {
       if (getEditor() == null || getEditor().getDocument() != document) {
@@ -152,6 +140,7 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
         getEditor().getSettings().setRefrainFromScrolling(false);
         getEditor().getSettings().setLineNumbersShown(true);
         getEditor().getSettings().setFoldingOutlineShown(false);
+        ((EditorEx)getEditor()).getFoldingModel().setFoldingEnabled(false);
 
         add(getEditor().getComponent(), BorderLayout.CENTER);
       }
@@ -164,8 +153,8 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
 
       getEditor().setBorder(IdeBorderFactory.createBorder(SideBorder.TOP));
 
-      clearHightlighting();
-      if (lineAttributes != null && positionToNavigate != null) {
+      clearHighlighting();
+      if (lineAttributes != null && positionToNavigate != null && positionToNavigate.line < getEditor().getDocument().getLineCount()) {
         myHighlighter = getEditor().getMarkupModel().addLineHighlighter(positionToNavigate.line, HighlighterLayer.SELECTION - 1,
                                                                         lineAttributes);
       }
@@ -177,8 +166,7 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
     }
   }
 
-
-  private void clearHightlighting() {
+  private void clearHighlighting() {
     if (myHighlighter != null) {
       getEditor().getMarkupModel().removeHighlighter(myHighlighter);
       myHighlighter = null;
@@ -192,12 +180,18 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
 
   @Override
   public void setPropertiesPanel(@Nullable final JPanel panel) {
-    if (panel == myDetailPanel) return;
-
-    if (panel != null) {
+    if (panel == null) {
+      if (myDetailPanelWrapper != null) {
+        myDetailPanelWrapper.removeAll();
+      }
+      myLabel.setText(myEmptyLabel);
+      add(myLabel, BorderLayout.CENTER);
+    }
+    else if (panel != myDetailPanel) {
+      remove(myLabel);
       if (myDetailPanelWrapper == null) {
         myDetailPanelWrapper = new JPanel(new GridLayout(1, 1));
-        myDetailPanelWrapper.setBorder(IdeBorderFactory.createEmptyBorder(5, 30, 5, 5));
+        myDetailPanelWrapper.setBorder(IdeBorderFactory.createEmptyBorder(5, 5, 5, 5));
         myDetailPanelWrapper.add(panel);
 
         add(myDetailPanelWrapper, BorderLayout.NORTH);
@@ -206,16 +200,14 @@ public class DetailViewImpl extends JPanel implements DetailView, UserDataHolder
         myDetailPanelWrapper.add(panel);
       }
     }
-    else {
-      myDetailPanelWrapper.removeAll();
-      myLabel.setText("Nothing to show");
-      add(myLabel, BorderLayout.CENTER);
-    }
     myDetailPanel = panel;
     revalidate();
+    repaint();
   }
 
-  final UserDataHolderBase myDataHolderBase = new UserDataHolderBase();
+  public void setEmptyLabel(String text) {
+    myEmptyLabel = text;
+  }
 
   @Override
   public <T> T getUserData(@NotNull Key<T> key) {

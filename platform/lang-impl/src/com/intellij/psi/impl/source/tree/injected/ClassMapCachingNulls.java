@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,7 @@
  */
 package com.intellij.psi.impl.source.tree.injected;
 
-import com.intellij.util.ReflectionCache;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,7 +27,7 @@ import java.util.Map;
 public class ClassMapCachingNulls<T> {
   private final Map<Class, T[]> myBackingMap;
   private final T[] myEmptyArray;
-  private final Map<Class, T[]> myMap = new ConcurrentHashMap<Class, T[]>();
+  private final Map<Class, T[]> myMap = ContainerUtil.newConcurrentMap();
 
   public ClassMapCachingNulls(@NotNull Map<Class, T[]> backingMap, T[] emptyArray) {
     myBackingMap = backingMap;
@@ -72,10 +71,10 @@ public class ClassMapCachingNulls<T> {
       assert value.length != 0;
       result = new ArrayList<T>(Arrays.asList(value));
     }
-    for (final Class aClass1 : ReflectionCache.getInterfaces(aClass)) {
+    for (final Class aClass1 : aClass.getInterfaces()) {
       result = addFromUpper(result, aClass1);
     }
-    final Class superclass = ReflectionCache.getSuperClass(aClass);
+    final Class superclass = aClass.getSuperclass();
     if (superclass != null) {
       result = addFromUpper(result, superclass);
     }
@@ -97,6 +96,10 @@ public class ClassMapCachingNulls<T> {
       assert !value.isEmpty();
     }
     return value;
+  }
+
+  public Map<Class, T[]> getBackingMap() {
+    return myBackingMap;
   }
 
   public void clearCache() {

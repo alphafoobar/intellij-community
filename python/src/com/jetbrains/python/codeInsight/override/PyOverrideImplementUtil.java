@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,7 +121,7 @@ public class PyOverrideImplementUtil {
           return new SpeedSearchComparator(false) {
             @Nullable
             @Override
-            public Iterable<TextRange> matchingFragments(String pattern, String text) {
+            public Iterable<TextRange> matchingFragments(@NotNull String pattern, @NotNull String text) {
               return super.matchingFragments(PyMethodMember.trimUnderscores(pattern), text);
             }
           };
@@ -143,7 +143,7 @@ public class PyOverrideImplementUtil {
       return;
     }
     new WriteCommandAction(pyClass.getProject(), pyClass.getContainingFile()) {
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         write(pyClass, membersToOverride, editor, implement);
       }
     }.execute();
@@ -156,7 +156,8 @@ public class PyOverrideImplementUtil {
     final int offset = editor.getCaretModel().getOffset();
     PsiElement anchor = null;
     for (PyStatement statement: statementList.getStatements()) {
-      if (statement.getTextRange().getStartOffset() < offset) {
+      if (statement.getTextRange().getStartOffset() < offset ||
+          (statement instanceof PyExpressionStatement && ((PyExpressionStatement)statement).getExpression() instanceof PyStringLiteralExpression)) {
         anchor = statement;
       }
     }
@@ -172,9 +173,7 @@ public class PyOverrideImplementUtil {
     PyPsiUtils.removeRedundantPass(statementList);
     if (element != null) {
       final PyStatementList targetStatementList = element.getStatementList();
-      final int start = targetStatementList != null
-                        ? targetStatementList.getTextRange().getStartOffset()
-                        : element.getTextRange().getStartOffset();
+      final int start = targetStatementList.getTextRange().getStartOffset();
       editor.getCaretModel().moveToOffset(start);
       editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
       editor.getSelectionModel().setSelection(start, element.getTextRange().getEndOffset());
@@ -182,16 +181,24 @@ public class PyOverrideImplementUtil {
   }
 
   private static PyFunctionBuilder buildOverriddenFunction(PyClass pyClass, PyFunction baseFunction, boolean implement) {
+    final boolean overridingNew = PyNames.NEW.equals(baseFunction.getName());
     PyFunctionBuilder pyFunctionBuilder = new PyFunctionBuilder(baseFunction.getName());
     final PyDecoratorList decorators = baseFunction.getDecoratorList();
-    if (decorators != null && decorators.findDecorator(PyNames.CLASSMETHOD) != null) {
-      pyFunctionBuilder.decorate(PyNames.CLASSMETHOD);
+    boolean baseMethodIsStatic = false;
+    if (decorators != null) {
+      if (decorators.findDecorator(PyNames.CLASSMETHOD) != null) {
+        pyFunctionBuilder.decorate(PyNames.CLASSMETHOD);
+      }
+      else if (decorators.findDecorator(PyNames.STATICMETHOD) != null) {
+        baseMethodIsStatic = true;
+        pyFunctionBuilder.decorate(PyNames.STATICMETHOD);
+      }
     }
     PyAnnotation anno = baseFunction.getAnnotation();
     if (anno != null) {
       pyFunctionBuilder.annotation(anno.getText());
     }
-    final TypeEvalContext context = TypeEvalContext.userInitiated(baseFunction.getContainingFile());
+    final TypeEvalContext context = TypeEvalContext.userInitiated(baseFunction.getProject(), baseFunction.getContainingFile());
     final List<PyParameter> baseParams = PyUtil.getParameters(baseFunction, context);
     for (PyParameter parameter : baseParams) {
       pyFunctionBuilder.parameter(parameter.getText());
@@ -220,45 +227,69 @@ public class PyOverrideImplementUtil {
       }
     }
 
-    if (PyNames.FAKE_OLD_BASE.equals(baseClass.getName()) || implement) {
+    if (PyNames.FAKE_OLD_BASE.equals(baseClass.getName()) || raisesNotImplementedError(baseFunction) || implement) {
       statementBody.append(PyNames.PASS);
     }
     else {
-      if (!PyNames.INIT.equals(baseFunction.getName()) && baseFunction.getReturnType(context, null) != PyNoneType.INSTANCE) {
+      if (!PyNames.INIT.equals(baseFunction.getName()) && context.getReturnType(baseFunction) != PyNoneType.INSTANCE || overridingNew) {
         statementBody.append("return ");
       }
-      if (baseClass.isNewStyleClass()) {
+      if (baseClass.isNewStyleClass(null)) {
         statementBody.append(PyNames.SUPER);
         statementBody.append("(");
         final LanguageLevel langLevel = ((PyFile)pyClass.getContainingFile()).getLanguageLevel();
         if (!langLevel.isPy3K()) {
           final String baseFirstName = !baseParams.isEmpty() ? baseParams.get(0).getName() : null;
           final String firstName = baseFirstName != null ? baseFirstName : PyNames.CANONICAL_SELF;
-          PsiElement outerClass = PsiTreeUtil.getParentOfType(pyClass, PyClass.class, true);
+          PsiElement outerClass = PsiTreeUtil.getParentOfType(pyClass, PyClass.class, true, PyFunction.class);
           String className = pyClass.getName();
           final List<String> nameResult = Lists.newArrayList(className);
-          while(outerClass instanceof PyClass) {
+          while(outerClass != null) {
             nameResult.add(0, ((PyClass)outerClass).getName());
-            outerClass = PsiTreeUtil.getParentOfType(outerClass, PyClass.class, true);
+            outerClass = PsiTreeUtil.getParentOfType(outerClass, PyClass.class, true, PyFunction.class);
           }
 
-          className = StringUtil.join(nameResult, ".");
-          statementBody.append(className).append(", ").append(firstName);
+          StringUtil.join(nameResult, ".", statementBody);
+          statementBody.append(", ").append(firstName);
         }
         statementBody.append(").").append(baseFunction.getName()).append("(");
-        if (parameters.size() > 0) {
+        // type.__new__ is explicitly decorated as @staticmethod in our stubs, but not in real Python code
+        if (parameters.size() > 0 && !(baseMethodIsStatic || overridingNew)) {
           parameters.remove(0);
         }
       }
       else {
         statementBody.append(getReferenceText(pyClass, baseClass)).append(".").append(baseFunction.getName()).append("(");
       }
-      statementBody.append(StringUtil.join(parameters, ", "));
+      StringUtil.join(parameters, ", ", statementBody);
       statementBody.append(")");
     }
 
     pyFunctionBuilder.statement(statementBody.toString());
     return pyFunctionBuilder;
+  }
+
+  public static boolean raisesNotImplementedError(@NotNull PyFunction function) {
+    for (PyStatement statement : function.getStatementList().getStatements()) {
+      if (!(statement instanceof PyRaiseStatement)) {
+        continue;
+      }
+      final PyRaiseStatement raiseStatement = (PyRaiseStatement)statement;
+      final PyExpression[] expressions = raiseStatement.getExpressions();
+      if (expressions.length > 0) {
+        final PyExpression firstExpression = expressions[0];
+        if (firstExpression instanceof PyCallExpression) {
+          final PyExpression callee = ((PyCallExpression)firstExpression).getCallee();
+          if (callee != null && callee.getText().equals(PyNames.NOT_IMPLEMENTED_ERROR)) {
+            return true;
+          }
+        }
+        else if (firstExpression.getText().equals(PyNames.NOT_IMPLEMENTED_ERROR)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // TODO find a better place for this logic
@@ -276,13 +307,11 @@ public class PyOverrideImplementUtil {
   }
 
   @NotNull
-  public static Collection<PyFunction> getAllSuperFunctions(@NotNull final PyClass pyClass) {
+  public static Collection<PyFunction> getAllSuperFunctions(@NotNull PyClass pyClass) {
     final Map<String, PyFunction> superFunctions = new HashMap<String, PyFunction>();
-    for (PyClass aClass : pyClass.getAncestorClasses()) {
-      for (PyFunction function : aClass.getMethods()) {
-        if (!superFunctions.containsKey(function.getName())) {
-          superFunctions.put(function.getName(), function);
-        }
+    for (PyFunction function : pyClass.getMethods(true)) {
+      if (!superFunctions.containsKey(function.getName())) {
+        superFunctions.put(function.getName(), function);
       }
     }
     return superFunctions.values();

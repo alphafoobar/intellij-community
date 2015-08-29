@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,10 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ArrayUtil;
-import com.intellij.xml.*;
+import com.intellij.xml.XmlAttributeDescriptor;
+import com.intellij.xml.XmlAttributeDescriptorsProvider;
+import com.intellij.xml.XmlElementDescriptor;
+import com.intellij.xml.XmlExtension;
 import com.intellij.xml.impl.schema.AnyXmlElementDescriptor;
 import com.intellij.xml.impl.schema.XmlElementDescriptorImpl;
 import com.intellij.xml.util.HtmlUtil;
@@ -35,6 +38,7 @@ public class RelaxedHtmlFromSchemaElementDescriptor extends XmlElementDescriptor
     super(tag);
   }
 
+  @Override
   public XmlElementDescriptor getElementDescriptor(XmlTag childTag, XmlTag contextTag) {
     XmlElementDescriptor elementDescriptor = super.getElementDescriptor(childTag, contextTag);
 
@@ -45,6 +49,7 @@ public class RelaxedHtmlFromSchemaElementDescriptor extends XmlElementDescriptor
     return elementDescriptor;
   }
 
+  @Override
   public XmlElementDescriptor[] getElementsDescriptors(final XmlTag context) {
     return ArrayUtil.mergeArrays(
       super.getElementsDescriptors(context),
@@ -64,6 +69,7 @@ public class RelaxedHtmlFromSchemaElementDescriptor extends XmlElementDescriptor
     return null;
   }
 
+  @Override
   public XmlAttributeDescriptor[] getAttributesDescriptors(final XmlTag context) {
     return addAttrDescriptorsForFacelets(context, super.getAttributesDescriptors(context));
   }
@@ -84,6 +90,7 @@ public class RelaxedHtmlFromSchemaElementDescriptor extends XmlElementDescriptor
     return getAttributeDescriptor(attribute.getName(), attribute.getParent());
   }
 
+  @Override
   public XmlAttributeDescriptor getAttributeDescriptor(String attributeName, final XmlTag context) {
     final XmlAttributeDescriptor descriptor = super.getAttributeDescriptor(attributeName.toLowerCase(), context);
     if (descriptor != null) return descriptor;
@@ -105,6 +112,7 @@ public class RelaxedHtmlFromSchemaElementDescriptor extends XmlElementDescriptor
     return null;
   }
 
+  @Override
   public boolean allowElementsFromNamespace(final String namespace, final XmlTag context) {
     return true;
   }

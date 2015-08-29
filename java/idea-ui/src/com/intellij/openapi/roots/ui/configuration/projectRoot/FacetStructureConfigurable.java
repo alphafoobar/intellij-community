@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,8 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.daemon.FacetProje
 import com.intellij.openapi.roots.ui.configuration.projectRoot.daemon.ProjectStructureElement;
 import com.intellij.openapi.ui.DetailsComponent;
 import com.intellij.openapi.ui.NamedConfigurable;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.treeStructure.filtered.FilteringTreeBuilder;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NonNls;
@@ -154,7 +156,7 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
         if (c1 instanceof FrameworkDetectionConfigurable && !(c2 instanceof FrameworkDetectionConfigurable)) return 1;
         if (!(c1 instanceof FrameworkDetectionConfigurable) && c2 instanceof FrameworkDetectionConfigurable) return -1;
 
-        return node1.getDisplayName().compareToIgnoreCase(node2.getDisplayName());
+        return StringUtil.naturalCompare(node1.getDisplayName(), node2.getDisplayName());
       }
     };
   }
@@ -169,13 +171,8 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
     MyNode facetTypeNode = new MyNode(facetTypeConfigurable);
     addNode(facetTypeNode, myRoot);
 
-    for (Module module : myModuleManager.getModules()) {
-      Collection<? extends Facet> facets = FacetManager.getInstance(module).getFacetsByType(facetType.getId());
-      FacetEditorFacadeImpl editorFacade = ModuleStructureConfigurable.getInstance(myProject).getFacetEditorFacade();
-      for (Facet facet : facets) {
-        addFacetNode(facetTypeNode, facet, editorFacade);
-      }
-    }
+    FacetEditorFacadeImpl editorFacade = ModuleStructureConfigurable.getInstance(myProject).getFacetEditorFacade();
+    addFacetNodes(facetTypeNode, ProjectFacetManager.getInstance(myProject).getFacets(facetType.getId()), editorFacade);
     return facetTypeNode;
   }
 
@@ -200,10 +197,13 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
     return addFacetTypeNode(facetType);
   }
 
-  public void addFacetNode(@NotNull MyNode facetTypeNode, @NotNull Facet facet, @NotNull FacetEditorFacadeImpl editorFacade) {
-    FacetConfigurable facetConfigurable = editorFacade.getOrCreateConfigurable(facet);
-    addNode(new FacetConfigurableNode(facetConfigurable), facetTypeNode);
-    myContext.getDaemonAnalyzer().queueUpdate(new FacetProjectStructureElement(myContext, facet));
+  public void addFacetNodes(@NotNull MyNode facetTypeNode, @NotNull List<? extends Facet> facets, @NotNull FacetEditorFacadeImpl editorFacade) {
+    for (Facet facet : facets) {
+      FacetConfigurable facetConfigurable = editorFacade.getOrCreateConfigurable(facet);
+      facetTypeNode.add(new FacetConfigurableNode(facetConfigurable));
+      myContext.getDaemonAnalyzer().queueUpdate(new FacetProjectStructureElement(myContext, facet));
+    }
+    sortDescendants(facetTypeNode);
   }
 
   @Nullable
@@ -276,8 +276,10 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
       actions.add(new MyNavigateAction());
     }
     actions.add(new MyRemoveAction());
-    actions.add(Separator.getInstance());
-    addCollapseExpandActions(actions);
+    if (fromPopup || !(Registry.is("ide.new.project.settings"))) {
+      actions.add(Separator.getInstance());
+      addCollapseExpandActions(actions);
+    }
     return actions;
   }
 

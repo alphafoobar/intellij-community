@@ -29,7 +29,6 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.javadoc.PsiDocComment;
-import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
@@ -217,11 +216,8 @@ public class GenerateConstructorHandler extends GenerateMembersHandlerBase {
     CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(manager.getProject());
 
     PsiMethod constructor = factory.createConstructor(aClass.getName(), aClass);
-    String modifier = PsiUtil.getMaximumModifierForMember(aClass, false);
 
-    if (modifier != null) {
-      PsiUtil.setModifierProperty(constructor, modifier, true);
-    }
+    GenerateMembersUtil.setVisibility(aClass, constructor);
 
     if (baseConstructor != null){
       PsiJavaCodeReferenceElement[] throwRefs = baseConstructor.getThrowsList().getReferenceElements();
@@ -269,13 +265,20 @@ public class GenerateConstructorHandler extends GenerateMembersHandlerBase {
       PsiParameter parm = factory.createParameter(parmName, field.getType(), aClass);
 
       final NullableNotNullManager nullableManager = NullableNotNullManager.getInstance(field.getProject());
-      final String notNull = nullableManager.getNotNull(field);
+      final PsiAnnotation notNull = nullableManager.copyNotNullAnnotation(field);
       if (notNull != null) {
-        parm.getModifierList().addAfter(factory.createAnnotationFromText("@" + notNull, field), null);
+        parm.getModifierList().addAfter(notNull, null);
       }
 
-      constructor.getParameterList().add(parm);
-      dummyConstructor.getParameterList().add(parm.copy());
+      if (constructor.isVarArgs()) {
+        final PsiParameterList parameterList = constructor.getParameterList();
+        parameterList.addBefore(parm, parameterList.getParameters()[parameterList.getParametersCount() - 1]);
+        final PsiParameterList dummyParameterlist = dummyConstructor.getParameterList();
+        dummyParameterlist.addBefore(parm.copy(), dummyParameterlist.getParameters()[dummyParameterlist.getParametersCount() - 1]);
+      } else {
+        constructor.getParameterList().add(parm);
+        dummyConstructor.getParameterList().add(parm.copy());
+      }
       fieldParams.add(parm);
     }
 

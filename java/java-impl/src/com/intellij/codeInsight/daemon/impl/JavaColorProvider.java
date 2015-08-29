@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInsight.daemon.impl;
 
-import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.editor.ElementColorProvider;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.JavaConstantExpressionEvaluator;
@@ -32,17 +31,28 @@ import java.awt.*;
 public class JavaColorProvider implements ElementColorProvider {
   @Override
   public Color getColorFrom(@NotNull PsiElement element) {
-    if (element instanceof PsiNewExpression && element.getLanguage() == JavaLanguage.INSTANCE) {
-      final PsiNewExpression expr = (PsiNewExpression)element;
-      final PsiType type = expr.getType();
-      if (type != null) {
-        final PsiClass aClass = PsiTypesUtil.getPsiClass(type);
-        if (aClass != null) {
-          final String fqn = aClass.getQualifiedName();
-          if ("java.awt.Color".equals(fqn) || "javax.swing.plaf.ColorUIResource".equals(fqn)) {
-            return getColor(expr.getArgumentList());
-          }
+    return getJavaColorFromExpression(element);
+  }
+
+  public static boolean isColorType(@Nullable PsiType type) {
+    if (type != null) {
+      final PsiClass aClass = PsiTypesUtil.getPsiClass(type);
+      if (aClass != null) {
+        final String fqn = aClass.getQualifiedName();
+        if ("java.awt.Color".equals(fqn) || "javax.swing.plaf.ColorUIResource".equals(fqn)) {
+          return true;
         }
+      }
+    }
+    return false;
+  }
+
+  @Nullable
+  public static Color getJavaColorFromExpression(@Nullable PsiElement element) {
+    if (element instanceof PsiNewExpression) {
+      final PsiNewExpression expr = (PsiNewExpression)element;
+      if (isColorType(expr.getType())) {
+        return getColor(expr.getArgumentList());
       }
     }
     return null;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ public class MavenModuleBuilderHelper {
                          : PsiFile.EMPTY_ARRAY;
     final VirtualFile pom = new WriteCommandAction<VirtualFile>(project, myCommandName, psiFiles) {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         VirtualFile file;
         try {
           file = root.createChildData(this, MavenConstants.POM_XML);
@@ -194,7 +194,9 @@ public class MavenModuleBuilderHelper {
     }
 
     MavenRunnerParameters params = new MavenRunnerParameters(
-      false, workingDir.getPath(), Collections.singletonList("org.apache.maven.plugins:maven-archetype-plugin:RELEASE:generate"), null);
+      false, workingDir.getPath(),
+      Collections.singletonList("org.apache.maven.plugins:maven-archetype-plugin:RELEASE:generate"),
+      Collections.<String>emptyList());
 
     MavenRunner runner = MavenRunner.getInstance(project);
     MavenRunnerSettings settings = runner.getState().clone();

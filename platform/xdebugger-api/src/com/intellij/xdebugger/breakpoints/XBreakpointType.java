@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 
 /**
@@ -83,6 +84,12 @@ public abstract class XBreakpointType<B extends XBreakpoint<P>, P extends XBreak
     return mySuspendThreadSupported;
   }
 
+  public enum StandardPanels {SUSPEND_POLICY, ACTIONS, DEPENDENCY}
+
+  public EnumSet<StandardPanels> getVisibleStandardPanels() {
+    return EnumSet.allOf(StandardPanels.class);
+  }
+
   @NotNull
   public final String getId() {
     return myId;
@@ -101,6 +108,16 @@ public abstract class XBreakpointType<B extends XBreakpoint<P>, P extends XBreak
   @NotNull
   public Icon getDisabledIcon() {
     return AllIcons.Debugger.Db_disabled_breakpoint;
+  }
+
+  @NotNull
+  public Icon getMutedEnabledIcon() {
+    return AllIcons.Debugger.Db_muted_breakpoint;
+  }
+
+  @NotNull
+  public Icon getMutedDisabledIcon() {
+    return AllIcons.Debugger.Db_muted_disabled_breakpoint;
   }
 
   /**
@@ -127,7 +144,25 @@ public abstract class XBreakpointType<B extends XBreakpoint<P>, P extends XBreak
   }
 
   @Nullable
+  public XBreakpointCustomPropertiesPanel<B> createCustomPropertiesPanel(@NotNull Project project) {
+    return createCustomPropertiesPanel();
+  }
+
+  /**
+   * @deprecated override {@link #createCustomPropertiesPanel(Project)} instead
+   */
+  @Nullable
   public XBreakpointCustomPropertiesPanel<B> createCustomPropertiesPanel() {
+    return null;
+  }
+
+  @Nullable
+  public XBreakpointCustomPropertiesPanel<B> createCustomRightPropertiesPanel(@NotNull Project project) {
+    return null;
+  }
+
+  @Nullable
+  public XBreakpointCustomPropertiesPanel<B> createCustomTopPropertiesPanel(@NotNull Project project) {
     return null;
   }
 

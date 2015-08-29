@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,25 +42,30 @@ import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerListener;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 import com.intellij.psi.PsiDocumentManager;
+import com.intellij.util.Consumer;
 import com.intellij.util.PathUtil;
-import com.intellij.util.containers.ConcurrentWeakHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.update.Update;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.concurrency.AsyncPromise;
+import org.jetbrains.concurrency.Promise;
 import org.jetbrains.idea.maven.model.MavenConstants;
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.utils.MavenMergingUpdateQueue;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentMap;
 
 public class MavenProjectsManagerWatcher {
 
-  private static final Key<ConcurrentWeakHashMap<Project, Integer>> CRC_WITHOUT_SPACES = Key.create("MavenProjectsManagerWatcher.CRC_WITHOUT_SPACES");
+  private static final Key<ConcurrentMap<Project, Integer>> CRC_WITHOUT_SPACES = Key.create("MavenProjectsManagerWatcher.CRC_WITHOUT_SPACES");
 
   public static final Key<Boolean> FORCE_IMPORT_AND_RESOLVE_ON_REFRESH =
     Key.create(MavenProjectsManagerWatcher.class + "FORCE_IMPORT_AND_RESOLVE_ON_REFRESH");
@@ -110,7 +115,7 @@ public class MavenProjectsManagerWatcher {
 
     myBusConnection.subscribe(ProjectTopics.MODULES, new ModuleAdapter() {
       @Override
-      public void moduleRemoved(Project project, Module module) {
+      public void moduleRemoved(@NotNull Project project, @NotNull Module module) {
         MavenProject mavenProject = myManager.findProject(module);
         if (mavenProject != null && !myManager.isIgnored(mavenProject)) {
           VirtualFile file = mavenProject.getFile();
@@ -125,7 +130,7 @@ public class MavenProjectsManagerWatcher {
       }
 
       @Override
-      public void moduleAdded(final Project project, final Module module) {
+      public void moduleAdded(@NotNull final Project project, @NotNull final Module module) {
         // this method is needed to return non-ignored status for modules that were deleted (and thus ignored) and then created again with a different module type
         if (myManager.isMavenizedModule(module)) {
           MavenProject mavenProject = myManager.findProject(module);
@@ -164,7 +169,7 @@ public class MavenProjectsManagerWatcher {
               public void run() {
                 new WriteAction() {
                   @Override
-                  protected void run(Result result) throws Throwable {
+                  protected void run(@NotNull Result result) throws Throwable {
                     for (Document each : copy) {
                       PsiDocumentManager.getInstance(myProject).commitDocument(each);
                       ((FileDocumentManagerImpl)FileDocumentManager.getInstance()).saveDocument(each, false);
@@ -247,13 +252,13 @@ public class MavenProjectsManagerWatcher {
     Disposer.dispose(myChangedDocumentsQueue);
   }
 
-  public synchronized void addManagedFilesWithProfiles(List<VirtualFile> files, List<String> explicitProfiles) {
+  public synchronized void addManagedFilesWithProfiles(List<VirtualFile> files, MavenExplicitProfiles explicitProfiles) {
     myProjectsTree.addManagedFilesWithProfiles(files, explicitProfiles);
     scheduleUpdateAll(false, true);
   }
 
   @TestOnly
-  public synchronized void resetManagedFilesAndProfilesInTests(List<VirtualFile> files, List<String> explicitProfiles) {
+  public synchronized void resetManagedFilesAndProfilesInTests(List<VirtualFile> files, MavenExplicitProfiles explicitProfiles) {
     myProjectsTree.resetManagedFilesAndProfiles(files, explicitProfiles);
     scheduleUpdateAll(false, true);
   }
@@ -263,43 +268,50 @@ public class MavenProjectsManagerWatcher {
     scheduleUpdateAll(false, true);
   }
 
-  public synchronized void setExplicitProfiles(Collection<String> profiles) {
+  public synchronized void setExplicitProfiles(MavenExplicitProfiles profiles) {
     myProjectsTree.setExplicitProfiles(profiles);
     scheduleUpdateAll(false, false);
   }
 
-  public void scheduleUpdateAll(boolean force, final boolean forceImportAndResolve) {
-    Runnable onCompletion = new Runnable() {
-      @Override
-      public void run() {
-        if (myProject.isDisposed()) return;
-
-        if (forceImportAndResolve || myManager.getImportingSettings().isImportAutomatically()) {
-          myManager.scheduleImportAndResolve();
-        }
-      }
-    };
+  public Promise<Void> scheduleUpdateAll(boolean force, final boolean forceImportAndResolve) {
+    final AsyncPromise<Void> promise = new AsyncPromise<Void>();
+    Runnable onCompletion = createScheduleImportAction(forceImportAndResolve, promise);
     myReadingProcessor.scheduleTask(new MavenProjectsProcessorReadingTask(force, myProjectsTree, myGeneralSettings, onCompletion));
+    return promise;
   }
 
-  public void scheduleUpdate(List<VirtualFile> filesToUpdate,
-                             List<VirtualFile> filesToDelete,
-                             boolean force,
-                             final boolean forceImportAndResolve) {
-    Runnable onCompletion = new Runnable() {
-      @Override
-      public void run() {
-        if (forceImportAndResolve || myManager.getImportingSettings().isImportAutomatically()) {
-          myManager.scheduleImportAndResolve();
-        }
-      }
-    };
+  public Promise<Void> scheduleUpdate(List<VirtualFile> filesToUpdate,
+                                      List<VirtualFile> filesToDelete,
+                                      boolean force,
+                                      final boolean forceImportAndResolve) {
+    final AsyncPromise<Void> promise = new AsyncPromise<Void>();
+    Runnable onCompletion = createScheduleImportAction(forceImportAndResolve, promise);
     myReadingProcessor.scheduleTask(new MavenProjectsProcessorReadingTask(filesToUpdate,
                                                                           filesToDelete,
                                                                           force,
                                                                           myProjectsTree,
                                                                           myGeneralSettings,
                                                                           onCompletion));
+    return promise;
+  }
+
+  @NotNull
+  private Runnable createScheduleImportAction(final boolean forceImportAndResolve, final AsyncPromise<Void> promise) {
+    return new Runnable() {
+        @Override
+        public void run() {
+          if (myProject.isDisposed()) return;
+
+          if (forceImportAndResolve || myManager.getImportingSettings().isImportAutomatically()) {
+            myManager.scheduleImportAndResolve().done(new Consumer<List<Module>>() {
+              @Override
+              public void consume(List<Module> modules) {
+                promise.setResult(null);
+              }
+            });
+          }
+        }
+      };
   }
 
   private void onSettingsChange() {
@@ -413,9 +425,10 @@ public class MavenProjectsManagerWatcher {
     private boolean xmlFileWasChanged(VirtualFile xmlFile, VFileEvent event) {
       if (!xmlFile.isValid() || !(event instanceof VFileContentChangeEvent)) return true;
 
-      ConcurrentWeakHashMap<Project, Integer> map = xmlFile.getUserData(CRC_WITHOUT_SPACES);
+      ConcurrentMap<Project, Integer> map = xmlFile.getUserData(CRC_WITHOUT_SPACES);
       if (map == null) {
-        map = xmlFile.putUserDataIfAbsent(CRC_WITHOUT_SPACES, new ConcurrentWeakHashMap<Project, Integer>());
+        ConcurrentMap<Project, Integer> value = ContainerUtil.createConcurrentWeakMap();
+        map = xmlFile.putUserDataIfAbsent(CRC_WITHOUT_SPACES, value);
       }
 
       Integer crc = map.get(myProject);

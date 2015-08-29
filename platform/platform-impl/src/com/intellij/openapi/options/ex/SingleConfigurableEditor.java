@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,22 +43,23 @@ import java.util.List;
 public class SingleConfigurableEditor extends DialogWrapper {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.options.ex.SingleConfigurableEditor");
   private Project myProject;
-  private Component myParentComponent;
   private Configurable myConfigurable;
   private JComponent myCenterPanel;
-  private String myDimensionKey;
+  private final String myDimensionKey;
   private final boolean myShowApplyButton;
-  private boolean myChangesWereApplied;
+  private boolean mySaveAllOnClose;
 
   public SingleConfigurableEditor(@Nullable Project project,
                                   Configurable configurable,
                                   @NonNls String dimensionKey,
                                   final boolean showApplyButton,
-                                  final IdeModalityType ideModalityType) {
+                                  @NotNull IdeModalityType ideModalityType) {
     super(project, true, ideModalityType);
     myDimensionKey = dimensionKey;
     myShowApplyButton = showApplyButton;
-    setTitle(createTitleString(configurable));
+    String title = createTitleString(configurable);
+    if (project != null && project.isDefault()) title = "Default " + title;
+    setTitle(title);
 
     myProject = project;
     myConfigurable = configurable;
@@ -76,7 +77,6 @@ public class SingleConfigurableEditor extends DialogWrapper {
     myShowApplyButton = showApplyButton;
     setTitle(createTitleString(configurable));
 
-    myParentComponent = parent;
     myConfigurable = configurable;
     init();
     myConfigurable.reset();
@@ -96,7 +96,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
     this(parent, configurable, dimensionServiceKey, showApplyButton, IdeModalityType.IDE);
   }
 
-  public SingleConfigurableEditor(@Nullable Project project, Configurable configurable, @NonNls String dimensionKey, IdeModalityType ideModalityType) {
+  public SingleConfigurableEditor(@Nullable Project project, Configurable configurable, @NonNls String dimensionKey, @NotNull IdeModalityType ideModalityType) {
     this(project, configurable, dimensionKey, true, ideModalityType);
   }
 
@@ -108,7 +108,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
     this(parent, configurable, dimensionServiceKey, true);
   }
 
-  public SingleConfigurableEditor(@Nullable Project project, Configurable configurable, IdeModalityType ideModalityType) {
+  public SingleConfigurableEditor(@Nullable Project project, Configurable configurable, @NotNull IdeModalityType ideModalityType) {
     this(project, configurable, ShowSettingsUtilImpl.createDimensionKey(configurable), ideModalityType);
   }
 
@@ -134,6 +134,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
     return displayName.replaceAll("\n", " ");
   }
 
+  @Override
   protected String getDimensionServiceKey() {
     if (myDimensionKey == null) {
       return super.getDimensionServiceKey();
@@ -143,6 +144,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
     }
   }
 
+  @Override
   @NotNull
   protected Action[] createActions() {
     List<Action> actions = new ArrayList<Action>();
@@ -157,23 +159,23 @@ public class SingleConfigurableEditor extends DialogWrapper {
     return actions.toArray(new Action[actions.size()]);
   }
 
+  @Override
   protected void doHelpAction() {
     HelpManager.getInstance().invokeHelp(myConfigurable.getHelpTopic());
   }
 
   @Override
   public void doCancelAction() {
-    if (myChangesWereApplied) {
-      ApplicationManager.getApplication().saveAll();
-    }
     super.doCancelAction();
   }
 
+  @Override
   protected void doOKAction() {
     try {
-      if (myConfigurable.isModified()) myConfigurable.apply();
-
-      ApplicationManager.getApplication().saveAll();
+      if (myConfigurable.isModified()) {
+        myConfigurable.apply();
+        mySaveAllOnClose = true;
+      }
     }
     catch (ConfigurationException e) {
       if (e.getMessage() != null) {
@@ -181,7 +183,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
           Messages.showMessageDialog(myProject, e.getMessage(), e.getTitle(), Messages.getErrorIcon());
         }
         else {
-          Messages.showMessageDialog(myParentComponent, e.getMessage(), e.getTitle(), Messages.getErrorIcon());
+          Messages.showMessageDialog(getRootPane(), e.getMessage(), e.getTitle(), Messages.getErrorIcon());
         }
       }
       return;
@@ -201,10 +203,11 @@ public class SingleConfigurableEditor extends DialogWrapper {
     public ApplyAction() {
       super(CommonBundle.getApplyButtonText());
       final Runnable updateRequest = new Runnable() {
+        @Override
         public void run() {
-          if (!SingleConfigurableEditor.this.isShowing()) return;
+          if (!isShowing()) return;
           try {
-            ApplyAction.this.setEnabled(myConfigurable != null && myConfigurable.isModified());
+            setEnabled(myConfigurable != null && myConfigurable.isModified());
           }
           catch (IndexNotReadyException ignored) {
           }
@@ -214,6 +217,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
 
       // invokeLater necessary to make sure dialog is already shown so we calculate modality state correctly.
       SwingUtilities.invokeLater(new Runnable() {
+        @Override
         public void run() {
           addUpdateRequest(updateRequest);
         }
@@ -224,13 +228,14 @@ public class SingleConfigurableEditor extends DialogWrapper {
       myUpdateAlarm.addRequest(updateRequest, 500, ModalityState.stateForComponent(getWindow()));
     }
 
+    @Override
     public void actionPerformed(ActionEvent event) {
       if (myPerformAction) return;
       try {
         myPerformAction = true;
         if (myConfigurable.isModified()) {
           myConfigurable.apply();
-          myChangesWereApplied = true;
+          mySaveAllOnClose = true;
           setCancelButtonText(CommonBundle.getCloseButtonText());
         }
       }
@@ -239,7 +244,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
           Messages.showMessageDialog(myProject, e.getMessage(), e.getTitle(), Messages.getErrorIcon());
         }
         else {
-          Messages.showMessageDialog(myParentComponent, e.getMessage(), e.getTitle(),
+          Messages.showMessageDialog(getRootPane(), e.getMessage(), e.getTitle(),
                                      Messages.getErrorIcon());
         }
       } finally {
@@ -248,11 +253,13 @@ public class SingleConfigurableEditor extends DialogWrapper {
     }
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     myCenterPanel = myConfigurable.createComponent();
     return myCenterPanel;
   }
 
+  @Override
   public JComponent getPreferredFocusedComponent() {
     if (myConfigurable instanceof BaseConfigurable) {
       JComponent preferred = ((BaseConfigurable)myConfigurable).getPreferredFocusedComponent();
@@ -261,9 +268,14 @@ public class SingleConfigurableEditor extends DialogWrapper {
     return IdeFocusTraversalPolicy.getPreferredFocusedComponent(myCenterPanel);
   }
 
+  @Override
   public void dispose() {
     super.dispose();
     myConfigurable.disposeUIResources();
     myConfigurable = null;
+
+    if (mySaveAllOnClose) {
+      ApplicationManager.getApplication().saveAll();
+    }
   }
 }

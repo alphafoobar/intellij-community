@@ -18,14 +18,13 @@ package org.jetbrains.idea.svn.dialogs;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
-import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vcs.vfs.VcsFileSystem;
 import com.intellij.openapi.vcs.vfs.VcsVirtualFile;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.pom.NavigatableAdapter;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SpeedSearchComparator;
 import com.intellij.ui.TreeSpeedSearch;
@@ -37,11 +36,10 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.browse.DirectoryEntry;
 import org.jetbrains.idea.svn.dialogs.browserCache.Expander;
 import org.jetbrains.idea.svn.history.SvnFileRevision;
-import org.tmatesoft.svn.core.SVNDirEntry;
 import org.tmatesoft.svn.core.SVNException;
-import org.tmatesoft.svn.core.SVNNodeKind;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 
@@ -78,10 +76,26 @@ public class RepositoryBrowserComponent extends JPanel implements Disposable, Da
   }
 
   public void setRepositoryURLs(SVNURL[] urls, final boolean showFiles) {
+    setRepositoryURLs(urls, showFiles, null, false);
+  }
+
+  public void setRepositoryURLs(SVNURL[] urls,
+                                final boolean showFiles,
+                                @Nullable NotNullFunction<RepositoryBrowserComponent, Expander> defaultExpanderFactory,
+                                boolean expandFirst) {
     RepositoryTreeModel model = new RepositoryTreeModel(myVCS, showFiles, this);
+
+    if (defaultExpanderFactory != null) {
+      model.setDefaultExpanderFactory(defaultExpanderFactory);
+    }
+
     model.setRoots(urls);
     Disposer.register(this, model);
     myRepositoryTree.setModel(model);
+
+    if (expandFirst) {
+      myRepositoryTree.expandRow(0);
+    }
   }
 
   public void setRepositoryURL(SVNURL url, boolean showFiles, final NotNullFunction<RepositoryBrowserComponent, Expander> defaultExpanderFactory) {
@@ -152,7 +166,7 @@ public class RepositoryBrowserComponent extends JPanel implements Disposable, Da
   }
 
   @Nullable
-  public SVNDirEntry getSelectedEntry() {
+  public DirectoryEntry getSelectedEntry() {
     TreePath selection = myRepositoryTree.getSelectionPath();
     if (selection == null) {
       return null;
@@ -241,8 +255,8 @@ public class RepositoryBrowserComponent extends JPanel implements Disposable, Da
     final RepositoryTreeNode node = getSelectedNode();
     if (node == null) return null;
 
-    SVNDirEntry entry = node.getSVNDirEntry();
-    if (entry == null || entry.getKind() != SVNNodeKind.FILE) {
+    DirectoryEntry entry = node.getSVNDirEntry();
+    if (entry == null || !entry.isFile()) {
       return null;
     }
 
@@ -252,7 +266,7 @@ public class RepositoryBrowserComponent extends JPanel implements Disposable, Da
     if (entry.getName().lastIndexOf('.') > 0 && !manager.getFileTypeByFileName(name).isBinary()) {
       SVNURL url = node.getURL();
       final SvnFileRevision revision = new SvnFileRevision(myVCS, SVNRevision.UNDEFINED, SVNRevision.HEAD, url.toString(),
-              entry.getAuthor(), entry.getDate(), null, null, null);
+              entry.getAuthor(), entry.getDate(), null, null);
 
       return new VcsVirtualFile(node.getSVNDirEntry().getName(), revision, VcsFileSystem.getInstance());
     } else {
@@ -268,7 +282,18 @@ public class RepositoryBrowserComponent extends JPanel implements Disposable, Da
         return null;
       }
       final VirtualFile vcsFile = getSelectedVcsFile();
-      return vcsFile != null ? new OpenFileDescriptor(project, vcsFile) : null;
+
+      // do not return OpenFileDescriptor instance here as in that case SelectInAction will be enabled and its invocation (using keyboard)
+      // will raise error - see IDEA-104113 - because of the following operations inside SelectInAction.actionPerformed():
+      // - at first VcsVirtualFile content will be loaded which for svn results in showing progress dialog
+      // - then DataContext from SelectInAction will still be accessed which results in error as current event count has already changed
+      // (because of progress dialog)
+      return vcsFile != null ? new NavigatableAdapter() {
+        @Override
+        public void navigate(boolean requestFocus) {
+          navigate(project, vcsFile, requestFocus);
+        }
+      } : null;
     } else if (CommonDataKeys.PROJECT.is(dataId)) {
       return myVCS.getProject();
     }

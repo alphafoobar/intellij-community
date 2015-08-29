@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import com.intellij.psi.PsiElement;
 import com.intellij.util.IncorrectOperationException;
 import com.jetbrains.python.codeInsight.editorActions.smartEnter.PySmartEnterProcessor;
 import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Created by IntelliJ IDEA.
@@ -27,10 +29,16 @@ import com.jetbrains.python.psi.*;
  * Date:   15.04.2010
  * Time:   17:55:46
  */
-public class PyMissingBracesFixer implements PyFixer {
-  public void apply(Editor editor, PySmartEnterProcessor processor, PsiElement psiElement) throws IncorrectOperationException {
+public class PyMissingBracesFixer extends PyFixer<PyElement> {
+  public PyMissingBracesFixer() {
+    super(PyElement.class);
+  }
+
+  @Override
+  public void doApply(@NotNull Editor editor, @NotNull PySmartEnterProcessor processor, @NotNull PyElement psiElement)
+    throws IncorrectOperationException {
     if (psiElement instanceof PySetLiteralExpression || psiElement instanceof PyDictLiteralExpression) {
-      PsiElement lastChild = PyUtil.getFirstNonCommentBefore(psiElement.getLastChild());
+      final PsiElement lastChild = PyPsiUtils.getPrevNonCommentSibling(psiElement.getLastChild(), false);
       if (lastChild != null && !"}".equals(lastChild.getText())) {
         editor.getDocument().insertString(lastChild.getTextRange().getEndOffset(), "}");
       }
@@ -38,7 +46,7 @@ public class PyMissingBracesFixer implements PyFixer {
     else if (psiElement instanceof PyListLiteralExpression ||
              psiElement instanceof PySliceExpression ||
              psiElement instanceof PySubscriptionExpression) {
-      PsiElement lastChild = PyUtil.getFirstNonCommentBefore(psiElement.getLastChild());
+      final PsiElement lastChild = PyPsiUtils.getPrevNonCommentSibling(psiElement.getLastChild(), false);
       if (lastChild != null && !"]".equals(lastChild.getText())) {
         editor.getDocument().insertString(lastChild.getTextRange().getEndOffset(), "]");
       }

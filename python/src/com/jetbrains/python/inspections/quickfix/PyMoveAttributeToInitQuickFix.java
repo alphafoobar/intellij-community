@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,11 +63,6 @@ public class PyMoveAttributeToInitQuickFix implements LocalQuickFix {
   private static boolean removeDefinition(PyAssignmentStatement assignment) {
     final PyStatementList statementList = PsiTreeUtil.getParentOfType(assignment, PyStatementList.class);
     if (statementList == null) return false;
-
-    if (statementList.getStatements().length == 1) {
-      final PyPassStatement passStatement = PyElementGenerator.getInstance(assignment.getProject()).createPassStatement();
-      statementList.addBefore(passStatement, assignment);
-    }
     assignment.delete();
     return true;
   }

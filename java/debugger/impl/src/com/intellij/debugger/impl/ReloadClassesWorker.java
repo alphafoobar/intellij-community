@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
+import com.intellij.debugger.engine.JavaExecutionStack;
+import com.intellij.debugger.engine.SuspendContextImpl;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.debugger.ui.breakpoints.BreakpointManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -28,6 +30,8 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.MessageCategory;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.frame.XExecutionStack;
 import com.sun.jdi.ReferenceType;
 import org.jetbrains.annotations.Nullable;
 
@@ -117,6 +121,10 @@ class ReloadClassesWorker {
 
       int processedEntriesCount = 0;
       for (final Map.Entry<String, HotSwapFile> entry : modifiedClasses.entrySet()) {
+        // stop if process is finished already
+        if (debugProcess.isDetached() || debugProcess.isDetaching()) {
+          break;
+        }
         if (redefineProcessor.getProcessedClassesCount() == 0 && myProgress.isCancelled()) {
           // once at least one class has been actually reloaded, do not interrupt the whole process
           break;
@@ -164,6 +172,15 @@ class ReloadClassesWorker {
       processException(e);
     }
 
+    DebuggerContextImpl context = myDebuggerSession.getContextManager().getContext();
+    SuspendContextImpl suspendContext = context.getSuspendContext();
+    if (suspendContext != null) {
+      XExecutionStack stack = suspendContext.getActiveExecutionStack();
+      if (stack instanceof JavaExecutionStack) {
+        ((JavaExecutionStack)stack).initTopFrame();
+      }
+    }
+
     final Semaphore waitSemaphore = new Semaphore();
     waitSemaphore.down();
     //noinspection SSBasedInspection
@@ -179,6 +196,11 @@ class ReloadClassesWorker {
               LOG.debug("time stamp set");
             }
             myDebuggerSession.refresh(false);
+
+            XDebugSession session = myDebuggerSession.getXDebugSession();
+            if (session != null) {
+              session.rebuildViews();
+            }
           }
         }
         catch (Throwable e) {

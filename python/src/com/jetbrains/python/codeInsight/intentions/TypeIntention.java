@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ public abstract class TypeIntention implements IntentionAction {
     if (parentFunction != null) {
       final ASTNode nameNode = parentFunction.getNameNode();
       if (nameNode != null) {
-        final PsiElement prev = elementAt.getPrevSibling();
+        final PsiElement prev = elementAt.getContainingFile().findElementAt(elementAt.getTextOffset()-1);
         if (nameNode.getPsi() == elementAt || nameNode.getPsi() == prev) {
           return !isReturnTypeDefined(parentFunction);
         }
@@ -169,18 +169,18 @@ public abstract class TypeIntention implements IntentionAction {
   }
 
   @Nullable
-  protected Callable getCallable(PsiElement elementAt) {
+  protected PyCallable getCallable(PsiElement elementAt) {
     PyCallExpression callExpression = getCallExpression(elementAt);
 
     if (callExpression != null && elementAt != null) {
-      final Callable callable = callExpression.resolveCalleeFunction(getResolveContext(elementAt));
+      final PyCallable callable = callExpression.resolveCalleeFunction(getResolveContext(elementAt));
       return callable == null ? PsiTreeUtil.getParentOfType(elementAt, PyFunction.class) : callable;
     }
     return PsiTreeUtil.getParentOfType(elementAt, PyFunction.class);
   }
 
   protected PyResolveContext getResolveContext(@NotNull PsiElement origin) {
-    return PyResolveContext.defaultContext().withTypeEvalContext(TypeEvalContext.codeAnalysis(origin.getContainingFile()));
+    return PyResolveContext.defaultContext().withTypeEvalContext(TypeEvalContext.codeAnalysis(origin.getProject(), origin.getContainingFile()));
   }
 
   public boolean startInWriteAction() {

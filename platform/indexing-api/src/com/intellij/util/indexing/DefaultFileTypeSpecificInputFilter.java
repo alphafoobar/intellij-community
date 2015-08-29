@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,19 @@ import com.intellij.util.Consumer;
 import org.jetbrains.annotations.NotNull;
 
 public class DefaultFileTypeSpecificInputFilter implements FileBasedIndex.FileTypeSpecificInputFilter {
-  private FileType[] myFileTypes;
+  private final FileType[] myFileTypes;
 
   public DefaultFileTypeSpecificInputFilter(@NotNull FileType... fileTypes) {
     myFileTypes = fileTypes;
   }
 
+  @Override
   public void registerFileTypesUsedForIndexing(@NotNull Consumer<FileType> fileTypeSink) {
     for(FileType ft:myFileTypes) fileTypeSink.consume(ft);
   }
 
   @Override
-  public boolean acceptInput(VirtualFile file) {
+  public boolean acceptInput(@NotNull VirtualFile file) {
     return true;
   }
 }

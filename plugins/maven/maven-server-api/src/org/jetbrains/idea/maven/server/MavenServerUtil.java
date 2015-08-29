@@ -16,8 +16,13 @@
 package org.jetbrains.idea.maven.server;
 
 import com.intellij.openapi.util.SystemInfo;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.io.File;
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Properties;
 
 public class MavenServerUtil {
   private static final Properties mySystemPropertiesCache;
@@ -51,6 +56,25 @@ public class MavenServerUtil {
   public static Properties collectSystemProperties() {
     return mySystemPropertiesCache;
   }
+
+  @NotNull
+  public static File findMavenBasedir(@NotNull File workingDir) {
+    File baseDir = workingDir;
+    File dir = workingDir;
+    while ((dir = dir.getParentFile()) != null) {
+      if (new File(dir, ".mvn").exists()) {
+        baseDir = dir;
+        break;
+      }
+    }
+    try {
+      return baseDir.getCanonicalFile();
+    }
+    catch (IOException e) {
+      return baseDir.getAbsoluteFile();
+    }
+  }
+
 
   private static boolean isMagicalProperty(String key) {
     return key.startsWith("=");

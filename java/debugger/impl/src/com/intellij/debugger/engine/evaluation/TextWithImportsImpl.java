@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,11 @@ import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Trinity;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.JavaCodeFragment;
-import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionCodeFragment;
-import com.intellij.psi.PsiFile;
+import com.intellij.psi.*;
+import com.intellij.xdebugger.XExpression;
+import com.intellij.xdebugger.evaluation.EvaluationMode;
+import com.intellij.xdebugger.impl.breakpoints.XExpressionImpl;
+import com.intellij.xdebugger.impl.ui.XDebuggerEditorBase;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,7 +37,7 @@ public final class TextWithImportsImpl implements TextWithImports{
   private final FileType myFileType;
   private final String myImports;
 
-  public TextWithImportsImpl (PsiExpression expression) {
+  public TextWithImportsImpl(@NotNull PsiElement expression) {
     myKind = CodeFragmentKind.EXPRESSION;
     final String text = expression.getText();
     PsiFile containingFile = expression.getContainingFile();
@@ -73,14 +74,17 @@ public final class TextWithImportsImpl implements TextWithImports{
     return Trinity.create(split[0], split.length > 1 ? split[1] : "", split.length > 2 ? FileTypeManager.getInstance().getStdFileType(split[2]) : null);
   }
 
+  @Override
   public CodeFragmentKind getKind() {
     return myKind;
   }
 
+  @Override
   public String getText() {
     return myText;
   }
 
+  @Override
   public @NotNull String getImports() {
     return myImports;
   }
@@ -97,6 +101,7 @@ public final class TextWithImportsImpl implements TextWithImports{
     return getText();
   }
 
+  @Override
   public String toExternalForm() {
     String result = myText;
     if (StringUtil.isNotEmpty(myImports) || myFileType != null) {
@@ -112,16 +117,59 @@ public final class TextWithImportsImpl implements TextWithImports{
     return myText.hashCode();
   }
 
+  @Override
   public boolean isEmpty() {
-    final String text = getText();
-    return text == null || "".equals(text.trim());
+    return StringUtil.isEmptyOrSpaces(getText());
   }
 
+  @Override
   public void setText(String newText) {
     myText = newText;
   }
 
+  @Override
   public FileType getFileType() {
     return myFileType;
+  }
+
+  @Nullable
+  public static XExpression toXExpression(@Nullable TextWithImports text) {
+    if (text != null && !text.getText().isEmpty()) {
+      return new XExpressionImpl(text.getText(),
+                                 XDebuggerEditorBase.getFileTypeLanguage(text.getFileType()),
+                                 StringUtil.nullize(text.getImports()),
+                                 getMode(text.getKind()));
+    }
+    return null;
+  }
+
+  private static EvaluationMode getMode(CodeFragmentKind kind) {
+    switch (kind) {
+      case EXPRESSION: return EvaluationMode.EXPRESSION;
+      case CODE_BLOCK: return EvaluationMode.CODE_FRAGMENT;
+    }
+    throw new IllegalStateException("Unknown kind " + kind);
+  }
+
+  private static CodeFragmentKind getKind(EvaluationMode mode) {
+    switch (mode) {
+      case EXPRESSION: return CodeFragmentKind.EXPRESSION;
+      case CODE_FRAGMENT: return CodeFragmentKind.CODE_BLOCK;
+    }
+    throw new IllegalStateException("Unknown mode " + mode);
+  }
+
+  public static TextWithImports fromXExpression(@Nullable XExpression expression) {
+    if (expression == null) return null;
+
+    if (expression.getCustomInfo() == null && expression.getLanguage() == null) {
+      return new TextWithImportsImpl(getKind(expression.getMode()), expression.getExpression());
+    }
+    else {
+      return new TextWithImportsImpl(getKind(expression.getMode()),
+                                     expression.getExpression(),
+                                     StringUtil.notNullize(expression.getCustomInfo()),
+                                     expression.getLanguage() != null ? expression.getLanguage().getAssociatedFileType() : null);
+    }
   }
 }

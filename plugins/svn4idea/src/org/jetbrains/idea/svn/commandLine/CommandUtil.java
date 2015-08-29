@@ -1,16 +1,31 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.idea.svn.commandLine;
 
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.VcsException;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.text.DateFormatUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.idea.svn.SvnVcs;
-import org.jetbrains.idea.svn.checkin.IdeaSvnkitBasedAuthenticationCallback;
-import org.tmatesoft.svn.core.SVNDepth;
-import org.tmatesoft.svn.core.wc.SVNDiffOptions;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.diff.DiffOptions;
+import org.jetbrains.idea.svn.status.StatusType;
 import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNStatusType;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 
 import javax.xml.bind.JAXBContext;
@@ -24,6 +39,8 @@ import java.util.List;
  * @author Konstantin Kolosovsky.
  */
 public class CommandUtil {
+
+  private static final Logger LOG = Logger.getInstance(CommandUtil.class);
 
   /**
    * Puts given value to parameters if condition is satisfied
@@ -55,24 +72,28 @@ public class CommandUtil {
   }
 
   public static void put(@NotNull List<String> parameters, @NotNull String path, @Nullable SVNRevision pegRevision) {
+    parameters.add(format(path, pegRevision));
+  }
+
+  @NotNull
+  public static String format(@NotNull String path, @Nullable SVNRevision pegRevision) {
     StringBuilder builder = new StringBuilder(path);
 
     boolean hasAtSymbol = path.contains("@");
     boolean hasPegRevision = pegRevision != null &&
                              !SVNRevision.UNDEFINED.equals(pegRevision) &&
                              !SVNRevision.WORKING.equals(pegRevision) &&
-                             pegRevision.isValid() &&
-                             pegRevision.getNumber() != 0;
+                             pegRevision.isValid();
 
     if (hasPegRevision || hasAtSymbol) {
       // add '@' to correctly handle paths that contain '@' symbol
       builder.append("@");
     }
     if (hasPegRevision) {
-      builder.append(pegRevision);
+      builder.append(format(pegRevision));
     }
 
-    parameters.add(builder.toString());
+    return builder.toString();
   }
 
   public static void put(@NotNull List<String> parameters, @NotNull SvnTarget target) {
@@ -87,18 +108,12 @@ public class CommandUtil {
     }
   }
 
-  public static void put(@NotNull List<String> parameters, @NotNull File... paths) {
-    for (File path : paths) {
-      put(parameters, path);
-    }
-  }
-
-  public static void put(@NotNull List<String> parameters, @Nullable SVNDepth depth) {
+  public static void put(@NotNull List<String> parameters, @Nullable Depth depth) {
     put(parameters, depth, false);
   }
 
-  public static void put(@NotNull List<String> parameters, @Nullable SVNDepth depth, boolean sticky) {
-    if (depth != null && !SVNDepth.UNKNOWN.equals(depth)) {
+  public static void put(@NotNull List<String> parameters, @Nullable Depth depth, boolean sticky) {
+    if (depth != null && !Depth.UNKNOWN.equals(depth)) {
       parameters.add("--depth");
       parameters.add(depth.getName());
 
@@ -112,11 +127,21 @@ public class CommandUtil {
   public static void put(@NotNull List<String> parameters, @Nullable SVNRevision revision) {
     if (revision != null && !SVNRevision.UNDEFINED.equals(revision) && !SVNRevision.WORKING.equals(revision) && revision.isValid()) {
       parameters.add("--revision");
-      parameters.add(revision.toString());
+      parameters.add(format(revision));
     }
   }
 
-  public static void put(@NotNull List<String> parameters, @Nullable SVNDiffOptions diffOptions) {
+  public static void put(@NotNull List<String> parameters, @NotNull SVNRevision startRevision, @NotNull SVNRevision endRevision) {
+    parameters.add("--revision");
+    parameters.add(format(startRevision) + ":" + format(endRevision));
+  }
+
+  @NotNull
+  public static String format(@NotNull SVNRevision revision) {
+    return revision.getDate() != null ? "{" + DateFormatUtil.getIso8601Format().format(revision.getDate()) + "}" : revision.toString();
+  }
+
+  public static void put(@NotNull List<String> parameters, @Nullable DiffOptions diffOptions) {
     if (diffOptions != null) {
       StringBuilder builder = new StringBuilder();
 
@@ -156,43 +181,7 @@ public class CommandUtil {
     JAXBContext context = JAXBContext.newInstance(type);
     Unmarshaller unmarshaller = context.createUnmarshaller();
 
-    return (T) unmarshaller.unmarshal(new StringReader(data));
-  }
-
-  /**
-   * Utility method for running commands.
-   * // TODO: Should be replaced with non-static analogue.
-   *
-   * @param vcs
-   * @param target
-   * @param name
-   * @param parameters
-   * @param listener
-   * @throws VcsException
-   */
-  public static CommandExecutor execute(@NotNull SvnVcs vcs,
-                                   @NotNull SvnTarget target,
-                                   @NotNull SvnCommandName name,
-                                   @NotNull List<String> parameters,
-                                   @Nullable LineCommandListener listener) throws VcsException {
-    return execute(vcs, target, null, name, parameters, listener);
-  }
-
-  public static CommandExecutor execute(@NotNull SvnVcs vcs,
-                                   @NotNull SvnTarget target,
-                                   @Nullable File workingDirectory,
-                                   @NotNull SvnCommandName name,
-                                   @NotNull List<String> parameters,
-                                   @Nullable LineCommandListener listener) throws VcsException {
-    Command command = new Command(name);
-
-    command.setTarget(target);
-    command.setWorkingDirectory(workingDirectory);
-    command.setResultBuilder(listener);
-    command.put(parameters);
-
-    CommandRuntime runtime = new CommandRuntime(vcs, new IdeaSvnkitBasedAuthenticationCallback(vcs));
-    return runtime.runWithAuthenticationAttempt(command);
+    return (T) unmarshaller.unmarshal(new StringReader(data.trim()));
   }
 
   @NotNull
@@ -211,38 +200,50 @@ public class CommandUtil {
   }
 
   @NotNull
-  public static SVNStatusType getStatusType(@Nullable String type) {
+  public static StatusType getStatusType(@Nullable String type) {
     return getStatusType(getStatusChar(type));
   }
 
   @NotNull
-  public static SVNStatusType getStatusType(char first) {
-    final SVNStatusType contentsStatus;
+  public static StatusType getStatusType(char first) {
+    final StatusType contentsStatus;
     if ('A' == first) {
-      contentsStatus = SVNStatusType.STATUS_ADDED;
+      contentsStatus = StatusType.STATUS_ADDED;
     } else if ('D' == first) {
-      contentsStatus = SVNStatusType.STATUS_DELETED;
+      contentsStatus = StatusType.STATUS_DELETED;
     } else if ('U' == first) {
-      contentsStatus = SVNStatusType.CHANGED;
+      contentsStatus = StatusType.CHANGED;
     } else if ('C' == first) {
-      contentsStatus = SVNStatusType.CONFLICTED;
+      contentsStatus = StatusType.CONFLICTED;
     } else if ('G' == first) {
-      contentsStatus = SVNStatusType.MERGED;
+      contentsStatus = StatusType.MERGED;
     } else if ('R' == first) {
-      contentsStatus = SVNStatusType.STATUS_REPLACED;
+      contentsStatus = StatusType.STATUS_REPLACED;
     } else if ('E' == first) {
-      contentsStatus = SVNStatusType.STATUS_OBSTRUCTED;
+      contentsStatus = StatusType.STATUS_OBSTRUCTED;
     } else {
-      contentsStatus = SVNStatusType.STATUS_NORMAL;
+      contentsStatus = StatusType.STATUS_NORMAL;
     }
     return contentsStatus;
   }
 
-  public static File correctUpToExistingParent(File base) {
-    while (base != null) {
-      if (base.exists() && base.isDirectory()) return base;
-      base = base.getParentFile();
+  @Nullable
+  public static File findExistingParent(@Nullable File file) {
+    while (file != null) {
+      if (file.exists() && file.isDirectory()) return file;
+      file = file.getParentFile();
     }
     return null;
+  }
+
+  @NotNull
+  public static File requireExistingParent(@NotNull File file) {
+    File result = findExistingParent(file);
+
+    if (result == null) {
+      LOG.error("Existing parent not found for " + file.getAbsolutePath());
+    }
+
+    return ObjectUtils.assertNotNull(result);
   }
 }

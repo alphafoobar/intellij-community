@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ public class RenamePropertyUtil {
     ContainerUtil.addAll(property, GroovyPropertyUtils.getAllGetters(containingClass, name, isStatic, false));
     ContainerUtil.addAll(property, GroovyPropertyUtils.getAllSetters(containingClass, name, isStatic, false));
 
-    for (Iterator<PsiElement> iterator = property.iterator(); iterator.hasNext();) {
+    for (Iterator<PsiElement> iterator = property.iterator(); iterator.hasNext(); ) {
       if (iterator.next() instanceof GrAccessorMethod) iterator.remove();
     }
 
@@ -115,7 +115,7 @@ public class RenamePropertyUtil {
   private static class AskDialog extends DialogWrapper {
     private JRadioButton myRbRenameMember;
     private JRadioButton myRbRenameProperty;
-    private PsiMember myMember;
+    private final PsiMember myMember;
 
 
     protected AskDialog(PsiMember member) {
@@ -169,7 +169,7 @@ public class RenamePropertyUtil {
     }
 
     private String getDescription() {
-      return (UsageViewUtil.getType(myMember) + " " + myMember.getName()).trim();
+      return String.format("%s '%s'", UsageViewUtil.getType(myMember), myMember.getName());
     }
 
     public boolean renameProperty() {

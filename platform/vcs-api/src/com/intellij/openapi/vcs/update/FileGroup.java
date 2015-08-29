@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,7 +134,7 @@ public class FileGroup implements JDOMExternalizable {
     ArrayList<Pair<String, VcsRevisionNumber>> files = new ArrayList<Pair<String, VcsRevisionNumber>>();
     for (UpdatedFile file : myFiles) {
       VcsRevisionNumber number = getRevision(vcsManager, file);
-      files.add(new Pair<String, VcsRevisionNumber>(file.getPath(), number));
+      files.add(Pair.create(file.getPath(), number));
     }
     return files;
   }
@@ -223,7 +223,7 @@ public class FileGroup implements JDOMExternalizable {
 
   @SuppressWarnings({"HardCodedStringLiteral"})
   public String toString() {
-    return myId + " " + myFiles.size() + " items";
+    return myId + " " + myFiles.size() + " items: " + myFiles;
   }
 
   @Nullable
@@ -254,6 +254,9 @@ public class FileGroup implements JDOMExternalizable {
     return null;
   }
 
+  /**
+   * @deprecated: remove after IDEA 14
+   */
   public void setRevisions(final String path, final AbstractVcs vcs, final VcsRevisionNumber revision) {
     for (UpdatedFile file : myFiles) {
       if (file.getPath().startsWith(path)) {

@@ -16,14 +16,17 @@
 package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInsight.NullableNotNullDialog;
-import com.intellij.codeInspection.InspectionsBundle;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.SurroundWithIfFix;
+import com.intellij.codeInspection.*;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiBinaryExpression;
 import com.intellij.psi.PsiExpression;
+import com.intellij.psi.tree.IElementType;
+import com.intellij.refactoring.util.RefactoringUtil;
 
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
@@ -40,9 +43,25 @@ public class DataFlowInspection extends DataFlowInspectionBase {
       fixes.add(new SurroundWithIfFix(qualifier));
     }
   }
+
+  @Override
+  protected LocalQuickFix[] createConditionalAssignmentFixes(boolean evaluatesToTrue, PsiAssignmentExpression assignment, final boolean onTheFly) {
+    IElementType op = assignment.getOperationTokenType();
+    boolean toRemove = op == JavaTokenType.ANDEQ && !evaluatesToTrue || op == JavaTokenType.OREQ && evaluatesToTrue;
+    if (toRemove && !onTheFly) {
+      return LocalQuickFix.EMPTY_ARRAY;
+    }
+    return new LocalQuickFix[]{toRemove ? new RemoveAssignmentFix() : createSimplifyToAssignmentFix()};
+  }
+
   @Override
   public JComponent createOptionsPanel() {
     return new OptionsPanel();
+  }
+
+  @Override
+  protected AddAssertStatementFix createAssertFix(PsiBinaryExpression binary, PsiExpression expression) {
+    return RefactoringUtil.getParentStatement(expression, false) == null ? null : new AddAssertStatementFix(binary);
   }
 
   private class OptionsPanel extends JPanel {
@@ -50,6 +69,7 @@ public class DataFlowInspection extends DataFlowInspectionBase {
     private final JCheckBox myReportConstantReferences;
     private final JCheckBox mySuggestNullables;
     private final JCheckBox myDontReportTrueAsserts;
+    private final JCheckBox myTreatUnknownMembersAsNullable;
 
     private OptionsPanel() {
       super(new GridBagLayout());
@@ -95,6 +115,15 @@ public class DataFlowInspection extends DataFlowInspectionBase {
         @Override
         public void stateChanged(ChangeEvent e) {
           REPORT_CONSTANT_REFERENCE_VALUES = myReportConstantReferences.isSelected();
+        }
+      });
+
+      myTreatUnknownMembersAsNullable = new JCheckBox("Treat non-annotated members and parameters as @Nullable");
+      myTreatUnknownMembersAsNullable.setSelected(TREAT_UNKNOWN_MEMBERS_AS_NULLABLE);
+      myTreatUnknownMembersAsNullable.getModel().addChangeListener(new ChangeListener() {
+        @Override
+        public void stateChanged(ChangeEvent e) {
+          TREAT_UNKNOWN_MEMBERS_AS_NULLABLE = myTreatUnknownMembersAsNullable.isSelected();
         }
       });
 
@@ -149,6 +178,9 @@ public class DataFlowInspection extends DataFlowInspectionBase {
 
       gc.gridy++;
       add(myReportConstantReferences, gc);
+
+      gc.gridy++;
+      add(myTreatUnknownMembersAsNullable, gc);
     }
   }
 

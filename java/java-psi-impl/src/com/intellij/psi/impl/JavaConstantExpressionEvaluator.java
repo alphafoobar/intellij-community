@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.containers.ConcurrentSoftHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -41,27 +41,29 @@ public class JavaConstantExpressionEvaluator extends JavaRecursiveElementWalking
   private static final Object NO_VALUE = ObjectUtils.NULL;
   private final ConstantExpressionVisitor myConstantExpressionVisitor;
 
-  private JavaConstantExpressionEvaluator(Set<PsiVariable> visitedVars, final boolean throwExceptionOnOverflow, final Project project, final PsiConstantEvaluationHelper.AuxEvaluator auxEvaluator) {
-    myMapFactory = auxEvaluator != null ? new Factory<ConcurrentMap<PsiElement, Object>>() {
-      @Override
-      public ConcurrentMap<PsiElement, Object> create() {
-        return auxEvaluator.getCacheMap(throwExceptionOnOverflow);
-      }
-    } : new Factory<ConcurrentMap<PsiElement, Object>>() {
+  private JavaConstantExpressionEvaluator(Set<PsiVariable> visitedVars,
+                                          final boolean throwExceptionOnOverflow,
+                                          @NotNull Project project,
+                                          final PsiConstantEvaluationHelper.AuxEvaluator auxEvaluator) {
+    myMapFactory = auxEvaluator == null ? new Factory<ConcurrentMap<PsiElement, Object>>() {
       @Override
       public ConcurrentMap<PsiElement, Object> create() {
         final Key<CachedValue<ConcurrentMap<PsiElement, Object>>> key =
           throwExceptionOnOverflow ? CONSTANT_VALUE_WITH_OVERFLOW_MAP_KEY : CONSTANT_VALUE_WO_OVERFLOW_MAP_KEY;
         return CachedValuesManager.getManager(myProject).getCachedValue(myProject, key, PROVIDER, false);
       }
+    } : new Factory<ConcurrentMap<PsiElement, Object>>() {
+      @Override
+      public ConcurrentMap<PsiElement, Object> create() {
+        return auxEvaluator.getCacheMap(throwExceptionOnOverflow);
+      }
     };
     myProject = project;
     myConstantExpressionVisitor = new ConstantExpressionVisitor(visitedVars, throwExceptionOnOverflow, auxEvaluator);
-
   }
 
   @Override
-  protected void elementFinished(PsiElement element) {
+  protected void elementFinished(@NotNull PsiElement element) {
     Object value = getCached(element);
     if (value == null) {
       Object result = myConstantExpressionVisitor.handle(element);
@@ -84,7 +86,7 @@ public class JavaConstantExpressionEvaluator extends JavaRecursiveElementWalking
   private static final CachedValueProvider<ConcurrentMap<PsiElement,Object>> PROVIDER = new CachedValueProvider<ConcurrentMap<PsiElement,Object>>() {
     @Override
     public Result<ConcurrentMap<PsiElement,Object>> compute() {
-      ConcurrentMap<PsiElement, Object> value = new ConcurrentSoftHashMap<PsiElement, Object>();
+      ConcurrentMap<PsiElement, Object> value = ContainerUtil.createConcurrentSoftMap();
       return Result.create(value, PsiModificationTracker.MODIFICATION_COUNT);
     }
   };
@@ -105,11 +107,13 @@ public class JavaConstantExpressionEvaluator extends JavaRecursiveElementWalking
     return myMapFactory.create();
   }
 
-  public static Object computeConstantExpression(PsiExpression expression, @Nullable Set<PsiVariable> visitedVars, boolean throwExceptionOnOverflow) {
+  public static Object computeConstantExpression(@Nullable PsiExpression expression, @Nullable Set<PsiVariable> visitedVars, boolean throwExceptionOnOverflow) {
     return computeConstantExpression(expression, visitedVars, throwExceptionOnOverflow, null);
   }
 
-  public static Object computeConstantExpression(PsiExpression expression, @Nullable Set<PsiVariable> visitedVars, boolean throwExceptionOnOverflow,
+  public static Object computeConstantExpression(@Nullable PsiExpression expression,
+                                                 @Nullable Set<PsiVariable> visitedVars,
+                                                 boolean throwExceptionOnOverflow,
                                                  final PsiConstantEvaluationHelper.AuxEvaluator auxEvaluator) {
     if (expression == null) return null;
 
@@ -131,7 +135,7 @@ public class JavaConstantExpressionEvaluator extends JavaRecursiveElementWalking
     return cached == NO_VALUE ? null : cached;
   }
   
-  public static Object computeConstantExpression(PsiExpression expression, boolean throwExceptionOnOverflow) {
+  public static Object computeConstantExpression(@Nullable PsiExpression expression, boolean throwExceptionOnOverflow) {
     return computeConstantExpression(expression, null, throwExceptionOnOverflow);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.injected.editor.VirtualFileWindow;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Ref;
@@ -32,8 +31,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.FreeThreadedFileViewProvider;
-import com.intellij.psi.impl.source.tree.MarkersHolderFileViewProvider;
-import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -42,8 +39,7 @@ import java.util.List;
 /**
  * @author cdr
 */
-public class InjectedFileViewProvider extends SingleRootFileViewProvider implements FreeThreadedFileViewProvider,
-                                                                                    MarkersHolderFileViewProvider {
+public class InjectedFileViewProvider extends SingleRootFileViewProvider implements FreeThreadedFileViewProvider {
   private Project myProject;
   private final Object myLock = new Object();
   private final DocumentWindowImpl myDocumentWindow;
@@ -61,7 +57,7 @@ public class InjectedFileViewProvider extends SingleRootFileViewProvider impleme
                            @NotNull Language language) {
     super(psiManager, (VirtualFile)virtualFile, true, language);
     myDocumentWindow = documentWindow;
-    myProject = documentWindow.getShreds().get(0).getHost().getProject();
+    myProject = documentWindow.getShreds().getHostPointer().getProject();
   }
 
   @Override
@@ -201,20 +197,8 @@ public class InjectedFileViewProvider extends SingleRootFileViewProvider impleme
     return "Injected file '"+getVirtualFile().getName()+"' " + (isValid() ? "" : " invalid") + (isPhysical() ? "" : " nonphysical");
   }
 
-  public void setPatchingLeaves(boolean patchingLeaves) {
+  void setPatchingLeaves(boolean patchingLeaves) {
     myPatchingLeaves = patchingLeaves;
   }
 
-  @Override
-  @NotNull
-  public RangeMarker[] getCachedMarkers() {
-    List<RangeMarker> markers = new SmartList<RangeMarker>();
-    for (PsiLanguageInjectionHost.Shred shred : myDocumentWindow.getShreds()) {
-      RangeMarker marker = (RangeMarker)shred.getHostRangeMarker();
-      if (marker != null) {
-        markers.add(marker);
-      }
-    }
-    return markers.toArray(new RangeMarker[markers.size()]);
-  }
 }

@@ -27,8 +27,8 @@ import com.intellij.testFramework.fixtures.TestFixtureBuilder;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.asm4.ClassReader;
-import org.jetbrains.asm4.ClassWriter;
+import org.jetbrains.org.objectweb.asm.ClassReader;
+import org.jetbrains.org.objectweb.asm.ClassWriter;
 
 import java.io.File;
 import java.io.IOException;
@@ -45,11 +45,6 @@ public class NotNullVerifyingInstrumenterTest extends UsefulTestCase {
   private boolean myJava6;
   private IdeaProjectTestFixture myFixture;
 
-  @SuppressWarnings({"JUnitTestCaseWithNonTrivialConstructors"})
-  public NotNullVerifyingInstrumenterTest() {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
   @Override
   protected void setUp() throws Exception {
     super.setUp();
@@ -62,53 +57,57 @@ public class NotNullVerifyingInstrumenterTest extends UsefulTestCase {
 
   @Override
   protected void tearDown() throws Exception {
-    myFixture.tearDown();
-    super.tearDown();
+    try {
+      myFixture.tearDown();
+    }
+    finally {
+      super.tearDown();
+    }
   }
 
   public void testSimpleReturn() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Object instance = testClass.newInstance();
     Method method = testClass.getMethod("test");
     verifyCallThrowsException("@NotNull method SimpleReturn.test must not return null", instance, method);
   }
 
   public void testSimpleReturnWithMessage() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Object instance = testClass.newInstance();
     Method method = testClass.getMethod("test");
     verifyCallThrowsException("This method cannot return null", instance, method);
   }
 
   public void testMultipleReturns() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Object instance = testClass.newInstance();
     Method method = testClass.getMethod("test", int.class);
     verifyCallThrowsException("@NotNull method MultipleReturns.test must not return null", instance, method, 1);
   }
 
   public void testSimpleParam() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Object instance = testClass.newInstance();
     Method method = testClass.getMethod("test", Object.class);
     verifyCallThrowsException("Argument 0 for @NotNull parameter of SimpleParam.test must not be null", instance, method, (Object)null);
   }
 
   public void testSimpleParamWithMessage() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Object instance = testClass.newInstance();
     Method method = testClass.getMethod("test", Object.class);
     verifyCallThrowsException("SimpleParamWithMessage.test(o) cant be null", instance, method, (Object)null);
   }
 
   public void testConstructorParam() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Constructor method = testClass.getConstructor(Object.class);
     verifyCallThrowsException("Argument 0 for @NotNull parameter of ConstructorParam.<init> must not be null", null, method, (Object)null);
   }
 
   public void testConstructorParamWithMessage() throws Exception {
-    Class testClass = prepareTest();
+    Class<?> testClass = prepareTest();
     Constructor method = testClass.getConstructor(Object.class);
     verifyCallThrowsException("ConstructorParam.ConstructorParam.o cant be null", null, method, (Object)null);
   }
@@ -126,10 +125,35 @@ public class NotNullVerifyingInstrumenterTest extends UsefulTestCase {
     verifyCallThrowsException("Argument for @NotNull parameter 'x' of UseParameterNames.instanceMethod must not be null", instance, instanceMethod, (Object)null);
   }
 
+  public void testLongParameter() throws Exception {
+    Class<?> testClass = prepareTest(true);
+    Method staticMethod = testClass.getMethod("foo", long.class, String.class, String.class);
+    verifyCallThrowsException("Argument for @NotNull parameter 'c' of LongParameter.foo must not be null", null, staticMethod, new Long(2), "z", null);
+  }
+
+  public void testDoubleParameter() throws Exception {
+    Class<?> testClass = prepareTest(true);
+    Method staticMethod = testClass.getMethod("foo", double.class, String.class, String.class);
+    verifyCallThrowsException("Argument for @NotNull parameter 'c' of DoubleParameter.foo must not be null", null, staticMethod, new Long(2), "z", null);
+  }
+
   public void testEnumConstructor() throws Exception {
     Class testClass = prepareTest();
     Object field = testClass.getField("Value");
     assertNotNull(field);
+  }
+
+  public void testCustomExceptionType() throws Exception {
+    Class<?> testClass = prepareTest();
+    try {
+      testClass.getMethod("foo", Object.class, Object.class).invoke(testClass.newInstance(), null, null);
+      fail();
+    }
+    catch (InvocationTargetException e) {
+      //noinspection ThrowableResultOfMethodCallIgnored
+      assertInstanceOf(e.getCause(), NullPointerException.class);
+      assertEquals("Argument 1 for @NotNull parameter of CustomExceptionType.foo must not be null", e.getCause().getMessage());
+    }
   }
 
   public void testEnumConstructorSecondParam() throws Exception {

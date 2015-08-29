@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,9 @@ import com.intellij.ide.projectView.impl.nodes.DropTargetNode;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -81,7 +83,7 @@ class ProjectViewDropTarget implements DnDNativeTarget {
     if (targetNode == null || (dropAction & DnDConstants.ACTION_COPY_OR_MOVE) == 0) {
       return false;
     }
-    else if (sourceNodes == null && !FileCopyPasteUtil.isFileListFlavorSupported(event)) {
+    else if (sourceNodes == null && !FileCopyPasteUtil.isFileListFlavorAvailable(event)) {
       return false;
     }
     else if (sourceNodes != null && ArrayUtilRt.find(sourceNodes, targetNode) != -1) {
@@ -124,7 +126,7 @@ class ProjectViewDropTarget implements DnDNativeTarget {
     assert targetNode != null;
     final int dropAction = event.getAction().getActionId();
     if (sourceNodes == null) {
-      if (FileCopyPasteUtil.isFileListFlavorSupported(event)) {
+      if (FileCopyPasteUtil.isFileListFlavorAvailable(event)) {
         List<File> fileList = FileCopyPasteUtil.getFileListFromAttachedObject(attached);
         if (!fileList.isEmpty()) {
           getDropHandler(dropAction).doDropFiles(fileList, targetNode);
@@ -307,6 +309,12 @@ class ProjectViewDropTarget implements DnDNativeTarget {
     private void doDrop(TreeNode targetNode, PsiElement[] sourceElements, final boolean externalDrop) {
       final PsiElement targetElement = getPsiElement(targetNode);
       if (targetElement == null) return;
+
+      if (DumbService.isDumb(myProject)) {
+        Messages.showMessageDialog(myProject, "Move refactoring is not available while indexing is in progress", "Indexing", null);
+        return;
+      }
+      
       final Module module = getModule(targetNode);
       final DataContext dataContext = DataManager.getInstance().getDataContext(myTree);
       getActionHandler().invoke(myProject, sourceElements, new DataContext() {

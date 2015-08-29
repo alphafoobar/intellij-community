@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import com.intellij.openapi.project.DumbAware;
 
 import java.awt.event.KeyEvent;
 
-abstract class DiffWalkerAction extends AnAction implements DumbAware {
+public abstract class DiffWalkerAction extends AnAction implements DumbAware {
   protected DiffWalkerAction() {
     setEnabledInModalContext(true);
   }
@@ -39,6 +39,7 @@ abstract class DiffWalkerAction extends AnAction implements DumbAware {
     Editor editor = side.getEditor();
     if (line >= 0 && editor != null) {
       LogicalPosition pos = new LogicalPosition(line, 0);
+      editor.getCaretModel().removeSecondaryCarets();
       editor.getCaretModel().moveToLogicalPosition(pos);
       editor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
     }

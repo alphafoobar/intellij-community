@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,25 @@
 
 package com.intellij.util.containers;
 
+import com.intellij.openapi.util.text.StringUtil;
 import gnu.trove.TObjectHashingStrategy;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
 
 import java.lang.ref.ReferenceQueue;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
+/**
+ * Base class for concurrent strong key:K -> (soft/weak) value:V map
+ * Null keys are NOT allowed
+ * Null values are NOT allowed
+ */
 abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
-  private final ConcurrentMap<K, MyValueReference<K, V>> myMap;
+  private final ConcurrentMap<K, ValueReference<K, V>> myMap;
   protected final ReferenceQueue<V> myQueue = new ReferenceQueue<V>();
 
   public ConcurrentRefValueHashMap(@NotNull Map<K, V> map) {
@@ -49,7 +57,7 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
     myMap = ContainerUtil.newConcurrentMap(initialCapacity, loadFactor, concurrencyLevel, hashingStrategy);
   }
 
-  protected interface MyValueReference<K, V> {
+  protected interface ValueReference<K, V> {
     @NotNull
     K getKey();
 
@@ -61,7 +69,8 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
     boolean processed = false;
 
     while (true) {
-      MyValueReference<K, V> ref = (MyValueReference<K, V>)myQueue.poll();
+      @SuppressWarnings("unchecked")
+      ValueReference<K, V> ref = (ValueReference<K, V>)myQueue.poll();
       if (ref == null) break;
       myMap.remove(ref.getKey(), ref);
       processed = true;
@@ -71,7 +80,7 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
 
   @Override
   public V get(@NotNull Object key) {
-    MyValueReference<K, V> ref = myMap.get(key);
+    ValueReference<K, V> ref = myMap.get(key);
     if (ref == null) return null;
     return ref.get();
   }
@@ -79,18 +88,19 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
   @Override
   public V put(@NotNull K key, @NotNull V value) {
     processQueue();
-    MyValueReference<K, V> oldRef = myMap.put(key, createRef(key, value));
+    ValueReference<K, V> oldRef = myMap.put(key, createValueReference(key, value));
     return oldRef != null ? oldRef.get() : null;
   }
 
-  protected abstract MyValueReference<K, V> createRef(@NotNull K key, @NotNull V value);
+  @NotNull
+  protected abstract ValueReference<K, V> createValueReference(@NotNull K key, @NotNull V value);
 
   @Override
   public V putIfAbsent(@NotNull K key, @NotNull V value) {
-    MyValueReference<K, V> newRef = createRef(key, value);
+    ValueReference<K, V> newRef = createValueReference(key, value);
     while (true) {
       processQueue();
-      MyValueReference<K, V> oldRef = myMap.putIfAbsent(key, newRef);
+      ValueReference<K, V> oldRef = myMap.putIfAbsent(key, newRef);
       if (oldRef == null) return null;
       final V oldVal = oldRef.get();
       if (oldVal == null) {
@@ -105,36 +115,38 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
   @Override
   public boolean remove(@NotNull final Object key, @NotNull Object value) {
     processQueue();
-    return myMap.remove(key, createRef((K)key, (V)value));
+    //noinspection unchecked
+    return myMap.remove(key, createValueReference((K)key, (V)value));
   }
 
   @Override
   public boolean replace(@NotNull final K key, @NotNull final V oldValue, @NotNull final V newValue) {
     processQueue();
-    return myMap.replace(key, createRef(key, oldValue), createRef(key, newValue));
+    return myMap.replace(key, createValueReference(key, oldValue), createValueReference(key, newValue));
   }
 
   @Override
   public V replace(@NotNull final K key, @NotNull final V value) {
     processQueue();
-    MyValueReference<K, V> ref = myMap.replace(key, createRef(key, value));
+    ValueReference<K, V> ref = myMap.replace(key, createValueReference(key, value));
     return ref == null ? null : ref.get();
   }
 
   @Override
-  public V remove(Object key) {
+  public V remove(@NotNull Object key) {
     processQueue();
-    MyValueReference<K, V> ref = myMap.remove(key);
+    ValueReference<K, V> ref = myMap.remove(key);
     return ref == null ? null : ref.get();
   }
 
   @Override
   public void putAll(@NotNull Map<? extends K, ? extends V> t) {
     processQueue();
-    for (K k : t.keySet()) {
-      V v = t.get(k);
+    for (Entry<? extends K, ? extends V> entry : t.entrySet()) {
+      V v = entry.getValue();
       if (v != null) {
-        put(k, v);
+        K key = entry.getKey();
+        put(key, v);
       }
     }
   }
@@ -147,22 +159,22 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
 
   @Override
   public int size() {
-    return myMap.size(); //?
+    return myMap.size();
   }
 
   @Override
   public boolean isEmpty() {
-    return myMap.isEmpty(); //?
+    return myMap.isEmpty();
   }
 
   @Override
-  public boolean containsKey(Object key) {
+  public boolean containsKey(@NotNull Object key) {
     return get(key) != null;
   }
 
   @Override
-  public boolean containsValue(Object value) {
-    throw new RuntimeException("method not implemented");
+  public boolean containsValue(@NotNull Object value) {
+    throw new UnsupportedOperationException();
   }
 
   @NotNull
@@ -174,9 +186,9 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
   @NotNull
   @Override
   public Collection<V> values() {
-    List<V> result = new ArrayList<V>();
-    final Collection<MyValueReference<K, V>> refs = myMap.values();
-    for (MyValueReference<K, V> ref : refs) {
+    Collection<V> result = new ArrayList<V>();
+    final Collection<ValueReference<K, V>> refs = myMap.values();
+    for (ValueReference<K, V> ref : refs) {
       final V value = ref.get();
       if (value != null) {
         result.add(value);
@@ -206,8 +218,13 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
           }
 
           @Override
-          public V setValue(V value) {
+          public V setValue(@NotNull V value) {
             throw new UnsupportedOperationException("setValue is not implemented");
+          }
+
+          @Override
+          public String toString() {
+            return "(" + getKey() + " : " + getValue() + ")";
           }
         });
       }
@@ -218,13 +235,7 @@ abstract class ConcurrentRefValueHashMap<K, V> implements ConcurrentMap<K, V> {
 
   @Override
   public String toString() {
-    @NonNls String s = "map size:" + size() + " [";
-    for (K k : myMap.keySet()) {
-      Object v = get(k);
-      s += "'" + k + "': '" + v + "', ";
-    }
-    s += "] ";
-    return s;
+    return "map size:" + size() + " [" + StringUtil.join(entrySet(), ",") + "]";
   }
 
   @TestOnly

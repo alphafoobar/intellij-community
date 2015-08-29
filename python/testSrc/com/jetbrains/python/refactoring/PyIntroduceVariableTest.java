@@ -15,10 +15,13 @@
  */
 package com.jetbrains.python.refactoring;
 
+import com.intellij.psi.PsiElement;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.testFramework.TestDataPath;
+import com.jetbrains.python.PythonFileType;
 import com.jetbrains.python.psi.PyCallExpression;
 import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.refactoring.introduce.IntroduceHandler;
 import com.jetbrains.python.refactoring.introduce.IntroduceOperation;
 import com.jetbrains.python.refactoring.introduce.variable.PyIntroduceVariableHandler;
@@ -76,6 +79,12 @@ public class PyIntroduceVariableTest extends PyIntroduceTestCase {
     final Collection<String> strings = buildSuggestions(PyCallExpression.class);
     assertTrue(strings.contains("d"));
     assertFalse(strings.contains("dict"));
+  }
+
+  // PY-13264
+  public void testDontSuggestNameOfCalledFunction() {
+    final Collection<String> suggestions = buildSuggestions(PyCallExpression.class);
+    assertDoesntContain(suggestions, "select");
   }
 
   public void testSuggestNamesNotInScope() {  // PY-4605
@@ -224,6 +233,16 @@ public class PyIntroduceVariableTest extends PyIntroduceTestCase {
     doTest();
   }
 
+  // PY-11909
+  public void testGeneratorParameter() {
+    doTest();
+  }
+
+  // PY-11909
+  public void testNoRedundantParenthesisAroundGeneratorExpression() {
+    doTest();
+  }
+
   // PY-10964
   public void testMultiReference() {
     myFixture.configureByFile(getTestName(true) + ".py");
@@ -241,6 +260,20 @@ public class PyIntroduceVariableTest extends PyIntroduceTestCase {
     }
   }
 
+  // PY-5475
+  public void testGeneratorExpressionWithCommentNotInlined() {
+    doTest();
+  }
+
+  // PY-5475
+  public void testFunctionCallWithCommentNotInlined() {
+    doTest();
+  }
+
+  public void testSelectionBreaksBinaryOperator() {
+    doTest();
+  }
+
   private void doTestCannotPerform() {
     boolean thrownExpectedException = false;
     try {
@@ -252,6 +285,17 @@ public class PyIntroduceVariableTest extends PyIntroduceTestCase {
       }
     }
     assertTrue(thrownExpectedException);
+  }
+
+  public void testAttributesAreNotConsideredAsUsedNames() {
+    myFixture.configureByText(PythonFileType.INSTANCE, "def f<caret>unc():\n" +
+                                                       "    foo()\n" +
+                                                       "    baz.bar()\n" +
+                                                       "    return quux[42].spam + 'eggs'");
+    final PsiElement element = myFixture.getElementAtCaret();
+    assertInstanceOf(element, PyFunction.class);
+    final Collection<String> usedNames = PyRefactoringUtil.collectUsedNames(element);
+    assertSameElements(usedNames, "foo", "baz", "quux");
   }
 
   @Override

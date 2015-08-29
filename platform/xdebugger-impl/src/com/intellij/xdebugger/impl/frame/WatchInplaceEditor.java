@@ -15,10 +15,11 @@
  */
 package com.intellij.xdebugger.impl.frame;
 
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AppUIUtil;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebugSessionAdapter;
+import com.intellij.xdebugger.XExpression;
+import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTreeInplaceEditor;
 import com.intellij.xdebugger.impl.ui.tree.nodes.WatchNode;
 import com.intellij.xdebugger.impl.ui.tree.nodes.WatchesRootNode;
@@ -36,23 +37,28 @@ public class WatchInplaceEditor extends XDebuggerTreeInplaceEditor {
   private final WatchesRootNode myRootNode;
   private final XWatchesView myWatchesView;
   @Nullable private final WatchNode myOldNode;
+  private WatchEditorSessionListener mySessionListener;
 
   public WatchInplaceEditor(@NotNull WatchesRootNode rootNode,
-                            @NotNull XDebugSession session, XWatchesView watchesView, final WatchNode node,
+                            @Nullable XDebugSession session, XWatchesView watchesView, final WatchNode node,
                             @NonNls final String historyId,
                             final @Nullable WatchNode oldNode) {
     super((XDebuggerTreeNode)node, historyId);
     myRootNode = rootNode;
     myWatchesView = watchesView;
     myOldNode = oldNode;
-    myExpressionEditor.setText(oldNode != null ? oldNode.getExpression() : "");
-    new WatchEditorSessionListener(session).install();
+    myExpressionEditor.setExpression(oldNode != null ? oldNode.getExpression() : null);
+    if (session != null) {
+      mySessionListener = new WatchEditorSessionListener(session).install();
+    }
   }
 
+  @Override
   protected JComponent createInplaceEditorComponent() {
     return myExpressionEditor.getComponent();
   }
 
+  @Override
   public void cancelEditing() {
     if (!isShown()) return;
     super.cancelEditing();
@@ -60,15 +66,26 @@ public class WatchInplaceEditor extends XDebuggerTreeInplaceEditor {
     if (myOldNode != null && index != -1) {
       myWatchesView.addWatchExpression(myOldNode.getExpression(), index, false);
     }
+    getTree().setSelectionRow(index);
   }
 
+  @Override
   public void doOKAction() {
-    String expression = myExpressionEditor.getText();
+    XExpression expression = myExpressionEditor.getExpression();
     myExpressionEditor.saveTextInHistory();
     super.doOKAction();
     int index = myRootNode.removeChildNode(getNode());
-    if (!StringUtil.isEmpty(expression) && index != -1) {
+    if (!XDebuggerUtilImpl.isEmptyExpression(expression) && index != -1) {
       myWatchesView.addWatchExpression(expression, index, false);
+    }
+    getTree().setSelectionRow(index);
+  }
+
+  @Override
+  protected void onHidden() {
+    super.onHidden();
+    if (mySessionListener != null) {
+      mySessionListener.remove();
     }
   }
 
@@ -79,12 +96,16 @@ public class WatchInplaceEditor extends XDebuggerTreeInplaceEditor {
       mySession = session;
     }
 
-    public void install() {
+    public WatchEditorSessionListener install() {
       mySession.addSessionListener(this);
+      return this;
+    }
+
+    public void remove() {
+      mySession.removeSessionListener(this);
     }
 
     private void cancel() {
-      mySession.removeSessionListener(this);
       AppUIUtil.invokeOnEdt(new Runnable() {
         @Override
         public void run() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,12 @@ class GrAssignabilityTest extends GrHighlightingTestBase {
   public void testIncompatibleTypesAssignments() { doTest(); }
 
   public void testDefaultMapConstructorNamedArgs() {
+    addBigDecimal()
     doTest(new GroovyConstructorNamedArgumentsInspection());
   }
 
   public void testDefaultMapConstructorNamedArgsError() {
+    addBigDecimal()
     doTest(new GroovyConstructorNamedArgumentsInspection());
   }
 
@@ -234,7 +236,7 @@ def foo = new A().&foo
 int i = foo()
 int <warning descr="Cannot assign 'Date' to 'int'">i2</warning> = foo(2)
 Date d = foo(2)
-Date <warning descr="Cannot assign 'Integer' to 'Date'">d2</warning> = foo()
+Date <warning descr="Cannot assign 'int' to 'Date'">d2</warning> = foo()
 ''')
   }
 
@@ -289,7 +291,7 @@ class Ca {
 
 use(Ca) {
   1.<warning descr="Category method 'foo' cannot be applied to 'java.lang.Integer'">foo</warning>()
-  (1 as int).<warning descr="Category method 'foo' cannot be applied to 'java.lang.Integer'">foo</warning>()
+  (1 as int).<warning descr="Category method 'foo' cannot be applied to 'int'">foo</warning>()
 }
 ''')
   }
@@ -338,7 +340,7 @@ class A {
   void testTupleAssignment() {
     testHighlighting('''\
 def (String x, int y)
-(x, <warning descr="Cannot assign 'String' to 'Integer'">y</warning>) = foo()
+(x, <warning descr="Cannot assign 'String' to 'int'">y</warning>) = foo()
 
 print x + y
 
@@ -368,7 +370,7 @@ def foo(Function<String, String> function) {
 foo<warning descr="'foo' in '_' cannot be applied to '(Function<java.lang.Double,java.lang.Double>)'">({println  it.byteValue()} as Function<Double, Double>)</warning>
 foo({println  it.substring(1)} as Function)
 foo({println  it.substring(1)} as Function<String, String>)
-foo<warning descr="'foo' in '_' cannot be applied to '(groovy.lang.Closure<java.lang.Void>)'">({println  it})</warning>
+foo<warning descr="'foo' in '_' cannot be applied to '(groovy.lang.Closure)'">({println  it})</warning>
 
 ''')
   }
@@ -396,7 +398,7 @@ private int getObjects() {
         //...
     }
 
-    <warning descr="Cannot assign 'String' to 'int'">return</warning> '';
+    <warning descr="Cannot return 'String' from method returning 'int'">return</warning> '';;
 }
 ''')
   }
@@ -446,7 +448,7 @@ String[] foox() {
 }
 
 int[] bar() {
-  <warning descr="Cannot assign 'String' to 'int[]'">return</warning> 'ab'
+  <warning descr="Cannot return 'String' from method returning 'int[]'">return</warning> 'ab'
 }
 ''')
   }
@@ -455,9 +457,10 @@ int[] bar() {
     testHighlighting('''\
 int <warning descr="Cannot assign 'null' to 'int'">x</warning> = null
 double <warning descr="Cannot assign 'null' to 'double'">y</warning> = null
+boolean a = null
 Integer z = null
-boolean <warning descr="Cannot assign 'null' to 'boolean'">a</warning> = null
 Boolean b = null
+Integer i = null
 ''')
   }
 
@@ -476,7 +479,7 @@ _Boolean(null)
   void testInnerWarning() {
     testHighlighting('''\
 public static void main(String[] args) {
-    bar (foo(foo(foo<warning descr="'foo' in '_' cannot be applied to '(java.lang.String)'">('2')</warning>)))
+    bar <warning descr="'bar' in '_' cannot be applied to '(java.lang.Number)'">(foo(foo(foo<warning descr="'foo' in '_' cannot be applied to '(java.lang.String)'">('2')</warning>)))</warning>
 }
 
 static def <T extends Number> T foo(T abc) {
@@ -507,7 +510,7 @@ Money d = [amount: 100, currency:'USA']
   void testBooleanIsAssignableToAny() {
     testHighlighting('''\
       boolean b1 = new Object()
-      boolean <warning descr="Cannot assign 'null' to 'boolean'">b2</warning> = null
+      boolean b2 = null
       Boolean b3 = new Object()
       Boolean b4 = null
 ''')
@@ -788,15 +791,31 @@ X <warning>x</warning> = {print 2}
     testHighlighting('''\
 void foo() {}
 
-def <warning>foo</warning> = foo()
+def foo = foo()
 
 def bar() {
   foo() //no warning
 }
 
 def zoo() {
-  <warning>return</warning> foo()
+  return foo()
 }
+''')
+  }
+
+  void testBinaryOperatorApplicability() {
+    testHighlighting('''\
+void bug(Collection<String> foo, Collection<String> bar) {
+    foo <warning descr="'leftShift' in 'org.codehaus.groovy.runtime.DefaultGroovyMethods' cannot be applied to '(java.util.Collection<java.lang.String>)'"><<</warning> bar   // warning missed
+    foo << "a"
+}''')
+  }
+
+  void testPlusIsApplicable() {
+    testHighlighting('''\
+print 1 + 2
+
+print 4 <warning descr="'plus' in 'org.codehaus.groovy.runtime.StringGroovyMethods' cannot be applied to '(java.util.ArrayList)'">+</warning> new ArrayList()
 ''')
   }
 }

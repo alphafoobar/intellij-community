@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
  */
 package com.jetbrains.python.psi.impl;
 
-import com.jetbrains.python.psi.PyStatementPart;
-import com.jetbrains.python.psi.PyStatementList;
-import com.jetbrains.python.PyElementTypes;
 import com.intellij.lang.ASTNode;
+import com.jetbrains.python.PyElementTypes;
+import com.jetbrains.python.psi.PyStatementList;
+import com.jetbrains.python.psi.PyStatementPart;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Abstract statement part implementation; extracts the statements list.
@@ -30,11 +31,8 @@ public abstract class PyStatementPartImpl extends PyElementImpl implements PySta
     super(astNode);
   }
 
+  @NotNull
   public PyStatementList getStatementList() {
-    ASTNode n = getNode().findChildByType(PyElementTypes.STATEMENT_LISTS);
-    if (n != null) {
-      return (PyStatementList)n.getPsi();
-    }
-    return null;
+    return childToPsiNotNull(PyElementTypes.STATEMENT_LIST);
   }
 }

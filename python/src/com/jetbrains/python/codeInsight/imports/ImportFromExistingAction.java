@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.ui.popup.PopupChooserBuilder;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.util.QualifiedName;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBList;
@@ -48,11 +49,12 @@ import java.util.List;
  * @author dcheryasov
  */
 public class ImportFromExistingAction implements QuestionAction {
-  PyElement myTarget;
+  PsiElement myTarget;
   List<ImportCandidateHolder> mySources; // list of <import, imported_item>
   String myName;
   boolean myUseQualifiedImport;
   private Runnable myOnDoneCallback;
+  private final boolean myImportLocally;
 
   /**
    * @param target element to become qualified as imported.
@@ -60,12 +62,13 @@ public class ImportFromExistingAction implements QuestionAction {
    * @param name relevant name ot the target element (e.g. of identifier in an expression).
    * @param useQualified if True, use qualified "import modulename" instead of "from modulename import ...".
    */
-  public ImportFromExistingAction(@NotNull PyElement target, @NotNull List<ImportCandidateHolder> sources, String name,
-                                  boolean useQualified) {
+  public ImportFromExistingAction(@NotNull PsiElement target, @NotNull List<ImportCandidateHolder> sources, @NotNull String name,
+                                  boolean useQualified, boolean importLocally) {
     myTarget = target;
     mySources = sources;
     myName = name;
     myUseQualifiedImport = useQualified;
+    myImportLocally = importLocally;
   }
 
   public void onDone(Runnable callback) {
@@ -82,7 +85,7 @@ public class ImportFromExistingAction implements QuestionAction {
     // check if the tree is sane
     PsiDocumentManager.getInstance(myTarget.getProject()).commitAllDocuments();
     if (!myTarget.isValid()) return false;
-    if ((myTarget instanceof PyQualifiedExpression) && ((((PyQualifiedExpression)myTarget).getQualifier() != null))) return false; // we cannot be qualified
+    if ((myTarget instanceof PyQualifiedExpression) && ((((PyQualifiedExpression)myTarget).isQualified()))) return false; // we cannot be qualified
     for (ImportCandidateHolder item : mySources) {
       if (!item.getImportable().isValid()) return false;
       if (!item.getFile().isValid()) return false;
@@ -107,10 +110,12 @@ public class ImportFromExistingAction implements QuestionAction {
 
     final Runnable runnable = new Runnable() {
       public void run() {
-        int index = list.getSelectedIndex();
-        if (index < 0) return;
-        PsiDocumentManager.getInstance(myTarget.getProject()).commitAllDocuments();
-        doWriteAction(mySources.get(index));
+        final Object selected = list.getSelectedValue();
+        if (selected instanceof ImportCandidateHolder) {
+          final ImportCandidateHolder item = (ImportCandidateHolder)selected;
+          PsiDocumentManager.getInstance(myTarget.getProject()).commitAllDocuments();
+          doWriteAction(item);
+        }
       }
     };
 
@@ -151,24 +156,41 @@ public class ImportFromExistingAction implements QuestionAction {
     if (manager.isInjectedFragment(file)) {
       file = manager.getTopLevelFile(myTarget);
     }
+    // We are trying to import top-level module or package which thus cannot be qualified
     if (isRoot(item.getFile())) {
-      AddImportHelper.addImportStatement(file, myName, null, priority);
+      if (myImportLocally) {
+        AddImportHelper.addLocalImportStatement(myTarget, myName);
+      } else {
+        AddImportHelper.addImportStatement(file, myName, item.getAsName(), priority, null);
+      }
     }
     else {
-      String qualifiedName = item.getPath().toString();
+      final QualifiedName path = item.getPath();
+      final String qualifiedName = path != null ? path.toString() : "";
       if (myUseQualifiedImport) {
         String nameToImport = qualifiedName;
         if (item.getImportable() instanceof PsiFileSystemItem) {
           nameToImport += "." + myName;
         }
-        AddImportHelper.addImportStatement(file, nameToImport, null, priority);
+        if (myImportLocally) {
+          AddImportHelper.addLocalImportStatement(myTarget, nameToImport);
+        }
+        else {
+          AddImportHelper.addImportStatement(file, nameToImport, item.getAsName(), priority, null);
+        }
         myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), qualifiedName + "." + myName));
       }
       else {
-        AddImportHelper.addImportFrom(file, myTarget, qualifiedName, myName, null, priority);
+        if (myImportLocally) {
+          AddImportHelper.addLocalFromImportStatement(myTarget, qualifiedName, myName);
+        }
+        else {
+          AddImportHelper.addFromImportStatement(file, qualifiedName, myName, item.getAsName(), priority, null);
+        }
       }
     }
   }
+
 
   private void addToExistingImport(PyImportElement src) {
     final PyElementGenerator gen = PyElementGenerator.getInstance(myTarget.getProject());
@@ -189,7 +211,7 @@ public class ImportFromExistingAction implements QuestionAction {
     PsiElement src = item.getImportable();
     new WriteCommandAction(src.getProject(), PyBundle.message("ACT.CMD.use.import"), myTarget.getContainingFile()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         doIt(item);
       }
     }.execute();

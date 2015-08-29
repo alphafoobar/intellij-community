@@ -20,6 +20,8 @@ import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.Location;
 import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.execution.actions.ConfigurationFromContext;
+import com.intellij.execution.actions.RunConfigurationProducer;
+import com.intellij.execution.junit2.PsiMemberParameterizedLocation;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiClass;
@@ -33,10 +35,19 @@ public class TestClassConfigurationProducer extends JUnitConfigurationProducer {
   protected boolean setupConfigurationFromContext(JUnitConfiguration configuration,
                                                   ConfigurationContext context,
                                                   Ref<PsiElement> sourceElement) {
-    Location location = JavaExecutionUtil.stepIntoSingleClass(context.getLocation());
+    final Location contextLocation = context.getLocation();
+    assert contextLocation != null;
+    final Location location = JavaExecutionUtil.stepIntoSingleClass(contextLocation);
     if (location == null) return false;
 
-    if (PatternConfigurationProducer.isMultipleElementsSelected(context)) {
+    if (contextLocation instanceof PsiMemberParameterizedLocation) {
+      final String paramSetName = ((PsiMemberParameterizedLocation)contextLocation).getParamSetName();
+      if (paramSetName != null) {
+        configuration.setProgramParameters(paramSetName);
+      }
+    }
+
+    if (RunConfigurationProducer.getInstance(PatternConfigurationProducer.class).isMultipleElementsSelected(context)) {
       return false;
     }
     PsiClass testClass = JUnitUtil.getTestClass(location);
@@ -46,6 +57,10 @@ public class TestClassConfigurationProducer extends JUnitConfigurationProducer {
     final Module originalModule = configuration.getConfigurationModule().getModule();
     configuration.beClassConfiguration(testClass);
     configuration.restoreOriginalModule(originalModule);
+    final String forkMode = configuration.getForkMode();
+    if (JUnitConfiguration.FORK_KLASS.equals(forkMode)) {
+      configuration.setForkMode(JUnitConfiguration.FORK_NONE);
+    }
     return true;
   }
 
@@ -68,7 +83,7 @@ public class TestClassConfigurationProducer extends JUnitConfigurationProducer {
         super.runForClass(aClass, psiMethod, context, performRunnable);
       }
     };
-    if (inheritorChooser.runMethodInAbstractClass(context, performRunnable, null, (PsiClass)fromContext.getSourceElement())) return;
+    if (inheritorChooser.runMethodInAbstractClass(context, performRunnable, null, (PsiClass)fromContext.getSourceElement(), getConditionToSearchForInheritors())) return;
     super.onFirstRun(fromContext, context, performRunnable);
   }
 }

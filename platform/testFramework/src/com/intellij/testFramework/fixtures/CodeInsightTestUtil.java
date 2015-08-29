@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,27 +23,31 @@ import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.codeInsight.lookup.LookupManager;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
+import com.intellij.codeInsight.template.Template;
 import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
+import com.intellij.codeInsight.template.impl.TemplateSettings;
 import com.intellij.codeInsight.template.impl.TemplateState;
 import com.intellij.codeInsight.template.impl.actions.ListTemplatesAction;
 import com.intellij.ide.DataManager;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.surroundWith.Surrounder;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.refactoring.rename.inplace.InplaceRefactoring;
 import com.intellij.refactoring.rename.inplace.VariableInplaceRenameHandler;
 import com.intellij.testFramework.TestDataFile;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -62,7 +66,7 @@ public class CodeInsightTestUtil {
   private CodeInsightTestUtil() { }
 
   @Nullable
-  public static IntentionAction findIntentionByText(List<IntentionAction> actions, @NonNls String text) {
+  public static IntentionAction findIntentionByText(@NotNull List<IntentionAction> actions, @NonNls @NotNull String text) {
     for (IntentionAction action : actions) {
       final String s = action.getText();
       if (s.equals(text)) {
@@ -72,10 +76,15 @@ public class CodeInsightTestUtil {
     return null;
   }
 
+  @TestOnly
   public static void doIntentionTest(CodeInsightTestFixture fixture, @NonNls String file, @NonNls String actionText) {
-    doIntentionTest(fixture, actionText, file + ".xml", file + "_after.xml");
+    String extension = FileUtilRt.getExtension(file);
+    file = FileUtil.getNameWithoutExtension(file);
+    if (extension.isEmpty()) extension = "xml";
+    doIntentionTest(fixture, actionText, file + "." + extension, file + "_after." + extension);
   }
 
+  @TestOnly
   public static void doIntentionTest(@NotNull final CodeInsightTestFixture fixture, @NonNls final String action,
                                      @NotNull final String before, @NotNull final String after) {
     fixture.configureByFile(before);
@@ -86,10 +95,11 @@ public class CodeInsightTestUtil {
     }
     new WriteCommandAction(fixture.getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) {
         fixture.launchAction(intentionAction);
       }
     }.execute();
+    UIUtil.dispatchAllInvocationEvents();
     fixture.checkResultByFile(after, false);
   }
 
@@ -144,7 +154,7 @@ public class CodeInsightTestUtil {
     fixture.configureByFile(before);
     new WriteCommandAction(fixture.getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         new ListTemplatesAction().actionPerformedImpl(fixture.getProject(), fixture.getEditor());
         final LookupImpl lookup = (LookupImpl)LookupManager.getActiveLookup(fixture.getEditor());
         assert lookup != null;
@@ -160,7 +170,7 @@ public class CodeInsightTestUtil {
     final List<SmartEnterProcessor> processors = SmartEnterProcessors.INSTANCE.forKey(fixture.getFile().getLanguage());
     new WriteCommandAction(fixture.getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         final Editor editor = fixture.getEditor();
         for (SmartEnterProcessor processor : processors) {
           processor.process(getProject(), editor, fixture.getFile());
@@ -175,7 +185,7 @@ public class CodeInsightTestUtil {
     fixture.configureByFile(before);
     new WriteCommandAction(fixture.getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         CodeStyleManager.getInstance(fixture.getProject()).reformat(fixture.getFile());
       }
     }.execute();
@@ -188,12 +198,12 @@ public class CodeInsightTestUtil {
   }
 
   @TestOnly
-  public static void doInlineRename(VariableInplaceRenameHandler handler, final String newName, Editor editor, PsiElement elementAtCaret) {
+  public static void doInlineRename(VariableInplaceRenameHandler handler, final String newName, @NotNull Editor editor, PsiElement elementAtCaret) {
     Project project = editor.getProject();
     TemplateManagerImpl templateManager = (TemplateManagerImpl)TemplateManager.getInstance(project);
     try {
       templateManager.setTemplateTesting(true);
-      InplaceRefactoring renamer = handler.doRename(elementAtCaret, editor, null);
+      handler.doRename(elementAtCaret, editor, DataManager.getInstance().getDataContext(editor.getComponent()));
       if (editor instanceof EditorWindow) {
         editor = ((EditorWindow)editor).getDelegate();
       }
@@ -232,5 +242,16 @@ public class CodeInsightTestUtil {
     fixture.configureByFile(file);
     fixture.testAction(action);
     fixture.checkResultByFile(name + "_after." + extension);
+  }
+
+  public static void addTemplate(final Template template, Disposable parentDisposable) {
+    final TemplateSettings settings = TemplateSettings.getInstance();
+    settings.addTemplate(template);
+    Disposer.register(parentDisposable, new Disposable() {
+      @Override
+      public void dispose() {
+        settings.removeTemplate(template);
+      }
+    });
   }
 }

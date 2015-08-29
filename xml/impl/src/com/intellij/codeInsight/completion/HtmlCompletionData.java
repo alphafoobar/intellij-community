@@ -16,6 +16,7 @@
 package com.intellij.codeInsight.completion;
 
 import com.intellij.lang.Language;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.filters.AndFilter;
 import com.intellij.psi.filters.ElementFilter;
@@ -25,7 +26,11 @@ import com.intellij.psi.filters.getters.HtmlAttributeValueGetter;
 import com.intellij.psi.filters.getters.XmlAttributeValueGetter;
 import com.intellij.psi.filters.position.XmlTokenTypeFilter;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.xml.*;
+import com.intellij.psi.xml.XmlAttribute;
+import com.intellij.psi.xml.XmlTag;
+import com.intellij.psi.xml.XmlToken;
+import com.intellij.psi.xml.XmlTokenType;
+import com.intellij.xml.util.HtmlUtil;
 import org.jetbrains.annotations.NonNls;
 
 /**
@@ -35,8 +40,6 @@ import org.jetbrains.annotations.NonNls;
 public class HtmlCompletionData extends XmlCompletionData {
   private boolean myCaseInsensitive;
   private static final @NonNls String JAVASCRIPT_LANGUAGE_ID = "JavaScript";
-  private static final @NonNls String STYLE_TAG = "style";
-  private static final @NonNls String SCRIPT_TAG = "script";
 
   public HtmlCompletionData() {
     this(true);
@@ -46,6 +49,7 @@ public class HtmlCompletionData extends XmlCompletionData {
     myCaseInsensitive = _caseInsensitive;
   }
 
+  @Override
   protected ElementFilter createXmlEntityCompletionFilter() {
     if (isCaseInsensitive()) {
       return new AndFilter(
@@ -77,12 +81,15 @@ public class HtmlCompletionData extends XmlCompletionData {
     myCaseInsensitive = caseInsensitive;
   }
 
+  @Override
   protected XmlAttributeValueGetter getAttributeValueGetter() {
     return new HtmlAttributeValueGetter(!isCaseInsensitive());
   }
 
+  @Override
   protected ElementFilter createTagCompletionFilter() {
     return new ElementFilter() {
+      @Override
       public boolean isAcceptable(Object element, PsiElement context) {
         String name = ((XmlTag)context).getName();
 
@@ -91,8 +98,8 @@ public class HtmlCompletionData extends XmlCompletionData {
           return true;
         }
 
-        if (equalNames(name, STYLE_TAG) ||
-            equalNames(name,SCRIPT_TAG)) {
+        if (equalNames(name, HtmlUtil.STYLE_TAG_NAME) ||
+            equalNames(name, HtmlUtil.SCRIPT_TAG_NAME)) {
           return false;
         }
 
@@ -100,33 +107,40 @@ public class HtmlCompletionData extends XmlCompletionData {
         return true;
       }
 
+      @Override
       public boolean isClassAcceptable(Class hintClass) {
         return true;
       }
     };
   }
 
+  @Override
   protected ElementFilter createAttributeCompletionFilter() {
     return new ElementFilter() {
+      @Override
       public boolean isAcceptable(Object element, PsiElement context) {
         if (isStyleAttributeContext(context)) return false;
         return true;
       }
 
+      @Override
       public boolean isClassAcceptable(Class hintClass) {
         return true;
       }
     };
   }
 
+  @Override
   protected ElementFilter createAttributeValueCompletionFilter() {
     return new ElementFilter() {
+      @Override
       public boolean isAcceptable(Object element, PsiElement context) {
         if (isStyleAttributeContext(context)) return false;
         if ( isScriptContext((PsiElement)element) ) return false;
         return true;
       }
 
+      @Override
       public boolean isClassAcceptable(Class hintClass) {
         return true;
       }
@@ -141,21 +155,16 @@ public class HtmlCompletionData extends XmlCompletionData {
 
   private boolean isStyleAttributeContext(PsiElement position) {
     XmlAttribute parentOfType = PsiTreeUtil.getParentOfType(position, XmlAttribute.class, false);
-
-    if (parentOfType != null) {
-      String name = parentOfType.getName();
-      if (myCaseInsensitive) return STYLE_TAG.equalsIgnoreCase(name);
-      return STYLE_TAG.equals(name); //name.endsWith("style");
-    }
-
-    return false;
+    return parentOfType != null && Comparing.strEqual(parentOfType.getName(), HtmlUtil.STYLE_TAG_NAME, !myCaseInsensitive);
   }
 
+  @Override
   public void registerVariant(CompletionVariant variant) {
     super.registerVariant(variant);
     if (isCaseInsensitive()) variant.setCaseInsensitive(true);
   }
 
+  @Override
   public String findPrefix(PsiElement insertedElement, int offset) {
     String prefix = super.findPrefix(insertedElement, offset);
 

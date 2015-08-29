@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,10 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import com.siyeh.ig.psiutils.InstanceOfUtils;
+import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -93,7 +95,7 @@ public class OverlyStrongTypeCastInspection extends BaseInspection {
       }
       @NonNls
       final String newExpression = '(' + expectedType.getCanonicalText() + ')' + operand.getText();
-      replaceExpressionAndShorten(expression, newExpression);
+      PsiReplacementUtil.replaceExpressionAndShorten(expression, newExpression);
     }
   }
 
@@ -134,13 +136,13 @@ public class OverlyStrongTypeCastInspection extends BaseInspection {
         //then it's redundant, and caught by the built-in inspection
         return;
       }
-      if (isTypeParameter(expectedType)) {
+      if (TypeUtils.isTypeParameter(expectedType)) {
         return;
       }
       if (expectedType instanceof PsiArrayType) {
         final PsiArrayType arrayType = (PsiArrayType)expectedType;
         final PsiType componentType = arrayType.getDeepComponentType();
-        if (isTypeParameter(componentType)) {
+        if (TypeUtils.isTypeParameter(componentType)) {
           return;
         }
       }
@@ -174,16 +176,10 @@ public class OverlyStrongTypeCastInspection extends BaseInspection {
       if (castTypeElement == null) {
         return;
       }
-      registerError(castTypeElement, expectedType);
-    }
-
-    private boolean isTypeParameter(PsiType type) {
-      if (!(type instanceof PsiClassType)) {
-        return false;
+      if (operand instanceof PsiFunctionalExpression && !LambdaUtil.isFunctionalType(expectedType)) {
+        return;
       }
-      final PsiClassType classType = (PsiClassType)type;
-      final PsiClass aClass = classType.resolve();
-      return aClass != null && aClass instanceof PsiTypeParameter;
+      registerError(castTypeElement, expectedType);
     }
   }
 }

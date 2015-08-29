@@ -59,6 +59,7 @@ class Outer {
   {
     new @TA Object();
     new @TA ArrayList<String>();
+    new @TA Runnable() { public void run() { } }.run();
 
     ArrayList<String> var = new <String> @TA ArrayList();
     new @TA Outer().new @TA Middle();
@@ -104,7 +105,6 @@ class Outer {
   void arrays(String @TA ... docs) {
     @TA String @TA [] @TA [] docs1 = new @TA String @TA [2] @TA [2];
     @TA int @TA [] ints = new @TA int @TA [2];
-    new Boolean @TA [2] <error descr="Annotations are not allowed here">@TA</error>;
   }
 
   int @TA [] mixedArrays @TA [] <error descr="Annotations are not allowed here">@TA</error> = new int[0][0];
@@ -112,8 +112,10 @@ class Outer {
     int @TA [] a @TA [] <error descr="Annotations are not allowed here">@TA</error> = (p != null ? p : mixedArrays);
     return a;
   }
+  void <error descr="Annotations are not allowed here">@TA</error> misplaced() { }
 
   @TA Outer() { }
+  <T> <error descr="Annotations are not allowed here">@TA</error> Outer(T t) { }
 
   class MyClass<@TA @TPA T> { }
   interface MyInterface<@TA @TPA E> { }
@@ -124,23 +126,7 @@ class Outer {
   }
   static class This extends Super {
     void superField() {
-      Outer.<error descr="Annotations are not allowed here">@TA</error> This.super.aField = 0;
       IntFunction<Super> f = Outer.<error descr="Annotations are not allowed here">@TA</error> This.super::getField;
     }
   }
-
-  //todo[r.sh]
-  /*public String toString(@TA C this) { return ""; }
-
-  public boolean equals(@TA C this, @TA C other) { return false; }
-
-  C(@TA C this, boolean b) { }
-
-  class Outer {
-    class Middle {
-      class Inner {
-        void innerMethod(@TA Outer.@TA Middle.@TA Inner this) { }
-      }
-    }
-  }*/
 }

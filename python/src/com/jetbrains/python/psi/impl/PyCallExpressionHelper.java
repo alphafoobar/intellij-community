@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,15 @@ package com.jetbrains.python.psi.impl;
 
 import com.intellij.codeInsight.completion.CompletionUtil;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiPolyVariantReference;
 import com.intellij.psi.PsiReference;
-import com.intellij.psi.ResolveResult;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.jetbrains.python.FunctionParameter;
 import com.jetbrains.python.PyNames;
+import com.jetbrains.python.nameResolver.FQNamesProvider;
+import com.jetbrains.python.nameResolver.NameResolverTools;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.QualifiedResolveResult;
@@ -43,8 +47,10 @@ public class PyCallExpressionHelper {
   }
 
   /**
+   * TODO: Copy/Paste with {@link com.jetbrains.python.psi.PyArgumentList#addArgument(com.jetbrains.python.psi.PyExpression)}
    * Adds an argument to the end of argument list.
-   * @param us the arg list
+   *
+   * @param us         the arg list
    * @param expression what to add
    */
   public static void addArgument(PyCallExpression us, PyExpression expression) {
@@ -57,7 +63,7 @@ public class PyCallExpressionHelper {
    * Tries to interpret a call as a call to built-in {@code classmethod} or {@code staticmethod}.
    *
    * @param redefiningCall the possible call, generally a result of chasing a chain of assignments
-   * @param us              any in-project PSI element, used to determine SDK and ultimately builtins module used to check the wrapping functions
+   * @param us             any in-project PSI element, used to determine SDK and ultimately builtins module used to check the wrapping functions
    * @return a pair of wrapper name and wrapped function; for {@code staticmethod(foo)} it would be ("staticmethod", foo).
    */
   @Nullable
@@ -70,7 +76,7 @@ public class PyCallExpressionHelper {
         PsiElement redefining_func = refex.getReference().resolve();
         if (redefining_func != null) {
           PsiElement true_func = PyBuiltinCache.getInstance(us).getByName(refname);
-          if (true_func instanceof PyClass) true_func = ((PyClass)true_func).findInitOrNew(true);
+          if (true_func instanceof PyClass) true_func = ((PyClass)true_func).findInitOrNew(true, null);
           if (true_func == redefining_func) {
             // yes, really a case of "foo = classmethod(foo)"
             PyArgumentList arglist = redefiningCall.getArgumentList();
@@ -82,7 +88,7 @@ public class PyCallExpressionHelper {
                   PsiElement original = ((PyReferenceExpression)possible_original_ref).getReference().resolve();
                   if (original instanceof PyFunction) {
                     // pinned down the original; replace our resolved callee with it and add flags.
-                    return new Pair<String, PyFunction>(refname, (PyFunction)original);
+                    return Pair.create(refname, (PyFunction)original);
                   }
                 }
               }
@@ -114,15 +120,15 @@ public class PyCallExpressionHelper {
       return (PyClass)resolved;
     }
     else if (resolved instanceof PyFunction) {
-        final PyFunction pyFunction = (PyFunction) resolved;
-        return pyFunction.getContainingClass();
+      final PyFunction pyFunction = (PyFunction)resolved;
+      return pyFunction.getContainingClass();
     }
 
     return null;
   }
 
   @Nullable
-  public static Callable resolveCalleeFunction(PyCallExpression call, PyResolveContext resolveContext) {
+  public static PyCallable resolveCalleeFunction(PyCallExpression call, PyResolveContext resolveContext) {
     PsiElement resolved;
     PyExpression callee = call.getCallee();
     if (callee instanceof PyReferenceExpression) {
@@ -135,7 +141,7 @@ public class PyCallExpressionHelper {
       resolved = callee;
     }
     if (resolved instanceof PyClass) {
-      resolved = ((PyClass)resolved).findInitOrNew(true); // class to constructor call
+      resolved = ((PyClass)resolved).findInitOrNew(true, null); // class to constructor call
     }
     else if (resolved instanceof PyCallExpression) {
       PyCallExpression redefiningCall = (PyCallExpression)resolved;
@@ -144,12 +150,12 @@ public class PyCallExpressionHelper {
         resolved = wrapperInfo.getSecond();
       }
     }
-    if (resolved instanceof Callable) {
-      return (Callable) resolved;
+    if (resolved instanceof PyCallable) {
+      return (PyCallable)resolved;
     }
     return null;
   }
-  
+
 
   @Nullable
   public static PyCallExpression.PyMarkedCallee resolveCallee(PyCallExpression us, PyResolveContext resolveContext) {
@@ -162,6 +168,9 @@ public class PyCallExpressionHelper {
     boolean isConstructorCall = false;
 
     PyExpression callee = us.getCallee();
+    if (isResolvedToMultipleTargets(callee, resolveContext)) {
+      return null;
+    }
     PsiElement resolved;
     QualifiedResolveResult resolveResult = null;
     if (callee instanceof PyReferenceExpression) {
@@ -175,7 +184,7 @@ public class PyCallExpressionHelper {
     }
     // analyze
     if (resolved instanceof PyClass) {
-      resolved = ((PyClass)resolved).findInitOrNew(true); // class to constructor call
+      resolved = ((PyClass)resolved).findInitOrNew(true, resolveContext.getTypeEvalContext()); // class to constructor call
       isConstructorCall = true;
     }
     else if (resolved instanceof PyCallExpression) {
@@ -197,38 +206,48 @@ public class PyCallExpressionHelper {
       final PyFunction function = (PyFunction)resolved;
       final Property property = function.getProperty();
       if (property != null && isQualifiedByInstance(function, qualifiers, context)) {
-        final PyType type = function.getReturnType(context, null);
-        if (type instanceof PyFunctionType) {
-          resolved = ((PyFunctionType)type).getCallable();
+        final PyType type = context.getReturnType(function);
+        if (type instanceof PyFunctionTypeImpl) {
+          resolved = ((PyFunctionTypeImpl)type).getCallable();
         }
         else {
           resolved = null;
         }
       }
     }
-    if (resolved instanceof Callable) {
+    if (resolved instanceof PyCallable) {
       PyFunction.Modifier modifier = resolved instanceof PyFunction
-                                   ? ((PyFunction)resolved).getModifier()
-                                   : null;
+                                     ? ((PyFunction)resolved).getModifier()
+                                     : null;
       if (modifier == null && wrappedModifier != null) {
         modifier = wrappedModifier;
       }
-      boolean isByInstance = isConstructorCall || isQualifiedByInstance((Callable)resolved, qualifiers, context)
+      boolean isByInstance = isConstructorCall || isQualifiedByInstance((PyCallable)resolved, qualifiers, context)
                              || resolved instanceof PyBoundFunction;
-      PyExpression lastQualifier = qualifiers != null && qualifiers.isEmpty() ? null : qualifiers.get(qualifiers.size()-1);
-      boolean isByClass = lastQualifier == null ? false : isQualifiedByClass((Callable)resolved, lastQualifier, context);
-      final Callable callable = (Callable)resolved;
+      PyExpression lastQualifier = qualifiers != null && qualifiers.isEmpty() ? null : qualifiers.get(qualifiers.size() - 1);
+      boolean isByClass = lastQualifier == null ? false : isQualifiedByClass((PyCallable)resolved, lastQualifier, context);
+      final PyCallable callable = (PyCallable)resolved;
 
       implicitOffset += getImplicitArgumentCount(callable, modifier, isConstructorCall, isByInstance, isByClass);
-      implicitOffset = implicitOffset < 0? 0: implicitOffset; // wrong source can trigger strange behaviour
+      implicitOffset = implicitOffset < 0 ? 0 : implicitOffset; // wrong source can trigger strange behaviour
       return new PyCallExpression.PyMarkedCallee(callable, modifier, implicitOffset,
                                                  resolveResult != null ? resolveResult.isImplicit() : false);
     }
     return null;
   }
 
+  private static boolean isResolvedToMultipleTargets(@Nullable PyExpression callee, @NotNull PyResolveContext resolveContext) {
+    if (callee != null) {
+      final List<PsiElement> resolved = PyUtil.multiResolveTopPriority(callee, resolveContext);
+      if (resolved.size() > 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
-   * Calls the {@link #getImplicitArgumentCount(PyExpression, Callable, com.jetbrains.python.psi.PyFunction.Modifier, EnumSet< com.jetbrains.python.psi.PyFunction.Modifier >, boolean) full version}
+   * Calls the {@link #getImplicitArgumentCount(PyExpression, com.jetbrains.python.psi.PyCallable, com.jetbrains.python.psi.PyFunction.Modifier, EnumSet< com.jetbrains.python.psi.PyFunction.Modifier >, boolean) full version}
    * with null flags and with isByInstance inferred directly from call site (won't work with reassigned bound methods).
    *
    * @param callReference       the call site, where arguments are given.
@@ -253,14 +272,14 @@ public class PyCallExpressionHelper {
   /**
    * Finds how many arguments are implicit in a given call.
    *
-   * @param callable      resolved method which is being called; non-methods immediately return 0.
-   * @param flags         set of flags for the call
-   * @param isByInstance  true if the call is known to be by instance (not by class).
+   * @param callable     resolved method which is being called; non-methods immediately return 0.
+   * @param flags        set of flags for the call
+   * @param isByInstance true if the call is known to be by instance (not by class).
    * @return a non-negative number of parameters that are implicit to this call. E.g. for a typical method call 1 is returned
-   *         because one parameter ('self') is implicit.
+   * because one parameter ('self') is implicit.
    */
   private static int getImplicitArgumentCount(
-    Callable callable,
+    PyCallable callable,
     PyFunction.Modifier modifier,
     boolean isConstructorCall,
     boolean isByInstance,
@@ -299,7 +318,7 @@ public class PyCallExpressionHelper {
     return implicit_offset;
   }
 
-  private static boolean isQualifiedByInstance(Callable resolved, List<PyExpression> qualifiers, TypeEvalContext context) {
+  private static boolean isQualifiedByInstance(PyCallable resolved, List<PyExpression> qualifiers, TypeEvalContext context) {
     PyDocStringOwner owner = PsiTreeUtil.getStubOrPsiParentOfType(resolved, PyDocStringOwner.class);
     if (!(owner instanceof PyClass)) {
       return false;
@@ -316,7 +335,7 @@ public class PyCallExpressionHelper {
     return false;
   }
 
-  private static boolean isQualifiedByInstance(Callable resolved, PyExpression qualifier, TypeEvalContext context) {
+  private static boolean isQualifiedByInstance(PyCallable resolved, PyExpression qualifier, TypeEvalContext context) {
     if (isQualifiedByClass(resolved, qualifier, context)) {
       return false;
     }
@@ -328,7 +347,7 @@ public class PyCallExpressionHelper {
     return true; // NOTE. best guess: unknown qualifier is more probably an instance.
   }
 
-  private static boolean isQualifiedByClass(Callable resolved, PyExpression qualifier, TypeEvalContext context) {
+  private static boolean isQualifiedByClass(PyCallable resolved, PyExpression qualifier, TypeEvalContext context) {
     PyType qtype = context.getType(qualifier);
     if (qtype instanceof PyClassType) {
       if (((PyClassType)qtype).isDefinition()) {
@@ -340,6 +359,9 @@ public class PyCallExpressionHelper {
           }
         }
       }
+    }
+    else if (qtype instanceof PyClassLikeType) {
+      return ((PyClassLikeType)qtype).isDefinition(); //Any definition means callable is classmethod
     }
     return false;
   }
@@ -355,6 +377,27 @@ public class PyCallExpressionHelper {
       }
     }
     return false;
+  }
+
+
+  /**
+   * Returns argument if it exists and has appropriate type
+   * @param parameter  argument
+   * @param argClass   expected class
+   * @param expression call expression
+   * @param <T>        expected class
+   * @return argument expression or null if has wrong type of does not exist
+   */
+  @Nullable
+  public static <T extends PsiElement> T getArgument(
+    @NotNull final FunctionParameter parameter,
+    @NotNull final Class<T> argClass,
+    @NotNull final PyCallExpression expression) {
+    final PyArgumentList list = expression.getArgumentList();
+    if (list == null) {
+      return null;
+    }
+    return PyUtil.as(list.getValueExpressionForParam(parameter), argClass);
   }
 
   @Nullable
@@ -403,57 +446,18 @@ public class PyCallExpressionHelper {
         }
         // normal cases
         final PyResolveContext resolveContext = PyResolveContext.noImplicits().withTypeEvalContext(context);
-        ResolveResult[] targets = ((PyReferenceExpression)callee).getReference(resolveContext).multiResolve(false);
-        if (targets.length > 0) {
-          PsiElement target = targets[0].getElement();
-          if (target == null) {
-            return null;
-          }
-          PyClass cls = null;
-          PyFunction init = null;
-          if (target instanceof PyClass) {
-            cls = (PyClass)target;
-            init = cls.findInitOrNew(true);
-          }
-          else if (target instanceof PyFunction) {
-            final PyFunction f = (PyFunction)target;
-            if (PyNames.INIT.equals(f.getName())) {
-              init = f;
-              cls = f.getContainingClass();
+        final PsiPolyVariantReference reference = ((PyReferenceExpression)callee).getReference(resolveContext);
+        final List<PyType> members = new ArrayList<PyType>();
+        for (PsiElement target : PyUtil.multiResolveTopPriority(reference)) {
+          if (target != null) {
+            final Ref<? extends PyType> typeRef = getCallTargetReturnType(call, target, context);
+            if (typeRef != null) {
+              members.add(typeRef.get());
             }
           }
-          if (init != null) {
-            final PyType t = init.getReturnType(context, (PyReferenceExpression)callee);
-            if (cls != null) {
-              if (init.getContainingClass() != cls) {
-                if (t instanceof PyCollectionType) {
-                  final PyType elementType = ((PyCollectionType)t).getElementType(context);
-                  return new PyCollectionTypeImpl(cls, false, elementType);
-                }
-                return new PyClassTypeImpl(cls, false);
-              }
-            }
-            if (t != null && !(t instanceof PyNoneType)) {
-              return t;
-            }
-            if (cls != null && t == null) {
-              final PyFunction newMethod = cls.findMethodByName(PyNames.NEW, true);
-              if (newMethod != null && !PyBuiltinCache.getInstance(call).hasInBuiltins(newMethod)) {
-                return PyUnionType.createWeakType(new PyClassTypeImpl(cls, false));
-              }
-            }
-          }
-          if (cls != null) {
-            return new PyClassTypeImpl(cls, false);
-          }
-          final PyType providedType = PyReferenceExpressionImpl.getReferenceTypeFromProviders(target, context, call);
-          if (providedType instanceof PyCallableType) {
-            return ((PyCallableType) providedType).getCallType(context, (PyReferenceExpression)callee);
-          }
-          if (target instanceof Callable) {
-            final Callable callable = (Callable)target;
-            return callable.getReturnType(context, (PyReferenceExpression)callee);
-          }
+        }
+        if (!members.isEmpty()) {
+          return PyUnionType.union(members);
         }
       }
       if (callee == null) {
@@ -462,8 +466,8 @@ public class PyCallExpressionHelper {
       else {
         final PyType type = context.getType(callee);
         if (type instanceof PyCallableType) {
-          final PyQualifiedExpression callSite = callee instanceof PyQualifiedExpression ? (PyQualifiedExpression)callee : null;
-          return ((PyCallableType) type).getCallType(context, callSite);
+          final PyCallableType callableType = (PyCallableType)type;
+          return callableType.getCallType(context, call);
         }
         return null;
       }
@@ -471,6 +475,61 @@ public class PyCallExpressionHelper {
     finally {
       TypeEvalStack.evaluated(call);
     }
+  }
+
+  @Nullable
+  private static Ref<? extends PyType> getCallTargetReturnType(@NotNull PyCallExpression call, @NotNull PsiElement target,
+                                                               @NotNull TypeEvalContext context) {
+    PyClass cls = null;
+    PyFunction init = null;
+    if (target instanceof PyClass) {
+      cls = (PyClass)target;
+      init = cls.findInitOrNew(true, context);
+    }
+    else if (target instanceof PyFunction) {
+      final PyFunction f = (PyFunction)target;
+      if (PyNames.INIT.equals(f.getName())) {
+        init = f;
+        cls = f.getContainingClass();
+      }
+    }
+    if (init != null) {
+      final PyType t = init.getCallType(context, call);
+      if (cls != null) {
+        if (init.getContainingClass() != cls) {
+          if (t instanceof PyCollectionType) {
+            final PyType elementType = ((PyCollectionType)t).getElementType(context);
+            return Ref.create(new PyCollectionTypeImpl(cls, false, elementType));
+          }
+          return Ref.create(new PyClassTypeImpl(cls, false));
+        }
+      }
+      if (t != null && !(t instanceof PyNoneType)) {
+        return Ref.create(t);
+      }
+      if (cls != null && t == null) {
+        final PyFunction newMethod = cls.findMethodByName(PyNames.NEW, true);
+        if (newMethod != null && !PyBuiltinCache.getInstance(call).isBuiltin(newMethod)) {
+          return Ref.create(PyUnionType.createWeakType(new PyClassTypeImpl(cls, false)));
+        }
+      }
+    }
+    if (cls != null) {
+      return Ref.create(new PyClassTypeImpl(cls, false));
+    }
+    final PyType providedType = PyReferenceExpressionImpl.getReferenceTypeFromProviders(target, context, call);
+    if (providedType instanceof PyCallableType) {
+      return Ref.create(((PyCallableType)providedType).getCallType(context, call));
+    }
+    if (target instanceof PyCallable) {
+      final PyCallable callable = (PyCallable)target;
+      return Ref.create(callable.getCallType(context, call));
+    }
+    /*PyCallExpression.PyMarkedCallee markedCallee = call.resolveCallee(PyResolveContext.defaultContext().withTypeEvalContext(context));
+    if (markedCallee != null) {
+      return Ref.create(markedCallee.getCallable().getCallType(context, call));
+    }*/
+    return null;
   }
 
   @NotNull
@@ -490,7 +549,7 @@ public class PyCallExpressionHelper {
               if (first_arg instanceof PyReferenceExpression) {
                 final PyReferenceExpression firstArgRef = (PyReferenceExpression)first_arg;
                 final PyExpression qualifier = firstArgRef.getQualifier();
-                if (qualifier != null && PyNames.CLASS.equals(firstArgRef.getReferencedName())) {
+                if (qualifier != null && PyNames.__CLASS__.equals(firstArgRef.getReferencedName())) {
                   final PsiReference qRef = qualifier.getReference();
                   final PsiElement element = qRef == null ? null : qRef.resolve();
                   if (element instanceof PyParameter) {
@@ -501,13 +560,15 @@ public class PyCallExpressionHelper {
                   }
                 }
                 PsiElement possible_class = firstArgRef.getReference().resolve();
-                if (possible_class instanceof PyClass && ((PyClass)possible_class).isNewStyleClass()) {
+                if (possible_class instanceof PyClass && ((PyClass)possible_class).isNewStyleClass(null)) {
                   final PyClass first_class = (PyClass)possible_class;
                   return new Maybe<PyType>(getSuperCallTypeForArguments(context, first_class, args[1]));
                 }
               }
             }
-            else if (((PyFile)call.getContainingFile()).getLanguageLevel().isPy3K() && containingClass != null) {
+            else if ((call.getContainingFile() instanceof PyFile) &&
+                     ((PyFile)call.getContainingFile()).getLanguageLevel().isPy3K() &&
+                     (containingClass != null)) {
               return new Maybe<PyType>(getSuperClassUnionType(containingClass));
             }
           }
@@ -556,5 +617,18 @@ public class PyCallExpressionHelper {
       return PyUnionType.union(superTypes);
     }
     return null;
+  }
+
+  /**
+   * Checks if expression callee's name matches one of names, provided by appropriate {@link com.jetbrains.python.nameResolver.FQNamesProvider}
+   *
+   * @param expression     call expression
+   * @param namesProviders name providers to check name against
+   * @return true if matches
+   * @see com.jetbrains.python.nameResolver
+   */
+  public static boolean isCallee(@NotNull final PyCallExpression expression, @NotNull final FQNamesProvider... namesProviders) {
+    final PyExpression callee = expression.getCallee();
+    return (callee != null) && NameResolverTools.isName(callee, namesProviders);
   }
 }

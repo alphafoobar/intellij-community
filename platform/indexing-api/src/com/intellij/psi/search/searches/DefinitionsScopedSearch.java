@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,8 +34,8 @@ import org.jetbrains.annotations.NotNull;
  *
  */
 public class DefinitionsScopedSearch extends ExtensibleQueryFactory<PsiElement, DefinitionsScopedSearch.SearchParameters> {
-  public static ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.definitionsScopedSearch");
-  public static DefinitionsScopedSearch INSTANCE = new DefinitionsScopedSearch();
+  public static final ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.definitionsScopedSearch");
+  public static final DefinitionsScopedSearch INSTANCE = new DefinitionsScopedSearch();
   
   static {
     final QueryExecutor[] OLD_EXECUTORS = DefinitionsSearch.EP_NAME.getExtensions();
@@ -63,16 +63,22 @@ public class DefinitionsScopedSearch extends ExtensibleQueryFactory<PsiElement, 
     private final SearchScope myScope;
     private final boolean myCheckDeep;
 
-    public SearchParameters(PsiElement element) {
-      this(element, element.getUseScope(), true);
+    public SearchParameters(@NotNull final PsiElement element) {
+      this(element, ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
+        @Override
+        public SearchScope compute() {
+          return element.getUseScope();
+        }
+      }), true);
     }
 
-    public SearchParameters(final PsiElement element, SearchScope scope, final boolean checkDeep) {
+    public SearchParameters(@NotNull PsiElement element, @NotNull SearchScope scope, final boolean checkDeep) {
       myElement = element;
       myScope = scope;
       myCheckDeep = checkDeep;
     }
 
+    @NotNull
     public PsiElement getElement() {
       return myElement;
     }
@@ -81,14 +87,14 @@ public class DefinitionsScopedSearch extends ExtensibleQueryFactory<PsiElement, 
       return myCheckDeep;
     }
 
+    @NotNull
     public SearchScope getScope() {
-      final SearchScope accessScope = ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
+      return ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
         @Override
         public SearchScope compute() {
-          return PsiSearchHelper.SERVICE.getInstance(myElement.getProject()).getUseScope(myElement);
+          return myScope.intersectWith(PsiSearchHelper.SERVICE.getInstance(myElement.getProject()).getUseScope(myElement));
         }
       });
-      return myScope.intersectWith(accessScope);
     }
   }
 

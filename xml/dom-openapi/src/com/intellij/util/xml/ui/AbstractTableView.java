@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.ui.table.TableView;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.ColumnInfo;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.ListTableModel;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
@@ -80,11 +81,13 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
 
     final JTableHeader header = myTable.getTableHeader();
     header.addMouseMotionListener(new MouseMotionAdapter() {
+      @Override
       public void mouseMoved(MouseEvent e) {
         updateTooltip(e);
       }
     });
     header.addMouseListener(new MouseAdapter() {
+      @Override
       public void mouseEntered(MouseEvent e) {
         updateTooltip(e);
       }
@@ -92,7 +95,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
     header.setReorderingAllowed(false);
 
     myTable.setRowHeight(PlatformIcons.CLASS_ICON.getIconHeight());
-    myTable.setPreferredScrollableViewportSize(new Dimension(-1, 150));
+    myTable.setPreferredScrollableViewportSize(JBUI.size(-1, 150));
     myTable.setSelectionMode(allowMultipleRowsSelection() ? ListSelectionModel.MULTIPLE_INTERVAL_SELECTION : ListSelectionModel.SINGLE_SELECTION);
 
     myInnerPanel = new JPanel(new CardLayout());
@@ -135,6 +138,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
     toolbarComponent.setBorder(BorderFactory.createCompoundBorder(matteBorder, toolbarComponent.getBorder()));
 
     getTable().getSelectionModel().addListSelectionListener(new ListSelectionListener() {
+      @Override
       public void valueChanged(ListSelectionEvent e) {
         myActionToolbar.updateActionsImmediately();
       }
@@ -164,6 +168,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
     if (getEmptyPaneText() != null) {
       final CardLayout cardLayout = ((CardLayout)myInnerPanel.getLayout());
       myTable.getModel().addTableModelListener(new TableModelListener() {
+        @Override
         public void tableChanged(TableModelEvent e) {
           cardLayout.show(myInnerPanel, myTable.getRowCount() == 0 ? EMPTY_PANE : TREE);
         }
@@ -220,6 +225,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
     return myTableModel;
   }
 
+  @Override
   public void calcData(DataKey key, DataSink sink) {
     if (PlatformDataKeys.HELP_ID.equals(key)) {
       sink.put(PlatformDataKeys.HELP_ID, getHelpId());
@@ -294,6 +300,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
       setSortable(false);
     }
 
+    @Override
     public Object getValueAt(final int rowIndex, final int columnIndex) {
       return myTableData[rowIndex][columnIndex];
     }
@@ -310,10 +317,12 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
       myTableData = objects;
     }
 
+    @Override
     public void setValueAt(final Object aValue, final int rowIndex, final int columnIndex) {
       final Object oldValue = getValueAt(rowIndex, columnIndex);
       if (!Comparing.equal(oldValue, aValue)) {
         wrapValueSetting(getItems().get(rowIndex), new Runnable() {
+          @Override
           public void run() {
             MyListTableModel.super.setValueAt("".equals(aValue) ? null : aValue, rowIndex, columnIndex);
           }
@@ -350,6 +359,7 @@ public abstract class AbstractTableView<T> extends JPanel implements TypeSafeDat
       return super.getCellRenderer(row, column);
     }
 
+    @Override
     public final TableCellRenderer getCellRenderer(int row, int column) {
       return myCachedRenderers[row][column];
     }

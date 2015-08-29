@@ -26,10 +26,10 @@ import com.intellij.openapi.project.DumbAware;
  */
 public class OnlineDocAction extends AnAction implements DumbAware {
   public void actionPerformed(AnActionEvent e) {
-    BrowserUtil.launchBrowser(ApplicationInfoImpl.getShadowInstance().getDocumentationUrl());
+    BrowserUtil.browse(ApplicationInfoImpl.getShadowInstance().getDocumentationUrl());
   }
 
   public void update(final AnActionEvent e) {
-    e.getPresentation().setVisible(ApplicationInfoImpl.getShadowInstance().getDocumentationUrl() != null);
+    e.getPresentation().setEnabledAndVisible(ApplicationInfoImpl.getShadowInstance().getDocumentationUrl() != null);
   }
 }

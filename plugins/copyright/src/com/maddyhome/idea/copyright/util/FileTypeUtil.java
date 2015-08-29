@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.openapi.fileTypes.*;
 import com.intellij.openapi.project.ProjectCoreUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiCodeFragment;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.messages.MessageBus;
@@ -42,7 +43,7 @@ public class FileTypeUtil {
     createMappings();
     bus.connect().subscribe(FileTypeManager.TOPIC, new FileTypeListener.Adapter() {
       @Override
-      public void fileTypesChanged(FileTypeEvent event) {
+      public void fileTypesChanged(@NotNull FileTypeEvent event) {
         types = null;
       }
     });
@@ -210,7 +211,7 @@ public class FileTypeUtil {
   }
 
   public static boolean isSupportedFile(PsiFile file) {
-    if (file == null || file instanceof PsiDirectory) {
+    if (file == null || file instanceof PsiDirectory || file instanceof PsiCodeFragment) {
       return false;
     }
     final VirtualFile virtualFile = file.getVirtualFile();

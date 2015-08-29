@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.pom.Navigatable;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.testng.remote.strprotocol.MessageHelper;
 import org.testng.remote.strprotocol.TestResultMessage;
@@ -52,6 +53,8 @@ public class TestProxy extends AbstractTestProxy {
     Pattern.compile("(.*)expected not same with:\\<(.*)\\> but was same:\\<(.*)\\>.*", Pattern.DOTALL);
   @NonNls public static final Pattern EXPECTED_BUT_FOUND_PATTERN =
     Pattern.compile("(.*)expected \\[(.*)\\] but found \\[(.*)\\].*", Pattern.DOTALL);
+  @NonNls public static final Pattern EXPECTED_BUT_WAS_HAMCREST_PATTERN =
+    Pattern.compile("(.*)\nExpected: .*?\"(.*)\"\n\\s*but: .*?\"(.*)\".*", Pattern.DOTALL);
   private final List<TestProxy> results = new ArrayList<TestProxy>();
   private TestResultMessage resultMessage;
   private String name;
@@ -69,6 +72,11 @@ public class TestProxy extends AbstractTestProxy {
 
   public String getName() {
     return name;
+  }
+
+  @Override
+  public boolean isConfig() {
+    return false;
   }
 
   @Nullable
@@ -157,7 +165,7 @@ public class TestProxy extends AbstractTestProxy {
     return !isNotPassed();
   }
 
-  public Location getLocation(final Project project, GlobalSearchScope searchScope) {
+  public Location getLocation(@NotNull final Project project, @NotNull GlobalSearchScope searchScope) {
     if (psiElement == null) return null;
     final PsiElement element = psiElement.getElement();
     if (element == null) return null;
@@ -165,7 +173,7 @@ public class TestProxy extends AbstractTestProxy {
   }
 
   @Nullable
-  public Navigatable getDescriptor(final Location location, final TestConsoleProperties testConsoleProperties) {
+  public Navigatable getDescriptor(@Nullable Location location, @NotNull TestConsoleProperties properties) {
     if (location == null) return null;
     return EditSourceUtil.getDescriptor(location.getPsiElement());
   }
@@ -236,6 +244,11 @@ public class TestProxy extends AbstractTestProxy {
   }
 
   @Override
+  public boolean hasPassedTests() {
+    return isPassed();
+  }
+
+  @Override
   public boolean isIgnored() {
     return resultMessage != null && MessageHelper.SKIPPED_TEST == resultMessage.getResult();
   }
@@ -288,26 +301,18 @@ public class TestProxy extends AbstractTestProxy {
   }
 
   @Override
-  public AssertEqualsDiffViewerProvider getDiffViewerProvider() {
+  public DiffHyperlink getDiffViewerProvider() {
     if (myHyperlink == null) {
+      for (TestProxy proxy : getChildren()) {
+        if (!proxy.isDefect()) continue;
+        final DiffHyperlink provider = proxy.getDiffViewerProvider();
+        if (provider != null) {
+          return provider;
+        }
+      }
       return null;
     }
-    return new AssertEqualsDiffViewerProvider() {
-      @Override
-      public void openDiff(Project project) {
-        myHyperlink.openDiff(project);
-      }
-
-      @Override
-      public String getExpected() {
-        return myHyperlink.getLeft();
-      }
-
-      @Override
-      public String getActual() {
-        return myHyperlink.getRight();
-      }
-    };
+    return myHyperlink;
   }
 
   private static String trimStackTrace(String stackTrace) {
@@ -359,6 +364,9 @@ public class TestProxy extends AbstractTestProxy {
       return printables;
     }
     if (appendDiffChuncks(result, s, printables, EXPECTED_BUT_FOUND_PATTERN)) {
+      return printables;
+    }
+    if (appendDiffChuncks(result, s, printables, EXPECTED_BUT_WAS_HAMCREST_PATTERN)) {
       return printables;
     }
     printables.add(new Chunk(s, ConsoleViewContentType.ERROR_OUTPUT));

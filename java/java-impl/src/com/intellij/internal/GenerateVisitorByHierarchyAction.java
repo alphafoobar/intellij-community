@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,11 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */
-
-/*
- * User: anna
- * Date: 28-Jun-2007
  */
 package com.intellij.internal;
 
@@ -31,7 +26,6 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
@@ -65,17 +59,13 @@ import java.util.*;
 import java.util.List;
 
 public class GenerateVisitorByHierarchyAction extends AnAction {
-  public GenerateVisitorByHierarchyAction() {
-    super("Generate Hierarchy Visitor");
-  }
 
   public void actionPerformed(AnActionEvent e) {
     final Ref<String> visitorNameRef = Ref.create("MyVisitor");
     final Ref<PsiClass> parentClassRef = Ref.create(null);
     final Project project = e.getData(CommonDataKeys.PROJECT);
     assert project != null;
-    final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
-    final PsiNameHelper helper = psiFacade.getNameHelper();
+    final PsiNameHelper helper = PsiNameHelper.getInstance(project);
     final PackageChooserDialog dialog = new PackageChooserDialog("Choose Target Package and Hierarchy Root Class", project) {
 
       @Override
@@ -225,7 +215,7 @@ public class GenerateVisitorByHierarchyAction extends AnAction {
     }
     final int finalDetectedPrefix = detectClassPrefix(classes.keySet()).length();
     new WriteCommandAction(project, PsiUtilCore.toPsiFileArray(psiFiles)) {
-      protected void run(final Result result) throws Throwable {
+      protected void run(@NotNull final Result result) throws Throwable {
         if (visitorClass == null) {
           final String shortClassName = PsiNameHelper.getShortClassName(visitorName);
           if (directory != null) {

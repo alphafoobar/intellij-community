@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,32 @@
 package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.ide.ui.UISettings;
+import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.UniqueVFilePathBuilder;
+import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.UniqueNameBuilder;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFilePathWrapper;
 import com.intellij.psi.search.FilenameIndex;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.ProjectScope;
+import com.intellij.psi.util.CachedValue;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.PsiModificationTracker;
+import com.intellij.util.containers.ConcurrentFactoryMap;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.Collection;
+import java.util.Collections;
 
 /**
  * @author yole
@@ -35,21 +50,108 @@ public class UniqueVFilePathBuilderImpl extends UniqueVFilePathBuilder {
   @NotNull
   @Override
   public String getUniqueVirtualFilePath(Project project, VirtualFile file) {
-    final Collection<VirtualFile> filesWithSameName = FilenameIndex.getVirtualFilesByName(project, file.getName(),
-                                                                                          ProjectScope.getProjectScope(project));
-    if (filesWithSameName.size() > 1 && filesWithSameName.contains(file)) {
+    return getUniqueVirtualFilePath(project, file, false);
+  }
+
+  @NotNull
+  @Override
+  public String getUniqueVirtualFilePathWithinOpenedFileEditors(Project project, VirtualFile vFile) {
+    return getUniqueVirtualFilePath(project, vFile, true);
+  }
+
+  private static final Key<CachedValue<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>>>
+    ourShortNameBuilderCacheKey = Key.create("project's.short.file.name.builder");
+  private static final Key<CachedValue<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>>>
+    ourShortNameOpenedBuilderCacheKey = Key.create("project's.short.file.name.opened.builder");
+  private static final UniqueNameBuilder<VirtualFile> ourEmptyBuilder = new UniqueNameBuilder<VirtualFile>(null, null, -1);
+
+  private static String getUniqueVirtualFilePath(final Project project, VirtualFile file, final boolean skipNonOpenedFiles) {
+    Key<CachedValue<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>>> key =
+      skipNonOpenedFiles ?  ourShortNameOpenedBuilderCacheKey:ourShortNameBuilderCacheKey;
+    CachedValue<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>> data = project.getUserData(key);
+    if (data == null) {
+      project.putUserData(key, data = CachedValuesManager.getManager(project).createCachedValue(
+        new CachedValueProvider<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>>() {
+          @Nullable
+          @Override
+          public Result<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>> compute() {
+            return new Result<ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>>(
+              new ConcurrentFactoryMap<String, UniqueNameBuilder<VirtualFile>>() {
+                @Nullable
+                @Override
+                protected UniqueNameBuilder<VirtualFile> create(String key) {
+                  final UniqueNameBuilder<VirtualFile> builder = filesWithTheSameName(
+                    key,
+                    project,
+                    skipNonOpenedFiles,
+                    ProjectScope.getProjectScope(project)
+                  );
+                  return builder != null ? builder:ourEmptyBuilder;
+                }
+              },
+              PsiModificationTracker.MODIFICATION_COUNT,
+              ProjectRootManager.getInstance(project),
+//              VirtualFileManager.VFS_STRUCTURE_MODIFICATIONS,
+              FileEditorManagerImpl.OPEN_FILE_SET_MODIFICATION_COUNT
+            );
+          }
+        }, false));
+    }
+
+    UniqueNameBuilder<VirtualFile> uniqueNameBuilderForShortName = data.getValue().get(file.getName());
+    if (uniqueNameBuilderForShortName == ourEmptyBuilder) uniqueNameBuilderForShortName = null;
+
+    if (uniqueNameBuilderForShortName != null && uniqueNameBuilderForShortName.contains(file)) {
+      if (file instanceof VirtualFilePathWrapper) {
+        return ((VirtualFilePathWrapper)file).getPresentablePath();
+      }
+      return getEditorTabText(file, uniqueNameBuilderForShortName, UISettings.getInstance().HIDE_KNOWN_EXTENSION_IN_TABS);
+    }
+    return file.getPresentableName();
+  }
+
+  @Nullable
+  private static UniqueNameBuilder<VirtualFile> filesWithTheSameName(String fileName, Project project,
+                                                              boolean skipNonOpenedFiles,
+                                                              GlobalSearchScope scope) {
+    Collection<VirtualFile> filesWithSameName = skipNonOpenedFiles ? Collections.<VirtualFile>emptySet() :
+                                                FilenameIndex.getVirtualFilesByName(project, fileName,
+                                                                                    scope);
+    THashSet<VirtualFile> setOfFilesWithTheSameName = new THashSet<VirtualFile>(filesWithSameName);
+    // add open files out of project scope
+    for(VirtualFile openFile: FileEditorManager.getInstance(project).getOpenFiles()) {
+      if (openFile.getName().equals(fileName)) {
+        setOfFilesWithTheSameName.add(openFile);
+      }
+    }
+    for (VirtualFile recentlyEditedFile : IdeDocumentHistory.getInstance(project).getChangedFiles()) {
+      if (recentlyEditedFile.getName().equals(fileName)) {
+        setOfFilesWithTheSameName.add(recentlyEditedFile);
+      }
+    }
+
+    filesWithSameName = setOfFilesWithTheSameName;
+
+    if (filesWithSameName.size() > 1) {
       String path = project.getBasePath();
       path = path == null ? "" : FileUtil.toSystemIndependentName(path);
       UniqueNameBuilder<VirtualFile> builder = new UniqueNameBuilder<VirtualFile>(path, File.separator, 25);
       for (VirtualFile virtualFile: filesWithSameName) {
         builder.addPath(virtualFile, virtualFile.getPath());
       }
-      String result = builder.getShortPath(file);
-      if (UISettings.getInstance().HIDE_KNOWN_EXTENSION_IN_TABS) {
-        return FileUtil.getNameWithoutExtension(result);
-      }
-      return result;
+      return builder;
     }
-    return file.getPresentableName();
+    return null;
+  }
+
+  public static <T> String getEditorTabText(T key, UniqueNameBuilder<T> builder, boolean hideKnownExtensionInTabs) {
+    String result = builder.getShortPath(key);
+    if (hideKnownExtensionInTabs) {
+      String withoutExtension = FileUtil.getNameWithoutExtension(result);
+      if (StringUtil.isNotEmpty(withoutExtension) && !withoutExtension.endsWith(builder.getSeparator())) {
+        return withoutExtension;
+      }
+    }
+    return result;
   }
 }

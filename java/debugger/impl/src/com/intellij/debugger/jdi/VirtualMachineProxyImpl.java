@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import com.sun.jdi.*;
 import com.sun.jdi.event.EventQueue;
 import com.sun.jdi.request.EventRequestManager;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -322,7 +323,12 @@ public class VirtualMachineProxyImpl implements JdiTimer, VirtualMachineProxy {
   }
 
   public void dispose() {
-    myVirtualMachine.dispose();
+    try {
+      myVirtualMachine.dispose();
+    }
+    catch (UnsupportedOperationException e) {
+      LOG.info(e);
+    }
   }
 
   public void exit(int i) {
@@ -545,7 +551,8 @@ public class VirtualMachineProxyImpl implements JdiTimer, VirtualMachineProxy {
     myVirtualMachine.setDebugTraceMode(i);
   }
 
-  public ThreadReferenceProxyImpl getThreadReferenceProxy(ThreadReference thread) {
+  @Nullable
+  public ThreadReferenceProxyImpl getThreadReferenceProxy(@Nullable ThreadReference thread) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     if(thread == null) {
       return null;
@@ -633,7 +640,13 @@ public class VirtualMachineProxyImpl implements JdiTimer, VirtualMachineProxy {
   }
 
   public static boolean isCollected(ObjectReference reference) {
-    return !isJ2ME(reference.virtualMachine()) && reference.isCollected();
+    try {
+      return !isJ2ME(reference.virtualMachine()) && reference.isCollected();
+    }
+    catch (UnsupportedOperationException e) {
+      LOG.info(e);
+    }
+    return false;
   }
 
   public String getResumeStack() {

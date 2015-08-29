@@ -1,7 +1,7 @@
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
 
-public class Foo {
+class Foo {
 
     String foo(Object escaper, String s) {
         return escapeStr(s, escaper);
@@ -16,12 +16,12 @@ public class Foo {
     }
 
     @Contract("null,_->null;!null,_->!null")
-    String escapeStr(String s, Object o) {
-        return s;
+    String escapeStr(@Nullable String s, Object o) {
+        return <warning descr="Expression 's' might evaluate to null but is returned by the method which is not declared as @Nullable">s</warning>;
     }
 
     @Contract("null->null;!null->!null")
-    String escapeStr(String s) {
-        return s;
+    String escapeStr(@Nullable String s) {
+        return <warning descr="Expression 's' might evaluate to null but is returned by the method which is not declared as @Nullable">s</warning>;
     }
 }

@@ -50,10 +50,11 @@ import javax.swing.tree.TreePath;
 import java.util.*;
 
 public abstract class BaseLibrariesConfigurable extends BaseStructureConfigurable  {
-  protected String myLevel;
+  protected final String myLevel;
 
-  protected BaseLibrariesConfigurable(final @NotNull Project project) {
+  protected BaseLibrariesConfigurable(final @NotNull Project project, @NotNull String libraryTableLevel) {
     super(project);
+    myLevel = libraryTableLevel;
   }
 
   public static BaseLibrariesConfigurable getInstance(@NotNull Project project, @NotNull String tableLevel) {
@@ -101,6 +102,7 @@ public abstract class BaseLibrariesConfigurable extends BaseStructureConfigurabl
   @Override
   public void checkCanApply() throws ConfigurationException {
     super.checkCanApply();
+    checkForEmptyAndDuplicatedNames("Library", CommonBundle.getErrorTitle(), LibraryConfigurable.class);
     for (LibraryConfigurable configurable : getLibraryConfigurables()) {
       if (configurable.getDisplayName().isEmpty()) {
         ((LibraryProjectStructureElement)configurable.getProjectStructureElement()).navigate();

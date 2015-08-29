@@ -32,6 +32,7 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
@@ -40,12 +41,12 @@ import com.intellij.openapi.vcs.annotate.*;
 import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
 import com.intellij.openapi.vcs.changes.VcsAnnotationLocalChangesListener;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
+import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vcs.impl.BackgroundableActionEnabledHandler;
 import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
 import com.intellij.openapi.vcs.impl.UpToDateLineNumberProviderImpl;
 import com.intellij.openapi.vcs.impl.VcsBackgroundableActions;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.ui.ColorUtil;
 import com.intellij.util.containers.SortedList;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -63,6 +64,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vcs.actions.AnnotateToggleAction");
   protected static final Key<Collection<ActiveAnnotationGutter>> KEY_IN_EDITOR = Key.create("Annotations");
 
+  @Override
   public void update(AnActionEvent e) {
     super.update(e);
     final boolean enabled = isEnabled(VcsContextFactory.SERVICE.getInstance().createContextOn(e));
@@ -71,8 +73,9 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
 
   private static boolean isEnabled(final VcsContext context) {
     VirtualFile[] selectedFiles = context.getSelectedFiles();
-    if (selectedFiles == null) return false;
-    if (selectedFiles.length != 1) return false;
+    if (selectedFiles.length != 1) {
+      return false;
+    }
     VirtualFile file = selectedFiles[0];
     if (file.isDirectory()) return false;
     Project project = context.getProject();
@@ -98,6 +101,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     return !selectedFile.getFileType().isBinary();
   }
 
+  @Override
   public boolean isSelected(AnActionEvent e) {
     VcsContext context = VcsContextFactory.SERVICE.getInstance().createContextOn(e);
     Editor editor = context.getEditor();
@@ -108,8 +112,11 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     if (selectedFile == null) {
       return false;
     }
-    
-    for (FileEditor fileEditor : FileEditorManager.getInstance(context.getProject()).getEditors(selectedFile)) {
+
+    Project project = context.getProject();
+    if (project == null) return false;
+
+    for (FileEditor fileEditor : FileEditorManager.getInstance(project).getEditors(selectedFile)) {
       if (fileEditor instanceof TextEditor) {
         if (isAnnotated(((TextEditor)fileEditor).getEditor())) {
           return true;
@@ -124,12 +131,13 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     return annotations != null && !annotations.isEmpty();
   }
 
+  @Override
   public void setSelected(AnActionEvent e, boolean selected) {
     final VcsContext context = VcsContextFactory.SERVICE.getInstance().createContextOn(e);
     Editor editor = context.getEditor();
     VirtualFile selectedFile = context.getSelectedFile();
     if (selectedFile == null) return;
-    
+
     if (!selected) {
       for (FileEditor fileEditor : FileEditorManager.getInstance(context.getProject()).getEditors(selectedFile)) {
         if (fileEditor instanceof TextEditor) {
@@ -153,13 +161,16 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
 
   private static void doAnnotate(final Editor editor, final Project project) {
     final VirtualFile file = FileDocumentManager.getInstance().getFile(editor.getDocument());
-    if (project == null) return;
+    if (project == null || file == null) {
+      return;
+    }
     final ProjectLevelVcsManager plVcsManager = ProjectLevelVcsManager.getInstance(project);
     final AbstractVcs vcs = plVcsManager.getVcsFor(file);
 
     if (vcs == null) return;
 
     final AnnotationProvider annotationProvider = vcs.getCachingAnnotationProvider();
+    assert annotationProvider != null;
 
     final Ref<FileAnnotation> fileAnnotationRef = new Ref<FileAnnotation>();
     final Ref<VcsException> exceptionRef = new Ref<VcsException>();
@@ -172,6 +183,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
                                                                      VcsBundle.message("retrieving.annotations"),
                                                                      true,
                                                                      BackgroundFromStartOption.getInstance()) {
+      @Override
       public void run(final @NotNull ProgressIndicator indicator) {
         try {
           fileAnnotationRef.set(annotationProvider.annotate(file));
@@ -180,7 +192,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
           exceptionRef.set(e);
         }
         catch (Throwable t) {
-          handler.completed(file.getPath());
+          exceptionRef.set(new VcsException(t));
         }
       }
 
@@ -194,6 +206,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
         handler.completed(file.getPath());
 
         if (!exceptionRef.isNull()) {
+          LOG.warn(exceptionRef.get());
           AbstractVcsHelper.getInstance(project).showErrors(Arrays.asList(exceptionRef.get()), VcsBundle.message("message.title.annotate"));
         }
 
@@ -239,7 +252,6 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     }
 
     final EditorGutterComponentEx editorGutter = (EditorGutterComponentEx)editor.getGutter();
-    final HighlightAnnotationsActions highlighting = new HighlightAnnotationsActions(project, file, fileAnnotation, editorGutter);
     final List<AnnotationFieldGutter> gutters = new ArrayList<AnnotationFieldGutter>();
     final AnnotationSourceSwitcher switcher = fileAnnotation.getAnnotationSourceSwitcher();
     final List<AnAction> additionalActions = new ArrayList<AnAction>();
@@ -248,10 +260,11 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     }
     additionalActions.add(new CopyRevisionNumberFromAnnotateAction(getUpToDateLineNumber, fileAnnotation));
     final AnnotationPresentation presentation =
-      new AnnotationPresentation(highlighting, switcher, editorGutter, gutters,
+      new AnnotationPresentation(fileAnnotation, switcher, editorGutter,
                                  additionalActions.toArray(new AnAction[additionalActions.size()]));
 
-    final Map<String, Color> bgColorMap = Registry.is("vcs.show.colored.annotations") ? computeBgColors(fileAnnotation) : null;
+    final Couple<Map<VcsRevisionNumber, Color>> bgColorMap =
+      Registry.is("vcs.show.colored.annotations") ? computeBgColors(fileAnnotation) : null;
     final Map<String, Integer> historyIds = Registry.is("vcs.show.history.numbers") ? computeLineNumbers(fileAnnotation) : null;
 
     if (switcher != null) {
@@ -274,21 +287,20 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
 
     final LineAnnotationAspect[] aspects = fileAnnotation.getAspects();
     for (LineAnnotationAspect aspect : aspects) {
-      final AnnotationFieldGutter gutter = new AnnotationFieldGutter(fileAnnotation, editor, aspect, presentation, bgColorMap);
-      gutter.setAspectValueToBgColorMap(bgColorMap);
-      gutters.add(gutter);
+      gutters.add(new AnnotationFieldGutter(fileAnnotation, editor, aspect, presentation, bgColorMap));
     }
 
 
     if (historyIds != null) {
       gutters.add(new HistoryIdColumn(fileAnnotation, editor, presentation, bgColorMap, historyIds));
     }
-    gutters.add(new HighlightedAdditionalColumn(fileAnnotation, editor, null, presentation, highlighting, bgColorMap));
+    gutters.add(new HighlightedAdditionalColumn(fileAnnotation, editor, null, presentation, bgColorMap));
     final AnnotateActionGroup actionGroup = new AnnotateActionGroup(gutters, editorGutter);
     presentation.addAction(actionGroup, 1);
     gutters.add(new ExtraFieldGutter(fileAnnotation, editor, presentation, bgColorMap, actionGroup));
 
-    presentation.addAction(new ShowHideAdditionalInfoAction(gutters, editorGutter, actionGroup));
+    presentation.addAction(new AnnotateCurrentRevisionAction(getUpToDateLineNumber, fileAnnotation, vcs));
+    presentation.addAction(new AnnotatePreviousRevisionAction(getUpToDateLineNumber, fileAnnotation, vcs));
     addActionsFromExtensions(presentation, fileAnnotation);
 
     for (AnAction action : presentation.getActions()) {
@@ -320,7 +332,7 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
   }
 
   @Nullable
-  private static Map<String, Integer> computeLineNumbers(FileAnnotation fileAnnotation) {
+  private static Map<String, Integer> computeLineNumbers(@NotNull FileAnnotation fileAnnotation) {
     final SortedList<VcsFileRevision> revisions = new SortedList<VcsFileRevision>(new Comparator<VcsFileRevision>() {
       @Override
       public int compare(VcsFileRevision o1, VcsFileRevision o2) {
@@ -350,30 +362,38 @@ public class AnnotateToggleAction extends ToggleAction implements DumbAware, Ann
     return numbers.size() < 2 ? null : numbers;
   }
 
-  @Nullable
-  private static Map<String, Color> computeBgColors(FileAnnotation fileAnnotation) {
-    final Map<String, Color> bgColors = new HashMap<String, Color>();
-    final Map<String, Color> revNumbers = new HashMap<String, Color>();
-    final int length = BG_COLORS.length;
+  @NotNull
+  private static Couple<Map<VcsRevisionNumber, Color>> computeBgColors(@NotNull FileAnnotation fileAnnotation) {
+    final Map<VcsRevisionNumber, Color> commitOrderColors = new HashMap<VcsRevisionNumber, Color>();
+    final Map<VcsRevisionNumber, Color> commitAuthorColors = new HashMap<VcsRevisionNumber, Color>();
+    final Map<String, Color> authorColors = new HashMap<String, Color>();
     final List<VcsFileRevision> fileRevisionList = fileAnnotation.getRevisions();
-    final boolean darcula = UIUtil.isUnderDarcula();
     if (fileRevisionList != null) {
-      for (VcsFileRevision revision : fileRevisionList) {
+      final int colorsCount = BG_COLORS.length;
+      final int revisionsCount = fileRevisionList.size();
+
+      for (int i = 0; i < fileRevisionList.size(); i++) {
+        VcsFileRevision revision = fileRevisionList.get(i);
+        final VcsRevisionNumber number = revision.getRevisionNumber();
         final String author = revision.getAuthor();
-        final String revNumber = revision.getRevisionNumber().asString();
-        if (author != null && !bgColors.containsKey(author)) {
-          final int size = bgColors.size();
-          Color color = BG_COLORS[size < length ? size : size % length];
-          if (darcula) {
-            color = ColorUtil.shift(color, 0.3);
+        if (number == null) continue;
+
+        if (!commitAuthorColors.containsKey(number)) {
+          if (author != null && !authorColors.containsKey(author)) {
+            final int index = authorColors.size();
+            Color color = BG_COLORS[index * BG_COLORS_PRIME % colorsCount];
+            authorColors.put(author, color);
           }
-          bgColors.put(author, color);
+
+          commitAuthorColors.put(number, authorColors.get(author));
         }
-        if (revNumber != null && !revNumbers.containsKey(revNumber)) {
-          revNumbers.put(revNumber, bgColors.get(author));
+        if (!commitOrderColors.containsKey(number)) {
+          Color color = BG_COLORS[colorsCount * i / revisionsCount];
+          commitOrderColors.put(number, color);
         }
       }
     }
-    return bgColors.size() < 2 ? null : revNumbers;
+    return Couple.of(commitOrderColors.size() > 1 ? commitOrderColors : null,
+                     commitAuthorColors.size() > 1 ? commitAuthorColors : null);
   }
 }

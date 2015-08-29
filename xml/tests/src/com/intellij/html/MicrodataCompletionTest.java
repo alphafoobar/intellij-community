@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,12 +41,12 @@ public class MicrodataCompletionTest extends CodeInsightFixtureTestCase {
   }
 
   private void doTestInHtml(String text, String... items) throws Throwable {
-    configureAndComplete(text, items);
+    configureAndComplete(text);
     assertContainsElements(myFixture.getLookupElementStrings(), Arrays.asList(items));
   }
 
   private void doFailTestInHtml(String text, String... items) throws Throwable {
-    configureAndComplete(text, items);
+    configureAndComplete(text);
     final List<String> lookups = myFixture.getLookupElementStrings();
     assertNotNull(lookups);
     for (String item : items) {
@@ -54,7 +54,7 @@ public class MicrodataCompletionTest extends CodeInsightFixtureTestCase {
     }
   }
 
-  private void configureAndComplete(String text, String[] items) throws Exception {
+  private void configureAndComplete(String text) {
     myFixture.configureByText(StdFileTypes.HTML, text);
     myFixture.complete(CompletionType.BASIC);
   }
@@ -158,6 +158,29 @@ public class MicrodataCompletionTest extends CodeInsightFixtureTestCase {
                  "url",
                  "weight",
                  "width"
+    );
+  }
+
+  public void testPropValueSchemaOrgFormatWithLinks() throws Throwable {
+    final VirtualFile virtualFile = myFixture.copyFileToProject("Rating.html");
+    ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      @Override
+      public void run() {
+        ExternalResourceManager.getInstance().addResource("http://schema.org/Rating", virtualFile.getPath());
+      }
+    });
+    doTestInHtml("<section itemscope itemtype=\"http://schema.org/Rating\"><div itemprop=\"<caret>\"></div></section>",
+                 "alternateName",
+                 "bestRating",
+                 "description",
+                 "image",
+                 "name",
+                 "potentialAction",
+                 "ratingValue",
+                 "reviewRating",
+                 "sameAs",
+                 "url",
+                 "worstRating"
     );
   }
 

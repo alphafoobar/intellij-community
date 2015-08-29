@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package org.jetbrains.idea.svn;
 
 import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsTestUtil;
 import com.intellij.openapi.vcs.changes.*;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.TimeoutUtil;
 import org.junit.Test;
 
 import java.util.Collection;
@@ -122,7 +124,7 @@ public class SvnNativeListsTest extends Svn17TestCase {
     myChangeListManager.ensureUpToDate(false);
     sleepABit();
     checkin();
-    editFileInCommand(myProject, file, "111");
+    VcsTestUtil.editFileInCommand(myProject, file, "111");
     myDirtyScopeManager.markEverythingDirty();
     myChangeListManager.ensureUpToDate(false);
     sleepABit();
@@ -147,7 +149,7 @@ public class SvnNativeListsTest extends Svn17TestCase {
     myChangeListManager.ensureUpToDate(false);
     sleepABit();
     checkin();
-    editFileInCommand(myProject, file, "111");
+    VcsTestUtil.editFileInCommand(myProject, file, "111");
     myDirtyScopeManager.markEverythingDirty();
     myChangeListManager.ensureUpToDate(false);
     sleepABit();
@@ -229,11 +231,6 @@ public class SvnNativeListsTest extends Svn17TestCase {
   }
 
   private void sleepABit() {
-    try {
-      Thread.sleep(50);
-    }
-    catch (InterruptedException e) {
-      //
-    }
+    TimeoutUtil.sleep(50);
   }
 }

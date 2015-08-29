@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.DocumentEx;
-import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.PomManager;
 import com.intellij.pom.PomModel;
 import com.intellij.pom.PomModelAspect;
@@ -34,17 +33,11 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.xml.*;
 import com.intellij.testFramework.LightCodeInsightTestCase;
-import com.intellij.testFramework.PlatformTestUtil;
 import org.jetbrains.annotations.NotNull;
-
-import java.io.File;
-import java.io.FileNotFoundException;
 
 public class XmlEventsTest extends LightCodeInsightTestCase {
   public void test1() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = XmlElementFactory.getInstance(getProject()).createTagFromText("<a/>");
     WriteCommandAction.runWriteCommandAction(null, new Runnable() {
       @Override
@@ -53,72 +46,109 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
       }
     });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(Attribute \"a\" for tag \"a\" set to \"b\")\n", listener.getEventString());
+  }
+
+  private Listener addPomListener() {
+    final PomModel model = PomManager.getModel(getProject());
+    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
+    model.addModelListener(listener,myTestRootDisposable);
+    return listener;
   }
 
   public void test2() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = XmlElementFactory.getInstance(getProject()).createTagFromText("<a>aaa</a>");
     final XmlTag otherTag = XmlElementFactory.getInstance(getProject()).createTagFromText("<a/>");
     final XmlText xmlText = tagFromText.getValue().getTextElements()[0];
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable(){
+      @Override
+      public void run() {
         xmlText.insertAtOffset(otherTag, 2);
       }
     });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(text changed to 'aa' was: 'aaa'), (child added to a child: XmlText), (child added to a child: XmlTag:a)\n", listener.getEventString());
   }
 
   public void test3() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = XmlElementFactory.getInstance(getProject()).createTagFromText("<a>aaa</a>");
     final XmlText xmlText = tagFromText.getValue().getTextElements()[0];
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable(){
+      @Override
+      public void run() {
         xmlText.insertText("bb", 2);
       }
     });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(text changed to 'aabba' was: 'aaa')\n", listener.getEventString());
+  }
+
+  public void testTagDelete() throws Exception{
+    final Listener listener = addPomListener();
+    configureFromFileText("x.xml", "<a>aaa\n<x>xxx</x>\n<y>yyy</y></a>");
+    final XmlTag x = ((XmlFile)getFile()).getRootTag().findSubTags("x")[0];
+    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
+      @Override
+      public void run() {
+        TextRange range = x.getTextRange();
+        getEditor().getDocument().deleteString(range.getStartOffset(), range.getEndOffset() + 1); // plus \n
+        PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
+      }
+    });
+
+    assertEquals("(child removed from a child: XmlTag:x), (child removed from a child: XmlText)\n", listener.getEventString());
+  }
+
+  public void testTagInsert() throws Exception{
+    final Listener listener = addPomListener();
+    configureFromFileText("x.xml", "<a>aaa\n<x>xxx</x>\n<y>yyy</y></a>");
+    final XmlTag x = ((XmlFile)getFile()).getRootTag().findSubTags("x")[0];
+    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
+      @Override
+      public void run() {
+        TextRange range = x.getTextRange();
+        getEditor().getDocument().insertString(range.getEndOffset() + 1, "<z>zxzz</z>\n"); // plus \n
+        PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
+      }
+    });
+
+    assertEquals("(child added to a child: XmlText), (child added to a child: XmlTag:z)\n", listener.getEventString());
   }
 
   public void test4() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = XmlElementFactory.getInstance(getProject()).createTagFromText("<a>a </a>");
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable(){
+      @Override
+      public void run() {
         tagFromText.addAfter(tagFromText.getValue().getTextElements()[0], tagFromText.getValue().getTextElements()[0]);
       }
     });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(text changed to 'a a ' was: 'a ')\n", listener.getEventString());
   }
 
   public void test5() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = XmlElementFactory.getInstance(getProject()).createTagFromText("<a>aaa</a>");
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
+      @Override
+      public void run() {
         tagFromText.delete();
       }
     });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(Xml document changed)\n", listener.getEventString());
   }
 
   public void testBulkUpdate() throws Exception{
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final PsiFile file = createFile("a.xml", "<a/>");
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         final Document document = PsiDocumentManager.getInstance(getProject()).getDocument(file);
         ((DocumentEx)document).setInBulkUpdate(true);
         document.insertString(0, " ");
@@ -126,7 +156,7 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
         ((DocumentEx)document).setInBulkUpdate(false);
       }
     }.execute();
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals("(Xml document changed)", listener.getEventString().trim());
   }
 
   public void testDocumentChange1() throws Exception{
@@ -134,7 +164,7 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
     final String stringToInsert = "b=\"c\"";
     final int positionToInsert = 2;
 
-    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert);
+    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert, "(Xml document changed)\n");
   }
 
   public void testDocumentChange2() throws Exception{
@@ -142,7 +172,7 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
     final String stringToInsert = "b=\"c\"";
     final int positionToInsert = 3;
 
-    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert);
+    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert, "(Xml document changed)\n");
   }
 
 
@@ -151,19 +181,19 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
     final String stringToInsert = "b=\"c\"";
     final int positionToInsert = 6;
 
-    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert);
+    checkEventsByDocumentChange(rootTagText, positionToInsert, stringToInsert, "(child changed in b child: XmlTag:a)\n");
   }
 
   public void testAttributeValueReplace() throws Exception {
     final String text = "<target name=\"old\"/>";
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
 
     final XmlTag tag = XmlElementFactory.getInstance(getProject()).createTagFromText(text);
     final XmlAttribute attribute = tag.getAttribute("name", null);
     assert attribute != null;
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable(){
+      @Override
+      public void run() {
         attribute.setValue("new");
       }
     });
@@ -173,29 +203,29 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
     assertEquals("(Attribute \"name\" for tag \"target\" set to \"\"new\"\")\n", listener.getEventString());
   }
 
-  private void checkEventsByDocumentChange(final String rootTagText, final int positionToInsert, final String stringToInsert)
+  private void checkEventsByDocumentChange(final String rootTagText, final int positionToInsert, final String stringToInsert, String events)
     throws Exception {
-    final PomModel model = PomManager.getModel(getProject());
-    final Listener listener = new Listener(model.getModelAspect(XmlAspect.class));
-    model.addModelListener(listener);
+    final Listener listener = addPomListener();
     final XmlTag tagFromText = ((XmlFile)createFile("file.xml", rootTagText)).getDocument().getRootTag();
     final PsiFileImpl containingFile = (PsiFileImpl)tagFromText.getContainingFile();
     final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(getProject());
     final Document document = documentManager.getDocument(containingFile);
-    WriteCommandAction.runWriteCommandAction(null, new Runnable(){public void run() {
+    WriteCommandAction.runWriteCommandAction(null, new Runnable(){
+      @Override
+      public void run() {
             document.insertString(positionToInsert, stringToInsert);
             documentManager.commitDocument(document);
           }
         });
 
-    assertFileTextEquals(getTestName(false) + ".txt", listener.getEventString());
+    assertEquals(events, listener.getEventString());
   }
 
   private static class Listener implements PomModelListener{
     private final XmlAspect myAspect;
     private final StringBuffer myBuffer = new StringBuffer();
 
-    public Listener(XmlAspect modelAspect) {
+    private Listener(XmlAspect modelAspect) {
       myAspect = modelAspect;
     }
 
@@ -212,28 +242,9 @@ public class XmlEventsTest extends LightCodeInsightTestCase {
       return aspect == myAspect;
     }
 
-    String getEventString(){
+    private String getEventString(){
       return myBuffer.toString();
     }
-  }
-
-  private static void assertFileTextEquals(String targetDataName, String treeText) throws Exception {
-    String fullName = PlatformTestUtil.getCommunityPath().replace(File.separatorChar, '/')+ "/xml/tests/testData/psi/events" + File.separatorChar + targetDataName;
-    try{
-      String expectedText = loadFile(fullName);
-      assertEquals(expectedText.trim(), treeText.trim());
-    }
-    catch(FileNotFoundException e){
-      //FileUtil.writeToFile(new File(fullName), StringUtil.convertLineSeparators(treeText).getBytes("UTF-8"));
-      fail("No output file found. Created file "+fullName);
-    }
-  }
-
-
-  protected static String loadFile(String fullName) throws Exception {
-    String text = FileUtil.loadFile(new File(fullName)).trim();
-    text = StringUtil.convertLineSeparators(text);
-    return text;
   }
 
   public void testDocumentChange() throws Exception {

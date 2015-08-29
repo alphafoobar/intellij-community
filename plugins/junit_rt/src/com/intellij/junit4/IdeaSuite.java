@@ -26,6 +26,7 @@ import org.junit.internal.runners.JUnit38ClassRunner;
 import org.junit.internal.runners.SuiteMethod;
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
+import org.junit.runners.Parameterized;
 import org.junit.runners.ParentRunner;
 import org.junit.runners.Suite;
 import org.junit.runners.model.InitializationError;
@@ -52,9 +53,9 @@ class IdeaSuite extends Suite {
     try {
       final Method getFilteredChildrenMethod = ParentRunner.class.getDeclaredMethod("getFilteredChildren", new Class[0]);
       getFilteredChildrenMethod.setAccessible(true);
-      List filteredChildren = (List)getFilteredChildrenMethod.invoke(this, new Object[0]);
-      for (int i = 0, filteredChildrenSize = filteredChildren.size(); i < filteredChildrenSize; i++) {
-        Object child = filteredChildren.get(i);
+      Collection filteredChildren = (Collection)getFilteredChildrenMethod.invoke(this, new Object[0]);
+      for (Iterator iterator = filteredChildren.iterator(); iterator.hasNext();) {
+        Object child = iterator.next();
         description.addChild(describeChild((Runner)child));
       }
     }
@@ -78,7 +79,7 @@ class IdeaSuite extends Suite {
   }
 
   protected List getChildren() {
-    final List children = super.getChildren();
+    final List children = new ArrayList(super.getChildren());
     final Set allNames = new HashSet();
     for (Iterator iterator = children.iterator(); iterator.hasNext();) {
       final Object child = iterator.next();
@@ -102,7 +103,7 @@ class IdeaSuite extends Suite {
   }
 
   private static boolean isSuite(Object child) {
-    return child instanceof Suite || child instanceof SuiteMethod;
+    return child instanceof Suite && !(child instanceof Parameterized) || child instanceof SuiteMethod;
   }
 
   private void skipSuiteComponents(Set allNames, Object child) {

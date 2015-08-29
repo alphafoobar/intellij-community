@@ -20,14 +20,23 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.vcsUtil.VcsUtil;
 import git4idea.GitLocalBranch;
 import git4idea.GitRemoteBranch;
+import git4idea.GitRevisionNumber;
 import git4idea.GitUtil;
+import git4idea.history.GitHistoryUtils;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
 import icons.GithubIcons;
@@ -37,6 +46,7 @@ import org.jetbrains.plugins.github.util.GithubNotifications;
 import org.jetbrains.plugins.github.util.GithubUrlUtil;
 import org.jetbrains.plugins.github.util.GithubUtil;
 
+import static org.jetbrains.plugins.github.util.GithubUtil.LOG;
 import static org.jetbrains.plugins.github.util.GithubUtil.setVisibleEnabled;
 
 /**
@@ -99,13 +109,12 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
 
     String urlToOpen = getGithubUrl(project, virtualFile, editor);
     if (urlToOpen != null) {
-      BrowserUtil.launchBrowser(urlToOpen);
+      BrowserUtil.browse(urlToOpen);
     }
   }
 
   @Nullable
-  public static String getGithubUrl(@NotNull Project project, @NotNull VirtualFile virtualFile, @Nullable Editor editor) {
-
+  private static String getGithubUrl(@NotNull Project project, @NotNull VirtualFile virtualFile, @Nullable Editor editor) {
     GitRepositoryManager manager = GitUtil.getRepositoryManager(project);
     final GitRepository repository = manager.getRepositoryForFile(virtualFile);
     if (repository == null) {
@@ -131,19 +140,20 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       return null;
     }
 
-    String branch = getBranchNameOnRemote(project, repository);
-    if (branch == null) {
-      return null;
-    }
-
     String relativePath = path.substring(rootPath.length());
-    String urlToOpen = makeUrlToOpen(editor, relativePath, branch, githubRemoteUrl);
-    if (urlToOpen == null) {
-      GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER, "Can't create properly url", githubRemoteUrl);
-      return null;
+
+    String branch = getCurrentBranchNameOnRemote(repository);
+    if (branch != null) {
+      return makeUrlToOpen(editor, relativePath, branch, githubRemoteUrl);
     }
 
-    return urlToOpen;
+    String hash = getCurrentFileRevisionHash(project, virtualFile);
+    if (hash != null) {
+      return makeUrlToOpen(editor, relativePath, hash, githubRemoteUrl);
+    }
+
+    GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER, "Can't find related tracked branch or hash.");
+    return null;
   }
 
   @Nullable
@@ -156,7 +166,12 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
     if (githubRepoUrl == null) {
       return null;
     }
-    builder.append(githubRepoUrl).append("/blob/").append(branch).append(relativePath);
+    if (StringUtil.isEmptyOrSpaces(relativePath)) {
+      builder.append(githubRepoUrl).append("/tree/").append(branch);
+    }
+    else {
+      builder.append(githubRepoUrl).append("/blob/").append(branch).append(relativePath);
+    }
 
     if (editor != null && editor.getDocument().getLineCount() >= 1) {
       // lines are counted internally from 0, but from 1 on github
@@ -167,30 +182,42 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       if (editor.getDocument().getLineStartOffset(end - 1) == selectionEnd) {
         end -= 1;
       }
-      builder.append("#L").append(begin).append('-').append(end);
+      builder.append("#L").append(begin).append("-L").append(end);
     }
 
     return builder.toString();
   }
 
   @Nullable
-  public static String getBranchNameOnRemote(@NotNull Project project, @NotNull GitRepository repository) {
+  private static String getCurrentBranchNameOnRemote(@NotNull GitRepository repository) {
     GitLocalBranch currentBranch = repository.getCurrentBranch();
     if (currentBranch == null) {
-      GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER,
-                                    "Can't open the file on GitHub when repository is on detached HEAD. Please checkout a branch.");
       return null;
     }
 
     GitRemoteBranch tracked = currentBranch.findTrackedBranch(repository);
     if (tracked == null) {
-      GithubNotifications
-        .showError(project, CANNOT_OPEN_IN_BROWSER, "Can't open the file on GitHub when current branch doesn't have a tracked branch.",
-                   "Current branch: " + currentBranch + ", tracked info: " + repository.getBranchTrackInfos());
       return null;
     }
 
     return tracked.getNameForRemoteOperations();
   }
 
+  @Nullable
+  private static String getCurrentFileRevisionHash(@NotNull final Project project, @NotNull final VirtualFile file) {
+    final Ref<GitRevisionNumber> ref = new Ref<GitRevisionNumber>();
+    ProgressManager.getInstance().run(new Task.Modal(project, "Getting last revision", false) {
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        try {
+          ref.set((GitRevisionNumber)GitHistoryUtils.getCurrentRevision(project, VcsUtil.getFilePath(file), null));
+        }
+        catch (VcsException e) {
+          LOG.warn(e);
+        }
+      }
+    });
+    if (ref.isNull()) return null;
+    return ref.get().getRev();
+  }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,8 @@
  */
 package com.intellij.codeInspection.dataFlow;
 
-import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInspection.dataFlow.instructions.InstanceofInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.Instruction;
-import com.intellij.psi.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashSet;
@@ -36,36 +34,11 @@ import java.util.Set;
 public class StandardDataFlowRunner extends DataFlowRunner {
   private final Set<Instruction> myCCEInstructions = new HashSet<Instruction>();
 
-  private boolean myInNullableMethod = false;
-  private boolean myInNotNullMethod = false;
-  private boolean myIsInMethod = false;
-
-  public StandardDataFlowRunner(PsiElement block) {
-    super(block);
+  public StandardDataFlowRunner() {
+    this(false, true);
   }
-
-  @Override
-  protected void prepareAnalysis(@NotNull PsiElement psiBlock, Iterable<DfaMemoryState> initialStates) {
-    PsiElement parent = psiBlock.getParent();
-    myIsInMethod = parent instanceof PsiMethod;
-    if (myIsInMethod) {
-      PsiMethod method = (PsiMethod)parent;
-      PsiType returnType = method.getReturnType();
-      myInNullableMethod = NullableNotNullManager.isNullable(method) ||
-                           returnType != null && returnType.equalsToText(CommonClassNames.JAVA_LANG_VOID);
-      myInNotNullMethod = NullableNotNullManager.isNotNull(method);
-    } else if (parent instanceof PsiLambdaExpression) {
-      PsiMethod method = LambdaUtil.getFunctionalInterfaceMethod(((PsiLambdaExpression)parent).getFunctionalInterfaceType());
-      if (method != null) {
-        myIsInMethod = true;
-        PsiType returnType = method.getReturnType();
-        myInNullableMethod = NullableNotNullManager.isNullable(method) ||
-                             returnType != null && returnType.equalsToText(CommonClassNames.JAVA_LANG_VOID);
-        myInNotNullMethod = NullableNotNullManager.isNotNull(method);
-      }
-    }
-
-    myCCEInstructions.clear();
+  public StandardDataFlowRunner(boolean unknownMembersAreNullable, boolean honorFieldInitializers) {
+    super(unknownMembersAreNullable, honorFieldInitializers);
   }
 
   public void onInstructionProducesCCE(Instruction instruction) {
@@ -74,18 +47,6 @@ public class StandardDataFlowRunner extends DataFlowRunner {
 
   @NotNull public Set<Instruction> getCCEInstructions() {
     return myCCEInstructions;
-  }
-
-  public boolean isInNotNullMethod() {
-    return myInNotNullMethod;
-  }
-
-  public boolean isInNullableMethod() {
-    return myInNullableMethod;
-  }
-
-  public boolean isInMethod() {
-    return myIsInMethod;
   }
 
   @NotNull public static Set<Instruction> getRedundantInstanceofs(final DataFlowRunner runner, StandardInstructionVisitor visitor) {

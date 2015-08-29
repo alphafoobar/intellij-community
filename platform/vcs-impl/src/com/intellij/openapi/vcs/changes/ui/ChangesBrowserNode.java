@@ -84,9 +84,9 @@ public class ChangesBrowserNode<T> extends DefaultMutableTreeNode {
   }
 
   public static ChangesBrowserNode create(final Project project, @NotNull Object userObject) {
-    /*if (userObject instanceof Change) {
-      return new ChangesBrowserChangeNode(project, (Change) userObject);
-    }*/
+    if (userObject instanceof Change) {
+      return new ChangesBrowserChangeNode(project, (Change) userObject, null);
+    }
     if (userObject instanceof VirtualFile) {
       return new ChangesBrowserFileNode(project, (VirtualFile) userObject);
     }
@@ -150,7 +150,7 @@ public class ChangesBrowserNode<T> extends DefaultMutableTreeNode {
 
   public <T> List<T> getAllObjectsUnder(final Class<T> clazz) {
     List<T> changes = new ArrayList<T>();
-    final Enumeration enumeration = depthFirstEnumeration();
+    final Enumeration enumeration = preorderEnumeration();
     while (enumeration.hasMoreElements()) {
       ChangesBrowserNode child = (ChangesBrowserNode)enumeration.nextElement();
       final Object value = child.getUserObject();

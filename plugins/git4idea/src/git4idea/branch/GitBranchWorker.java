@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,15 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitCommit;
 import git4idea.GitExecutionException;
+import git4idea.GitLocalBranch;
 import git4idea.GitPlatformFacade;
 import git4idea.changes.GitChangeUtils;
 import git4idea.commands.Git;
@@ -61,27 +65,39 @@ public final class GitBranchWorker {
     myUiHandler = uiHandler;
   }
   
-  public void checkoutNewBranch(@NotNull final String name, @NotNull final List<GitRepository> repositories) {
+  public void checkoutNewBranch(@NotNull final String name, @NotNull List<GitRepository> repositories) {
     updateInfo(repositories);
-    new GitCheckoutNewBranchOperation(myProject, myFacade, myGit, myUiHandler, repositories, name).execute();
+    repositories = ContainerUtil.filter(repositories, new Condition<GitRepository>() {
+      @Override
+      public boolean value(GitRepository repository) {
+        GitLocalBranch currentBranch = repository.getCurrentBranch();
+        return currentBranch == null || !currentBranch.getName().equals(name);
+      }
+    });
+    if (!repositories.isEmpty()) {
+      new GitCheckoutNewBranchOperation(myProject, myFacade, myGit, myUiHandler, repositories, name).execute();
+    }
+    else {
+      LOG.error("Creating new branch the same as current in all repositories: " + name);
+    }
   }
 
   public void createNewTag(@NotNull final String name, @NotNull final String reference, @NotNull final List<GitRepository> repositories) {
-    updateInfo(repositories);
     for (GitRepository repository : repositories) {
       myGit.createNewTag(repository, name, null, reference);
+      VfsUtil.markDirtyAndRefresh(true, true, false, repository.getGitDir());
     }
   }
 
   public void checkoutNewBranchStartingFrom(@NotNull String newBranchName, @NotNull String startPoint,
                                             @NotNull List<GitRepository> repositories) {
     updateInfo(repositories);
-    new GitCheckoutOperation(myProject, myFacade, myGit, myUiHandler, repositories, startPoint, newBranchName).execute();
+    new GitCheckoutOperation(myProject, myFacade, myGit, myUiHandler, repositories, startPoint, false, newBranchName).execute();
   }
 
-  public void checkout(@NotNull final String reference, @NotNull List<GitRepository> repositories) {
+  public void checkout(@NotNull final String reference, boolean detach, @NotNull List<GitRepository> repositories) {
     updateInfo(repositories);
-    new GitCheckoutOperation(myProject, myFacade, myGit, myUiHandler, repositories, reference, null).execute();
+    new GitCheckoutOperation(myProject, myFacade, myGit, myUiHandler, repositories, reference, detach, null).execute();
   }
 
 
@@ -141,7 +157,7 @@ public final class GitBranchWorker {
   }
 
   @NotNull
-  private Pair<List<GitCommit>, List<GitCommit>> loadCommitsToCompare(@NotNull GitRepository repository, @NotNull final String branchName) {
+  private Couple<List<GitCommit>> loadCommitsToCompare(@NotNull GitRepository repository, @NotNull final String branchName) {
     final List<GitCommit> headToBranch;
     final List<GitCommit> branchToHead;
     try {
@@ -152,7 +168,7 @@ public final class GitBranchWorker {
       // we treat it as critical and report an error
       throw new GitExecutionException("Couldn't get [git log .." + branchName + "] on repository [" + repository.getRoot() + "]", e);
     }
-    return Pair.create(headToBranch, branchToHead);
+    return Couple.of(headToBranch, branchToHead);
   }
   
   private void displayCompareDialog(@NotNull String branchName, @NotNull String currentBranch, @NotNull GitCommitCompareInfo compareInfo,

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,17 +22,27 @@ import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ArrayUtil;
 import com.intellij.xml.*;
 import com.intellij.xml.util.HtmlUtil;
+import com.intellij.xml.util.XmlUtil;
+import org.intellij.plugins.relaxNG.model.descriptors.CompositeDescriptor;
+import org.intellij.plugins.relaxNG.model.descriptors.RngElementDescriptor;
+import org.jetbrains.annotations.NotNull;
+import org.kohsuke.rngom.digested.DElementPattern;
+
+import javax.xml.namespace.QName;
 
 /**
  * @author Eugene.Kudelevsky
  */
-public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor, XmlElementDescriptorAwareAboutChildren {
+public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor, XmlElementDescriptorAwareAboutChildren, Comparable {
   private final XmlElementDescriptor myDelegate;
+  private final boolean isHtml;
 
   public RelaxedHtmlFromRngElementDescriptor(XmlElementDescriptor delegate) {
     myDelegate = delegate;
+    isHtml = isHtml(delegate);
   }
 
+  @Override
   public XmlElementDescriptor getElementDescriptor(XmlTag childTag, XmlTag contextTag) {
     XmlElementDescriptor elementDescriptor = myDelegate.getElementDescriptor(childTag, contextTag);
 
@@ -53,6 +63,7 @@ public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor
     return myDelegate.getDefaultName();
   }
 
+  @Override
   public XmlElementDescriptor[] getElementsDescriptors(final XmlTag context) {
     return ArrayUtil.mergeArrays(
       myDelegate.getElementsDescriptors(context),
@@ -60,12 +71,16 @@ public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor
     );
   }
 
+  @Override
   public XmlAttributeDescriptor[] getAttributesDescriptors(final XmlTag context) {
     return RelaxedHtmlFromSchemaElementDescriptor.addAttrDescriptorsForFacelets(context, myDelegate.getAttributesDescriptors(context));
   }
 
   @Override
   public XmlAttributeDescriptor getAttributeDescriptor(XmlAttribute attribute) {
+    XmlAttributeDescriptor descriptor = myDelegate.getAttributeDescriptor(attribute);
+    if (descriptor != null) return descriptor;
+
     return getAttributeDescriptor(attribute.getName(), attribute.getParent());
   }
 
@@ -89,6 +104,7 @@ public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor
     return null;
   }
 
+  @Override
   public XmlAttributeDescriptor getAttributeDescriptor(String attributeName, final XmlTag context) {
     final XmlAttributeDescriptor descriptor = myDelegate.getAttributeDescriptor(attributeName.toLowerCase(), context);
     if (descriptor != null) return descriptor;
@@ -136,5 +152,34 @@ public class RelaxedHtmlFromRngElementDescriptor implements XmlElementDescriptor
     return obj == this ||
            (obj instanceof RelaxedHtmlFromRngElementDescriptor
             && myDelegate.equals(((RelaxedHtmlFromRngElementDescriptor)obj).myDelegate));
+  }
+
+  @Override
+  public int compareTo(@NotNull Object o) {
+    if (!(o instanceof RelaxedHtmlFromRngElementDescriptor)) return 1;
+    final RelaxedHtmlFromRngElementDescriptor other = (RelaxedHtmlFromRngElementDescriptor)o;
+    if (other.isHtml && !isHtml) return -1;
+    if (!other.isHtml && isHtml) return 1;
+    return 0;
+  }
+
+  private static boolean isHtml(XmlElementDescriptor o) {
+    if (o instanceof CompositeDescriptor) {
+      for (DElementPattern pattern : ((CompositeDescriptor)o).getElementPatterns()) {
+        if (isHtml(pattern)) return true;
+      }
+    } else if (o instanceof RngElementDescriptor) {
+      return isHtml(((RngElementDescriptor)o).getElementPattern());
+    }
+    return false;
+  }
+
+  private static boolean isHtml(DElementPattern pattern) {
+    for (QName name : pattern.getName().listNames()) {
+      if (XmlUtil.XHTML_URI.equals(name.getNamespaceURI())) {
+        return true;
+      }
+    }
+    return false;
   }
 }

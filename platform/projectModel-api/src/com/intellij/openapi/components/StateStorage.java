@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,54 +13,46 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.openapi.components;
 
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileEvent;
-import com.intellij.util.io.fs.IFile;
-import com.intellij.util.messages.Topic;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.List;
+import java.io.IOException;
 import java.util.Set;
 
 public interface StateStorage {
-  Topic<Listener> STORAGE_TOPIC = new Topic<Listener>("STORAGE_LISTENER", Listener.class, Topic.BroadcastDirection.TO_PARENT);
+  /**
+   * You can call this method only once.
+   * If state exists and not archived - not-null result.
+   * If doesn't exists or archived - null result.
+   */
+  @Nullable
+  <T> T getState(@Nullable Object component, @NotNull String componentName, @NotNull Class<T> stateClass, @Nullable T mergeInto, boolean reload);
+
+  <T> T getState(@Nullable Object component, @NotNull String componentName, @NotNull Class<T> stateClass);
+
+  boolean hasState(@NotNull String componentName, boolean reloadData);
 
   @Nullable
-  <T> T getState(final Object component, final String componentName, Class<T> stateClass, @Nullable T mergeInto) throws StateStorageException;
-  boolean hasState(final Object component, final String componentName, final Class<?> aClass, final boolean reloadData) throws StateStorageException;
-
-  @NotNull
   ExternalizationSession startExternalization();
-  @NotNull
-  SaveSession startSave(@NotNull ExternalizationSession externalizationSession);
-  void finishSave(@NotNull SaveSession saveSession);
 
-  void reload(@NotNull Set<String> changedComponents) throws StateStorageException;
+  /**
+   * Get changed component names
+   */
+  void analyzeExternalChangesAndUpdateIfNeed(@NotNull Set<String> componentNames);
 
   interface ExternalizationSession {
-    void setState(@NotNull Object component, final String componentName, @NotNull Object state, @Nullable final Storage storageSpec) throws StateStorageException;
+    void setState(@NotNull Object component, @NotNull String componentName, @NotNull Object state);
+
+    /**
+     * return null if nothing to save
+     */
+    @Nullable
+    SaveSession createSaveSession();
   }
 
   interface SaveSession {
-    void save() throws StateStorageException;
-
-    @Nullable
-    Set<String> analyzeExternalChanges(@NotNull Set<Pair<VirtualFile,StateStorage>> changedFiles);
-
-    @NotNull
-    Collection<IFile> getStorageFilesToSave() throws StateStorageException;
-
-    @NotNull
-    List<IFile> getAllStorageFiles();
-  }
-
-  interface Listener {
-    void storageFileChanged(@NotNull VirtualFileEvent event, @NotNull StateStorage storage);
+    void save() throws IOException;
   }
 }

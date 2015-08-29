@@ -15,25 +15,29 @@
  */
 package com.intellij.util.text;
 
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.regex.Pattern;
-
 /**
- * See http://semver.org
- *
- * @author Sergey Simonchik
+ * Holds <a href="http://semver.org">Semantic Version</a>.
  */
-public class SemVer {
+public class SemVer implements Comparable<SemVer> {
+  private final String myRawVersion;
   private final int myMajor;
   private final int myMinor;
   private final int myPatch;
 
-  public SemVer(int major, int minor, int patch) {
+  public SemVer(@NotNull String rawVersion, int major, int minor, int patch) {
+    myRawVersion = rawVersion;
     myMajor = major;
     myMinor = minor;
     myPatch = patch;
+  }
+
+  @NotNull
+  public String getRawVersion() {
+    return myRawVersion;
   }
 
   public int getMajor() {
@@ -46,6 +50,11 @@ public class SemVer {
 
   public int getPatch() {
     return myPatch;
+  }
+
+  @NotNull
+  public String getParsedVersion() {
+    return myMajor + "." + myMinor + "." + myPatch;
   }
 
   @Override
@@ -70,33 +79,50 @@ public class SemVer {
     return result;
   }
 
+  @Override
+  public String toString() {
+    return myRawVersion;
+  }
+
   @Nullable
   public static SemVer parseFromText(@NotNull String text) {
-    String[] comps = text.split(Pattern.quote("."), 3);
-    if (comps.length != 3) {
+    int majorEndInd = text.indexOf('.');
+    if (majorEndInd < 0) {
       return null;
     }
-    Integer major = toInteger(comps[0]);
-    Integer minor = toInteger(comps[1]);
-    String patchStr = comps[2];
-    int dashInd = patchStr.indexOf('-');
-    if (dashInd >= 0) {
-      patchStr = patchStr.substring(0, dashInd);
+    int major = StringUtil.parseInt(text.substring(0, majorEndInd), -1);
+    int minorEndInd = text.indexOf('.', majorEndInd + 1);
+    if (minorEndInd < 0) {
+      return null;
     }
-    Integer patch = toInteger(patchStr);
-    if (major != null && minor != null && patch != null) {
-      return new SemVer(major, minor, patch);
+    int minor = StringUtil.parseInt(text.substring(majorEndInd + 1, minorEndInd), -1);
+    final String patchStr;
+    int dashInd = text.indexOf('-', minorEndInd + 1);
+    if (dashInd >= 0) {
+      patchStr = text.substring(minorEndInd + 1, dashInd);
+    }
+    else {
+      patchStr = text.substring(minorEndInd + 1);
+    }
+    int patch = StringUtil.parseInt(patchStr, -1);
+    if (major >= 0 && minor >= 0 && patch >= 0) {
+      return new SemVer(text, major, minor, patch);
     }
     return null;
   }
 
-  private static Integer toInteger(@NotNull String str) {
-    try {
-      return Integer.parseInt(str);
+  @Override
+  public int compareTo(SemVer other) {
+    // null is not permitted
+    if (getMajor() != other.getMajor()) {
+      return getMajor() - other.getMajor();
     }
-    catch (NumberFormatException e) {
-      return null;
+    if (getMinor() != other.getMinor()) {
+      return getMinor() - other.getMinor();
     }
+    if (getPatch() != other.getPatch()) {
+      return getPatch() - other.getPatch();
+    }
+    return 0;
   }
-
 }

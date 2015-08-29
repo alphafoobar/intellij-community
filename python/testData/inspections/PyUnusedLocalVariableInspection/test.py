@@ -3,7 +3,7 @@ def foo1():
   <weak_warning descr="Local variable 'aaa' value is not used">aaa</weak_warning> = 2 #fail
 
   bbb = 1 #pass
-  <weak_warning descr="Local variable 'bbb' value is not used">bbb</weak_warning> += 2 #fail
+  return bbb
 
 def bar(<weak_warning descr="Parameter 'self' value is not used">self</weak_warning>): #fail
   print("Foo")
@@ -291,7 +291,7 @@ def test_unused_empty_function(<weak_warning descr="Parameter 'x' value is not u
 # PY-7072
 def test_unused_variable_in_cycle(x, c):
     while x > 0:
-        x -= 1 #pass
+        x = x - 1 #pass
         if c:
             break
 
@@ -303,3 +303,20 @@ def test_unused_condition_local_with_last_if_in_cycle(c):
         x = False #pass
         if c:
             x = True
+
+
+# PY-7527
+def test_unused_empty_init_parameter():
+    class C(object):
+        def __init__(self, <weak_warning descr="Parameter 'foo' value is not used">foo</weak_warning>):
+            pass
+
+        def f(self, bar):
+            pass
+
+    return C
+
+
+# PY-14429
+def test_used_local_augmented_assignment(x, y):
+    x += y

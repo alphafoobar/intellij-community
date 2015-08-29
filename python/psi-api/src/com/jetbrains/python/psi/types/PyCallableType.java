@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.jetbrains.python.psi.types;
 
-import com.jetbrains.python.psi.PyQualifiedExpression;
+import com.jetbrains.python.psi.PyCallSiteExpression;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,14 +34,19 @@ public interface PyCallableType extends PyType {
   boolean isCallable();
 
   /**
-   * Returns the type which is the result of calling an instance of this type.
+   * Returns the return type of a function independent of a call site.
    *
-   * @return the call result type or null if invalid.
+   * For example, it may return a generic type.
    * @param context
-   * @param callSite
    */
   @Nullable
-  PyType getCallType(@NotNull TypeEvalContext context, @Nullable PyQualifiedExpression callSite);
+  PyType getReturnType(@NotNull TypeEvalContext context);
+
+  /**
+   * Returns the type which is the result of calling an instance of this type.
+   */
+  @Nullable
+  PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteExpression callSite);
 
   /**
    * Returns the list of parameter types.

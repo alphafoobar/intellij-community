@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <options>
-  <configurable id="fileColors" configurable_name="File Colors">
+  <configurable id="reference.settings.ide.settings.file-colors" configurable_name="File Colors">
     <option name="" hit="" />
     <option name="colors" hit="Enable File Colors" />
     <option name="enable" hit="Enable File Colors" />
@@ -158,7 +158,7 @@
     <option name="default" hit="Default project copyright:" />
     <option name="project" hit="Default project copyright:" />
   </configurable>
-  <configurable id="Configurable.PHP" configurable_name="PHP">
+  <configurable id="reference.webide.settings.project.settings.php" configurable_name="PHP">
     <option name="" hit="" />
     <option name="development" hit="Development environment" />
     <option name="environment" hit="Development environment" />
@@ -1212,6 +1212,8 @@
     <option name="separators" hit="Warn if CRLF line separators are about to be committed" />
     <option name="to" hit="Warn if CRLF line separators are about to be committed" />
     <option name="warn" hit="Warn if CRLF line separators are about to be committed" />
+    <option name="force" hit="Allow force push" />
+    <option name="push" hit="Allow force push" />
   </configurable>
   <configurable id="usage.statistics" configurable_name="Usage Statistics">
     <option name="" hit=" Were asking your permission to send information about your plugins configuration (what is enabled  and what is not) and feature usage statistics (e.g. how frequently youre using code completion).     This data is anonymous, does not contain any personal information, collected for use only by JetBrains s.r.o.  and will never be transmitted to any third party. " />
@@ -1801,7 +1803,7 @@
     <option name="found" hit="not found" />
     <option name="not" hit="not found" />
   </configurable>
-  <configurable id="Configurable.PHP.Debug.DBGPProxy" configurable_name="DBGp Proxy">
+  <configurable id="reference.settings.php.debug.xdebug.proxy" configurable_name="DBGp Proxy">
     <option name="dbgp" hit="DBGp Proxy" />
     <option name="proxy" hit="DBGp Proxy" />
     <option name="host" hit="Host:" />
@@ -4128,7 +4130,7 @@
     <option name="variable" hit="Static member variable" />
     <option name="string" hit="String" />
   </configurable>
-  <configurable id="editor" configurable_name="Editor">
+  <configurable id="preferences.editor" configurable_name="Editor">
     <option name="" hit="" />
     <option name="" hit=" Change font size (Zoom) with Ctrl+Mouse Wheel " />
     <option name="change" hit=" Change font size (Zoom) with Ctrl+Mouse Wheel " />
@@ -4327,6 +4329,13 @@
     <option name="wraps" hit="Use soft wraps in editor" />
     <option name="space" hit="Virtual Space" />
     <option name="virtual" hit="Virtual Space" />
+    <option name="rich" hit="Rich-text copy"/>
+    <option name="copy" hit="Rich-text copy"/>
+    <option name="color" hit="Color scheme"/>
+    <option name="scheme" hit="Color scheme"/>
+    <option name="strip" hit="Strip common indent"/>
+    <option name="common" hit="Strip common indent"/>
+    <option name="indent" hit="Strip common indent"/>
   </configurable>
   <configurable id="vcs.Subversion" configurable_name="Subversion">
     <option name="" path="General" hit="" />
@@ -4860,7 +4869,7 @@
     <option name="" hit="" />
     <option name="excludes" hit="Excludes" />
   </configurable>
-  <configurable id="Configurable.PHP.PHPUnit" configurable_name="PHPUnit">
+  <configurable id="reference.webide.settings.project.settings.php.phpunit" configurable_name="PHPUnit">
     <option name="" hit="" />
     <option name="bootstrap" hit="Default bootstrap file:" />
     <option name="default" hit="Default bootstrap file:" />
@@ -4899,10 +4908,6 @@
     <option name="data" hit="Data View" />
     <option name="view" hit="Data View" />
     <option name="database" hit="Database" />
-    <option name="explicit" hit="Explicit parameter patterns (RegExp):" />
-    <option name="parameter" hit="Explicit parameter patterns (RegExp):" />
-    <option name="patterns" hit="Explicit parameter patterns (RegExp):" />
-    <option name="regexp" hit="Explicit parameter patterns (RegExp):" />
     <option name="column" hit="Include column names" />
     <option name="include" hit="Include column names" />
     <option name="names" hit="Include column names" />
@@ -6277,8 +6282,8 @@
     <option name="editor" path="ActionManager" hit="Compare File with Editor" />
     <option name="file" path="ActionManager" hit="Compare File with Editor" />
     <option name="with" path="ActionManager" hit="Compare File with Editor" />
-    <option name="compare" path="ActionManager" hit="Compare Jars" />
-    <option name="jars" path="ActionManager" hit="Compare Jars" />
+    <option name="compare" path="ActionManager" hit="Compare JARs" />
+    <option name="jars" path="ActionManager" hit="Compare JARs" />
     <option name="compare" path="ActionManager" hit="Compare Local File with Deployed Version" />
     <option name="deployed" path="ActionManager" hit="Compare Local File with Deployed Version" />
     <option name="file" path="ActionManager" hit="Compare Local File with Deployed Version" />
@@ -8900,8 +8905,8 @@
     <option name="hierarchy" path="ActionManager" hit="Implement Method (from Method Hierarchy)" />
     <option name="implement" path="ActionManager" hit="Implement Method (from Method Hierarchy)" />
     <option name="method" path="ActionManager" hit="Implement Method (from Method Hierarchy)" />
-    <option name="implement" path="ActionManager" hit="Implement Methods..." />
-    <option name="methods" path="ActionManager" hit="Implement Methods..." />
+    <option name="implement" path="ActionManager" hit="Implement methods..." />
+    <option name="methods" path="ActionManager" hit="Implement methods..." />
     <option name="base" path="ActionManager" hit="Implement base interface/class methods in the current class" />
     <option name="class" path="ActionManager" hit="Implement base interface/class methods in the current class" />
     <option name="current" path="ActionManager" hit="Implement base interface/class methods in the current class" />
@@ -10374,8 +10379,8 @@
     <option name="opens" path="ActionManager" hit="Opens folder with log file" />
     <option name="with" path="ActionManager" hit="Opens folder with log file" />
     <option name="opera" path="ActionManager" hit="Opera" />
-    <option name="imports" path="ActionManager" hit="Optimize Imports..." />
-    <option name="optimize" path="ActionManager" hit="Optimize Imports..." />
+    <option name="imports" path="ActionManager" hit="Optimize Imports" />
+    <option name="optimize" path="ActionManager" hit="Optimize Imports" />
     <option name="options" path="ActionManager" hit="Options..." />
     <option name="organic" path="ActionManager" hit="Organic" />
     <option name="orthogonal" path="ActionManager" hit="Orthogonal" />
@@ -10869,8 +10874,8 @@
     <option name="2" path="ActionManager" hit="Refactoring Actions (2)" />
     <option name="actions" path="ActionManager" hit="Refactoring Actions (2)" />
     <option name="refactoring" path="ActionManager" hit="Refactoring Actions (2)" />
-    <option name="code" path="ActionManager" hit="Reformat Code..." />
-    <option name="reformat" path="ActionManager" hit="Reformat Code..." />
+    <option name="code" path="ActionManager" hit="Reformat Code" />
+    <option name="reformat" path="ActionManager" hit="Reformat Code" />
     <option name="code" path="ActionManager" hit="Reformat code" />
     <option name="reformat" path="ActionManager" hit="Reformat code" />
     <option name="80" path="ActionManager" hit="Reformat string literal or comment to fit maximum width (usually 80)" />
@@ -14597,7 +14602,7 @@
     <option name="write" hit="Use &quot;safe write&quot; (save changes to a temporary file first)" />
     <option name="sec" hit="sec." />
   </configurable>
-  <configurable id="Configurable.PHP.Composer" configurable_name="Composer">
+  <configurable id="reference.webide.settings.project.settings.php.composer" configurable_name="Composer">
     <option name="" hit="" />
     <option name="composer" hit="Composer" />
     <option name="composer" hit="Empty path to composer.phar" />
@@ -14714,7 +14719,7 @@
     <option name="view" hit="   Select a scope to view or edit its details here   " />
     <option name="scopes" hit="Scopes" />
   </configurable>
-  <configurable id="Configurable.PHP.MessDetector" configurable_name="Mess Detector">
+  <configurable id="com.jetbrains.php.tools.quality.messDetector.MessDetectorConfigurable" configurable_name="Mess Detector">
     <option name="" hit="" />
     <option name="files" hit="Ignored files:" />
     <option name="ignored" hit="Ignored files:" />
@@ -17490,7 +17495,7 @@
     <option name="modifier" hit="Wrap after modifier list" />
     <option name="wrap" hit="Wrap after modifier list" />
   </configurable>
-  <configurable id="Configurable.PHP.Servers" configurable_name="Servers">
+  <configurable id="settings.php.debug.servers" configurable_name="Servers">
     <option name="" hit="" />
     <option name="" hit="      " />
     <option name="body" hit="      " />
@@ -19625,7 +19630,7 @@
     <option name="tab" path="Tabs and Indents" hit="Use tab character" />
     <option name="use" path="Tabs and Indents" hit="Use tab character" />
   </configurable>
-  <configurable id="appearance" configurable_name="Appearance">
+  <configurable id="preferences.lookFeel" configurable_name="Appearance">
     <option name="" hit="" />
     <option name="" hit=" Automatically position mouse cursor on default button " />
     <option name="automatically" hit=" Automatically position mouse cursor on default button " />
@@ -19848,10 +19853,9 @@
     <option name="native-to-ascii" hit="Transparent native-to-ascii conversion" />
     <option name="transparent" hit="Transparent native-to-ascii conversion" />
   </configurable>
-  <configurable id="Console Folding" configurable_name="Console Folding">
+  <configurable id="Console" configurable_name="Console">
     <option name="" hit="" />
-    <option name="console" hit="Console Folding" />
-    <option name="folding" hit="Console Folding" />
+    <option name="console" hit="Console" />
     <option name="exceptions" hit="Exceptions" />
     <option name="console" hit="Fold console lines that contain" />
     <option name="contain" hit="Fold console lines that contain" />
@@ -19990,7 +19994,7 @@
     <option name="issue" hit="Issue Navigation" />
     <option name="navigation" hit="Issue Navigation" />
   </configurable>
-  <configurable id="Configurable.PHP.Smarty" configurable_name="Smarty">
+  <configurable id="reference.webide.settings.project.settings.smarty" configurable_name="Smarty">
     <option name="changes" hit="Reopen editor for changes to take effect" />
     <option name="editor" hit="Reopen editor for changes to take effect" />
     <option name="effect" hit="Reopen editor for changes to take effect" />
@@ -20079,7 +20083,7 @@
     <option name="flag" hit="Undefined Flag" />
     <option name="undefined" hit="Undefined Flag" />
   </configurable>
-  <configurable id="com.jetbrains.python.templateLanguages.TemplateLanguageModulesConfigurable" configurable_name="Python Template Languages">
+  <configurable id="com.jetbrains.python.templateLanguages.PyTemplateLanguageModulesConfigurable" configurable_name="Python Template Languages">
     <option name="" hit="" />
     <option name="languages" hit="Python Template Languages" />
     <option name="python" hit="Python Template Languages" />
@@ -21080,7 +21084,7 @@
     <option name="password" hit="Password:" />
     <option name="test" hit="Test" />
   </configurable>
-  <configurable id="Configurable.PHP.Debug.SkippedPaths" configurable_name="Skipped Paths">
+  <configurable id="settings.php.debug.skipped.paths" configurable_name="Skipped Paths">
     <option name="" hit="" />
     <option name="about" hit="Notify about skipped files" />
     <option name="files" hit="Notify about skipped files" />
@@ -21420,7 +21424,7 @@
     <option name="line" hit="Use line comment" />
     <option name="use" hit="Use line comment" />
   </configurable>
-  <configurable id="Configurable.PHP.CodeSniffer" configurable_name="Code Sniffer">
+  <configurable id="com.jetbrains.php.tools.quality.phpcs.PhpCSConfigurable" configurable_name="Code Sniffer">
     <option name="" hit="" />
     <option name="code" hit="Code Sniffer" />
     <option name="sniffer" hit="Code Sniffer" />
@@ -22023,6 +22027,7 @@
     <option name="jboss-app_5_0" hit="jboss-app_5_0" />
     <option name="jboss-deployment-structure_1_0" hit="jboss-deployment-structure_1_0" />
     <option name="jboss-deployment-structure_1_1" hit="jboss-deployment-structure_1_1" />
+    <option name="jboss-deployment-structure_1_2" hit="jboss-deployment-structure_1_2" />
     <option name="jboss-web_3_2" hit="jboss-web_3_2" />
     <option name="jboss-web_4_0" hit="jboss-web_4_0" />
     <option name="jboss-web_4_2" hit="jboss-web_4_2" />
@@ -22327,6 +22332,9 @@
     <option name="end" hit="End (on blank line)" />
     <option name="line" hit="End (on blank line)" />
     <option name="on" hit="End (on blank line)" />
+    <option name="backspace" hit="Backspace smart indent" />
+    <option name="smart" hit="Backspace smart indent" />
+    <option name="indent" hit="Backspace smart indent" />
     <option name="enter" hit="Enter" />
     <option name="home" hit="Home" />
     <option name="a" hit="Insert 'self' when defining a method" />
@@ -22587,7 +22595,7 @@
     <option name="number" hit="Number" />
     <option name="string" hit="String" />
   </configurable>
-  <configurable id="Configurable.PHP.Debug" configurable_name="Debug">
+  <configurable id="reference.webide.settings.project.settings.php.debug" configurable_name="Debug">
     <option name="" hit="" />
     <option name="accept" hit="Can accept external connections" />
     <option name="can" hit="Can accept external connections" />

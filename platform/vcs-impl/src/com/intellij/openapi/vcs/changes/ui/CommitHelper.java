@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -40,7 +41,9 @@ import com.intellij.openapi.vcs.checkin.CheckinEnvironment;
 import com.intellij.openapi.vcs.checkin.CheckinHandler;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vcs.update.RefreshVFsSynchronously;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
+import com.intellij.util.Function;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.WaitForProgressToShow;
 import com.intellij.util.concurrency.Semaphore;
@@ -100,7 +103,11 @@ public class CommitHelper {
   }
 
   public boolean doCommit() {
-    return doCommit(new CommitProcessor());
+    return doCommit((AbstractVcs)null);
+  }
+
+  public boolean doCommit(@Nullable AbstractVcs vcs) {
+    return doCommit(new CommitProcessor(vcs));
   }
 
   public boolean doAlienCommit(final AbstractVcs vcs) {
@@ -188,9 +195,9 @@ public class CommitHelper {
     int failed = changesFailedToCommit.size();
     int committed = myIncludedChanges.size() - failed;
 
-    String text = committed + " " + StringUtil.pluralize("change", committed) + " committed";
+    String text = committed + " " + StringUtil.pluralize("file", committed) + " committed";
     if (failed > 0) {
-      text += ", " + failed + " " + StringUtil.pluralize("change", failed) + " failed to commit";
+      text += ", " + failed + " " + StringUtil.pluralize("file", failed) + " failed to commit";
     }
     StringBuilder content = new StringBuilder(StringUtil.isEmpty(myCommitMessage) ? text : text + ": " + escape(myCommitMessage));
     for (String s : myFeedback) {
@@ -373,8 +380,10 @@ public class CommitHelper {
     private LocalHistoryAction myAction;
     private ChangeListsModificationAfterCommit myAfterVcsRefreshModification;
     private boolean myCommitSuccess;
+    @Nullable private final AbstractVcs myVcs;
 
-    private CommitProcessor() {
+    private CommitProcessor(@Nullable AbstractVcs vcs) {
+      myVcs = vcs;
       myAfterVcsRefreshModification = ChangeListsModificationAfterCommit.NOTHING;
       if (myChangeList instanceof LocalChangeList) {
         final LocalChangeList localList = (LocalChangeList) myChangeList;
@@ -390,6 +399,9 @@ public class CommitHelper {
     }
 
     public void callSelf() {
+      if (myVcs != null && myIncludedChanges.isEmpty()) {
+        process(myVcs, myIncludedChanges);
+      }
       ChangesUtil.processChangesByVcs(myProject, myIncludedChanges, this);
     }
 
@@ -472,8 +484,7 @@ public class CommitHelper {
                     }
                   } else if (ChangeListsModificationAfterCommit.MOVE_OTHERS.equals(myAfterVcsRefreshModification)) {
                     ChangelistMoveOfferDialog dialog = new ChangelistMoveOfferDialog(myConfiguration);
-                    dialog.show();
-                    if (dialog.isOK()) {
+                    if (dialog.showAndGet()) {
                       final Collection<Change> changes = clManager.getDefaultChangeList().getChanges();
                       MoveChangesToAnotherListAction.askAndMove(myProject, changes, null);
                     }
@@ -532,10 +543,13 @@ public class CommitHelper {
   public static Collection<Document> markCommittingDocuments(@NotNull Project project, @NotNull List<Change> changes) {
     Collection<Document> committingDocs = new ArrayList<Document>();
     for (Change change : changes) {
-      Document doc = ChangesUtil.getFilePath(change).getDocument();
-      if (doc != null) {
-        doc.putUserData(DOCUMENT_BEING_COMMITTED_KEY, project);
-        committingDocs.add(doc);
+      VirtualFile virtualFile = ChangesUtil.getFilePath(change).getVirtualFile();
+      if (virtualFile != null && !virtualFile.getFileType().isBinary()) {
+        Document doc = FileDocumentManager.getInstance().getDocument(virtualFile);
+        if (doc != null) {
+          doc.putUserData(DOCUMENT_BEING_COMMITTED_KEY, project);
+          committingDocs.add(doc);
+        }
       }
     }
     return committingDocs;
@@ -581,7 +595,7 @@ public class CommitHelper {
     }
     else {
       if (myCustomResultHandler == null) {
-        showErrorDialogAndMoveToAnotherList(processor, errorsSize, warningsSize);
+        showErrorDialogAndMoveToAnotherList(processor, errorsSize, warningsSize, errors);
       }
       else {
         myCustomResultHandler.onFailure();
@@ -589,19 +603,26 @@ public class CommitHelper {
     }
   }
 
-  private void showErrorDialogAndMoveToAnotherList(final GeneralCommitProcessor processor, final int errorsSize, final int warningsSize) {
+  private void showErrorDialogAndMoveToAnotherList(final GeneralCommitProcessor processor, final int errorsSize, final int warningsSize,
+                                                   @NotNull final List<VcsException> errors) {
     WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable() {
       public void run() {
-        final String message;
+        String message;
         if (errorsSize > 0 && warningsSize > 0) {
           message = VcsBundle.message("message.text.commit.failed.with.errors.and.warnings");
         }
         else if (errorsSize > 0) {
-          message = VcsBundle.message("message.text.commit.failed.with.errors");
+          message = StringUtil.pluralize(VcsBundle.message("message.text.commit.failed.with.error"), errorsSize);
         }
         else {
-          message = VcsBundle.message("message.text.commit.finished.with.warnings");
+          message = StringUtil.pluralize(VcsBundle.message("message.text.commit.finished.with.warning"), warningsSize);
         }
+        message += ":\n" + StringUtil.join(errors, new Function<VcsException, String>() {
+          @Override
+          public String fun(VcsException e) {
+            return e.getMessage();
+          }
+        }, "\n");
         //new VcsBalloonProblemNotifier(myProject, message, MessageType.ERROR).run();
         Messages.showErrorDialog(message, VcsBundle.message("message.title.commit"));
 

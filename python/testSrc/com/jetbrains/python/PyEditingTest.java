@@ -17,7 +17,6 @@ package com.jetbrains.python;
 
 import com.intellij.codeInsight.generation.actions.CommentByLineCommentAction;
 import com.intellij.ide.DataManager;
-import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.command.CommandProcessor;
@@ -26,7 +25,10 @@ import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.util.Computable;
 import com.intellij.psi.PsiFile;
+import com.jetbrains.python.documentation.DocStringFormat;
+import com.jetbrains.python.documentation.PyDocumentationSettings;
 import com.jetbrains.python.fixtures.PyTestCase;
+import com.jetbrains.python.psi.LanguageLevel;
 
 /**
  * @author yole
@@ -103,12 +105,7 @@ public class PyEditingTest extends PyTestCase {
   private void doTestBackspace(final String fileName, final LogicalPosition pos) {
     myFixture.configureByFile("/editing/" + fileName + ".before.py");
     myFixture.getEditor().getCaretModel().moveToLogicalPosition(pos);
-    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        myFixture.performEditorAction(IdeActions.ACTION_EDITOR_BACKSPACE);
-      }
-    }, "", null);
+    pressButton(IdeActions.ACTION_EDITOR_BACKSPACE);
     myFixture.checkResultByFile("/editing/" + fileName + ".after.py", true);
   }
 
@@ -119,8 +116,7 @@ public class PyEditingTest extends PyTestCase {
       @Override
       public void run() {
         CommentByLineCommentAction action = new CommentByLineCommentAction();
-        action.actionPerformed(new AnActionEvent(null, DataManager.getInstance().getDataContext(), "", action.getTemplatePresentation(),
-                                                 ActionManager.getInstance(), 0));
+        action.actionPerformed(AnActionEvent.createFromAnAction(action, null, "", DataManager.getInstance().getDataContext()));
       }
     }, "", null);
     myFixture.checkResultByFile("/editing/uncommentWithSpace.after.py", true);
@@ -142,7 +138,7 @@ public class PyEditingTest extends PyTestCase {
   }
 
   public void testEnterInStatement() {
-    doTestEnter("if a <caret>and b: pass", "if a \\\n    and b: pass");
+    doTestEnter("if a <caret>and b: pass", "if a \\\n        and b: pass");
   }
 
   public void testEnterBeforeStatement() {
@@ -202,10 +198,17 @@ public class PyEditingTest extends PyTestCase {
   }
 
   public void testEnterStubInDocstring() {  // CR-PY-144
-    doTestEnter("def foo():\n  \"\"\"<caret>", "def foo():\n" +
-                                               "  \"\"\"\n" +
-                                               "  \n" +
-                                               "  \"\"\"");
+    final PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
+    final String oldFormat = documentationSettings.getFormat();
+    documentationSettings.setFormat(DocStringFormat.PLAIN);
+    try {
+      doTestEnter("def foo():\n  \"\"\"<caret>", "def foo():\n" +
+                                                 "  \"\"\"\n" +
+                                                 "  \n" +
+                                                 "  \"\"\"");
+    } finally {
+      documentationSettings.setFormat(oldFormat);
+    }
   }
 
   public void testEnterInString() {  // PY-1738
@@ -288,10 +291,10 @@ public class PyEditingTest extends PyTestCase {
   }
 
   public void testParenthesizedInIf() {
-    doTestEnter("if isinstance(bz_value, list) and <caret>(isinstance(bz_value[0], str):\n" +
+    doTestEnter("if isinstance(bz_value, list) and <caret>(isinstance(bz_value[0], str)):\n" +
                 "    pass",
-                "if isinstance(bz_value, list) and \n" +
-                "(isinstance(bz_value[0], str):\n" +
+                "if isinstance(bz_value, list) and \\\n" +
+                "        (isinstance(bz_value[0], str)):\n" +
                 "    pass");
   }
 
@@ -313,6 +316,62 @@ public class PyEditingTest extends PyTestCase {
     doTestEnter("a = 'test(<caret>)'",
                 "a = 'test(' \\\n" +
                 "    ')'");
+  }
+
+  public void testEnterAfterDefKeywordInFunction() {
+    doTestEnter("def <caret>func():\n" +
+                "    pass",
+                "def \\\n" +
+                "        func():\n" +
+                "    pass");
+  }
+
+  public void testEnterBeforeColonInFunction() {
+    doTestEnter("def func()<caret>:\n" +
+                "    pass",
+                "def func()\\\n" +
+                "        :\n" +
+                "    pass");
+  }
+
+  // PY-15469
+  public void testEnterBeforeArrowInFunction() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, new Runnable() {
+      public void run() {
+        doTestEnter("def func() <caret>-> int:\n" +
+                    "    pass",
+                    "def func() \\\n" +
+                    "        -> int:\n" +
+                    "    pass");
+      }
+    });
+  }
+
+  // PY-15469
+  public void testEnterAfterArrowInFunction() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, new Runnable() {
+      public void run() {
+        doTestEnter("def func() -><caret> int:\n" +
+                    "    pass",
+                    "def func() ->\\\n" +
+                    "        int:\n" +
+                    "    pass");
+      }
+    });
+  }
+
+  // PY-15469
+  public void testEnterDoesNotInsertSlashInsideArrow() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, new Runnable() {
+      @Override
+      public void run() {
+        doTestEnter("def func() -<caret>> int:\n" +
+                    "    pass",
+                    "def func() -\n" +
+                    "> int:\n" +
+                    "    pass");
+      }
+    });
   }
 
   private void doTestEnter(String before, final String after) {
@@ -394,8 +453,22 @@ public class PyEditingTest extends PyTestCase {
     doTestEnter("<caret>''", "\n''");
   }
 
+  public void testEnterInUnicodeString() {
+    doTestEnter("a = u\"some <caret>text\"", "a = u\"some \" \\\n" +
+                                         "    u\"<caret>text\"");
+  }
+
   public void testBackslashInParenthesis() {  // PY-5106
     doTestEnter("(\"some <caret>string\", 1)", "(\"some \"\n" +
                                                " \"string\", 1)");
+  }
+
+  // PY-15609
+  public void testEnterInStringInTupleWithoutParenthesis() {
+    doTestEnter("def hello_world():\n" +
+                "    return bar, 'so<caret>me'",
+                "def hello_world():\n" +
+                "    return bar, 'so' \\\n" +
+                "                'me'");
   }
 }

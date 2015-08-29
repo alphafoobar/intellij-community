@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import java.util.LinkedHashSet;
 public class ProjectViewSelectInGroupTarget implements CompositeSelectInTarget, DumbAware {
   @Override
   @NotNull
-  public Collection<SelectInTarget> getSubTargets(SelectInContext context) {
+  public Collection<SelectInTarget> getSubTargets(@NotNull SelectInContext context) {
     return ProjectView.getInstance(context.getProject()).getSelectInTargets();
   }
 
@@ -72,7 +72,7 @@ public class ProjectViewSelectInGroupTarget implements CompositeSelectInTarget, 
             @Override
             public ActionCallback run() {
               target.selectIn(context, requestFocus);
-              return new ActionCallback.Done();
+              return ActionCallback.DONE;
             }
           }, true);
         }

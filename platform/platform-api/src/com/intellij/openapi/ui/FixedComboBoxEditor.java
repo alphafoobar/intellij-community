@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@ package com.intellij.openapi.ui;
 
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.Gray;
+import com.intellij.ui.components.JBTextField;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ui.MacUIUtil;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -34,7 +37,6 @@ import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
@@ -46,19 +48,21 @@ public class FixedComboBoxEditor implements ComboBoxEditor {
   public static final Border EDITOR_BORDER = new MacComboBoxEditorBorder(false);
   public static final Border DISABLED_EDITOR_BORDER = new MacComboBoxEditorBorder(true);
 
-  private JTextField myField;
+  @NotNull private final JBTextField myField;
   private Object oldValue;
 
   public FixedComboBoxEditor() {
     if (SystemInfo.isMac && UIUtil.isUnderAquaLookAndFeel()) {
       myField = new MacComboBoxTextField();
-    } else {
-      myField = new JTextField();
+    }
+    else {
+      myField = new JBTextField();
       myField.setBorder(null);
     }
   }
 
-  protected JTextField getField() {
+  @NotNull
+  public JBTextField getField() {
     return myField;
   }
 
@@ -118,23 +122,13 @@ public class FixedComboBoxEditor implements ComboBoxEditor {
     final ComboBoxUI ui = comboBox.getUI();
     ComboPopup popup = null;
     if (ui instanceof BasicComboBoxUI) {
-      try {
-        final Field popupField = BasicComboBoxUI.class.getDeclaredField("popup");
-        popupField.setAccessible(true);
-        popup = (ComboPopup)popupField.get(ui);
-      }
-      catch (NoSuchFieldException e1) {
-        popup = null;
-      }
-      catch (IllegalAccessException e1) {
-        popup = null;
-      }
+      popup = ReflectionUtil.getField(BasicComboBoxUI.class, ui, ComboPopup.class, "popup");
     }
 
     return popup;
   }
 
-  private class MacComboBoxTextField extends JTextField implements DocumentListener, FocusListener {
+  private class MacComboBoxTextField extends JBTextField implements DocumentListener, FocusListener {
     private MacComboBoxTextField() {
       setBorder(isEnabled() ? EDITOR_BORDER : DISABLED_EDITOR_BORDER);
       //setFont(UIUtil.getListFont());

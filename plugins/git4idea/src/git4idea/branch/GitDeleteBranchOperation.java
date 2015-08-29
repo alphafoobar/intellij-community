@@ -15,18 +15,16 @@
  */
 package git4idea.branch;
 
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitCommit;
 import git4idea.GitPlatformFacade;
-import git4idea.GitVcs;
 import git4idea.commands.*;
 import git4idea.repo.GitRepository;
-import git4idea.util.GitUIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -70,7 +68,7 @@ class GitDeleteBranchOperation extends GitBranchOperation {
       else if (notFullyMergedDetector.hasHappened()) {
         String baseBranch = notMergedToUpstreamDetector.getBaseBranch();
         if (baseBranch == null) { // GitBranchNotMergedToUpstreamDetector didn't happen
-          baseBranch = myCurrentBranchOrRev;
+          baseBranch = myCurrentHeads.get(repository);
         }
 
         Collection<GitRepository> remainingRepositories = getRemainingRepositories();
@@ -121,8 +119,8 @@ class GitDeleteBranchOperation extends GitBranchOperation {
     }
 
     if (!result.totalSuccess()) {
-      GitUIUtil.notify(GitVcs.IMPORTANT_ERROR_NOTIFICATION, myProject, "Error during rollback of branch deletion",
-                       result.getErrorOutputWithReposIndication(), NotificationType.ERROR, null);
+      VcsNotifier.getInstance(myProject).notifyError("Error during rollback of branch deletion",
+                                                     result.getErrorOutputWithReposIndication());
     }
   }
 

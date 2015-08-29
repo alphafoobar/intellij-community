@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,15 @@
 package com.intellij.codeInsight.navigation;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.TargetElementUtilBase;
+import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.search.PsiElementProcessor;
 import com.intellij.psi.search.PsiElementProcessorAdapter;
@@ -38,18 +40,19 @@ public class ImplementationSearcher {
 
   public static final String SEARCHING_FOR_IMPLEMENTATIONS = CodeInsightBundle.message("searching.for.implementations");
 
+  @NotNull
   public PsiElement[] searchImplementations(final Editor editor, final PsiElement element, final int offset) {
-    final TargetElementUtilBase targetElementUtil = TargetElementUtilBase.getInstance();
+    final TargetElementUtil targetElementUtil = TargetElementUtil.getInstance();
     boolean onRef = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
       @Override
       public Boolean compute() {
-        return targetElementUtil.findTargetElement(editor, getFlags() & ~(TargetElementUtilBase.REFERENCED_ELEMENT_ACCEPTED | TargetElementUtilBase.LOOKUP_ITEM_ACCEPTED), offset) == null;
+        return targetElementUtil.findTargetElement(editor, getFlags() & ~(TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED | TargetElementUtil.LOOKUP_ITEM_ACCEPTED), offset) == null;
       }
     });
     return searchImplementations(element, editor, offset, onRef && ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
         @Override
         public Boolean compute() {
-          return targetElementUtil.includeSelfInGotoImplementation(element);
+          return element == null || targetElementUtil.includeSelfInGotoImplementation(element);
         }
     }), onRef);
   }
@@ -75,7 +78,13 @@ public class ImplementationSearcher {
       }
       return filterElements(element, all, offset);
     }
-    return (includeSelfAlways || includeSelfIfNoOthers) && element.getTextRange() != null ?
+    return (includeSelfAlways || includeSelfIfNoOthers) &&
+           ApplicationManager.getApplication().runReadAction(new Computable<TextRange>() {
+             @Override
+             public TextRange compute() {
+               return element.getTextRange();
+             }
+           }) != null ?
            new PsiElement[] {element} :
            PsiElement.EMPTY_ARRAY;
   }
@@ -84,7 +93,7 @@ public class ImplementationSearcher {
     return ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
       @Override
       public SearchScope compute() {
-        return TargetElementUtilBase.getInstance().getSearchScope(editor, element);
+        return TargetElementUtil.getInstance().getSearchScope(editor, element);
       }
     });
   }
@@ -109,8 +118,14 @@ public class ImplementationSearcher {
     return result[0];
   }
 
-  public static void dumbModeNotification(PsiElement element) {
-    DumbService.getInstance(element.getProject()).showDumbModeNotification("Implementation information isn't available while indices are built");
+  public static void dumbModeNotification(final PsiElement element) {
+    Project project = ApplicationManager.getApplication().runReadAction(new Computable<Project>() {
+      @Override
+      public Project compute() {
+        return element.getProject();
+      }
+    });
+    DumbService.getInstance(project).showDumbModeNotification("Implementation information isn't available while indices are built");
   }
 
   protected PsiElement[] filterElements(PsiElement element, PsiElement[] targetElements, final int offset) {
@@ -118,19 +133,18 @@ public class ImplementationSearcher {
   }
 
   public static int getFlags() {
-    return TargetElementUtilBase.getInstance().getDefinitionSearchFlags();
+    return TargetElementUtil.getInstance().getDefinitionSearchFlags();
   }
 
   public static class FirstImplementationsSearcher extends ImplementationSearcher {
     @Override
     protected PsiElement[] searchDefinitions(final PsiElement element, final Editor editor) {
-      final PsiElement[][] result = new PsiElement[1][];
-
       if (canShowPopupWithOneItem(element)) {
         return new PsiElement[]{element};
       }
 
       final PsiElementProcessor.CollectElementsWithLimit<PsiElement> collectProcessor = new PsiElementProcessor.CollectElementsWithLimit<PsiElement>(2, new THashSet<PsiElement>());
+      final PsiElement[][] result = new PsiElement[1][];
       if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
         @Override
         public void run() {
@@ -138,8 +152,7 @@ public class ImplementationSearcher {
             DefinitionsScopedSearch.search(element, getSearchScope(element, editor)).forEach(new PsiElementProcessorAdapter<PsiElement>(collectProcessor){
               @Override
               public boolean processInReadAction(PsiElement element) {
-                if (!accept(element)) return true;
-                return super.processInReadAction(element);
+                return !accept(element) || super.processInReadAction(element);
               }
             });
             result[0] = collectProcessor.toArray();
@@ -164,7 +177,7 @@ public class ImplementationSearcher {
     }
   }
 
-  public static abstract class BackgroundableImplementationSearcher extends ImplementationSearcher {
+  public abstract static class BackgroundableImplementationSearcher extends ImplementationSearcher {
     @Override
     protected PsiElement[] searchDefinitions(final PsiElement element, Editor editor) {
       final CommonProcessors.CollectProcessor<PsiElement> processor = new CommonProcessors.CollectProcessor<PsiElement>() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,11 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.GlobalSearchScopesCore;
+import com.intellij.psi.search.ProjectScope;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.Function;
-import com.intellij.util.PlatformUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.ConvertContext;
 import com.intellij.util.xml.DomFileElement;
@@ -108,8 +111,22 @@ public class IdeaPluginConverter extends ResolvingConverter<IdeaPlugin> {
 
   public static Collection<IdeaPlugin> getAllPlugins(final Project project) {
     if (DumbService.isDumb(project)) return Collections.emptyList();
-    GlobalSearchScope scope = PlatformUtils.isIdeaProject(project) ?
-                              GlobalSearchScopesCore.projectProductionScope(project) : GlobalSearchScope.allScope(project);
+    
+    return CachedValuesManager.getManager(project).getCachedValue(project, new CachedValueProvider<Collection<IdeaPlugin>>() {
+      @Nullable
+      @Override
+      public Result<Collection<IdeaPlugin>> compute() {
+        GlobalSearchScope scope = GlobalSearchScopesCore.projectProductionScope(project).
+          union(ProjectScope.getLibrariesScope(project));
+        return Result.create(getPlugins(project, scope), PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT);
+      }
+    });
+  }
+
+  @NotNull
+  public static Collection<IdeaPlugin> getPlugins(Project project, GlobalSearchScope scope) {
+    if (DumbService.isDumb(project)) return Collections.emptyList();
+
     List<DomFileElement<IdeaPlugin>> files = DomService.getInstance().getFileElements(IdeaPlugin.class, project, scope);
     return ContainerUtil.map(files, new Function<DomFileElement<IdeaPlugin>, IdeaPlugin>() {
       public IdeaPlugin fun(DomFileElement<IdeaPlugin> ideaPluginDomFileElement) {

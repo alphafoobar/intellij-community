@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,15 @@
 package com.intellij.psi.codeStyle;
 
 import com.intellij.openapi.components.ServiceManager;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-/**
- * @author MYakovlev
- * Date: Jul 19, 2002
- */
+import java.util.List;
+
 public abstract class CodeStyleSchemes {
-
   public static CodeStyleSchemes getInstance(){
-    CodeStyleSchemes schemes = ServiceManager.getService(CodeStyleSchemes.class);
-    if (!schemes.isLoaded()) {
-      schemes.loadSettings();
-    }
-    return schemes;
+    return ServiceManager.getService(CodeStyleSchemes.class);
   }
 
   public abstract CodeStyleScheme[] getSchemes();
@@ -40,9 +35,11 @@ public abstract class CodeStyleSchemes {
 
   public abstract CodeStyleScheme createNewScheme(String preferredName, CodeStyleScheme parentScheme);
 
+  @TestOnly
   public abstract void deleteScheme(CodeStyleScheme scheme);
 
-  public abstract CodeStyleScheme findSchemeByName(String name);
+  @Nullable
+  public abstract CodeStyleScheme findSchemeByName(@NotNull String name);
 
   /**
    * Attempts to find a scheme with a given name or an alternative suitable scheme.
@@ -67,10 +64,9 @@ public abstract class CodeStyleSchemes {
 
   public abstract CodeStyleScheme getDefaultScheme();
 
-  public abstract void addScheme(CodeStyleScheme currentScheme);
+  public abstract void addScheme(@NotNull CodeStyleScheme currentScheme);
 
-  public abstract boolean isLoaded();
-
-  public abstract void loadSettings();
+  @Deprecated
+  public abstract void setSchemes(@NotNull List<CodeStyleScheme> schemes);
 }
 

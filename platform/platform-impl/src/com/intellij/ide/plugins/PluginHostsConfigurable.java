@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,14 @@ package com.intellij.ide.plugins;
 
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.options.BaseConfigurable;
+import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.ui.InputValidator;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.NonEmptyInputValidator;
-import com.intellij.openapi.updateSettings.impl.PluginDownloader;
-import com.intellij.openapi.updateSettings.impl.UpdateChecker;
 import com.intellij.openapi.updateSettings.impl.UpdateSettings;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFileManager;
@@ -35,59 +36,64 @@ import com.intellij.ui.components.JBList;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.io.URLUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
-public class PluginHostsConfigurable extends BaseConfigurable {
+public class PluginHostsConfigurable extends BaseConfigurable implements Configurable.NoScroll {
   private CustomPluginRepositoriesPanel myUpdatesSettingsPanel;
 
+  @Override
   public JComponent createComponent() {
     myUpdatesSettingsPanel = new CustomPluginRepositoriesPanel();
     return myUpdatesSettingsPanel.myPanel;
   }
 
+  @Override
   public String getDisplayName() {
     return "Custom Plugin Repositories";
   }
 
+  @Override
   public String getHelpTopic() {
     return null;
   }
 
+  @Override
   public void apply() throws ConfigurationException {
     UpdateSettings settings = UpdateSettings.getInstance();
 
-    settings.myPluginHosts.clear();
-    settings.myPluginHosts.addAll(myUpdatesSettingsPanel.getPluginsHosts());
+    settings.getStoredPluginHosts().clear();
+    settings.getStoredPluginHosts().addAll(myUpdatesSettingsPanel.getPluginsHosts());
   }
 
+  @Override
   public void reset() {
-    myUpdatesSettingsPanel.setPluginHosts(UpdateSettings.getInstance().myPluginHosts);
+    myUpdatesSettingsPanel.setPluginHosts(UpdateSettings.getInstance().getStoredPluginHosts());
   }
 
+  @Override
   public boolean isModified() {
-    if (myUpdatesSettingsPanel == null) return false;
-    UpdateSettings settings = UpdateSettings.getInstance();
-    return !settings.myPluginHosts.equals(myUpdatesSettingsPanel.getPluginsHosts());
+    if (myUpdatesSettingsPanel == null) {
+      return false;
+    }
+    //noinspection EqualsBetweenInconvertibleTypes
+    return !UpdateSettings.getInstance().getStoredPluginHosts().equals(myUpdatesSettingsPanel.getPluginsHosts());
   }
 
+  @Override
   public void disposeUIResources() {
     myUpdatesSettingsPanel = null;
   }
 
-  public Collection<? extends String> getPluginsHosts() {
-    return myUpdatesSettingsPanel.getPluginsHosts();
-  }
-
   public static class CustomPluginRepositoriesPanel {
-    private JBList myUrlsList;
-    private JPanel myPanel;
+    private final JBList myUrlsList;
+    private final JPanel myPanel;
 
     public CustomPluginRepositoriesPanel() {
       myUrlsList = new JBList(new DefaultListModel());
@@ -107,6 +113,7 @@ public class PluginHostsConfigurable extends BaseConfigurable {
             dlg.show();
             String input = dlg.getInputString();
             if (input != null) {
+              //noinspection unchecked
               ((DefaultListModel)myUrlsList.getModel()).addElement(correctRepositoryRule(input));
             }
           }
@@ -120,10 +127,12 @@ public class PluginHostsConfigurable extends BaseConfigurable {
                                                Messages.getQuestionIcon(),
                                                (String)myUrlsList.getSelectedValue(),
                                                new InputValidator() {
+                                                 @Override
                                                  public boolean checkInput(final String inputString) {
                                                    return inputString.length() > 0;
                                                  }
 
+                                                 @Override
                                                  public boolean canClose(final String inputString) {
                                                    return checkInput(inputString);
                                                  }
@@ -131,6 +140,7 @@ public class PluginHostsConfigurable extends BaseConfigurable {
             dlg.show();
             final String input = dlg.getInputString();
             if (input != null) {
+              //noinspection unchecked
               ((DefaultListModel)myUrlsList.getModel()).set(myUrlsList.getSelectedIndex(), input);
             }
           }
@@ -150,6 +160,7 @@ public class PluginHostsConfigurable extends BaseConfigurable {
       final DefaultListModel model = (DefaultListModel)myUrlsList.getModel();
       model.clear();
       for (String host : pluginHosts) {
+        //noinspection unchecked
         model.addElement(host);
       }
     }
@@ -163,47 +174,46 @@ public class PluginHostsConfigurable extends BaseConfigurable {
     return input;
   }
 
-  public static class HostMessages extends Messages {
+  private static class HostMessages extends Messages {
     public static class InputHostDialog extends InputDialog {
-
-      public InputHostDialog(Component parentComponent,
-                             String message,
-                             String title,
-                             Icon icon,
-                             String initialValue,
-                             InputValidator validator) {
-        super(parentComponent, message, title, icon, initialValue, validator);
+      public InputHostDialog(Component parent, String message, String title, Icon icon, String initialValue, InputValidator validator) {
+        super(parent, message, title, icon, initialValue, validator);
       }
 
+      @Override
       @NotNull
       protected Action[] createActions() {
-        final Action[] actions = super.createActions();
         final AbstractAction checkNowAction = new AbstractAction("Check Now") {
-          public void actionPerformed(final ActionEvent e) {
-            final boolean[] result = new boolean[1];
-            final Exception[] ex = new Exception[1];
-            if (ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
+          @Override
+          public void actionPerformed(@Nullable ActionEvent e) {
+            ProgressManager.getInstance().run(new Task.Modal(null, "Checking plugins repository...", true) {
+              private int result;
+              private Exception error;
+
               @Override
-              public void run() {
+              public void run(@NotNull ProgressIndicator indicator) {
+                String host = correctRepositoryRule(getTextField().getText());
                 try {
-                  result[0] =
-                    UpdateChecker.checkPluginsHost(correctRepositoryRule(getTextField().getText()), new ArrayList<PluginDownloader>());
+                  result = RepositoryHelper.loadPlugins(host, null, indicator).size();
                 }
-                catch (Exception e1) {
-                  ex[0] = e1;
+                catch (Exception e) {
+                  error = e;
                 }
               }
-            }, "Checking plugins repository...", true, null, getPreferredFocusedComponent())) {
-              if (ex[0] != null) {
-                showErrorDialog(myField, "Connection failed: " + ex[0].getMessage());
+
+              @Override
+              public void onSuccess() {
+                if (error != null) {
+                  showErrorDialog(myField, "Connection failed: " + error.getMessage());
+                }
+                else if (result == 0) {
+                  showWarningDialog(myField, "No plugins found. Please check log file for possible errors.", "Check Plugins Repository");
+                }
+                else {
+                  showInfoMessage(myField, "Repository was successfully checked", "Check Plugins Repository");
+                }
               }
-              else if (result[0]) {
-                showInfoMessage(myField, "Plugins repository was successfully checked", "Check Plugins Repository");
-              }
-              else {
-                showErrorDialog(myField, "Plugin descriptions contain some errors. Please, check idea.log for details.");
-              }
-            }
+            });
           }
         };
         myField.getDocument().addDocumentListener(new DocumentAdapter() {
@@ -213,7 +223,7 @@ public class PluginHostsConfigurable extends BaseConfigurable {
           }
         });
         checkNowAction.setEnabled(!StringUtil.isEmptyOrSpaces(myField.getText()));
-        return ArrayUtil.append(actions, checkNowAction);
+        return ArrayUtil.append(super.createActions(), checkNowAction);
       }
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,12 @@
  */
 package com.intellij.openapi.vfs.newvfs;
 
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationEx;
+import com.intellij.openapi.diagnostic.FrequentEventDetector;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.DumbAwareRunnable;
@@ -42,6 +44,7 @@ public class RefreshQueueImpl extends RefreshQueue {
   private final ExecutorService myQueue = ConcurrencyUtil.newSingleThreadExecutor("FS Synchronizer");
   private final ProgressIndicator myRefreshIndicator = RefreshProgress.create(VfsBundle.message("file.synchronize.progress"));
   private final TLongObjectHashMap<RefreshSession> mySessions = new TLongObjectHashMap<RefreshSession>();
+  private final FrequentEventDetector myEventCounter = new FrequentEventDetector(100, 100, FrequentEventDetector.Level.ERROR);
 
   public void execute(@NotNull RefreshSessionImpl session) {
     if (session.isAsynchronous()) {
@@ -56,8 +59,8 @@ public class RefreshQueueImpl extends RefreshQueue {
       }
       else {
         if (((ApplicationEx)app).holdsReadLock()) {
-          LOG.error("Do not call synchronous refresh from inside read action except for event dispatch thread. " +
-                    "This will eventually cause deadlock if there are any events to fire");
+          LOG.error("Do not call synchronous refresh under read lock (except from EDT) - " +
+                    "this will cause a deadlock if there are any events to fire.");
           return;
         }
         queueSession(session, ModalityState.defaultModalityState());
@@ -72,27 +75,26 @@ public class RefreshQueueImpl extends RefreshQueue {
       public void run() {
         try {
           myRefreshIndicator.start();
-          HeavyProcessLatch.INSTANCE.processStarted();
+          AccessToken token = HeavyProcessLatch.INSTANCE.processStarted("Doing file refresh. " + session.toString());
           try {
             doScan(session);
           }
           finally {
-            HeavyProcessLatch.INSTANCE.processFinished();
+            token.finish();
             myRefreshIndicator.stop();
           }
         }
         finally {
-          final Application app = ApplicationManager.getApplication();
-          app.invokeLater(new DumbAwareRunnable() {
+          ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable() {
             @Override
             public void run() {
-              if (app.isDisposed()) return;
               session.fireEvents(false);
             }
           }, modality);
         }
       }
     });
+    myEventCounter.eventHappened();
   }
 
   private void doScan(RefreshSessionImpl session) {
@@ -130,6 +132,7 @@ public class RefreshQueueImpl extends RefreshQueue {
     }
   }
 
+  @NotNull
   @Override
   public RefreshSession createSession(boolean async, boolean recursively, @Nullable Runnable finishRunnable, @NotNull ModalityState state) {
     return new RefreshSessionImpl(async, recursively, finishRunnable, state);
@@ -138,5 +141,12 @@ public class RefreshQueueImpl extends RefreshQueue {
   @Override
   public void processSingleEvent(@NotNull VFileEvent event) {
     new RefreshSessionImpl(Collections.singletonList(event)).launch();
+  }
+
+  public static boolean isRefreshInProgress() {
+    RefreshQueueImpl refreshQueue = (RefreshQueueImpl)RefreshQueue.getInstance();
+    synchronized (refreshQueue.mySessions) {
+      return !refreshQueue.mySessions.isEmpty();
+    }
   }
 }

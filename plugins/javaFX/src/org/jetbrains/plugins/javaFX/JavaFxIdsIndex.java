@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,11 +42,13 @@ public class JavaFxIdsIndex extends FileBasedIndexExtension<String, Set<String>>
     return myDataIndexer;
   }
 
+  @NotNull
   @Override
   public DataExternalizer<Set<String>> getValueExternalizer() {
     return myDataExternalizer;
   }
 
+  @NotNull
   @Override
   public FileBasedIndex.InputFilter getInputFilter() {
     return myInputFilter;
@@ -58,6 +60,7 @@ public class JavaFxIdsIndex extends FileBasedIndexExtension<String, Set<String>>
     return KEY;
   }
 
+  @NotNull
   @Override
   public KeyDescriptor<String> getKeyDescriptor() {
     return myKeyDescriptor;
@@ -70,7 +73,7 @@ public class JavaFxIdsIndex extends FileBasedIndexExtension<String, Set<String>>
 
   @Override
   public int getVersion() {
-    return 1;
+    return 2;
   }
 
   @NotNull

@@ -54,7 +54,7 @@ public class JavaFXNSDescriptor implements XmlNSDescriptor, Validator<XmlDocumen
       final PsiClass paneClass = JavaPsiFacade.getInstance(project).findClass(JavaFxCommonClassNames.JAVAFX_SCENE_LAYOUT_PANE, GlobalSearchScope.allScope(project));
       if (paneClass != null) {
         final ArrayList<XmlElementDescriptor> result = new ArrayList<XmlElementDescriptor>();
-        ClassInheritorsSearch.search(paneClass).forEach(new Processor<PsiClass>() {
+        ClassInheritorsSearch.search(paneClass, paneClass.getUseScope(), true, true, false).forEach(new Processor<PsiClass>() {
           @Override
           public boolean process(PsiClass psiClass) {
             result.add(new JavaFxClassBackedElementDescriptor(psiClass.getName(), psiClass));
@@ -68,15 +68,11 @@ public class JavaFXNSDescriptor implements XmlNSDescriptor, Validator<XmlDocumen
   }
 
   @Nullable
-   public XmlFile getDescriptorFile() {
+  public XmlFile getDescriptorFile() {
      return myFile;
    }
- 
-   public boolean isHierarhyEnabled() {
-     return false;
-   }
- 
-   public PsiElement getDeclaration() {
+
+  public PsiElement getDeclaration() {
      return myFile;
    }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,8 +67,7 @@ public class PyTestCommandLineState extends PythonTestCommandLineStateBase {
     assert script_params != null;
     String params = myConfiguration.getParams();
     if (!StringUtil.isEmptyOrSpaces(params)) {
-      for (String p : StringUtil.splitHonorQuotes(params, ' '))
-        script_params.addParameter(p);
+      script_params.addParametersString(params);
     }
 
     String keywords = myConfiguration.getKeywords();
@@ -82,7 +81,7 @@ public class PyTestCommandLineState extends PythonTestCommandLineStateBase {
   protected ConsoleView createAndAttachConsole(Project project, ProcessHandler processHandler, Executor executor)
     throws ExecutionException {
     final ConsoleView consoleView = super.createAndAttachConsole(project, processHandler, executor);
-    consoleView.addMessageFilter(new PyTestTracebackFilter(project, myConfiguration.getWorkingDirectory()));
+    addTracebackFilter(project, consoleView, processHandler);
     return consoleView;
   }
 }

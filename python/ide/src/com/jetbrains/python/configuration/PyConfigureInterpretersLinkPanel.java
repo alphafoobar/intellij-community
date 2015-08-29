@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@
 package com.jetbrains.python.configuration;
 
 import com.intellij.ide.DataManager;
-import com.intellij.openapi.options.newEditor.OptionsEditor;
+import com.intellij.openapi.options.ex.Settings;
 import com.intellij.ui.ClickListener;
 import com.intellij.ui.components.JBLabel;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
@@ -36,14 +37,11 @@ public class PyConfigureInterpretersLinkPanel extends JPanel {
     myConfigureLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
     new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         if (clickCount == 1) {
-          final OptionsEditor optionsEditor = OptionsEditor.KEY.getData(DataManager.getInstance().getDataContext(parentPanel));
-          if (optionsEditor != null) {
-            PythonSdkConfigurable configurable = optionsEditor.findConfigurable(PythonSdkConfigurable.class);
-            if (configurable != null) {
-              optionsEditor.clearSearchAndSelect(configurable);
-            }
+          Settings settings = Settings.KEY.getData(DataManager.getInstance().getDataContext(parentPanel));
+          if (settings != null) {
+            settings.select(settings.find(PyActiveSdkModuleConfigurable.class.getName()));
             return true;
           }
         }

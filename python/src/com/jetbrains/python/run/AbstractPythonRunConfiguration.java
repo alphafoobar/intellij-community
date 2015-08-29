@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,10 +37,10 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.util.PathMappingSettings;
 import com.intellij.util.PlatformUtils;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PythonModuleTypeBase;
-import com.intellij.util.PathMappingSettings;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.sdk.PythonEnvUtil;
@@ -49,6 +49,7 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,7 @@ public abstract class AbstractPythonRunConfiguration<T extends AbstractRunConfig
   private boolean myUseModuleSdk;
   private boolean myAddContentRoots = true;
   private boolean myAddSourceRoots = true;
+
   protected PathMappingSettings myMappingSettings;
 
   public AbstractPythonRunConfiguration(Project project, final ConfigurationFactory factory) {
@@ -226,7 +228,7 @@ public abstract class AbstractPythonRunConfiguration<T extends AbstractRunConfig
     final String addContentRoots = JDOMExternalizerUtil.readField(element, "ADD_CONTENT_ROOTS");
     myAddContentRoots = addContentRoots == null || Boolean.parseBoolean(addContentRoots);
     final String addSourceRoots = JDOMExternalizerUtil.readField(element, "ADD_SOURCE_ROOTS");
-    myAddSourceRoots = addSourceRoots == null|| Boolean.parseBoolean(addSourceRoots);
+    myAddSourceRoots = addSourceRoots == null || Boolean.parseBoolean(addSourceRoots);
     getConfigurationModule().readExternal(element);
 
     setMappingSettings(PathMappingSettings.readExternal(element));
@@ -297,23 +299,23 @@ public abstract class AbstractPythonRunConfiguration<T extends AbstractRunConfig
   }
 
   @Override
-  public boolean addContentRoots() {
+  public boolean shouldAddContentRoots() {
     return myAddContentRoots;
   }
 
   @Override
-  public boolean addSourceRoots() {
+  public boolean shouldAddSourceRoots() {
     return myAddSourceRoots;
   }
 
   @Override
-  public void addSourceRoots(boolean add) {
-    myAddSourceRoots = add;
+  public void setAddSourceRoots(boolean flag) {
+    myAddSourceRoots = flag;
   }
 
   @Override
-  public void addContentRoots(boolean add) {
-    myAddContentRoots = add;
+  public void setAddContentRoots(boolean flag) {
+    myAddContentRoots = flag;
   }
 
   public static void copyParams(AbstractPythonRunConfigurationParams source, AbstractPythonRunConfigurationParams target) {
@@ -325,8 +327,8 @@ public abstract class AbstractPythonRunConfiguration<T extends AbstractRunConfig
     target.setModule(source.getModule());
     target.setUseModuleSdk(source.isUseModuleSdk());
     target.setMappingSettings(source.getMappingSettings());
-    target.addContentRoots(source.addContentRoots());
-    target.addSourceRoots(source.addSourceRoots());
+    target.setAddContentRoots(source.shouldAddContentRoots());
+    target.setAddSourceRoots(source.shouldAddSourceRoots());
   }
 
   /**
@@ -411,12 +413,27 @@ public abstract class AbstractPythonRunConfiguration<T extends AbstractRunConfig
     final VirtualFile virtualFile = location.getVirtualFile();
     if (virtualFile != null) {
       String path = virtualFile.getCanonicalPath();
-      if (pyClass != null)
+      if (pyClass != null) {
         path += "::" + pyClass.getName();
-      if (pyFunction != null)
+      }
+      if (pyFunction != null) {
         path += "::" + pyFunction.getName();
+      }
       return path;
     }
     return null;
+  }
+
+  /**
+   * @return working directory to run, never null, does its best to return project dir if empty.
+   * Unlike {@link #getWorkingDirectory()} it does not simply take directory from config.
+   */
+  @NotNull
+  public String getWorkingDirectorySafe() {
+    final String result = StringUtil.isEmpty(myWorkingDirectory) ? getProject().getBasePath() : myWorkingDirectory;
+    if (result == null) {
+      return new File(".").getAbsolutePath();
+    }
+    return result;
   }
 }

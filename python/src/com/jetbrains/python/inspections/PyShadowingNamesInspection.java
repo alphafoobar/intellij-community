@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.jetbrains.python.codeInsight.controlflow.ControlFlowCache;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.Scope;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
+import com.jetbrains.python.inspections.quickfix.PyRenameElementQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.resolve.ResolveProcessor;
@@ -77,7 +78,7 @@ public class PyShadowingNamesInspection extends PyInspection {
 
     @Override
     public void visitPyTargetExpression(@NotNull PyTargetExpression node) {
-      if (node.getQualifier() == null) {
+      if (!node.isQualified()) {
         processElement(node);
       }
     }
@@ -98,7 +99,7 @@ public class PyShadowingNamesInspection extends PyInspection {
           final ScopeOwner nextOwner = ScopeUtil.getScopeOwner(owner);
           if (nextOwner != null) {
             final ResolveProcessor processor = new ResolveProcessor(name);
-            PyResolveUtil.scopeCrawlUp(processor, nextOwner, null, name, null);
+            PyResolveUtil.scopeCrawlUp(processor, nextOwner, null, name, null, null);
             final PsiElement resolved = processor.getResult();
             if (resolved != null) {
               final PyComprehensionElement comprehension = PsiTreeUtil.getParentOfType(resolved, PyComprehensionElement.class);

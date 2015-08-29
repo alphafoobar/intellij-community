@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,12 @@ import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.keymap.KeyMapBundle;
 import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.keymap.impl.ShortcutRestrictions;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NotNull;
@@ -59,7 +61,8 @@ class MouseShortcutDialog extends DialogWrapper{
     MouseShortcut shortcut,
     @NotNull Keymap keymap,
     @NotNull String actiondId,
-    @NotNull Group mainGroup
+    @NotNull Group mainGroup,
+    @NotNull ShortcutRestrictions restrictions
   ){
     super(parentComponent,true);
     setTitle(KeyMapBundle.message("mouse.shortcut.dialog.title"));
@@ -98,6 +101,8 @@ class MouseShortcutDialog extends DialogWrapper{
       myButton=-1;
       myModifiers=-1;
     }
+
+    myRbDoubleClick.setEnabled(restrictions.allowMouseDoubleClick);
 
     updatePreviewAndConflicts();
 
@@ -162,7 +167,7 @@ class MouseShortcutDialog extends DialogWrapper{
     );
     clickPadPanel.setBorder(IdeBorderFactory.createTitledBorder(
       KeyMapBundle.message("mouse.shortcut.dialog.click.pad.border"), true));
-    myClickPad.setPreferredSize(new Dimension(260,60));
+    myClickPad.setPreferredSize(JBUI.size(260, 60));
     clickPadPanel.add(myClickPad,BorderLayout.CENTER);
 
     // Shortcut preview
@@ -188,7 +193,7 @@ class MouseShortcutDialog extends DialogWrapper{
       conflictsPanel,
       new GridBagConstraints(0,3,1,1,1,1,GridBagConstraints.CENTER,GridBagConstraints.BOTH,new Insets(0,0,0,0),0,0)
     );
-    myTarConflicts.setPreferredSize(new Dimension(260,60));
+    myTarConflicts.setPreferredSize(JBUI.size(260,60));
     JScrollPane scrollPane= ScrollPaneFactory.createScrollPane(myTarConflicts);
     scrollPane.setBorder(null);
     conflictsPanel.add(

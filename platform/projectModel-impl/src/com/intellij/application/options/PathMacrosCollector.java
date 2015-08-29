@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,12 @@ import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtilRt;
-import gnu.trove.THashSet;
+import com.intellij.util.containers.SmartHashSet;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -54,10 +55,16 @@ public class PathMacrosCollector extends PathMacroMap {
                          PathMacros.getInstance());
   }
 
-  public static Set<String> getMacroNames(Element root, @Nullable PathMacroFilter filter, @NotNull final PathMacros pathMacros) {
+  @NotNull
+  public static Set<String> getMacroNames(Element root, @Nullable PathMacroFilter filter, @NotNull PathMacros pathMacros) {
     final PathMacrosCollector collector = new PathMacrosCollector();
     collector.substitute(root, true, false, filter);
-    final Set<String> result = new THashSet<String>(collector.myMacroMap.keySet());
+    Set<String> preResult = collector.myMacroMap.keySet();
+    if (preResult.isEmpty()) {
+      return Collections.emptySet();
+    }
+
+    Set<String> result = new SmartHashSet<String>(preResult);
     result.removeAll(pathMacros.getSystemMacroNames());
     result.removeAll(pathMacros.getLegacyMacroNames());
     result.removeAll(PathMacrosImpl.getToolMacroNames());
@@ -65,8 +72,9 @@ public class PathMacrosCollector extends PathMacroMap {
     return result;
   }
 
+  @NotNull
   @Override
-  public String substituteRecursively(String text, boolean caseSensitive) {
+  public String substituteRecursively(@NotNull String text, boolean caseSensitive) {
     if (StringUtil.isEmpty(text)) {
       return text;
     }

@@ -1,9 +1,6 @@
 package com.intellij.updater;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
@@ -13,14 +10,10 @@ import java.util.zip.ZipOutputStream;
 public class PatchFileCreator {
   private static final String PATCH_INFO_FILE_NAME = ".patch-info";
 
-  public static void create(File olderDir,
-                            File newerDir,
-                            File patchFile,
-                            List<String> ignoredFiles,
-                            List<String> criticalFiles,
-                            List<String> optionalFiles,
-                            UpdaterUI ui) throws IOException, OperationCancelledException {
-    Patch patchInfo = new Patch(olderDir, newerDir, ignoredFiles, criticalFiles, optionalFiles, ui);
+  public static Patch create(PatchSpec spec, File patchFile, UpdaterUI ui) throws IOException, OperationCancelledException {
+
+    Patch patchInfo = new Patch(spec, ui);
+    Runner.logger.info("Creating the patch file '" + patchFile + "'...");
     ui.startProcess("Creating the patch file '" + patchFile + "'...");
     ui.checkCancelled();
 
@@ -32,8 +25,12 @@ public class PatchFileCreator {
       patchInfo.write(out);
       out.closeEntry();
 
+      File olderDir = new File(spec.getOldFolder());
+      File newerDir = new File(spec.getNewFolder());
       List<PatchAction> actions = patchInfo.getActions();
       for (PatchAction each : actions) {
+
+        Runner.logger.info("Packing " + each.getPath());
         ui.setStatus("Packing " + each.getPath());
         ui.checkCancelled();
         each.buildPatchFile(olderDir, newerDir, out);
@@ -42,6 +39,8 @@ public class PatchFileCreator {
     finally {
       out.close();
     }
+
+    return patchInfo;
   }
 
   public static PreparationResult prepareAndValidate(File patchFile,
@@ -51,6 +50,7 @@ public class PatchFileCreator {
 
     ZipFile zipFile = new ZipFile(patchFile);
     try {
+
       InputStream in = Utils.getEntryInputStream(zipFile, PATCH_INFO_FILE_NAME);
       try {
         patch = new Patch(in);
@@ -62,6 +62,8 @@ public class PatchFileCreator {
     finally {
       zipFile.close();
     }
+
+    ui.setDescription(patch.getOldBuild(), patch.getNewBuild());
 
     List<ValidationResult> validationResults = patch.validate(toDir, ui);
     return new PreparationResult(patch, patchFile, toDir, validationResults);

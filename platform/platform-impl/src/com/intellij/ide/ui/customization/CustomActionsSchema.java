@@ -32,6 +32,7 @@ import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.util.ImageLoader;
@@ -204,7 +205,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
         if (pair.first.equals(id)){
           final ActionGroup actionGroup = (ActionGroup)ActionManager.getInstance().getAction(id);
           if (actionGroup != null) { //J2EE/Commander plugin was disabled
-            myIdToActionGroup.put(id, CustomizationUtil.correctActionGroup(actionGroup, this, pair.second));
+            myIdToActionGroup.put(id, CustomizationUtil.correctActionGroup(actionGroup, this, pair.second, pair.second));
           }
         }
       }
@@ -216,7 +217,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
     for (Pair pair : myIdToNameList) {
       final ActionGroup actionGroup = (ActionGroup)ActionManager.getInstance().getAction(pair.first);
       if (actionGroup != null) { //J2EE/Commander plugin was disabled
-        myIdToActionGroup.put(pair.first, CustomizationUtil.correctActionGroup(actionGroup, this, pair.second));
+        myIdToActionGroup.put(pair.first, CustomizationUtil.correctActionGroup(actionGroup, this, pair.second, pair.second));
       }
     }
   }
@@ -327,7 +328,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
         if (iconPath != null && new File(FileUtil.toSystemDependentName(iconPath)).exists()) {
           Image image = null;
           try {
-            image = ImageLoader.loadFromStream(VfsUtil.convertToURL(VfsUtil.pathToUrl(iconPath)).openStream());
+            image = ImageLoader.loadFromStream(VfsUtilCore.convertToURL(VfsUtil.pathToUrl(iconPath)).openStream());
           }
           catch (IOException e) {
             LOG.debug(e);
@@ -339,6 +340,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
         }
         if (anAction.getTemplatePresentation() != null) {
           anAction.getTemplatePresentation().setIcon(icon);
+          anAction.getTemplatePresentation().setDisabledIcon(IconLoader.getDisabledIcon(icon));
           anAction.setDefaultIcon(false);
         }
       }

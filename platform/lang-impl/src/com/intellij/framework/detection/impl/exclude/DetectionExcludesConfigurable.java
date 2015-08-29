@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,17 +28,21 @@ import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.ui.components.JBList;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -66,15 +70,33 @@ public class DetectionExcludesConfigurable implements Configurable {
   @NotNull
   public JComponent createComponent() {
     myEnabledDetectionCheckBox = new JCheckBox("Enable framework detection");
+    myEnabledDetectionCheckBox.setBorder(new EmptyBorder(10, 10, 0, 0));
     final JBList excludesList = new JBList(myModel);
-    excludesList.setCellRenderer(new ColoredListCellRenderer() {
+    final ColoredListCellRenderer renderer = new ColoredListCellRenderer() {
+      JPanel panel = new JPanel(new BorderLayout());
+      {
+        panel.setBorder(new EmptyBorder(2, 10, 2, 0));
+        panel.add(this);
+      }
+
       @Override
       protected void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+        setIconTextGap(4);
         if (value instanceof ExcludeListItem) {
           ((ExcludeListItem)value).renderItem(this);
+          setBorder(new EmptyBorder(0, 10, 0, 0));
         }
       }
-    });
+
+      @Override
+      public Component getListCellRendererComponent(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+        super.getListCellRendererComponent(list, value, index, selected, hasFocus);
+        panel.setBackground(UIUtil.getListBackground(selected));
+        return panel;
+      }
+    };
+    renderer.setMyBorder(new EmptyBorder(0,0,0,0));
+    excludesList.setCellRenderer(renderer);
     final ToolbarDecorator decorator = ToolbarDecorator.createDecorator(excludesList)
       .disableUpAction().disableDownAction()
       .setAddAction(new AnActionButtonRunnable() {
@@ -83,9 +105,12 @@ public class DetectionExcludesConfigurable implements Configurable {
           doAddAction(button);
         }
       });
+    if (Registry.is("ide.new.project.settings")) {
+      decorator.setPanelBorder(new CustomLineBorder(1, 0, 0, 0));
+    }
     myMainPanel = new JPanel(new BorderLayout(0, 5));
     myMainPanel.add(myEnabledDetectionCheckBox, BorderLayout.NORTH);
-    final LabeledComponent<JPanel> excludesComponent = LabeledComponent.create(decorator.createPanel(), "Exclude from detection:");
+    final LabeledComponent<JPanel> excludesComponent = LabeledComponent.create(decorator.createPanel(), "   Exclude from detection:");
     myMainPanel.add(excludesComponent);
     myEnabledDetectionCheckBox.addActionListener(new ActionListener() {
       @Override
@@ -231,9 +256,6 @@ public class DetectionExcludesConfigurable implements Configurable {
 
   @Nullable
   private ExcludesConfigurationState computeState() {
-    if (myModel.getItems().isEmpty() && myEnabledDetectionCheckBox.isSelected()) {
-      return null;
-    }
     final ExcludesConfigurationState state = new ExcludesConfigurationState();
     state.setDetectionEnabled(myEnabledDetectionCheckBox.isSelected());
     for (ExcludeListItem item : myModel.getItems()) {
@@ -253,22 +275,20 @@ public class DetectionExcludesConfigurable implements Configurable {
   public void reset() {
     myModel.clear();
     final ExcludesConfigurationState state = myConfiguration.getActualState();
-    myEnabledDetectionCheckBox.setSelected(state == null || state.isDetectionEnabled());
-    if (state != null) {
-      for (String typeId : state.getFrameworkTypes()) {
-        final FrameworkType frameworkType = FrameworkDetectorRegistry.getInstance().findFrameworkType(typeId);
-        myModel.add(frameworkType != null ? new ValidExcludeListItem(frameworkType, null) : new InvalidExcludeListItem(typeId, null));
+    myEnabledDetectionCheckBox.setSelected(state.isDetectionEnabled());
+    for (String typeId : state.getFrameworkTypes()) {
+      final FrameworkType frameworkType = FrameworkDetectorRegistry.getInstance().findFrameworkType(typeId);
+      myModel.add(frameworkType != null ? new ValidExcludeListItem(frameworkType, null) : new InvalidExcludeListItem(typeId, null));
+    }
+    for (ExcludedFileState fileState : state.getFiles()) {
+      VirtualFile file = VirtualFileManager.getInstance().findFileByUrl(fileState.getUrl());
+      final String typeId = fileState.getFrameworkType();
+      if (typeId == null) {
+        myModel.add(file != null ? new ValidExcludeListItem(null, file) : new InvalidExcludeListItem(null, fileState.getUrl()));
       }
-      for (ExcludedFileState fileState : state.getFiles()) {
-        VirtualFile file = VirtualFileManager.getInstance().findFileByUrl(fileState.getUrl());
-        final String typeId = fileState.getFrameworkType();
-        if (typeId == null) {
-          myModel.add(file != null ? new ValidExcludeListItem(null, file) : new InvalidExcludeListItem(null, fileState.getUrl()));
-        }
-        else {
-          final FrameworkType frameworkType = FrameworkDetectorRegistry.getInstance().findFrameworkType(typeId);
-          myModel.add(frameworkType != null && file != null? new ValidExcludeListItem(frameworkType, file) : new InvalidExcludeListItem(typeId, fileState.getUrl()));
-        }
+      else {
+        final FrameworkType frameworkType = FrameworkDetectorRegistry.getInstance().findFrameworkType(typeId);
+        myModel.add(frameworkType != null && file != null? new ValidExcludeListItem(frameworkType, file) : new InvalidExcludeListItem(typeId, fileState.getUrl()));
       }
     }
   }

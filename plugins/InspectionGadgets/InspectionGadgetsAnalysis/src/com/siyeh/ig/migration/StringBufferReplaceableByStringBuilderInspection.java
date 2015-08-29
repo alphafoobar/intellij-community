@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
@@ -100,7 +100,7 @@ public class StringBufferReplaceableByStringBuilderInspection extends BaseInspec
     }
 
     @Override
-    public void doFix(Project project, ProblemDescriptor descriptor) throws IncorrectOperationException {
+    public void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
       final PsiElement parent = element.getParent();
       final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
@@ -113,6 +113,9 @@ public class StringBufferReplaceableByStringBuilderInspection extends BaseInspec
       final PsiClassType stringBuilderType = factory.createType(stringBuilderClass);
       final PsiTypeElement stringBuilderTypeElement = factory.createTypeElement(stringBuilderType);
       final PsiElement grandParent = parent.getParent();
+      if (!(grandParent instanceof PsiDeclarationStatement)) {
+        return;
+      }
       final PsiDeclarationStatement declarationStatement = (PsiDeclarationStatement)grandParent;
       final PsiElement[] declaredElements = declarationStatement.getDeclaredElements();
       for (PsiElement declaredElement : declaredElements) {
@@ -148,6 +151,11 @@ public class StringBufferReplaceableByStringBuilderInspection extends BaseInspec
     return new StringBufferReplaceableByStringBuilderVisitor();
   }
 
+  @Override
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
+  }
+
   private static class StringBufferReplaceableByStringBuilderVisitor extends BaseInspectionVisitor {
 
     private static final Set<String> excludes = ContainerUtil.newHashSet(CommonClassNames.JAVA_LANG_STRING_BUILDER,
@@ -155,9 +163,6 @@ public class StringBufferReplaceableByStringBuilderInspection extends BaseInspec
 
     @Override
     public void visitDeclarationStatement(PsiDeclarationStatement statement) {
-      if (!PsiUtil.isLanguageLevel5OrHigher(statement)) {
-        return;
-      }
       super.visitDeclarationStatement(statement);
       final PsiElement[] declaredElements = statement.getDeclaredElements();
       if (declaredElements.length == 0) {
@@ -201,10 +206,20 @@ public class StringBufferReplaceableByStringBuilderInspection extends BaseInspec
       if (VariableAccessUtils.variableIsReturned(variable, context, true)) {
         return false;
       }
-      if (VariableAccessUtils.variableIsPassedAsMethodArgument(variable, excludes, context, true)) {
+      if (VariableAccessUtils.variableIsUsedInInnerClass(variable, context)) {
         return false;
       }
-      if (VariableAccessUtils.variableIsUsedInInnerClass(variable, context)) {
+      if (VariableAccessUtils.variableIsPassedAsMethodArgument(variable, context, true, new Processor<PsiCall>() {
+        @Override
+        public boolean process(PsiCall call) {
+          final PsiMethod method = call.resolveMethod();
+          if (method == null) {
+            return false;
+          }
+          final PsiClass aClass = method.getContainingClass();
+          return aClass != null && excludes.contains(aClass.getQualifiedName());
+        }
+      })) {
         return false;
       }
       return true;

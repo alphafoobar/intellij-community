@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,18 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.testFramework.PlatformLangTestCase;
+import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.testFramework.PlatformTestCase;
 
 import java.io.File;
 
-public class LocatorTest extends PlatformLangTestCase {
+public class LocatorTest extends PlatformTestCase {
   public void test() throws Exception {
     File locatorFile = new File(PathManager.getSystemPath() + "/" + ApplicationEx.LOCATOR_FILE_NAME);
     assertTrue("doesn't exist: " + locatorFile.getPath(), locatorFile.exists());
     assertTrue("can't read: " + locatorFile.getPath(), locatorFile.canRead());
 
-    String home = FileUtil.loadFile(locatorFile, "UTF-8");
+    String home = FileUtil.loadFile(locatorFile, CharsetToolkit.UTF8_CHARSET);
     assertTrue(home, StringUtil.isNotEmpty(home));
 
     assertEquals(home, PathManager.getHomePath());

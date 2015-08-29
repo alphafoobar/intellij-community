@@ -15,8 +15,10 @@
  */
 package com.intellij.refactoring.introduceField;
 
+import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.codeInsight.TestFrameworks;
+import com.intellij.codeInsight.daemon.impl.quickfix.AnonymousTargetClassPreselectionUtil;
 import com.intellij.codeInsight.navigation.NavigationUtil;
 import com.intellij.ide.util.PsiClassListCellRenderer;
 import com.intellij.openapi.application.ApplicationManager;
@@ -43,6 +45,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import static com.intellij.refactoring.introduceField.BaseExpressionToFieldHandler.InitializationPlace.IN_CONSTRUCTOR;
@@ -65,7 +68,7 @@ public abstract class LocalToFieldHandler {
   public boolean convertLocalToField(final PsiLocalVariable local, final Editor editor) {
     boolean tempIsStatic = myIsConstant;
     PsiElement parent = local.getParent();
-    List<PsiClass> classes = new ArrayList<PsiClass>();
+    final List<PsiClass> classes = new ArrayList<PsiClass>();
     while (parent != null && parent.getContainingFile() != null) {
       if (parent instanceof PsiClass && !(myIsConstant && parent instanceof PsiAnonymousClass)) {
         classes.add((PsiClass)parent);
@@ -89,13 +92,16 @@ public abstract class LocalToFieldHandler {
       if (convertLocalToField(local, classes.get(getChosenClassIndex(classes)), editor, tempIsStatic)) return false;
     } else {
       final boolean isStatic = tempIsStatic;
+      final PsiClass firstClass = classes.get(0);
+      final PsiClass preselection = AnonymousTargetClassPreselectionUtil.getPreselection(classes, firstClass);
       NavigationUtil.getPsiElementPopup(classes.toArray(new PsiClass[classes.size()]), new PsiClassListCellRenderer(), "Choose class to introduce " + (myIsConstant ? "constant" : "field"), new PsiElementProcessor<PsiClass>() {
         @Override
         public boolean execute(@NotNull PsiClass aClass) {
+          AnonymousTargetClassPreselectionUtil.rememberSelection(aClass, aClass);
           convertLocalToField(local, aClass, editor, isStatic);
           return false;
         }
-      }).showInBestPositionFor(editor);
+      }, preselection).showInBestPositionFor(editor);
     }
 
     return true;
@@ -167,7 +173,7 @@ public abstract class LocalToFieldHandler {
     }
   }
 
-  private static PsiStatement createAssignment(PsiLocalVariable local, String fieldname, PsiElementFactory factory) {
+  private static PsiExpressionStatement createAssignment(PsiLocalVariable local, String fieldname, PsiElementFactory factory) {
     try {
       String pattern = fieldname + "=0;";
       PsiExpressionStatement statement = (PsiExpressionStatement)factory.createStatementFromText(pattern, null);
@@ -197,6 +203,7 @@ public abstract class LocalToFieldHandler {
     } else {
       assignment = (PsiStatement)body.add(assignment);
     }
+    appendComments(local, assignment);
     local.delete();
     return assignment;
   }
@@ -222,14 +229,18 @@ public abstract class LocalToFieldHandler {
               continue;
             }
             if ("super".equals(text) && enclosingConstructor == null && PsiTreeUtil.isAncestor(constructor, local, false)) {
+              final PsiStatement statement = (PsiStatement)body.addAfter(assignment, first);
+              appendComments(local, statement);
               local.delete();
-              return (PsiStatement)body.addAfter(assignment, first);
+              return statement;
             }
           }
         }
         if (enclosingConstructor == null && PsiTreeUtil.isAncestor(constructor, local, false)) {
+          final PsiStatement statement = (PsiStatement)body.addBefore(assignment, first);
+          appendComments(local, statement);
           local.delete();
-          return (PsiStatement)body.addBefore(assignment, first);
+          return statement;
         }
       }
 
@@ -246,7 +257,10 @@ public abstract class LocalToFieldHandler {
       }
     }
 
-    if (enclosingConstructor == null) local.delete();
+    if (enclosingConstructor == null) {
+      appendComments(assignment, local);
+      local.delete();
+    }
     return assignment;
   }
 
@@ -261,7 +275,6 @@ public abstract class LocalToFieldHandler {
     private final BaseExpressionToFieldHandler.InitializationPlace myInitializerPlace;
     private final PsiExpression[] myOccurences;
     private PsiField myField;
-    private PsiStatement myAssignmentStatement;
 
     public IntroduceFieldRunnable(boolean rebindNeeded,
                                   PsiLocalVariable local,
@@ -282,6 +295,7 @@ public abstract class LocalToFieldHandler {
 
     public void run() {
       try {
+        ChangeContextUtil.encodeContextInfo(myDestinationClass, true);
         final boolean rebindNeeded2 = !myVariableName.equals(myFieldName) || myRebindNeeded;
         final PsiReference[] refs;
         if (rebindNeeded2) {
@@ -301,7 +315,7 @@ public abstract class LocalToFieldHandler {
         }
 
         myLocal.normalizeDeclaration();
-        PsiDeclarationStatement declarationStatement = (PsiDeclarationStatement)myLocal.getParent();
+        PsiElement declarationStatement = myLocal.getParent();
         final BaseExpressionToFieldHandler.InitializationPlace finalInitializerPlace;
         if (myLocal.getInitializer() == null) {
           finalInitializerPlace = IN_FIELD_DECLARATION;
@@ -313,24 +327,30 @@ public abstract class LocalToFieldHandler {
 
         switch (finalInitializerPlace) {
           case IN_FIELD_DECLARATION:
+            appendComments(declarationStatement, myField);
             declarationStatement.delete();
             break;
 
           case IN_CURRENT_METHOD:
-            PsiStatement statement = createAssignment(myLocal, myFieldName, factory);
-            myAssignmentStatement = (PsiStatement)declarationStatement.replace(statement);
+            PsiExpressionStatement statement = createAssignment(myLocal, myFieldName, factory);
+            appendComments(declarationStatement, declarationStatement);
+            if (declarationStatement instanceof PsiDeclarationStatement) {
+              declarationStatement.replace(statement);
+            } else {
+              myLocal.replace(statement.getExpression());
+            }
             break;
 
           case IN_CONSTRUCTOR:
-            myAssignmentStatement = addInitializationToConstructors(myLocal, myField, enclosingConstructor, factory);
+            addInitializationToConstructors(myLocal, myField, enclosingConstructor, factory);
             break;
           case IN_SETUP_METHOD:
-            myAssignmentStatement = addInitializationToSetUp(myLocal, myField, factory);
+            addInitializationToSetUp(myLocal, myField, factory);
         }
 
         if (enclosingConstructor != null && myInitializerPlace == IN_CONSTRUCTOR) {
           PsiStatement statement = createAssignment(myLocal, myFieldName, factory);
-          myAssignmentStatement = (PsiStatement)declarationStatement.replace(statement);
+          declarationStatement.replace(statement);
         }
 
         if (rebindNeeded2) {
@@ -342,6 +362,7 @@ public abstract class LocalToFieldHandler {
             }
           }
           //RefactoringUtil.renameVariableReferences(local, pPrefix + fieldName, GlobalSearchScope.projectScope(myProject));
+          ChangeContextUtil.decodeContextInfo(myDestinationClass, myDestinationClass, null);
         }
       }
       catch (IncorrectOperationException e) {
@@ -352,9 +373,13 @@ public abstract class LocalToFieldHandler {
     public PsiField getField() {
       return myField;
     }
+  }
 
-    public PsiStatement getAssignmentStatement() {
-      return myAssignmentStatement;
+  private static void appendComments(PsiElement declarationStatement, PsiElement element) {
+    final Collection<PsiComment> comments = PsiTreeUtil.findChildrenOfType(declarationStatement, PsiComment.class);
+    final PsiElement parent = element.getParent();
+    for (PsiComment comment : comments) {
+      parent.addBefore(comment, element);
     }
   }
 }

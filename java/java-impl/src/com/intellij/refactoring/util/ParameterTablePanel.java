@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
  */
 package com.intellij.refactoring.util;
 
-import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.refactoring.ui.TypeSelector;
 import com.intellij.refactoring.ui.TypeSelectorManager;
 import com.intellij.refactoring.ui.TypeSelectorManagerImpl;
 import com.intellij.ui.BooleanTableCellRenderer;
+import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ui.TableUtil;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBComboBoxLabel;
@@ -82,8 +82,9 @@ public abstract class ParameterTablePanel extends JPanel {
 
     myTable.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     myTable.setCellSelectionEnabled(true);
-    myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setCellRenderer(new CheckBoxTableCellRenderer());
-    myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setMaxWidth(new JCheckBox().getPreferredSize().width);
+    TableColumn checkboxColumn = myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN);
+    TableUtil.setupCheckboxColumn(checkboxColumn);
+    checkboxColumn.setCellRenderer(new CheckBoxTableCellRenderer());
     myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_NAME_COLUMN).setCellRenderer(new DefaultTableCellRenderer() {
       public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
         super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
@@ -153,7 +154,7 @@ public abstract class ParameterTablePanel extends JPanel {
 
 
     myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN).setCellRenderer(new DefaultTableCellRenderer() {
-      private JBComboBoxLabel myLabel = new JBComboBoxLabel();
+      private final JBComboBoxLabel myLabel = new JBComboBoxLabel();
 
       public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
         myLabel.setText(String.valueOf(value));
@@ -284,7 +285,7 @@ public abstract class ParameterTablePanel extends JPanel {
     public Object getValueAt(int rowIndex, int columnIndex) {
       switch (columnIndex) {
         case CHECKMARK_COLUMN: {
-          return getVariableData()[rowIndex].passAsParameter ? Boolean.TRUE : Boolean.FALSE;
+          return getVariableData()[rowIndex].passAsParameter;
         }
         case PARAMETER_NAME_COLUMN: {
           return getVariableData()[rowIndex].name;
@@ -309,7 +310,7 @@ public abstract class ParameterTablePanel extends JPanel {
         case PARAMETER_NAME_COLUMN: {
           VariableData data = getVariableData()[rowIndex];
           String name = (String)aValue;
-          if (JavaPsiFacade.getInstance(myProject).getNameHelper().isIdentifier(name)) {
+          if (PsiNameHelper.getInstance(myProject).isIdentifier(name)) {
             data.name = name;
           }
           updateSignature();

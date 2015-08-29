@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,17 +23,20 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.ex.util.LexerEditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
-import com.intellij.openapi.fileTypes.*;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.InternalFileType;
+import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.fileTypes.impl.CustomSyntaxTableFileType;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.CustomHighlighterTokenType;
-import com.intellij.psi.impl.cache.impl.BaseFilterLexer;
 import com.intellij.psi.impl.cache.CacheUtil;
+import com.intellij.psi.impl.cache.impl.BaseFilterLexer;
 import com.intellij.psi.impl.cache.impl.IndexPatternUtil;
 import com.intellij.psi.impl.cache.impl.OccurrenceConsumer;
 import com.intellij.psi.impl.cache.impl.todo.TodoIndexEntry;
 import com.intellij.psi.impl.cache.impl.todo.TodoIndexers;
+import com.intellij.psi.impl.cache.impl.todo.VersionedTodoIndexer;
 import com.intellij.psi.search.IndexPattern;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
@@ -116,7 +119,7 @@ public abstract class PlatformIdTableBuilding {
     return ourTodoIndexers.containsKey(fileType) || TodoIndexers.INSTANCE.forFileType(fileType) != null || fileType instanceof InternalFileType;
   }
 
-  private static class CompositeTodoIndexer implements DataIndexer<TodoIndexEntry, Integer, FileContent> {
+  private static class CompositeTodoIndexer extends VersionedTodoIndexer {
     private final DataIndexer<TodoIndexEntry, Integer, FileContent>[] indexers;
 
     public CompositeTodoIndexer(@NotNull DataIndexer<TodoIndexEntry, Integer, FileContent>... indexers) {
@@ -125,7 +128,7 @@ public abstract class PlatformIdTableBuilding {
 
     @NotNull
     @Override
-    public Map<TodoIndexEntry, Integer> map(FileContent inputData) {
+    public Map<TodoIndexEntry, Integer> map(@NotNull FileContent inputData) {
       Map<TodoIndexEntry, Integer> result = ContainerUtil.newTroveMap();
       for (DataIndexer<TodoIndexEntry, Integer, FileContent> indexer : indexers) {
         for (Map.Entry<TodoIndexEntry, Integer> entry : indexer.map(inputData).entrySet()) {
@@ -139,9 +142,18 @@ public abstract class PlatformIdTableBuilding {
       }
       return result;
     }
+
+    @Override
+    public int getVersion() {
+      int version = super.getVersion();
+      for(DataIndexer dataIndexer:indexers) {
+        version += dataIndexer instanceof VersionedTodoIndexer ? ((VersionedTodoIndexer)dataIndexer).getVersion() : 0xFF;
+      }
+      return version;
+    }
   }
 
-  private static class TokenSetTodoIndexer implements DataIndexer<TodoIndexEntry, Integer, FileContent> {
+  private static class TokenSetTodoIndexer extends VersionedTodoIndexer {
     @NotNull private final TokenSet myCommentTokens;
     private final VirtualFile myFile;
 
@@ -152,7 +164,7 @@ public abstract class PlatformIdTableBuilding {
 
     @Override
     @NotNull
-    public Map<TodoIndexEntry, Integer> map(final FileContent inputData) {
+    public Map<TodoIndexEntry, Integer> map(@NotNull final FileContent inputData) {
       if (IndexPatternUtil.getIndexPatternCount() > 0) {
         final CharSequence chars = inputData.getContentAsText();
         final OccurrenceConsumer occurrenceConsumer = new OccurrenceConsumer(null, true);
@@ -163,7 +175,7 @@ public abstract class PlatformIdTableBuilding {
           highlighter = editorHighlighter;
         }
         else {
-          highlighter = HighlighterFactory.createHighlighter(null, myFile);
+          highlighter = HighlighterFactory.createHighlighter(inputData.getProject(), myFile);
           highlighter.setText(chars);
         }
 
@@ -199,52 +211,5 @@ public abstract class PlatformIdTableBuilding {
       }
       return Collections.emptyMap();
     }
-  }
-
-  public static class PlainTextTodoIndexer implements DataIndexer<TodoIndexEntry, Integer, FileContent> {
-    @Override
-    @NotNull
-    public Map<TodoIndexEntry, Integer> map(final FileContent inputData) {
-      String chars = inputData.getContentAsText().toString(); // matching strings is faster than HeapCharBuffer
-
-      final IndexPattern[] indexPatterns = IndexPatternUtil.getIndexPatterns();
-      if (indexPatterns.length <= 0) {
-        return Collections.emptyMap();
-      }
-      OccurrenceConsumer occurrenceConsumer = new OccurrenceConsumer(null, true);
-      for (IndexPattern indexPattern : indexPatterns) {
-        Pattern pattern = indexPattern.getPattern();
-        if (pattern != null) {
-          Matcher matcher = pattern.matcher(chars);
-          while (matcher.find()) {
-            if (matcher.start() != matcher.end()) {
-              occurrenceConsumer.incTodoOccurrence(indexPattern);
-            }
-          }
-        }
-      }
-      Map<TodoIndexEntry, Integer> map = new HashMap<TodoIndexEntry, Integer>();
-      for (IndexPattern indexPattern : indexPatterns) {
-        final int count = occurrenceConsumer.getOccurrenceCount(indexPattern);
-        if (count > 0) {
-          map.put(new TodoIndexEntry(indexPattern.getPatternString(), indexPattern.isCaseSensitive()), count);
-        }
-      }
-      return map;
-    }
-
-  }
-
-  static {
-    IdTableBuilding.registerIdIndexer(PlainTextFileType.INSTANCE, new IdTableBuilding.PlainTextIndexer());
-    registerTodoIndexer(PlainTextFileType.INSTANCE, new PlainTextTodoIndexer());
-
-    //IdTableBuilding.registerIdIndexer(StdFileTypes.IDEA_MODULE, null);
-    //IdTableBuilding.registerIdIndexer(StdFileTypes.IDEA_WORKSPACE, null);
-    //IdTableBuilding.registerIdIndexer(StdFileTypes.IDEA_PROJECT, null);
-
-    //registerTodoIndexer(StdFileTypes.IDEA_MODULE, null);
-    //registerTodoIndexer(StdFileTypes.IDEA_WORKSPACE, null);
-    //registerTodoIndexer(StdFileTypes.IDEA_PROJECT, null);
   }
 }

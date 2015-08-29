@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,23 +29,26 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.intention.AddAnnotationPsiFix");
   protected final String myAnnotation;
-  protected final String[] myAnnotationsToRemove;
-  protected final PsiNameValuePair[] myPairs; // not used when registering local quick fix
+  private final String[] myAnnotationsToRemove;
+  private final PsiNameValuePair[] myPairs; // not used when registering local quick fix
   protected final String myText;
 
   public AddAnnotationPsiFix(@NotNull String fqn,
-                            @NotNull PsiModifierListOwner modifierListOwner,
-                            @NotNull PsiNameValuePair[] values,
-                            @NotNull String... annotationsToRemove) {
+                             @NotNull PsiModifierListOwner modifierListOwner,
+                             @NotNull PsiNameValuePair[] values,
+                             @NotNull String... annotationsToRemove) {
     super(modifierListOwner);
     myAnnotation = fqn;
+    ObjectUtils.assertAllElementsNotNull(values);
     myPairs = values;
+    ObjectUtils.assertAllElementsNotNull(annotationsToRemove);
     myAnnotationsToRemove = annotationsToRemove;
     myText = calcText(modifierListOwner, myAnnotation);
   }
@@ -64,15 +67,28 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   }
 
   @Nullable
-  public static PsiModifierListOwner getContainer(final PsiElement element) {
-    PsiModifierListOwner listOwner = PsiTreeUtil.getParentOfType(element, PsiParameter.class, false);
-    if (listOwner == null) {
-      final PsiIdentifier psiIdentifier = PsiTreeUtil.getParentOfType(element, PsiIdentifier.class, false);
-      if (psiIdentifier != null && psiIdentifier.getParent() instanceof PsiModifierListOwner) {
-        listOwner = (PsiModifierListOwner)psiIdentifier.getParent();
+  public static PsiModifierListOwner getContainer(final PsiFile file, int offset) {
+    PsiReference reference = file.findReferenceAt(offset);
+    if (reference != null) {
+      PsiElement target = reference.resolve();
+      if (target instanceof PsiMember) {
+        return (PsiMember)target;
       }
     }
-    return listOwner;
+
+    PsiElement element = file.findElementAt(offset);
+
+    PsiModifierListOwner listOwner = PsiTreeUtil.getParentOfType(element, PsiModifierListOwner.class, false);
+    if (listOwner instanceof PsiParameter) return listOwner;
+
+    if (listOwner instanceof PsiNameIdentifierOwner) {
+      PsiElement id = ((PsiNameIdentifierOwner)listOwner).getNameIdentifier();
+      if (id != null && id.getTextRange().containsOffset(offset)) { // Groovy methods will pass this check as well
+        return listOwner;
+      }
+    }
+
+    return null;
   }
 
   @Override
@@ -108,7 +124,7 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
 
     final ExternalAnnotationsManager annotationsManager = ExternalAnnotationsManager.getInstance(project);
     final PsiModifierList modifierList = myModifierListOwner.getModifierList();
-    LOG.assertTrue(modifierList != null);
+    LOG.assertTrue(modifierList != null, myModifierListOwner + " ("+myModifierListOwner.getClass()+")");
     if (modifierList.findAnnotation(myAnnotation) != null) return;
     final ExternalAnnotationsManager.AnnotationPlace annotationAnnotationPlace = annotationsManager.chooseAnnotationsPlace(myModifierListOwner);
     if (annotationAnnotationPlace == ExternalAnnotationsManager.AnnotationPlace.NOWHERE) return;
@@ -142,7 +158,7 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   public static void removePhysicalAnnotations(PsiModifierListOwner owner, String... fqns) {
     for (String fqn : fqns) {
       PsiAnnotation annotation = AnnotationUtil.findAnnotation(owner, fqn);
-      if (annotation != null) {
+      if (annotation != null && !AnnotationUtil.isInferredAnnotation(annotation)) {
         annotation.delete();
       }
     }

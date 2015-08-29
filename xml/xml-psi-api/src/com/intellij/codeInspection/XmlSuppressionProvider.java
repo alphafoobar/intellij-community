@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,14 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * @author Dmitry Avdeev
  */
-public abstract class XmlSuppressionProvider {
+public abstract class XmlSuppressionProvider implements InspectionSuppressor {
 
-  public static ExtensionPointName<XmlSuppressionProvider> EP_NAME = new ExtensionPointName<XmlSuppressionProvider>("com.intellij.xml.xmlSuppressionProvider");
+  public static final ExtensionPointName<XmlSuppressionProvider> EP_NAME = new ExtensionPointName<XmlSuppressionProvider>("com.intellij.xml.xmlSuppressionProvider");
 
   public static boolean isSuppressed(@NotNull PsiElement element, @NotNull String inspectionId) {
     for (XmlSuppressionProvider provider : Extensions.getExtensions(EP_NAME)) {
@@ -38,21 +39,20 @@ public abstract class XmlSuppressionProvider {
     return false;
   }
 
-  public static XmlSuppressionProvider getProvider(@NotNull PsiFile file) {
-    for (XmlSuppressionProvider provider : Extensions.getExtensions(EP_NAME)) {
-      if (provider.isProviderAvailable(file)) {
-        return provider;
-      }
-    }
-    throw new RuntimeException("No providers found for " + file);
-  }
-
   public abstract boolean isProviderAvailable(@NotNull PsiFile file);
 
+  @Override
   public abstract boolean isSuppressedFor(@NotNull PsiElement element, @NotNull String inspectionId);
 
   public abstract void suppressForFile(@NotNull PsiElement element, @NotNull String inspectionId);
 
   public abstract void suppressForTag(@NotNull PsiElement element, @NotNull String inspectionId);
+
+  @NotNull
+  @Override
+  public SuppressQuickFix[] getSuppressActions(@Nullable PsiElement element, @NotNull String toolId) {
+    return XmlSuppressableInspectionTool.getSuppressFixes(toolId, this);
+  }
+
 
 }

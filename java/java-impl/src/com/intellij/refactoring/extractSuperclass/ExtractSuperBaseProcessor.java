@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.MethodSignatureUtil;
 import com.intellij.refactoring.RefactoringBundle;
-import com.intellij.refactoring.listeners.RefactoringEventData;
 import com.intellij.refactoring.turnRefsToSuper.TurnRefsToSuperProcessorBase;
 import com.intellij.refactoring.util.DocCommentPolicy;
 import com.intellij.refactoring.util.RefactoringUIUtil;
@@ -34,14 +33,11 @@ import com.intellij.refactoring.util.classMembers.MemberInfo;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
 import com.intellij.usageView.UsageViewUtil;
-import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 /**
  * @author dsl
@@ -68,7 +64,7 @@ public abstract class ExtractSuperBaseProcessor extends TurnRefsToSuperProcessor
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new ExtractSuperClassViewDescriptor(myTargetDirectory, myClass, myMemberInfos);
   }
 
@@ -106,34 +102,6 @@ public abstract class ExtractSuperBaseProcessor extends TurnRefsToSuperProcessor
     return false;
   }
 
-  @Nullable
-  @Override
-  protected String getRefactoringId() {
-    return "refactoring.extractSuper";
-  }
-
-  @Nullable
-  @Override
-  protected RefactoringEventData getBeforeData() {
-    RefactoringEventData data = new RefactoringEventData();
-    data.addElement(myClass);
-    data.addMembers(myMemberInfos, new Function<MemberInfo, PsiElement>() {
-      @Override
-      public PsiElement fun(MemberInfo info) {
-        return info.getMember();
-      }
-    });
-    return data;
-  }
-
-  @Nullable
-  @Override
-  protected RefactoringEventData getAfterData(UsageInfo[] usages) {
-    RefactoringEventData data = new RefactoringEventData();
-    data.addElement(myClass);
-    return data;
-  }
-
   @NotNull
   protected UsageInfo[] findUsages() {
     PsiReference[] refs = ReferencesSearch.search(myClass, GlobalSearchScope.projectScope(myProject), false).toArray(new PsiReference[0]);
@@ -153,7 +121,7 @@ public abstract class ExtractSuperBaseProcessor extends TurnRefsToSuperProcessor
     return UsageViewUtil.removeDuplicatedUsages(usageInfos);
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     try {
       final String superClassName = myClass.getName();
       final String oldQualifiedName = myClass.getQualifiedName();
@@ -194,7 +162,7 @@ public abstract class ExtractSuperBaseProcessor extends TurnRefsToSuperProcessor
 
   protected abstract PsiClass extractSuper(String superClassName) throws IncorrectOperationException;
 
-  protected void refreshElements(PsiElement[] elements) {
+  protected void refreshElements(@NotNull PsiElement[] elements) {
     myClass = (PsiClass)elements[0];
     myTargetDirectory = (PsiDirectory)elements[1];
     for (int i = 0; i < myMemberInfos.length; i++) {

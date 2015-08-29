@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,16 @@ import com.intellij.ide.projectView.impl.ModuleGroup;
 import com.intellij.ide.projectView.impl.ProjectViewPane;
 import com.intellij.ide.projectView.impl.ProjectViewTree;
 import com.intellij.ide.scopeView.nodes.BasePsiNode;
-import com.intellij.ide.ui.customization.CustomizationUtil;
 import com.intellij.ide.util.DeleteHandler;
 import com.intellij.ide.util.DirectoryChooserUtil;
 import com.intellij.ide.util.EditorHelper;
 import com.intellij.ide.util.treeView.TreeState;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -47,8 +49,6 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleUtil;
-import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootAdapter;
@@ -71,6 +71,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.scope.packageSet.*;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.*;
+import com.intellij.ui.popup.HintUpdateSupply;
 import com.intellij.util.EditSourceOnDoubleClickHandler;
 import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
@@ -108,7 +109,7 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
   private final IdeView myIdeView = new MyIdeView();
   private final MyPsiTreeChangeAdapter myPsiTreeChangeAdapter = new MyPsiTreeChangeAdapter();
 
-  private final DnDAwareTree myTree = new DnDAwareTree(){
+  private final DnDAwareTree myTree = new JBTreeWithHintProvider(){
     @Override
     public boolean isFileColorsEnabled() {
       return ProjectViewTree.isFileColorsEnabledFor(this);
@@ -252,7 +253,7 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
 
   public void selectScope(final NamedScope scope) {
     refreshScope(scope);
-    if (scope != DefaultScopesProvider.getAllScope() && scope != null) {
+    if (scope != CustomScopesProviderEx.getAllScope() && scope != null) {
       CURRENT_SCOPE_NAME = scope.getName();
     }
   }
@@ -298,7 +299,6 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
         }
       }
     });
-    CustomizationUtil.installPopupHandler(myTree, IdeActions.GROUP_PROJECT_VIEW_POPUP, ActionPlaces.PROJECT_VIEW_POPUP);
   }
 
   @NotNull
@@ -307,10 +307,13 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
     if (treePaths != null) {
       Set<PsiElement> result = new HashSet<PsiElement>();
       for (TreePath path : treePaths) {
-        PackageDependenciesNode node = (PackageDependenciesNode)path.getLastPathComponent();
-        final PsiElement psiElement = node.getPsiElement();
-        if (psiElement != null && psiElement.isValid()) {
-          result.add(psiElement);
+        final Object component = path.getLastPathComponent();
+        if (component instanceof PackageDependenciesNode) {
+          PackageDependenciesNode node = (PackageDependenciesNode)component;
+          final PsiElement psiElement = node.getPsiElement();
+          if (psiElement != null && psiElement.isValid()) {
+            result.add(psiElement);
+          }
         }
       }
       return PsiUtilCore.toPsiElementArray(result);
@@ -321,7 +324,7 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
   public void refreshScope(@Nullable NamedScope scope) {
     FileTreeModelBuilder.clearCaches(myProject);
     if (scope == null) { //was deleted
-      scope = DefaultScopesProvider.getAllScope();
+      scope = CustomScopesProviderEx.getAllScope();
     }
     LOG.assertTrue(scope != null);
     final NamedScopesHolder holder = NamedScopesHolder.getHolder(myProject, scope.getName(), myDependencyValidationManager);
@@ -362,7 +365,7 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
   protected NamedScope getCurrentScope() {
     NamedScope scope = NamedScopesHolder.getScope(myProject, CURRENT_SCOPE_NAME);
     if (scope == null) {
-      scope = DefaultScopesProvider.getAllScope();
+      scope = CustomScopesProviderEx.getAllScope();
     }
     LOG.assertTrue(scope != null);
     return scope;
@@ -886,6 +889,7 @@ public class ScopeTreeViewPanel extends JPanel implements Disposable {
       return null;
     }
 
+    @NotNull
     @Override
     public PsiDirectory[] getDirectories() {
       PsiDirectory directory = getDirectory();

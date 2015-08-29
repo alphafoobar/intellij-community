@@ -68,8 +68,9 @@ public class MavenProjectsTree {
   private volatile List<String> myIgnoredFilesPatterns = new ArrayList<String>();
   private volatile Pattern myIgnoredFilesPatternsCache;
 
-  private Set<String> myExplicitProfiles = new HashSet<String>();
-  private final Set<String> myTemporarilyRemovedExplicitProfiles = new HashSet<String>();
+  private MavenExplicitProfiles myExplicitProfiles = MavenExplicitProfiles.NONE;
+  private final MavenExplicitProfiles myTemporarilyRemovedExplicitProfiles =
+    new MavenExplicitProfiles(new HashSet<String>(), new HashSet<String>());
 
   private final List<MavenProject> myRootProjects = new ArrayList<MavenProject>();
 
@@ -100,7 +101,8 @@ public class MavenProjectsTree {
         result.myManagedFilesPaths = readCollection(in, new LinkedHashSet<String>());
         result.myIgnoredFilesPaths = readCollection(in, new ArrayList<String>());
         result.myIgnoredFilesPatterns = readCollection(in, new ArrayList<String>());
-        result.myExplicitProfiles = readCollection(in, new THashSet<String>());
+        result.myExplicitProfiles = new MavenExplicitProfiles(readCollection(in, new THashSet<String>()),
+                                                              readCollection(in, new THashSet<String>()));
         result.myRootProjects.addAll(readProjectsRecursively(in, result));
       }
       catch (IOException e) {
@@ -166,7 +168,8 @@ public class MavenProjectsTree {
           writeCollection(out, myManagedFilesPaths);
           writeCollection(out, myIgnoredFilesPaths);
           writeCollection(out, myIgnoredFilesPatterns);
-          writeCollection(out, myExplicitProfiles);
+          writeCollection(out, myExplicitProfiles.getEnabledProfiles());
+          writeCollection(out, myExplicitProfiles.getDisabledProfiles());
           writeProjectsRecursively(out, myRootProjects);
         }
         finally {
@@ -194,7 +197,7 @@ public class MavenProjectsTree {
     }
   }
 
-  public void resetManagedFilesPathsAndProfiles(List<String> paths, Collection<String> profiles) {
+  public void resetManagedFilesPathsAndProfiles(List<String> paths, MavenExplicitProfiles profiles) {
     synchronized (myStateLock) {
       myManagedFilesPaths = new LinkedHashSet<String>(paths);
     }
@@ -202,19 +205,20 @@ public class MavenProjectsTree {
   }
 
   @TestOnly
-  public void resetManagedFilesAndProfiles(List<VirtualFile> files, Collection<String> profiles) {
+  public void resetManagedFilesAndProfiles(List<VirtualFile> files, MavenExplicitProfiles profiles) {
     resetManagedFilesPathsAndProfiles(MavenUtil.collectPaths(files), profiles);
   }
 
-  public void addManagedFilesWithProfiles(List<VirtualFile> files, Collection<String> profiles) {
+  public void addManagedFilesWithProfiles(List<VirtualFile> files, MavenExplicitProfiles profiles) {
     List<String> newFiles;
-    Set<String> newProfiles;
+    MavenExplicitProfiles newProfiles;
     synchronized (myStateLock) {
       newFiles = new ArrayList<String>(myManagedFilesPaths);
       newFiles.addAll(MavenUtil.collectPaths(files));
 
-      newProfiles = new THashSet<String>(myExplicitProfiles);
-      newProfiles.addAll(profiles);
+      newProfiles = myExplicitProfiles.clone();
+      newProfiles.getEnabledProfiles().addAll(profiles.getEnabledProfiles());
+      newProfiles.getDisabledProfiles().addAll(profiles.getDisabledProfiles());
     }
 
     resetManagedFilesPathsAndProfiles(newFiles, newProfiles);
@@ -349,15 +353,15 @@ public class MavenProjectsTree {
     }
   }
 
-  public Collection<String> getExplicitProfiles() {
+  public MavenExplicitProfiles getExplicitProfiles() {
     synchronized (myStateLock) {
-      return new THashSet<String>(myExplicitProfiles);
+      return myExplicitProfiles.clone();
     }
   }
 
-  public void setExplicitProfiles(Collection<String> explicitProfiles) {
+  public void setExplicitProfiles(MavenExplicitProfiles explicitProfiles) {
     synchronized (myStateLock) {
-      myExplicitProfiles = new THashSet<String>(explicitProfiles);
+      myExplicitProfiles = explicitProfiles.clone();
     }
     fireProfilesChanged();
   }
@@ -366,17 +370,25 @@ public class MavenProjectsTree {
     Collection<String> available = getAvailableProfiles();
 
     synchronized (myStateLock) {
-      Collection<String> removedProfiles = new THashSet<String>(myExplicitProfiles);
-      removedProfiles.removeAll(available);
-      myTemporarilyRemovedExplicitProfiles.addAll(removedProfiles);
-
-      Collection<String> restoredProfiles = new THashSet<String>(myTemporarilyRemovedExplicitProfiles);
-      restoredProfiles.retainAll(available);
-      myTemporarilyRemovedExplicitProfiles.removeAll(restoredProfiles);
-
-      myExplicitProfiles.removeAll(removedProfiles);
-      myExplicitProfiles.addAll(restoredProfiles);
+      updateExplicitProfiles(myExplicitProfiles.getEnabledProfiles(), myTemporarilyRemovedExplicitProfiles.getEnabledProfiles(),
+                             available);
+      updateExplicitProfiles(myExplicitProfiles.getDisabledProfiles(), myTemporarilyRemovedExplicitProfiles.getDisabledProfiles(),
+                             available);
     }
+  }
+
+  private void updateExplicitProfiles(Collection<String> explicitProfiles, Collection<String> temporarilyRemovedExplicitProfiles,
+                                      Collection<String> available) {
+    Collection<String> removedProfiles = new THashSet<String>(explicitProfiles);
+    removedProfiles.removeAll(available);
+    temporarilyRemovedExplicitProfiles.addAll(removedProfiles);
+
+    Collection<String> restoredProfiles = new THashSet<String>(temporarilyRemovedExplicitProfiles);
+    restoredProfiles.retainAll(available);
+    temporarilyRemovedExplicitProfiles.removeAll(restoredProfiles);
+
+    explicitProfiles.removeAll(removedProfiles);
+    explicitProfiles.addAll(restoredProfiles);
   }
 
   public Collection<String> getAvailableProfiles() {
@@ -396,17 +408,26 @@ public class MavenProjectsTree {
     Collection<String> active = new THashSet<String>();
     for (MavenProject each : getProjects()) {
       available.addAll(each.getProfilesIds());
-      active.addAll(each.getActivatedProfilesIds());
+      active.addAll(each.getActivatedProfilesIds().getEnabledProfiles());
     }
 
-    Collection<String> explicitProfiles = getExplicitProfiles();
+    Collection<String> enabledProfiles = getExplicitProfiles().getEnabledProfiles();
+    Collection<String> disabledProfiles = getExplicitProfiles().getDisabledProfiles();
 
     for (String each : available) {
-      MavenProfileKind state = MavenProfileKind.NONE;
-      if (explicitProfiles.contains(each)) {
+      MavenProfileKind state;
+      if (disabledProfiles.contains(each)) {
+        state = MavenProfileKind.NONE;
+      }
+      else if (enabledProfiles.contains(each)) {
         state = MavenProfileKind.EXPLICIT;
       }
-      else if (active.contains(each)) state = MavenProfileKind.IMPLICIT;
+      else if (active.contains(each)) {
+        state = MavenProfileKind.IMPLICIT;
+      }
+      else {
+        state = MavenProfileKind.NONE;
+      }
       result.add(Pair.create(each, state));
     }
     return result;
@@ -414,7 +435,7 @@ public class MavenProjectsTree {
 
   public void updateAll(boolean force, MavenGeneralSettings generalSettings, MavenProgressIndicator process) {
     List<VirtualFile> managedFiles = getExistingManagedFiles();
-    Collection<String> explicitProfiles = getExplicitProfiles();
+    MavenExplicitProfiles explicitProfiles = getExplicitProfiles();
 
     MavenProjectReader projectReader = new MavenProjectReader();
     update(managedFiles, true, force, explicitProfiles, projectReader, generalSettings, process);
@@ -434,7 +455,7 @@ public class MavenProjectsTree {
   private void update(Collection<VirtualFile> files,
                       boolean recursive,
                       boolean force,
-                      Collection<String> explicitProfiles,
+                      MavenExplicitProfiles explicitProfiles,
                       MavenProjectReader projectReader,
                       MavenGeneralSettings generalSettings,
                       MavenProgressIndicator process) {
@@ -469,7 +490,7 @@ public class MavenProjectsTree {
 
   private void doAdd(final VirtualFile f,
                      boolean recursuve,
-                     Collection<String> explicitProfiles,
+                     MavenExplicitProfiles explicitProfiles,
                      UpdateContext updateContext,
                      Stack<MavenProject> updateStack,
                      MavenProjectReader reader,
@@ -503,7 +524,7 @@ public class MavenProjectsTree {
                         boolean isNew,
                         boolean recursive,
                         boolean force,
-                        Collection<String> explicitProfiles,
+                        MavenExplicitProfiles explicitProfiles,
                         UpdateContext updateContext,
                         Stack<MavenProject> updateStack,
                         MavenProjectReader reader,
@@ -649,7 +670,7 @@ public class MavenProjectsTree {
   }
 
   private MavenProjectTimestamp calculateTimestamp(final MavenProject mavenProject,
-                                                   final Collection<String> explicitProfiles,
+                                                   final MavenExplicitProfiles explicitProfiles,
                                                    final MavenGeneralSettings generalSettings) {
     AccessToken accessToken = ApplicationManager.getApplication().acquireReadActionLock();
     try {
@@ -712,7 +733,7 @@ public class MavenProjectsTree {
 
   private void delete(MavenProjectReader projectReader,
                       List<VirtualFile> files,
-                      Collection<String> explicitProfiles,
+                      MavenExplicitProfiles explicitProfiles,
                       MavenGeneralSettings generalSettings,
                       MavenProgressIndicator process) {
     if (files.isEmpty()) return;
@@ -892,7 +913,7 @@ public class MavenProjectsTree {
     try {
       final CRC32 crc = new CRC32();
 
-      Set<String> profiles = myExplicitProfiles;
+      MavenExplicitProfiles profiles = myExplicitProfiles;
       if (profiles != null) {
         updateCrc(crc, profiles.hashCode());
       }
@@ -905,7 +926,7 @@ public class MavenProjectsTree {
         Module module = fileIndex.getModuleForFile(pomFile);
         if (module == null) continue;
 
-        if (fileIndex.getContentRootForFile(pomFile) != pomFile.getParent()) continue;
+        if (!Comparing.equal(fileIndex.getContentRootForFile(pomFile), pomFile.getParent())) continue;
 
         updateCrc(crc, module.getName());
 
@@ -930,7 +951,7 @@ public class MavenProjectsTree {
         updateCrc(crc, getFilterExclusions(mavenProject).hashCode());
         updateCrc(crc, mavenProject.getProperties().hashCode());
 
-        for (String each : mavenProject.getFilters()) {
+        for (String each : mavenProject.getFilterPropertiesFiles()) {
           File file = new File(each);
           updateCrc(crc, file.lastModified());
         }
@@ -1069,7 +1090,7 @@ public class MavenProjectsTree {
     try {
       MavenProject rootProject = project;
       while (true) {
-        MavenProject aggregator = myModuleToAggregatorMapping.get(project);
+        MavenProject aggregator = myModuleToAggregatorMapping.get(rootProject);
         if (aggregator == null) {
           return rootProject;
         }
@@ -1170,14 +1191,35 @@ public class MavenProjectsTree {
         projectIds.add(project.getMavenId());
       }
 
-      for (MavenProject project : myVirtualFileToProjectMapping.values()) {
-        for (MavenArtifact dep : project.getDependencies()) {
-          if (projectIds.contains(dep)) {
-            if (result == null) result = new ArrayList<MavenProject>();
+      final Set<File> projectPaths = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
 
-            result.add(project);
+      for (MavenProject project : projects) {
+        projectPaths.add(new File(project.getFile().getPath()));
+      }
+
+      for (MavenProject project : myVirtualFileToProjectMapping.values()) {
+        boolean isDependent = false;
+
+        Set<String> pathsInStack = project.getModulePaths();
+        for (final String path : pathsInStack) {
+          if (projectPaths.contains(new File(path))) {
+            isDependent = true;
             break;
           }
+        }
+
+        if (!isDependent) {
+          for (MavenArtifact dep : project.getDependencies()) {
+            if (projectIds.contains(dep)) {
+              isDependent = true;
+              break;
+            }
+          }
+        }
+
+        if (isDependent) {
+          if (result == null) result = new ArrayList<MavenProject>();
+          result.add(project);
         }
       }
 
@@ -1206,7 +1248,7 @@ public class MavenProjectsTree {
                       @NotNull ResolveContext context,
                       @NotNull MavenProgressIndicator process) throws MavenProcessCanceledException {
     MavenEmbedderWrapper embedder = embeddersManager.getEmbedder(MavenEmbeddersManager.FOR_DEPENDENCIES_RESOLVE);
-    embedder.customizeForResolve(getWorkspaceMap(), console, process);
+    embedder.customizeForResolve(getWorkspaceMap(), console, process, generalSettings.isAlwaysUpdateSnapshots());
 
     try {
       process.checkCanceled();
@@ -1321,7 +1363,7 @@ public class MavenProjectsTree {
                                   @NotNull MavenProgressIndicator process,
                                   @NotNull EmbedderTask task) throws MavenProcessCanceledException {
     MavenEmbedderWrapper embedder = embeddersManager.getEmbedder(embedderKind);
-    embedder.customizeForResolve(getWorkspaceMap(), console, process);
+    embedder.customizeForResolve(getWorkspaceMap(), console, process, false);
     embedder.clearCachesFor(mavenProject.getMavenId());
     try {
       task.run(embedder);

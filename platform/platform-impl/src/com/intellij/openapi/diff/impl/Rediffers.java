@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Alarm;
 import com.intellij.util.containers.HashMap;
 
-import java.util.Iterator;
-
 public class Rediffers {
   private final HashMap<EditorSource, Rediff> myRediffers = new HashMap<EditorSource, Rediff>();
   private final DiffPanelImpl myPanel;
@@ -43,8 +41,7 @@ public class Rediffers {
   }
 
   public void dispose() {
-    for (Iterator<Rediff> iterator = myRediffers.values().iterator(); iterator.hasNext();) {
-      Rediff rediff = iterator.next();
+    for (Rediff rediff : myRediffers.values()) {
       rediff.stopListen();
     }
     myRediffers.clear();
@@ -90,9 +87,7 @@ public class Rediffers {
     public void beforeDocumentChange(DocumentEvent event) {}
 
     public void documentChanged(DocumentEvent event) {
-      int newLines = StringUtil.getLineBreakCount(event.getNewFragment());
-      int oldLines = StringUtil.getLineBreakCount(event.getOldFragment());
-      if (newLines != oldLines) myPanel.invalidateDiff();
+      if (event.getOldLength() != event.getNewLength()) myPanel.invalidateDiff();
       requestRediff();
     }
 

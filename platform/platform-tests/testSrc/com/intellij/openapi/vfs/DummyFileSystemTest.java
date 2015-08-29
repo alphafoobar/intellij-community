@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ package com.intellij.openapi.vfs;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.vfs.ex.dummy.DummyFileSystem;
-import com.intellij.testFramework.PlatformLangTestCase;
+import com.intellij.testFramework.PlatformTestCase;
+import org.jetbrains.annotations.NotNull;
 
-public class DummyFileSystemTest extends PlatformLangTestCase {
+public class DummyFileSystemTest extends PlatformTestCase {
   private DummyFileSystem fs;
 
   @Override
@@ -33,7 +34,7 @@ public class DummyFileSystemTest extends PlatformLangTestCase {
     final VirtualFile root = fs.createRoot("root");
     VirtualFile f = new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         VirtualFile res = root.createChildData(this, "f");
         result.setResult(res);
       }
@@ -42,12 +43,12 @@ public class DummyFileSystemTest extends PlatformLangTestCase {
     final VirtualFileEvent[] events = new VirtualFileEvent[2];
     fs.addVirtualFileListener(new VirtualFileAdapter() {
       @Override
-      public void fileDeleted(VirtualFileEvent e) {
+      public void fileDeleted(@NotNull VirtualFileEvent e) {
         events[0] = e;
       }
 
       @Override
-      public void beforeFileDeletion(VirtualFileEvent e) {
+      public void beforeFileDeletion(@NotNull VirtualFileEvent e) {
         events[1] = e;
       }
     });

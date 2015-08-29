@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@
 package com.intellij.packaging.impl.artifacts;
 
 import com.intellij.compiler.server.BuildManager;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.Result;
-import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.application.*;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.ProjectLoadingErrorsNotifier;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx;
+import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.UnknownFeaturesCollector;
 import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.packaging.artifacts.*;
@@ -48,12 +48,12 @@ import java.util.*;
  * @author nik
  */
 @State(
-    name = ArtifactManagerImpl.COMPONENT_NAME,
-    storages = {
-        @Storage(file = StoragePathMacros.PROJECT_FILE),
-        @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/artifacts/", scheme = StorageScheme.DIRECTORY_BASED,
-                 stateSplitter = ArtifactManagerStateSplitter.class)
-    }
+  name = ArtifactManagerImpl.COMPONENT_NAME,
+  storages = {
+    @Storage(file = StoragePathMacros.PROJECT_FILE),
+    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/artifacts", scheme = StorageScheme.DIRECTORY_BASED,
+      stateSplitter = ArtifactManagerStateSplitter.class)
+  }
 )
 public class ArtifactManagerImpl extends ArtifactManager implements ProjectComponent, PersistentStateComponent<ArtifactManagerState> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.packaging.impl.artifacts.ArtifactManagerImpl");
@@ -65,12 +65,7 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
   private final DefaultPackagingElementResolvingContext myResolvingContext;
   private boolean myInsideCommit = false;
   private boolean myLoaded;
-  private long myModificationCount;
-  private final ModificationTracker myModificationTracker = new ModificationTracker() {
-    public long getModificationCount() {
-      return myModificationCount;
-    }
-  };
+  private final SimpleModificationTracker myModificationTracker = new SimpleModificationTracker();
   private final Map<String, LocalFileSystem.WatchRequest> myWatchedOutputs = new HashMap<String, LocalFileSystem.WatchRequest>();
 
   public ArtifactManagerImpl(Project project) {
@@ -80,25 +75,30 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     ((ArtifactPointerManagerImpl)ArtifactPointerManager.getInstance(project)).setArtifactManager(this);
   }
 
+  @Override
   @NotNull
   public Artifact[] getArtifacts() {
     return myModel.getArtifacts();
   }
 
+  @Override
   public Artifact findArtifact(@NotNull String name) {
     return myModel.findArtifact(name);
   }
 
+  @Override
   @NotNull
   public Artifact getArtifactByOriginal(@NotNull Artifact artifact) {
     return myModel.getArtifactByOriginal(artifact);
   }
 
+  @Override
   @NotNull
   public Artifact getOriginalArtifact(@NotNull Artifact artifact) {
     return myModel.getOriginalArtifact(artifact);
   }
 
+  @Override
   @NotNull
   public Collection<? extends Artifact> getArtifactsByType(@NotNull ArtifactType type) {
     return myModel.getArtifactsByType(type);
@@ -109,6 +109,7 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     return myModel.getAllArtifactsIncludingInvalid();
   }
 
+  @Override
   public ArtifactManagerState getState() {
     final ArtifactManagerState state = new ArtifactManagerState();
     for (Artifact artifact : getAllArtifactsIncludingInvalid()) {
@@ -130,7 +131,8 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
           }
         }
         Collections.sort(artifactState.getPropertiesList(), new Comparator<ArtifactPropertiesState>() {
-          public int compare(ArtifactPropertiesState o1, ArtifactPropertiesState o2) {
+          @Override
+          public int compare(@NotNull ArtifactPropertiesState o1, @NotNull ArtifactPropertiesState o2) {
             return o1.getId().compareTo(o2.getId());
           }
         });
@@ -187,10 +189,20 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     return packagingElement;
   }
 
+  @Override
   public void loadState(ArtifactManagerState managerState) {
-    final List<ArtifactImpl> artifacts = new ArrayList<ArtifactImpl>();
-    for (ArtifactState state : managerState.getArtifacts()) {
-      artifacts.add(loadArtifact(state));
+    List<ArtifactState> artifactStates = managerState.getArtifacts();
+    final List<ArtifactImpl> artifacts = new ArrayList<ArtifactImpl>(artifactStates.size());
+    if (!artifactStates.isEmpty()) {
+      AccessToken token = ReadAction.start();
+      try {
+        for (ArtifactState state : artifactStates) {
+          artifacts.add(loadArtifact(state));
+        }
+      }
+      finally {
+        token.finish();
+      }
     }
 
     if (myLoaded) {
@@ -241,6 +253,7 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
   private InvalidArtifact createInvalidArtifact(ArtifactState state, String errorMessage) {
     final InvalidArtifact artifact = new InvalidArtifact(state, errorMessage);
     ProjectLoadingErrorsNotifier.getInstance(myProject).registerError(new ArtifactLoadingErrorDescription(myProject, artifact));
+    UnknownFeaturesCollector.getInstance(myProject).registerUnknownFeature("com.intellij.packaging.artifacts.ArtifactType", state.getArtifactType(), "Artifact");
     return artifact;
   }
 
@@ -256,15 +269,18 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     }
   }
 
+  @Override
   public void disposeComponent() {
     LocalFileSystem.getInstance().removeWatchedRoots(myWatchedOutputs.values());
   }
 
+  @Override
   @NotNull
   public String getComponentName() {
     return COMPONENT_NAME;
   }
 
+  @Override
   public void initComponent() {
     VirtualFileManager.getInstance().addVirtualFileListener(new ArtifactVirtualFileListener(myProject, this), myProject);
     updateWatchedRoots();
@@ -295,9 +311,11 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     }
   }
 
+  @Override
   public void projectOpened() {
   }
 
+  @Override
   public void projectClosed() {
   }
 
@@ -352,10 +370,11 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
       }
 
       myModel.setArtifactsList(allArtifacts);
-      myModificationCount++;
+      myModificationTracker.incModificationCount();
       final ArtifactListener publisher = myProject.getMessageBus().syncPublisher(TOPIC);
       hasChanges = !removed.isEmpty() || !added.isEmpty() || !changed.isEmpty();
       ProjectRootManagerEx.getInstanceEx(myProject).mergeRootsChangesDuring(new Runnable() {
+        @Override
         public void run() {
           for (ArtifactImpl artifact : removed) {
             publisher.artifactRemoved(artifact);
@@ -383,10 +402,12 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     return myProject;
   }
 
+  @Override
   @NotNull
   public Artifact addArtifact(@NotNull final String name, @NotNull final ArtifactType type, final CompositePackagingElement<?> root) {
     return new WriteAction<Artifact>() {
-      protected void run(final Result<Artifact> result) {
+      @Override
+      protected void run(@NotNull final Result<Artifact> result) {
         final ModifiableArtifactModel model = createModifiableModel();
         final ModifiableArtifact artifact = model.addArtifact(name, type);
         if (root != null) {
@@ -410,7 +431,8 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
     final CompositePackagingElement<?> root = model.getOrCreateModifiableArtifact(artifact).getRootElement();
     PackagingElementFactory.getInstance().getOrCreateDirectory(root, relativePath).addOrFindChildren(elements);
     new WriteAction() {
-      protected void run(final Result result) {
+      @Override
+      protected void run(@NotNull final Result result) {
         model.commit();
       }
     }.execute();
@@ -436,6 +458,7 @@ public class ArtifactManagerImpl extends ArtifactManager implements ProjectCompo
       mySortedArtifacts = null;
     }
 
+    @Override
     protected List<? extends Artifact> getArtifactsList() {
       return myArtifactsList;
     }

@@ -41,13 +41,24 @@ public class ZipUtil {
     @NotNull final File extractToDir,
     final boolean unwrapSingleTopLevelFolder) throws GeneratorException
   {
+    unzipWithProgressSynchronously(project, progressTitle, zipArchive, extractToDir, null, unwrapSingleTopLevelFolder);
+  }
+
+  public static void unzipWithProgressSynchronously(
+    @Nullable Project project,
+    @NotNull String progressTitle,
+    @NotNull final File zipArchive,
+    @NotNull final File extractToDir,
+    @Nullable final NullableFunction<String, String> pathConvertor,
+    final boolean unwrapSingleTopLevelFolder) throws GeneratorException
+  {
     final Outcome<Boolean> outcome = DownloadUtil.provideDataWithProgressSynchronously(
       project, progressTitle, "Unpacking ...",
       new Callable<Boolean>() {
         @Override
         public Boolean call() throws IOException {
           ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
-          unzip(progress, extractToDir, zipArchive, null, null, unwrapSingleTopLevelFolder);
+          unzip(progress, extractToDir, zipArchive, pathConvertor, null, unwrapSingleTopLevelFolder);
           return true;
         }
       },
@@ -131,9 +142,9 @@ public class ZipUtil {
       else {
         dirToMove = unzipToDir;
       }
-      if (!FileUtil.moveDirWithContent(dirToMove, targetDir)) {
-        FileUtil.copyDirContent(dirToMove, targetDir);
-      }
+      // Don't "FileUtil.moveDirWithContent(dirToMove, targetDir)"
+      // because a file moved with "java.io.File.renameTo" won't inherit its new parent's permissions
+      FileUtil.copyDirContent(dirToMove, targetDir);
       FileUtil.delete(unzipToDir);
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.ComponentWithBrowseButton;
 import com.intellij.openapi.ui.TextComponentAccessor;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.GuiUtils;
@@ -28,11 +29,14 @@ import com.intellij.ui.InsertPathAction;
 import com.intellij.ui.PanelWithAnchor;
 import com.intellij.ui.TextFieldWithHistory;
 import com.intellij.ui.components.JBCheckBox;
+import com.intellij.util.PathUtil;
 import net.miginfocom.swing.MigLayout;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
 import java.util.ArrayList;
 
 /**
@@ -49,16 +53,34 @@ public class AlternativeJREPanel extends JPanel implements PanelWithAnchor {
     myCbEnabled = new JBCheckBox(ExecutionBundle.message("run.configuration.use.alternate.jre.checkbox"));
 
     myFieldWithHistory = new TextFieldWithHistory();
+    myFieldWithHistory.setHistorySize(-1);
     final ArrayList<String> foundJDKs = new ArrayList<String>();
+    final Sdk[] allJDKs = ProjectJdkTable.getInstance().getAllJdks();
+
+    for (Sdk sdk : allJDKs) {
+      foundJDKs.add(sdk.getName());
+    }
+
     for (JreProvider provider : JreProvider.EP_NAME.getExtensions()) {
       String path = provider.getJrePath();
       if (!StringUtil.isEmpty(path)) {
         foundJDKs.add(path);
       }
     }
-    final Sdk[] allJDKs = ProjectJdkTable.getInstance().getAllJdks();
+
     for (Sdk jdk : allJDKs) {
-      foundJDKs.add(jdk.getHomePath());
+      String homePath = jdk.getHomePath();
+
+      if (!SystemInfo.isMac) {
+        final File jre = new File(jdk.getHomePath(), "jre");
+        if (jre.isDirectory()) {
+          homePath = jre.getPath();
+        }
+      }
+
+      if (!foundJDKs.contains(homePath)) {
+        foundJDKs.add(homePath);
+      }
     }
     myFieldWithHistory.setHistory(foundJDKs);
     myPathField = new ComponentWithBrowseButton<TextFieldWithHistory>(myFieldWithHistory, null);
@@ -95,8 +117,8 @@ public class AlternativeJREPanel extends JPanel implements PanelWithAnchor {
     return FileUtil.toSystemIndependentName(myPathField.getChildComponent().getText().trim());
   }
 
-  private void setPath(final String path) {
-    myPathField.getChildComponent().setText(FileUtil.toSystemDependentName(path == null ? "" : path));
+  private void setPath(@Nullable String path) {
+    myPathField.getChildComponent().setText(StringUtil.notNullize(PathUtil.toSystemDependentName(path)));
   }
 
   public boolean isPathEnabled() {
@@ -108,7 +130,7 @@ public class AlternativeJREPanel extends JPanel implements PanelWithAnchor {
     enabledChanged();
   }
 
-  public void init(String path, boolean isEnabled){
+  public void init(@Nullable String path, boolean isEnabled){
     setPathEnabled(isEnabled);
     setPath(path);
   }

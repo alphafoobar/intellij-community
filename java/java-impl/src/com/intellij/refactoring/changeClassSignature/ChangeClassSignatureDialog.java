@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ public class ChangeClassSignatureDialog extends RefactoringDialog {
   private final MyTableModel myTableModel;
   private JBTable myTable;
   static final String REFACTORING_NAME = RefactoringBundle.message("changeClassSignature.refactoring.name");
-  private boolean myHideDefaultValueColumn;
+  private final boolean myHideDefaultValueColumn;
 
   public ChangeClassSignatureDialog(@NotNull PsiClass aClass, boolean hideDefaultValueColumn) {
     this(
@@ -194,7 +194,7 @@ public class ChangeClassSignatureDialog extends RefactoringDialog {
     final Map<String, TypeParameterInfo> infos = new HashMap<String, TypeParameterInfo>();
     for (final TypeParameterInfo info : myTypeParameterInfos) {
       if (!info.isForExistingParameter() &&
-          !JavaPsiFacade.getInstance(myClass.getProject()).getNameHelper().isIdentifier(info.getNewName())) {
+          !PsiNameHelper.getInstance(myClass.getProject()).isIdentifier(info.getNewName())) {
         return RefactoringBundle.message("error.wrong.name.input", info.getNewName());
       }
       final String newName = info.isForExistingParameter() ? parameters[info.getOldParameterIndex()].getName() : info.getNewName();

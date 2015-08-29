@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import com.intellij.xdebugger.frame.XCompositeNode;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XValueChildrenList;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 
 public class PyStackFrame extends XStackFrame {
@@ -69,7 +70,7 @@ public class PyStackFrame extends XStackFrame {
   }
 
   @Override
-  public void customizePresentation(ColoredTextContainer component) {
+  public void customizePresentation(@NotNull ColoredTextContainer component) {
     component.setIcon(AllIcons.Debugger.StackFrame);
 
     if (myPosition == null) {
@@ -96,9 +97,13 @@ public class PyStackFrame extends XStackFrame {
       return attributes;
     }
     else {
-      return (attributes.getStyle() & SimpleTextAttributes.STYLE_ITALIC) != 0
-             ? SimpleTextAttributes.GRAY_ITALIC_ATTRIBUTES : SimpleTextAttributes.GRAYED_ATTRIBUTES;
+      return getGrayAttributes(attributes);
     }
+  }
+
+  protected static SimpleTextAttributes getGrayAttributes(SimpleTextAttributes attributes) {
+    return (attributes.getStyle() & SimpleTextAttributes.STYLE_ITALIC) != 0
+           ? SimpleTextAttributes.GRAY_ITALIC_ATTRIBUTES : SimpleTextAttributes.GRAYED_ATTRIBUTES;
   }
 
   @Override
@@ -108,9 +113,9 @@ public class PyStackFrame extends XStackFrame {
       @Override
       public void run() {
         try {
-          final XValueChildrenList values = myDebugProcess.loadFrame();
+          XValueChildrenList values = myDebugProcess.loadFrame();
           if (!node.isObsolete()) {
-            node.addChildren(values != null ? values : XValueChildrenList.EMPTY, true);
+            addChildren(node, values);
           }
         }
         catch (PyDebuggerException e) {
@@ -121,6 +126,10 @@ public class PyStackFrame extends XStackFrame {
         }
       }
     });
+  }
+
+  protected void addChildren(@NotNull final XCompositeNode node, @Nullable final XValueChildrenList children) {
+    node.addChildren(children != null ? children : XValueChildrenList.EMPTY, true);
   }
 
   public String getThreadId() {

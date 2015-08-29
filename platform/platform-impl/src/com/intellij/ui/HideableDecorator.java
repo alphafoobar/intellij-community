@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.ui;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -42,6 +43,10 @@ public class HideableDecorator {
   private Dimension myPreviousContentSize;
 
   public HideableDecorator(JPanel panel, String title, boolean adjustWindow) {
+    this(panel, title, adjustWindow, null);
+  }
+
+  public HideableDecorator(JPanel panel, String title, boolean adjustWindow, @Nullable JComponent northEastComponent) {
     myPanel = panel;
     myAdjustWindow = adjustWindow;
     myTitledSeparator = new TitledSeparator(title, null) {
@@ -51,11 +56,18 @@ public class HideableDecorator {
         registerMnemonic();
       }
     };
-    myPanel.add(myTitledSeparator, BorderLayout.NORTH);
+    JPanel northPanel = new JPanel(new BorderLayout());
+    northPanel.add(myTitledSeparator, BorderLayout.CENTER);
+    if (northEastComponent != null) {
+      northPanel.add(northEastComponent, BorderLayout.EAST);
+    }
+
+    myPanel.add(northPanel, BorderLayout.NORTH);
     myTitledSeparator.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    updateIcon();
     myTitledSeparator.addMouseListener(new MouseAdapter() {
       @Override
-      public void mouseReleased(MouseEvent e) {
+      public void mouseReleased(@NotNull MouseEvent e) {
         if (myOn) {
           off();
         }
@@ -64,6 +76,12 @@ public class HideableDecorator {
         }
       }
     });
+  }
+
+  private void updateIcon() {
+    final Icon icon = myOn ? AllIcons.General.SplitDown : AllIcons.General.SplitRight;
+    myTitledSeparator.getLabel().setIcon(icon);
+    myTitledSeparator.getLabel().setDisabledIcon(IconLoader.getTransparentIcon(icon, 0.5f));
   }
 
   public void setContentComponent(@Nullable JComponent content) {
@@ -101,8 +119,7 @@ public class HideableDecorator {
 
   protected void on() {
     myOn = true;
-    myTitledSeparator.getLabel().setIcon(AllIcons.General.SplitDown);
-    myTitledSeparator.getLabel().setDisabledIcon(IconLoader.getTransparentIcon(AllIcons.General.SplitDown, 0.5f));
+    updateIcon();
     myTitledSeparator.getLabel().setIconTextGap(5);
     if (myContent != null) {
       myContent.setVisible(true);
@@ -114,8 +131,7 @@ public class HideableDecorator {
 
   protected void off() {
     myOn = false;
-    myTitledSeparator.getLabel().setIcon(AllIcons.General.SplitRight);
-    myTitledSeparator.getLabel().setDisabledIcon(IconLoader.getTransparentIcon(AllIcons.General.SplitRight, 0.5f));
+    updateIcon();
     if (myContent != null) {
       myContent.setVisible(false);
       myPreviousContentSize = myContent.getSize();

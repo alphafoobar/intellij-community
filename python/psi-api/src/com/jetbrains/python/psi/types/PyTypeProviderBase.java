@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.psi.types;
 
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.containers.FactoryMap;
 import com.jetbrains.python.psi.*;
@@ -35,7 +36,7 @@ public class PyTypeProviderBase implements PyTypeProvider {
 
   protected interface ReturnTypeCallback {
     @Nullable
-    PyType getType(@Nullable PyQualifiedExpression callSite, @Nullable PyType qualifierType, TypeEvalContext context);
+    PyType getType(@Nullable PyCallSiteExpression callSite, @Nullable PyType qualifierType, TypeEvalContext context);
   }
 
   private static class ReturnTypeDescriptor {
@@ -46,12 +47,13 @@ public class PyTypeProviderBase implements PyTypeProvider {
     }
 
     @Nullable
-    public PyType get(PyFunction function, @Nullable PyQualifiedExpression callSite, TypeEvalContext context) {
+    public PyType get(PyFunction function, @Nullable PyCallSiteExpression callSite, TypeEvalContext context) {
       PyClass containingClass = function.getContainingClass();
       if (containingClass != null) {
         final ReturnTypeCallback typeCallback = myStringToReturnTypeMap.get(containingClass.getQualifiedName());
         if (typeCallback != null) {
-          final PyExpression qualifier = callSite != null ? callSite.getQualifier() : null;
+          final PyExpression callee = callSite instanceof PyCallExpression ? ((PyCallExpression)callSite).getCallee() : null;
+          final PyExpression qualifier = callee instanceof PyQualifiedExpression ? ((PyQualifiedExpression)callee).getQualifier() : null;
           PyType qualifierType = qualifier != null ? context.getType(qualifier) : null;
           return typeCallback.getType(callSite, qualifierType, context);
         }
@@ -62,7 +64,7 @@ public class PyTypeProviderBase implements PyTypeProvider {
 
   private final ReturnTypeCallback mySelfTypeCallback = new ReturnTypeCallback() {
     @Override
-    public PyType getType(@Nullable PyQualifiedExpression callSite, @Nullable PyType qualifierType, TypeEvalContext context) {
+    public PyType getType(@Nullable PyCallSiteExpression callSite, @Nullable PyType qualifierType, TypeEvalContext context) {
       if (qualifierType instanceof PyClassType) {
         PyClass aClass = ((PyClassType)qualifierType).getPyClass();
         return PyPsiFacade.getInstance(aClass.getProject()).createClassType(aClass, false);
@@ -79,8 +81,9 @@ public class PyTypeProviderBase implements PyTypeProvider {
     }
   };
 
+  @Nullable
   @Override
-  public PyType getReferenceExpressionType(PyReferenceExpression referenceExpression, TypeEvalContext context) {
+  public PyType getReferenceExpressionType(@NotNull PyReferenceExpression referenceExpression, @NotNull TypeEvalContext context) {
     return null;
   }
 
@@ -90,12 +93,19 @@ public class PyTypeProviderBase implements PyTypeProvider {
   }
 
   @Override
-  public PyType getParameterType(@NotNull PyNamedParameter param, @NotNull PyFunction func, @NotNull TypeEvalContext context) {
+  public Ref<PyType> getParameterType(@NotNull PyNamedParameter param, @NotNull PyFunction func, @NotNull TypeEvalContext context) {
     return null;
   }
 
+  @Nullable
   @Override
-  public PyType getReturnType(@NotNull PyFunction function, @Nullable PyQualifiedExpression callSite, @NotNull TypeEvalContext context) {
+  public Ref<PyType> getReturnType(@NotNull PyCallable callable, @NotNull TypeEvalContext context) {
+    return null;
+  }
+
+  @Nullable
+  @Override
+  public PyType getCallType(@NotNull PyFunction function, @Nullable PyCallSiteExpression callSite, @NotNull TypeEvalContext context) {
     ReturnTypeDescriptor descriptor;
     synchronized (myMethodToReturnTypeMap) {
       descriptor = myMethodToReturnTypeMap.get(function.getName());
@@ -103,11 +113,6 @@ public class PyTypeProviderBase implements PyTypeProvider {
     if (descriptor != null) {
       return descriptor.get(function, callSite, context);
     }
-    return null;
-  }
-
-  @Override
-  public PyType getIterationType(@NotNull PyClass iterable) {
     return null;
   }
 
@@ -119,7 +124,7 @@ public class PyTypeProviderBase implements PyTypeProvider {
 
   @Nullable
   @Override
-  public PyType getCallableType(@NotNull Callable callable, @NotNull TypeEvalContext context) {
+  public PyType getCallableType(@NotNull PyCallable callable, @NotNull TypeEvalContext context) {
     return null;
   }
 

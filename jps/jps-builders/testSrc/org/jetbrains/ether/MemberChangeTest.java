@@ -116,6 +116,10 @@ public class MemberChangeTest extends IncrementalTestCase {
     doTest();
   }
 
+  public void testAddParameterToConstructor() {
+    doTest();
+  }
+
   public void testDeleteInner() {
     doTest();
   }
@@ -197,6 +201,10 @@ public class MemberChangeTest extends IncrementalTestCase {
   }
 
   public void testAddMethod() {
+    doTest();
+  }
+
+  public void testAddVarargMethod() {
     doTest();
   }
 }

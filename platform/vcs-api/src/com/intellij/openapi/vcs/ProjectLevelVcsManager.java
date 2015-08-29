@@ -229,7 +229,8 @@ public abstract class ProjectLevelVcsManager {
   public abstract boolean isBackgroundVcsOperationRunning();
 
   public abstract List<VirtualFile> getRootsUnderVcsWithoutFiltering(final AbstractVcs vcs);
-  public abstract VirtualFile[] getRootsUnderVcs(AbstractVcs vcs);
+
+  public abstract VirtualFile[] getRootsUnderVcs(@NotNull AbstractVcs vcs);
 
   /**
    * Also includes into list all modules under roots
@@ -272,6 +273,7 @@ public abstract class ProjectLevelVcsManager {
   public abstract VcsHistoryCache getVcsHistoryCache();
   public abstract ContentRevisionCache getContentRevisionCache();
   public abstract boolean isFileInContent(final VirtualFile vf);
+  public abstract boolean isIgnored(VirtualFile vf);
 
   public abstract boolean dvcsUsedInProject();
 

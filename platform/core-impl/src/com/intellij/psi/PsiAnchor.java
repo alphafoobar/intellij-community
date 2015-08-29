@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,20 +19,26 @@ package com.intellij.psi;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.NullableComputable;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.impl.smartPointers.SelfElementInfo;
+import com.intellij.psi.impl.smartPointers.SmartPointerAnchorProvider;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.impl.source.PsiFileWithStubSupport;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.stubs.StubBase;
 import com.intellij.psi.stubs.StubElement;
 import com.intellij.psi.stubs.StubTree;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.IStubFileElementType;
+import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -51,6 +57,7 @@ public abstract class PsiAnchor {
   public abstract int getStartOffset();
   public abstract int getEndOffset();
 
+  @NotNull
   public static PsiAnchor create(@NotNull final PsiElement element) {
     if (!element.isValid()) {
       throw new PsiInvalidElementAccessException(element);
@@ -76,13 +83,13 @@ public abstract class PsiAnchor {
     PsiAnchor stubRef = createStubReference(element, file);
     if (stubRef != null) return stubRef;
 
-    if (!element.isPhysical() && element instanceof PsiCompiledElement|| element instanceof LightElement) {
-      return new HardReference(element);
+    if (!element.isPhysical() && element instanceof PsiCompiledElement || element instanceof LightElement || element instanceof SyntheticElement) {
+      return wrapperOrHardReference(element);
     }
 
     TextRange textRange = element.getTextRange();
     if (textRange == null) {
-      return new HardReference(element);
+      return wrapperOrHardReference(element);
     }
 
     Language lang = null;
@@ -99,11 +106,25 @@ public abstract class PsiAnchor {
     return new TreeRangeReference(file, textRange.getStartOffset(), textRange.getEndOffset(), element.getClass(), lang, virtualFile);
   }
 
+  @NotNull
+  public static PsiAnchor wrapperOrHardReference(@NotNull PsiElement element) {
+    for (SmartPointerAnchorProvider provider : SmartPointerAnchorProvider.EP_NAME.getExtensions()) {
+      PsiElement anchorElement = provider.getAnchor(element);
+      if (anchorElement != null && anchorElement != element) {
+        PsiAnchor wrappedAnchor = create(anchorElement);
+        if (!(wrappedAnchor instanceof HardReference)) {
+          return new WrappedElementAnchor(provider, wrappedAnchor);
+        }
+      }
+    }
+    return new HardReference(element);
+  }
+
   @Nullable
   public static StubIndexReference createStubReference(@NotNull PsiElement element, @NotNull PsiFile containingFile) {
     if (element instanceof StubBasedPsiElement &&
         element.isPhysical() &&
-        (element instanceof PsiCompiledElement || ((PsiFileImpl)containingFile).getContentElementType() instanceof IStubFileElementType)) {
+        (element instanceof PsiCompiledElement || canHaveStub(containingFile))) {
       final StubBasedPsiElement elt = (StubBasedPsiElement)element;
       final IStubElementType elementType = elt.getElementType();
       if (elt.getStub() != null || elementType.shouldCreateStub(element.getNode())) {
@@ -116,7 +137,15 @@ public abstract class PsiAnchor {
     return null;
   }
 
-  public static int calcStubIndex(StubBasedPsiElement psi) {
+  private static boolean canHaveStub(PsiFile file) {
+    if (!(file instanceof PsiFileImpl)) return false;
+
+    VirtualFile vFile = file.getVirtualFile();
+    IElementType elementType = ((PsiFileImpl)file).getContentElementType();
+    return elementType instanceof IStubFileElementType && vFile != null && ((IStubFileElementType)elementType).shouldBuildStubFor(vFile);
+  }
+
+  public static int calcStubIndex(@NotNull StubBasedPsiElement psi) {
     if (psi instanceof PsiFile) {
       return 0;
     }
@@ -217,10 +246,10 @@ public abstract class PsiAnchor {
     }
   }
 
-  private static class HardReference extends PsiAnchor {
+  public static class HardReference extends PsiAnchor {
     private final PsiElement myElement;
 
-    private HardReference(final PsiElement element) {
+    public HardReference(final PsiElement element) {
       myElement = element;
     }
 
@@ -318,7 +347,7 @@ public abstract class PsiAnchor {
 
     @Override
     public int hashCode() {
-      return 31 * myFile.hashCode() + (myLanguage.hashCode());
+      return 31 * myFile.hashCode() + myLanguage.hashCode();
     }
   }
   
@@ -360,7 +389,7 @@ public abstract class PsiAnchor {
       PsiDirectoryReference reference = (PsiDirectoryReference)o;
 
       if (!myFile.equals(reference.myFile)) return false;
-      if (myProject != null ? !myProject.equals(reference.myProject) : reference.myProject != null) return false;
+      if (!myProject.equals(reference.myProject)) return false;
 
       return true;
     }
@@ -426,15 +455,25 @@ public abstract class PsiAnchor {
     private final int myIndex;
     private final Language myLanguage;
     private final IStubElementType myElementType;
-    private final long myCreationModCount;
+    private final short myCreationModCount;
+    private final short myCreationStamp;
 
-    public StubIndexReference(@NotNull final PsiFile file, final int index, @NotNull Language language, IStubElementType elementType) {
+    private StubIndexReference(@NotNull final PsiFile file, final int index, @NotNull Language language, IStubElementType elementType) {
       myLanguage = language;
       myElementType = elementType;
       myVirtualFile = file.getVirtualFile();
       myProject = file.getProject();
       myIndex = index;
-      myCreationModCount = file.getManager().getModificationTracker().getModificationCount();
+      myCreationModCount = getModCount();
+      myCreationStamp = (short)file.getModificationStamp();
+    }
+
+    private short getModCount() {
+      final PsiModificationTracker tracker = PsiManager.getInstance(getProject()).getModificationTracker();
+      if (myVirtualFile.getName().endsWith(".java")) {
+        return (short)tracker.getJavaStructureModificationCount();
+      }
+      return (short)tracker.getModificationCount();
     }
 
     @Override
@@ -464,19 +503,35 @@ public abstract class PsiAnchor {
     }
 
     public String diagnoseNull() {
+      final PsiFile file = ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>() {
+        @Override
+        public PsiFile compute() {
+          return getFile();
+        }
+      });
       try {
         PsiElement element = ApplicationManager.getApplication().runReadAction(new NullableComputable<PsiElement>() {
           @Override
           public PsiElement compute() {
-            return restoreFromStubIndex((PsiFileWithStubSupport)getFile(), myIndex, myElementType, true);
+            return restoreFromStubIndex((PsiFileWithStubSupport)file, myIndex, myElementType, true);
           }
         });
         return "No diagnostics, element=" + element + "@" + (element == null ? 0 : System.identityHashCode(element));
       }
       catch (AssertionError e) {
-        return e.getMessage() +
-               "; current modCount=" + PsiManager.getInstance(getProject()).getModificationTracker().getModificationCount() +
-               "; creation modCount=" + myCreationModCount;
+        String msg = e.getMessage();
+        msg += "\n current (java)modCount=" + getModCount() + "; creation (java)modCount=" + myCreationModCount;
+        if (file == null) {
+          msg += "\n no PSI file";
+        } else {
+          msg += "\n current file stamp=" + (short)file.getModificationStamp() + "; creation file stamp=" + myCreationStamp;
+        }
+        final Document document = FileDocumentManager.getInstance().getCachedDocument(myVirtualFile);
+        if (document != null) {
+          msg += "\n committed=" + PsiDocumentManager.getInstance(myProject).isCommitted(document);
+          msg += "\n saved=" + !FileDocumentManager.getInstance().isDocumentUnsaved(document);
+        }
+        return msg;
       }
     }
 
@@ -513,14 +568,14 @@ public abstract class PsiAnchor {
     @Override
     public int getStartOffset() {
       final PsiElement resolved = retrieve();
-      if (resolved == null) throw new PsiInvalidElementAccessException(null, "Element type: " + myElementType.toString() + "; " + myVirtualFile);
+      if (resolved == null) throw new PsiInvalidElementAccessException(null, "Element type: " + myElementType + "; " + myVirtualFile);
       return resolved.getTextRange().getStartOffset();
     }
 
     @Override
     public int getEndOffset() {
       final PsiElement resolved = retrieve();
-      if (resolved == null) throw new PsiInvalidElementAccessException(null, "Element type: " + myElementType.toString() + "; " + myVirtualFile);
+      if (resolved == null) throw new PsiInvalidElementAccessException(null, "Element type: " + myElementType + "; " + myVirtualFile);
       return resolved.getTextRange().getEndOffset();
     }
 
@@ -528,6 +583,7 @@ public abstract class PsiAnchor {
       return myVirtualFile;
     }
 
+    @NotNull
     public Project getProject() {
       return myProject;
     }

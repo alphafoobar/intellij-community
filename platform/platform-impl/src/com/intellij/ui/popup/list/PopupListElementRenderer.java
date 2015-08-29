@@ -16,26 +16,25 @@
 package com.intellij.ui.popup.list;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.ui.popup.ListItemDescriptor;
+import com.intellij.openapi.ui.popup.ListItemDescriptorAdapter;
 import com.intellij.openapi.ui.popup.ListPopupStep;
+import com.intellij.openapi.ui.popup.ListPopupStepEx;
+import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.ui.ColorUtil;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 
 public class PopupListElementRenderer extends GroupedItemsListRenderer {
   private final ListPopupImpl myPopup;
 
   public PopupListElementRenderer(final ListPopupImpl aPopup) {
-    super(new ListItemDescriptor() {
+    super(new ListItemDescriptorAdapter() {
       @Override
       public String getTextFor(Object value) {
         return aPopup.getListStep().getTextFor(value);
-      }
-
-      @Override
-      public String getTooltipFor(Object value) {
-        return null;
       }
 
       @Override
@@ -52,6 +51,14 @@ public class PopupListElementRenderer extends GroupedItemsListRenderer {
       public String getCaptionAboveOf(Object value) {
         return aPopup.getListModel().getCaptionAboveOf(value);
       }
+
+      @Nullable
+      @Override
+      public String getTooltipFor(Object value) {
+        ListPopupStep<Object> listStep = aPopup.getListStep();
+        if (!(listStep instanceof ListPopupStepEx)) return null;
+        return ((ListPopupStepEx)listStep).getTooltipTextFor(value);
+      }
     });
     myPopup = aPopup;
   }
@@ -61,6 +68,12 @@ public class PopupListElementRenderer extends GroupedItemsListRenderer {
     ListPopupStep<Object> step = myPopup.getListStep();
     boolean isSelectable = step.isSelectable(value);
     myTextLabel.setEnabled(isSelectable);
+    if (!isSelected && step instanceof BaseListPopupStep) {
+      Color bg = ((BaseListPopupStep)step).getBackgroundFor(value);
+      Color fg = ((BaseListPopupStep)step).getForegroundFor(value);
+      if (fg != null) myTextLabel.setForeground(fg);
+      if (bg != null) UIUtil.setBackgroundRecursively(myComponent, bg);
+    }
 
     if (step.isMnemonicsNavigationEnabled()) {
       final int pos = step.getMnemonicNavigationFilter().getMnemonicPos(value);

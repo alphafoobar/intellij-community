@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,26 @@
 package com.intellij.codeInspection;
 
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
+import com.intellij.lang.Language;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.templateLanguages.TemplateLanguageFileViewProvider;
 import com.intellij.util.ResourceUtil;
+import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.SerializationFilter;
 import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializationException;
 import com.intellij.util.xmlb.XmlSerializer;
+import gnu.trove.THashSet;
+import gnu.trove.TObjectHashingStrategy;
 import org.jdom.Element;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
@@ -39,24 +48,138 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
  * @author anna
  * @since 28-Nov-2005
  */
-@SuppressWarnings("JavadocReference")
-public abstract class InspectionProfileEntry {
+public abstract class InspectionProfileEntry implements BatchSuppressableTool {
   public static final String GENERAL_GROUP_NAME = InspectionsBundle.message("inspection.general.tools.group.name");
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.InspectionProfileEntry");
 
-  private static final SkipDefaultValuesSerializationFilters DEFAULT_FILTER = new SkipDefaultValuesSerializationFilters();
-  private static Set<String> ourBlackList = null;
+  private static final SerializationFilter DEFAULT_FILTER = new SkipDefaultValuesSerializationFilters();
+  private static Set<String> ourBlackList;
   private static final Object BLACK_LIST_LOCK = new Object();
-  private Boolean myUseNewSerializer = null;
+  private Boolean myUseNewSerializer;
 
-  public void cleanup(Project project) {
+  @NonNls
+  @Nullable
+  public String getAlternativeID() {
+    return null;
+  }
+
+  @Override
+  public boolean isSuppressedFor(@NotNull PsiElement element) {
+    Set<InspectionSuppressor> suppressors = getSuppressors(element);
+    String toolId = getSuppressId();
+    for (InspectionSuppressor suppressor : suppressors) {
+      if (isSuppressed(toolId, suppressor, element)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @NotNull
+  protected String getSuppressId() {
+    return getShortName();
+  }
+
+  @NotNull
+  @Override
+  public SuppressQuickFix[] getBatchSuppressActions(@Nullable PsiElement element) {
+    if (element == null) {
+      return SuppressQuickFix.EMPTY_ARRAY;
+    }
+    Set<SuppressQuickFix> fixes = new THashSet<SuppressQuickFix>(new TObjectHashingStrategy<SuppressQuickFix>() {
+      @Override
+      public int computeHashCode(SuppressQuickFix object) {
+        int result = object instanceof InjectionAwareSuppressQuickFix
+          ? ((InjectionAwareSuppressQuickFix)object).isShouldBeAppliedToInjectionHost().hashCode()
+          : 0;
+        return 31 * result + object.getName().hashCode();
+      }
+
+      @Override
+      public boolean equals(SuppressQuickFix o1, SuppressQuickFix o2) {
+        if (o1 instanceof InjectionAwareSuppressQuickFix && o2 instanceof InjectionAwareSuppressQuickFix) {
+          if (((InjectionAwareSuppressQuickFix)o1).isShouldBeAppliedToInjectionHost() != ((InjectionAwareSuppressQuickFix)o2).isShouldBeAppliedToInjectionHost()) {
+            return false;
+          }
+        }
+        return o1.getName().equals(o2.getName());
+      }
+    });
+    
+    Set<InspectionSuppressor> suppressors = getSuppressors(element);
+    final PsiLanguageInjectionHost injectionHost = InjectedLanguageManager.getInstance(element.getProject()).getInjectionHost(element);
+    if (injectionHost != null) {
+      Set<InspectionSuppressor> injectionHostSuppressors = getSuppressors(injectionHost);
+      for (InspectionSuppressor suppressor : injectionHostSuppressors) {
+        addAllSuppressActions(fixes, injectionHost, suppressor, ThreeState.YES, getSuppressId());
+      }
+    }
+
+    for (InspectionSuppressor suppressor : suppressors) {
+      addAllSuppressActions(fixes, element, suppressor, injectionHost != null ? ThreeState.NO : ThreeState.UNSURE, getSuppressId());
+    }
+    return fixes.toArray(new SuppressQuickFix[fixes.size()]);
+  }
+
+  private static void addAllSuppressActions(@NotNull Set<SuppressQuickFix> fixes,
+                                            @NotNull PsiElement element,
+                                            @NotNull InspectionSuppressor suppressor,
+                                            @NotNull ThreeState appliedToInjectionHost,
+                                            @NotNull String toolId) {
+    final SuppressQuickFix[] actions = suppressor.getSuppressActions(element, toolId);
+    for (SuppressQuickFix action : actions) {
+      if (action instanceof InjectionAwareSuppressQuickFix) {
+        ((InjectionAwareSuppressQuickFix)action).setShouldBeAppliedToInjectionHost(appliedToInjectionHost);
+      }
+      fixes.add(action);
+    }
+  }
+
+  private boolean isSuppressed(@NotNull String toolId,
+                               @NotNull InspectionSuppressor suppressor,
+                               @NotNull PsiElement element) {
+    if (suppressor.isSuppressedFor(element, toolId)) {
+      return true;
+    }
+    final String alternativeId = getAlternativeID();
+    return alternativeId != null && !alternativeId.equals(toolId) && suppressor.isSuppressedFor(element, alternativeId);
+  }
+
+  @NotNull
+  public static Set<InspectionSuppressor> getSuppressors(@NotNull PsiElement element) {
+    FileViewProvider viewProvider = element.getContainingFile().getViewProvider();
+    final InspectionSuppressor elementLanguageSuppressor = LanguageInspectionSuppressors.INSTANCE.forLanguage(element.getLanguage());
+    if (viewProvider instanceof TemplateLanguageFileViewProvider) {
+      Set<InspectionSuppressor> suppressors = new LinkedHashSet<InspectionSuppressor>();
+      ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(viewProvider.getBaseLanguage()));
+      for (Language language : viewProvider.getLanguages()) {
+        ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(language));
+      }
+      ContainerUtil.addIfNotNull(suppressors, elementLanguageSuppressor);
+      return suppressors;
+    }
+    if (!element.getLanguage().isKindOf(viewProvider.getBaseLanguage())) {
+      // handling embedding elements {@link EmbeddingElementType
+      Set<InspectionSuppressor> suppressors = new LinkedHashSet<InspectionSuppressor>();
+      ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(viewProvider.getBaseLanguage()));
+      ContainerUtil.addIfNotNull(suppressors, elementLanguageSuppressor);
+      return suppressors;
+    }
+    return elementLanguageSuppressor != null
+           ? Collections.singleton(elementLanguageSuppressor)
+           : Collections.<InspectionSuppressor>emptySet();
+  }
+
+  public void cleanup(@NotNull Project project) {
 
   }
 
@@ -66,12 +189,12 @@ public abstract class InspectionProfileEntry {
     @Nullable String getDefaultGroupDisplayName();
   }
 
-  protected volatile DefaultNameProvider myNameProvider = null;
+  protected volatile DefaultNameProvider myNameProvider;
 
   /**
-   * @see com.intellij.codeInspection.InspectionEP#groupDisplayName
-   * @see com.intellij.codeInspection.InspectionEP#groupKey
-   * @see com.intellij.codeInspection.InspectionEP#groupBundle
+   * @see InspectionEP#groupDisplayName
+   * @see InspectionEP#groupKey
+   * @see InspectionEP#groupBundle
    */
   @Nls
   @NotNull
@@ -87,7 +210,7 @@ public abstract class InspectionProfileEntry {
   }
 
   /**
-   * @see com.intellij.codeInspection.InspectionEP#groupPath
+   * @see InspectionEP#groupPath
    */
   @NotNull
   public String[] getGroupPath() {
@@ -99,9 +222,9 @@ public abstract class InspectionProfileEntry {
   }
 
   /**
-   * @see com.intellij.codeInspection.InspectionEP#displayName
-   * @see com.intellij.codeInspection.InspectionEP#key
-   * @see com.intellij.codeInspection.InspectionEP#bundle
+   * @see InspectionEP#displayName
+   * @see InspectionEP#key
+   * @see InspectionEP#bundle
    */
   @Nls
   @NotNull
@@ -119,7 +242,7 @@ public abstract class InspectionProfileEntry {
   /**
    * DO NOT OVERRIDE this method.
    *
-   * @see com.intellij.codeInspection.InspectionEP#shortName
+   * @see InspectionEP#shortName
    */
   @NonNls
   @NotNull
@@ -135,13 +258,13 @@ public abstract class InspectionProfileEntry {
 
   @NotNull
   public static String getShortName(@NotNull String className) {
-    return StringUtil.trimEnd(className, "Inspection");
+    return StringUtil.trimEnd(StringUtil.trimEnd(className, "Inspection"), "InspectionBase");
   }
 
   /**
    * DO NOT OVERRIDE this method.
    *
-   * @see com.intellij.codeInspection.InspectionEP#level
+   * @see InspectionEP#level
    */
   @NotNull
   public HighlightDisplayLevel getDefaultLevel() {
@@ -151,7 +274,7 @@ public abstract class InspectionProfileEntry {
   /**
    * DO NOT OVERRIDE this method.
    *
-   * @see com.intellij.codeInspection.InspectionEP#enabledByDefault
+   * @see InspectionEP#enabledByDefault
    */
   public boolean isEnabledByDefault() {
     return false;
@@ -159,6 +282,7 @@ public abstract class InspectionProfileEntry {
 
   /**
    * This method is called each time UI is shown.
+   *
    * @return null if no UI options required.
    */
   @Nullable
@@ -269,7 +393,7 @@ public abstract class InspectionProfileEntry {
    * Initialize inspection with project. Is called on project opened for all profiles as well as on profile creation.
    *
    * @param project to be associated with this entry
-   * @deprecated this won't work for inspections configured via {@link com.intellij.codeInspection.InspectionEP}
+   * @deprecated this won't work for inspections configured via {@link InspectionEP}
    */
   public void projectOpened(@NotNull Project project) {
   }
@@ -278,7 +402,7 @@ public abstract class InspectionProfileEntry {
    * Cleanup inspection settings corresponding to the project. Is called on project closed for all profiles as well as on profile deletion.
    *
    * @param project to be disassociated from this entry
-   * @deprecated this won't work for inspections configured via {@link com.intellij.codeInspection.InspectionEP}
+   * @deprecated this won't work for inspections configured via {@link InspectionEP}
    */
   public void projectClosed(@NotNull Project project) {
   }
@@ -332,7 +456,8 @@ public abstract class InspectionProfileEntry {
       if (descriptionUrl == null) return null;
       return ResourceUtil.loadText(descriptionUrl);
     }
-    catch (IOException ignored) { }
+    catch (IOException ignored) {
+    }
 
     return null;
   }

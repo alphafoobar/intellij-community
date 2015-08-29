@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,7 @@ import com.intellij.lexer.Lexer;
 import com.intellij.lexer.MergingLexerAdapter;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.LanguageFileType;
-import com.intellij.psi.FileViewProvider;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiManager;
-import com.intellij.psi.SingleRootFileViewProvider;
+import com.intellij.psi.*;
 import com.intellij.psi.impl.DebugUtil;
 import com.intellij.psi.impl.source.DummyHolder;
 import com.intellij.psi.impl.source.PsiFileImpl;
@@ -51,10 +48,10 @@ public class TemplateDataElementType extends IFileElementType implements ITempla
 
   public static final LanguageExtension<TreePatcher> TREE_PATCHER = new LanguageExtension<TreePatcher>("com.intellij.lang.treePatcher", new SimpleTreePatcher());
 
-  private final IElementType myTemplateElementType;
-  private final IElementType myOuterElementType;
+  @NotNull private final IElementType myTemplateElementType;
+  @NotNull private final IElementType myOuterElementType;
 
-  public TemplateDataElementType(@NonNls String debugName, Language language, IElementType templateElementType, IElementType outerElementType) {
+  public TemplateDataElementType(@NonNls String debugName, Language language, @NotNull IElementType templateElementType, @NotNull IElementType outerElementType) {
     super(debugName, language);
     myTemplateElementType = templateElementType;
     myOuterElementType = outerElementType;
@@ -72,7 +69,8 @@ public class TemplateDataElementType extends IFileElementType implements ITempla
   public ASTNode parseContents(ASTNode chameleon) {
     final CharTable table = SharedImplUtil.findCharTableByTree(chameleon);
     final FileElement treeElement = new DummyHolder(((TreeElement)chameleon).getManager(), null, table).getTreeElement();
-    final PsiFile file = (PsiFile)TreeUtil.getFileElement((TreeElement)chameleon).getPsi();
+    final FileElement fileElement = TreeUtil.getFileElement((TreeElement)chameleon);
+    final PsiFile file = (PsiFile)fileElement.getPsi();
     PsiFile originalFile = file.getOriginalFile();
 
     final TemplateLanguageFileViewProvider viewProvider = (TemplateLanguageFileViewProvider)originalFile.getViewProvider();
@@ -112,8 +110,10 @@ public class TemplateDataElementType extends IFileElementType implements ITempla
     DebugUtil.checkTreeStructure(parsed);
     DebugUtil.checkTreeStructure(treeElement);
     DebugUtil.checkTreeStructure(chameleon);
-    DebugUtil.checkTreeStructure(file.getNode());
-    DebugUtil.checkTreeStructure(originalFile.getNode());
+    if (fileElement != chameleon) {
+      DebugUtil.checkTreeStructure(file.getNode());
+      DebugUtil.checkTreeStructure(originalFile.getNode());
+    }
 
     return childNode;
   }
@@ -188,7 +188,7 @@ public class TemplateDataElementType extends IFileElementType implements ITempla
   }
 
   protected OuterLanguageElementImpl createOuterLanguageElement(final Lexer lexer, final CharTable table,
-                                                                final IElementType outerElementType) {
+                                                                @NotNull IElementType outerElementType) {
     final CharSequence buffer = lexer.getBufferSequence();
     final int tokenStart = lexer.getTokenStart();
     if (tokenStart < 0 || tokenStart > buffer.length()) {
@@ -213,6 +213,10 @@ public class TemplateDataElementType extends IFileElementType implements ITempla
         return language;
       }
     };
+
+    // Since we're already inside a template language PSI that was built regardless of the file size (for whatever reason), 
+    // there should also be no file size checks for template data files.
+    SingleRootFileViewProvider.doNotCheckFileSizeLimit(virtualFile);
 
     return viewProvider.getPsi(language);
   }

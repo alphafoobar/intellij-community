@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,14 @@
  */
 package com.intellij.testFramework;
 
-import com.intellij.ExtensionPoints;
+import com.intellij.ToolExtensionPoints;
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.codeInspection.GlobalInspectionTool;
 import com.intellij.codeInspection.InspectionEP;
 import com.intellij.codeInspection.InspectionManager;
 import com.intellij.codeInspection.LocalInspectionTool;
 import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspectionBase;
 import com.intellij.codeInspection.deadCode.UnusedDeclarationPresentation;
 import com.intellij.codeInspection.ex.*;
 import com.intellij.codeInspection.reference.EntryPoint;
@@ -41,6 +42,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
+import com.intellij.testFramework.fixtures.impl.GlobalInspectionContextForTests;
 import com.intellij.util.ArrayUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -62,9 +64,8 @@ public abstract class InspectionTestCase extends PsiTestCase {
     InspectionEP ep = new InspectionEP();
     ep.presentation = UnusedDeclarationPresentation.class.getName();
     ep.implementationClass = UnusedDeclarationInspection.class.getName();
-    ep.shortName = UnusedDeclarationInspection.SHORT_NAME;
-    GlobalInspectionToolWrapper wrapper = new GlobalInspectionToolWrapper(ep);
-    return wrapper;
+    ep.shortName = UnusedDeclarationInspectionBase.SHORT_NAME;
+    return new GlobalInspectionToolWrapper(ep);
   }
 
   public InspectionManagerEx getManager() {
@@ -145,10 +146,10 @@ public abstract class InspectionTestCase extends PsiTestCase {
     InspectionManagerEx inspectionManager = (InspectionManagerEx)InspectionManager.getInstance(getProject());
     InspectionToolWrapper[] toolWrappers = runDeadCodeFirst ? new InspectionToolWrapper []{getUnusedDeclarationWrapper(), toolWrapper} : new InspectionToolWrapper []{toolWrapper};
     toolWrappers = ArrayUtil.mergeArrays(toolWrappers, additional);
-    final GlobalInspectionContextImpl globalContext =
+    final GlobalInspectionContextForTests globalContext =
       CodeInsightTestFixtureImpl.createGlobalContextForTool(scope, getProject(), inspectionManager, toolWrappers);
 
-    InspectionTestUtil.runTool(toolWrapper, scope, globalContext, inspectionManager);
+    InspectionTestUtil.runTool(toolWrapper, scope, globalContext);
     return globalContext;
   }
 
@@ -179,7 +180,7 @@ public abstract class InspectionTestCase extends PsiTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    ExtensionPoint<EntryPoint> point = Extensions.getRootArea().getExtensionPoint(ExtensionPoints.DEAD_CODE_TOOL);
+    ExtensionPoint<EntryPoint> point = Extensions.getRootArea().getExtensionPoint(ToolExtensionPoints.DEAD_CODE_TOOL);
     myUnusedCodeExtension = new EntryPoint() {
       @NotNull
       @Override
@@ -188,12 +189,12 @@ public abstract class InspectionTestCase extends PsiTestCase {
       }
 
       @Override
-      public boolean isEntryPoint(RefElement refElement, PsiElement psiElement) {
+      public boolean isEntryPoint(@NotNull RefElement refElement, @NotNull PsiElement psiElement) {
         return isEntryPoint(psiElement);
       }
 
       @Override
-      public boolean isEntryPoint(PsiElement psiElement) {
+      public boolean isEntryPoint(@NotNull PsiElement psiElement) {
         return ext_src != null && VfsUtilCore.isAncestor(ext_src, PsiUtilCore.getVirtualFile(psiElement), false);
       }
 
@@ -223,7 +224,7 @@ public abstract class InspectionTestCase extends PsiTestCase {
 
   @Override
   protected void tearDown() throws Exception {
-    ExtensionPoint<EntryPoint> point = Extensions.getRootArea().getExtensionPoint(ExtensionPoints.DEAD_CODE_TOOL);
+    ExtensionPoint<EntryPoint> point = Extensions.getRootArea().getExtensionPoint(ToolExtensionPoints.DEAD_CODE_TOOL);
     point.unregisterExtension(myUnusedCodeExtension);
     myUnusedCodeExtension = null;
     ext_src = null;
@@ -244,5 +245,10 @@ public abstract class InspectionTestCase extends PsiTestCase {
   @NonNls
   protected String getTestDataPath() {
     return PathManagerEx.getTestDataPath() + "/inspection/";
+  }
+
+  @Override
+  protected final boolean isRunInWriteAction() {
+    return false;
   }
 }

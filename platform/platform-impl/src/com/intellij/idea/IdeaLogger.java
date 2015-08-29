@@ -121,7 +121,7 @@ public class IdeaLogger extends Logger {
   @Override
   public void error(String message, @Nullable Throwable t, @NotNull String... details) {
     if (t instanceof ProcessCanceledException) {
-      myLogger.error(new Throwable("Do not log ProcessCanceledException").initCause(t));
+      myLogger.error(message, new Throwable("Do not log ProcessCanceledException").initCause(t));
       throw (ProcessCanceledException)t;
     }
 
@@ -159,7 +159,7 @@ public class IdeaLogger extends Logger {
     myLogger.error("OS: " + System.getProperties().getProperty("os.name", "unknown"));
 
     ApplicationImpl application = (ApplicationImpl)ApplicationManager.getApplication();
-    if (application != null && application.isComponentsCreated()) {
+    if (application != null && application.isComponentsCreated() && !application.isDisposed()) {
       final String lastPreformedActionId = ourLastActionId;
       if (lastPreformedActionId != null) {
         myLogger.error("Last Action: " + lastPreformedActionId);
@@ -199,7 +199,7 @@ public class IdeaLogger extends Logger {
       @Override
       public String getInfo() {
         final ApplicationInfoEx info = ApplicationInfoImpl.getShadowInstance();
-        return info.getFullApplicationName() + "  " + "Build #" + info.getBuild().asString();
+        return info.getFullApplicationName() + "  " + "Build #" + info.getBuild().asStringWithAllDetails();
       }
     };
   }

@@ -17,16 +17,16 @@ package org.jetbrains.jps.incremental;
 
 import com.intellij.openapi.util.io.FileUtil;
 import gnu.trove.THashSet;
+import gnu.trove.TObjectIntHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.builders.*;
-import org.jetbrains.jps.builders.impl.BuildOutputConsumerImpl;
 import org.jetbrains.jps.builders.impl.BuildTargetChunk;
-import org.jetbrains.jps.builders.impl.DirtyFilesHolderBase;
 import org.jetbrains.jps.builders.logging.ProjectBuilderLogger;
 import org.jetbrains.jps.builders.storage.SourceToOutputMapping;
 import org.jetbrains.jps.cmdline.ProjectDescriptor;
 import org.jetbrains.jps.incremental.fs.BuildFSState;
+import org.jetbrains.jps.incremental.fs.CompilationRound;
 import org.jetbrains.jps.incremental.messages.DoneSomethingNotification;
 import org.jetbrains.jps.incremental.messages.FileDeletedEvent;
 import org.jetbrains.jps.incremental.storage.BuildDataManager;
@@ -50,7 +50,7 @@ public class BuildOperations {
     final Timestamps timestamps = pd.timestamps.getStorage();
     final BuildTargetConfiguration configuration = pd.getTargetsState().getTargetConfiguration(target);
     if (context.isProjectRebuild()) {
-      FSOperations.markDirtyFiles(context, target, timestamps, true, null, null);
+      FSOperations.markDirtyFiles(context, target, CompilationRound.CURRENT, timestamps, true, null, null);
       pd.fsState.markInitialScanPerformed(target);
       configuration.save(context);
     }
@@ -69,7 +69,7 @@ public class BuildOperations {
     final ProjectDescriptor pd = context.getProjectDescriptor();
     final Timestamps timestamps = pd.timestamps.getStorage();
     final THashSet<File> currentFiles = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
-    FSOperations.markDirtyFiles(context, target, timestamps, forceMarkDirty, currentFiles, null);
+    FSOperations.markDirtyFiles(context, target, CompilationRound.CURRENT, timestamps, forceMarkDirty, currentFiles, null);
 
     // handle deleted paths
     final BuildFSState fsState = pd.fsState;
@@ -84,24 +84,6 @@ public class BuildOperations {
       }
     }
     pd.fsState.markInitialScanPerformed(target);
-  }
-
-  public static <R extends BuildRootDescriptor, T extends BuildTarget<R>>
-  void buildTarget(final T target, final CompileContext context, TargetBuilder<?, ?> builder) throws ProjectBuildException, IOException {
-
-    if (builder.getTargetTypes().contains(target.getTargetType())) {
-      DirtyFilesHolder<R, T> holder = new DirtyFilesHolderBase<R, T>(context) {
-        @Override
-        public void processDirtyFiles(@NotNull FileProcessor<R, T> processor) throws IOException {
-          context.getProjectDescriptor().fsState.processFilesToRecompile(context, target, processor);
-        }
-      };
-      //noinspection unchecked
-      BuildOutputConsumerImpl outputConsumer = new BuildOutputConsumerImpl(target, context);
-      ((TargetBuilder<R, T>)builder).build(target, holder, outputConsumer, context);
-      outputConsumer.fireFileGeneratedEvent();
-      context.checkCanceled();
-    }
   }
 
   public static void markTargetsUpToDate(CompileContext context, BuildTargetChunk chunk) throws IOException {
@@ -157,6 +139,7 @@ public class BuildOperations {
 
       dirtyFilesHolder.processDirtyFiles(new FileProcessor<R, T>() {
         private final Map<T, SourceToOutputMapping> mappingsCache = new java.util.HashMap<T, SourceToOutputMapping>(); // cache the mapping locally
+        private final TObjectIntHashMap<T> idsCache = new TObjectIntHashMap<T>();
 
         @Override
         public boolean apply(T target, File file, R sourceRoot) throws IOException {
@@ -165,13 +148,24 @@ public class BuildOperations {
             srcToOut = dataManager.getSourceToOutputMap(target);
             mappingsCache.put(target, srcToOut);
           }
+          final int targetId;
+          if (!idsCache.containsKey(target)) {
+            targetId = dataManager.getTargetsState().getBuildTargetId(target);
+            idsCache.put(target, targetId);
+          }
+          else {
+            targetId = idsCache.get(target);
+          }
           final String srcPath = file.getPath();
           final Collection<String> outputs = srcToOut.getOutputs(srcPath);
           if (outputs != null) {
             final boolean shouldPruneOutputDirs = target instanceof ModuleBasedTarget;
+            final List<String> deletedForThisSource = new ArrayList<String>(outputs.size());
             for (String output : outputs) {
-              deleteRecursively(output, deletedPaths, shouldPruneOutputDirs ? dirsToDelete : null);
+              deleteRecursively(output, deletedForThisSource, shouldPruneOutputDirs ? dirsToDelete : null);
             }
+            deletedPaths.addAll(deletedForThisSource);
+            dataManager.getOutputToTargetRegistry().removeMapping(deletedForThisSource, targetId);
             Set<File> cleaned = cleanedSources.get(target);
             if (cleaned == null) {
               cleaned = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
@@ -207,9 +201,9 @@ public class BuildOperations {
   public static boolean deleteRecursively(@NotNull String path, @NotNull Collection<String> deletedPaths, @Nullable Set<File> parentDirs) {
     File file = new File(path);
     boolean deleted = deleteRecursively(file, deletedPaths);
-    if (deleted) {
+    if (deleted && parentDirs != null) {
       File parent = file.getParentFile();
-      if (parent != null && parentDirs != null) {
+      if (parent != null) {
         parentDirs.add(parent);
       }
     }

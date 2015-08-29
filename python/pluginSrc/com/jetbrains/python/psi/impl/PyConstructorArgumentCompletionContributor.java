@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.jetbrains.python.psi.impl;
 
 import com.intellij.codeInsight.completion.*;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PropertyUtil;
@@ -60,9 +61,10 @@ public class PyConstructorArgumentCompletionContributor extends CompletionContri
   private static void addSettersAndListeners(CompletionResultSet result, PsiClass containingClass) {
     // see PyJavaType.init() in Jython source code for matching logic
     for (PsiMethod method : containingClass.getAllMethods()) {
+      final Project project = containingClass.getProject();
       if (PropertyUtil.isSimplePropertySetter(method)) {
         final String propName = PropertyUtil.getPropertyName(method);
-        result.addElement(PyUtil.createNamedParameterLookup(propName));
+        result.addElement(PyUtil.createNamedParameterLookup(propName, project));
       }
       else if (method.getName().startsWith("add") && method.getName().endsWith("Listener") && PsiType.VOID.equals(method.getReturnType())) {
         final PsiParameter[] parameters = method.getParameterList().getParameters();
@@ -71,9 +73,9 @@ public class PyConstructorArgumentCompletionContributor extends CompletionContri
           if (type instanceof PsiClassType) {
             final PsiClass parameterClass = ((PsiClassType)type).resolve();
             if (parameterClass != null) {
-              result.addElement(PyUtil.createNamedParameterLookup(StringUtil.decapitalize(parameterClass.getName())));
-              for (PsiMethod parameterMethod: parameterClass.getMethods()) {
-                result.addElement(PyUtil.createNamedParameterLookup(parameterMethod.getName()));
+              result.addElement(PyUtil.createNamedParameterLookup(StringUtil.decapitalize(parameterClass.getName()), project));
+              for (PsiMethod parameterMethod : parameterClass.getMethods()) {
+                result.addElement(PyUtil.createNamedParameterLookup(parameterMethod.getName(), project));
               }
             }
           }

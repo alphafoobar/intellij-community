@@ -17,11 +17,9 @@ package com.intellij.execution;
 
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.ExecutionConsole;
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.project.DumbAware;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +31,8 @@ public class DefaultExecutionResult implements ExecutionResult {
   private final ExecutionConsole myConsole;
   private final ProcessHandler myProcessHandler;
   private AnAction[] myActions;
-  private AnAction[] myRestartActions;
+  @NotNull
+  private AnAction[] myRestartActions = AnAction.EMPTY_ARRAY;
   private final List<AnAction> myStopActions = new ArrayList<AnAction>();
 
   public DefaultExecutionResult() {
@@ -42,7 +41,7 @@ public class DefaultExecutionResult implements ExecutionResult {
     myActions = AnAction.EMPTY_ARRAY;
   }
 
-  public DefaultExecutionResult(final ExecutionConsole console, @NotNull final ProcessHandler processHandler) {
+  public DefaultExecutionResult(@Nullable ExecutionConsole console, @NotNull final ProcessHandler processHandler) {
     this(console, processHandler, AnAction.EMPTY_ARRAY);
   }
 
@@ -66,12 +65,14 @@ public class DefaultExecutionResult implements ExecutionResult {
     myActions = actions;
   }
 
+  @NotNull
   public AnAction[] getRestartActions() {
     return myRestartActions;
   }
 
-  public void setRestartActions(AnAction... restartActions) {
-    myRestartActions = restartActions;
+  // TODO: Find all usages, make sure there is no null and make this method NotNull
+  public void setRestartActions(@Nullable AnAction... restartActions) {
+    myRestartActions = (restartActions != null ? restartActions : AnAction.EMPTY_ARRAY);
   }
 
   public void addStopAction(AnAction action) {
@@ -86,34 +87,5 @@ public class DefaultExecutionResult implements ExecutionResult {
   @Override
   public ProcessHandler getProcessHandler() {
     return myProcessHandler;
-  }
-
-  /**
-   * @deprecated use {@link com.intellij.execution.actions.StopProcessAction}.
-   * Will be removed in IDEA 14
-   */
-  public static class StopAction extends AnAction implements DumbAware {
-    private final ProcessHandler myProcessHandler;
-
-    public StopAction(final ProcessHandler processHandler) {
-      super(ExecutionBundle.message("run.configuration.stop.action.name"), null, AllIcons.Actions.Suspend);
-      getTemplatePresentation().setEnabled(false);
-      myProcessHandler = processHandler;
-    }
-
-    @Override
-    public void actionPerformed(final AnActionEvent e) {
-      if(myProcessHandler.detachIsDefault()) {
-        myProcessHandler.detachProcess();
-      }
-      else {
-        myProcessHandler.destroyProcess();
-      }
-    }
-
-    @Override
-    public void update(final AnActionEvent event) {
-      event.getPresentation().setEnabled(!myProcessHandler.isProcessTerminating() && !myProcessHandler.isProcessTerminated());
-    }
   }
 }

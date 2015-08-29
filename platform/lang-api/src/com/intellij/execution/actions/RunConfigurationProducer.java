@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,22 +15,21 @@
  */
 package com.intellij.execution.actions;
 
-import com.intellij.execution.Location;
-import com.intellij.execution.PsiLocation;
-import com.intellij.execution.RunManager;
-import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.*;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiElement;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * Supports creating run configurations from context (by right-clicking a code element in the source editor or the project view). Typically,
@@ -40,7 +39,24 @@ import java.util.List;
  * @author yole
  */
 public abstract class RunConfigurationProducer<T extends RunConfiguration> {
-  public static ExtensionPointName<RunConfigurationProducer> EP_NAME = ExtensionPointName.create("com.intellij.runConfigurationProducer");
+  public static final ExtensionPointName<RunConfigurationProducer> EP_NAME = ExtensionPointName.create("com.intellij.runConfigurationProducer");
+  private static final Logger LOG = Logger.getInstance("#" + RunConfigurationProducer.class.getName());
+
+  @NotNull
+  public static List<RunConfigurationProducer<?>> getProducers(@NotNull Project project) {
+    RunConfigurationProducerService runConfigurationProducerService = RunConfigurationProducerService.getInstance(project);
+    RunConfigurationProducer[] allProducers = Extensions.getExtensions(EP_NAME);
+
+    List<RunConfigurationProducer<?>> result = ContainerUtil.newArrayListWithCapacity(allProducers.length);
+    for (RunConfigurationProducer producer : allProducers) {
+      if (!runConfigurationProducerService.isIgnored(producer)) {
+        result.add(producer);
+      }
+    }
+
+    return result;
+  }
+
   private final ConfigurationFactory myConfigurationFactory;
 
   protected RunConfigurationProducer(final ConfigurationFactory configurationFactory) {
@@ -105,9 +121,26 @@ public abstract class RunConfigurationProducer<T extends RunConfiguration> {
    * @param other a configuration created by another producer.
    * @return true if the configuration created by this producer is at least as good as the other one; false if this configuration
    * should be discarded and the other one should be used instead.
+   * @see #shouldReplace(ConfigurationFromContext, ConfigurationFromContext)
    */
   public boolean isPreferredConfiguration(ConfigurationFromContext self, ConfigurationFromContext other) {
     return true;
+  }
+
+  /**
+   * When two configurations are created from the same context by two different producers, checks if the configuration created by
+   * this producer should replace the other one, that is if the other one should be discarded.
+   *
+   * <p>This is the same relationship as {@link #isPreferredConfiguration(ConfigurationFromContext, ConfigurationFromContext)} but
+   * specified from the "replacement" side.
+   *
+   * @param self  a configuration created by this producer.
+   * @param other a configuration created by another producer.
+   * @return true if the other configuration should be discarded, false otherwise.
+   * @see #isPreferredConfiguration(ConfigurationFromContext, ConfigurationFromContext)
+   */
+  public boolean shouldReplace(ConfigurationFromContext self, ConfigurationFromContext other) {
+    return false;
   }
 
   /**
@@ -145,15 +178,21 @@ public abstract class RunConfigurationProducer<T extends RunConfiguration> {
         final RunManager runManager = RunManager.getInstance(context.getProject());
         final ConfigurationType type = fromContext.getConfigurationType();
         final List<RunnerAndConfigurationSettings> configurations = runManager.getConfigurationSettingsList(type);
-        final RunnerAndConfigurationSettings configuration = findExistingConfiguration(context);
-        if (configuration != null) {
-          fromContext.setConfigurationSettings(configuration);
+        final RunnerAndConfigurationSettings settings = findExistingConfiguration(context);
+        if (settings != null) {
+          fromContext.setConfigurationSettings(settings);
         } else {
           final ArrayList<String> currentNames = new ArrayList<String>();
           for (RunnerAndConfigurationSettings configurationSettings : configurations) {
             currentNames.add(configurationSettings.getName());
           }
-          fromContext.getConfiguration().setName(RunManager.suggestUniqueName(fromContext.getConfiguration().getName(), currentNames));
+          RunConfiguration configuration = fromContext.getConfiguration();
+          String name = configuration.getName();
+          if (name == null) {
+            LOG.error(configuration);
+            name = "Unnamed";
+          }
+          configuration.setName(RunManager.suggestUniqueName(name, currentNames));
         }
       }
     }
@@ -187,12 +226,23 @@ public abstract class RunConfigurationProducer<T extends RunConfiguration> {
     return RunManager.getInstance(context.getProject()).createRunConfiguration("", myConfigurationFactory);
   }
 
-  public static RunConfigurationProducer getInstance(Class<? extends RunConfigurationProducer> aClass) {
+  @NotNull
+  public static <T extends RunConfigurationProducer> T getInstance(Class<? extends T> aClass) {
     for (RunConfigurationProducer producer : Extensions.getExtensions(EP_NAME)) {
       if (aClass.isInstance(producer)) {
-        return producer;
+        return (T)producer;
       }
     }
+    assert false : aClass;
     return null;
+  }
+
+  @Nullable
+  public RunConfiguration createLightConfiguration(@NotNull final ConfigurationContext context) {
+    RunConfiguration configuration = myConfigurationFactory.createTemplateConfiguration(context.getProject());
+    if (!setupConfigurationFromContext((T)configuration, context, new Ref<PsiElement>(context.getPsiLocation()))) {
+      return null;
+    }
+    return configuration;
   }
 }

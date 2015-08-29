@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,12 @@ package com.intellij.psi.impl.source.tree;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectCoreUtil;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiLock;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.TokenType;
 import com.intellij.psi.impl.DebugUtil;
 import com.intellij.psi.impl.ElementBase;
@@ -33,17 +36,18 @@ import org.jetbrains.annotations.Nullable;
 
 public abstract class TreeElement extends ElementBase implements ASTNode, Cloneable {
   public static final TreeElement[] EMPTY_ARRAY = new TreeElement[0];
-  private TreeElement myNextSibling = null;
-  private TreeElement myPrevSibling = null;
-  private CompositeElement myParent = null;
+  private TreeElement myNextSibling;
+  private TreeElement myPrevSibling;
+  private CompositeElement myParent;
 
   private final IElementType myType;
   private volatile int myStartOffsetInParent = -1;
 
-  public TreeElement(IElementType type) {
+  public TreeElement(@NotNull IElementType type) {
     myType = type;
   }
 
+  @NotNull
   @Override
   public Object clone() {
     TreeElement clone = (TreeElement)super.clone();
@@ -64,6 +68,10 @@ public abstract class TreeElement extends ElementBase implements ASTNode, Clonea
   }
 
   public PsiManagerEx getManager() {
+    Project project = ProjectCoreUtil.theOnlyOpenProject();
+    if (project != null) {
+      return (PsiManagerEx)PsiManager.getInstance(project);
+    }
     TreeElement element;
     for (element = this; element.getTreeParent() != null; element = element.getTreeParent()) {
     }
@@ -162,7 +170,7 @@ public abstract class TreeElement extends ElementBase implements ASTNode, Clonea
 
   @NonNls
   public String toString() {
-    return "Element" + "(" + getElementType().toString() + ")";
+    return "Element" + "(" + getElementType() + ")";
   }
 
   @Override
@@ -208,7 +216,7 @@ public abstract class TreeElement extends ElementBase implements ASTNode, Clonea
   public void clearCaches() {
   }
 
-  @SuppressWarnings({"EqualsWhichDoesntCheckParameterClass"})
+  @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
   public final boolean equals(Object obj) {
     return obj == this;
   }
@@ -390,6 +398,7 @@ public abstract class TreeElement extends ElementBase implements ASTNode, Clonea
   }
 
   @Override
+  @NotNull
   public IElementType getElementType() {
     return myType;
   }

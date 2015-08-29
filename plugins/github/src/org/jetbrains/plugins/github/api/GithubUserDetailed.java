@@ -25,10 +25,10 @@ public class GithubUserDetailed extends GithubUser {
   @Nullable private final String myName;
   @Nullable private final String myEmail;
 
-  private final int myOwnedPrivateRepos;
+  @Nullable private final Integer myOwnedPrivateRepos;
 
-  @NotNull private final String myType;
-  @NotNull private final UserPlan myPlan;
+  @Nullable private final String myType;
+  @Nullable private final UserPlan myPlan;
 
   public static class UserPlan {
     @NotNull private final String myName;
@@ -50,18 +50,18 @@ public class GithubUserDetailed extends GithubUser {
   }
 
   public boolean canCreatePrivateRepo() {
-    return getPlan().getPrivateRepos() > getOwnedPrivateRepos();
+    return getPlan() == null || getOwnedPrivateRepos() == null || getPlan().getPrivateRepos() > getOwnedPrivateRepos();
   }
 
   public GithubUserDetailed(@NotNull String login,
                             @NotNull String htmlUrl,
-                            @Nullable String gravatarId,
+                            @Nullable String avatarUrl,
                             @Nullable String name,
                             @Nullable String email,
-                            int ownedPrivateRepos,
-                            @NotNull String type,
-                            @NotNull UserPlan plan) {
-    super(login, htmlUrl, gravatarId);
+                            @Nullable Integer ownedPrivateRepos,
+                            @Nullable String type,
+                            @Nullable UserPlan plan) {
+    super(login, htmlUrl, avatarUrl);
     myName = name;
     myEmail = email;
     myOwnedPrivateRepos = ownedPrivateRepos;
@@ -79,16 +79,17 @@ public class GithubUserDetailed extends GithubUser {
     return myEmail;
   }
 
-  @NotNull
+  @Nullable
   public String getType() {
     return myType;
   }
 
-  public int getOwnedPrivateRepos() {
+  @Nullable
+  public Integer getOwnedPrivateRepos() {
     return myOwnedPrivateRepos;
   }
 
-  @NotNull
+  @Nullable
   public UserPlan getPlan() {
     return myPlan;
   }

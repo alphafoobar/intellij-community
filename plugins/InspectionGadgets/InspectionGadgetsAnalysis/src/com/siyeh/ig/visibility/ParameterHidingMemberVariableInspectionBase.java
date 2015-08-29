@@ -17,6 +17,7 @@ package com.siyeh.ig.visibility;
 
 import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PropertyUtil;
 import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
@@ -48,6 +49,12 @@ public class ParameterHidingMemberVariableInspectionBase extends BaseInspection 
   @NotNull
   public String getID() {
     return "ParameterHidesMemberVariable";
+  }
+
+  @Nullable
+  @Override
+  public String getAlternativeID() {
+    return "hiding";
   }
 
   @Override
@@ -113,8 +120,11 @@ public class ParameterHidingMemberVariableInspectionBase extends BaseInspection 
       }
       if (m_ignoreForPropertySetters) {
         final String methodName = method.getName();
-        final PsiType returnType = method.getReturnType();
-        if (methodName.startsWith(HardcodedMethodConstants.SET) && PsiType.VOID.equals(returnType)) {
+        if (methodName.startsWith(HardcodedMethodConstants.SET) && PsiType.VOID.equals(method.getReturnType())) {
+          return;
+        }
+
+        if (PropertyUtil.isSimplePropertySetter(method)) {
           return;
         }
       }
@@ -131,14 +141,10 @@ public class ParameterHidingMemberVariableInspectionBase extends BaseInspection 
       if (variableName == null) {
         return null;
       }
-      PsiClass aClass = ClassUtils.getContainingClass(variable);
+      PsiClass aClass = ClassUtils.getContainingClass(method);
       while (aClass != null) {
-        final PsiField[] fields = aClass.getAllFields();
-        for (PsiField field : fields) {
-          final String fieldName = field.getName();
-          if (!variableName.equals(fieldName)) {
-            continue;
-          }
+        PsiField field = aClass.findFieldByName(variableName, true);
+        if (field != null) {
           if (m_ignoreStaticMethodParametersHidingInstanceFields && !field.hasModifierProperty(PsiModifier.STATIC) &&
               method.hasModifierProperty(PsiModifier.STATIC)) {
             continue;
@@ -147,6 +153,7 @@ public class ParameterHidingMemberVariableInspectionBase extends BaseInspection 
             return aClass;
           }
         }
+
         aClass = ClassUtils.getContainingClass(aClass);
       }
       return null;

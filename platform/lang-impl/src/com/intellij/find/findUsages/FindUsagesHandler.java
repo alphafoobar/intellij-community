@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,19 +20,17 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadActionProcessor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.NullableComputable;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.PsiReference;
-import com.intellij.psi.PsiReferenceService;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.refactoring.util.TextOccurrencesUtil;
 import com.intellij.usageView.UsageInfo;
+import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -47,8 +45,10 @@ import java.util.Collections;
  */
 public abstract class FindUsagesHandler {
   // return this handler if you want to cancel the search
-  public static final FindUsagesHandler NULL_HANDLER = new FindUsagesHandler(PsiUtilCore.NULL_PSI_ELEMENT){};
+  @NotNull
+  public static final FindUsagesHandler NULL_HANDLER = new NullFindUsagesHandler();
 
+  @NotNull
   private final PsiElement myPsiElement;
 
   protected FindUsagesHandler(@NotNull PsiElement psiElement) {
@@ -81,7 +81,13 @@ public abstract class FindUsagesHandler {
     return PsiElement.EMPTY_ARRAY;
   }
 
-  public static FindUsagesOptions createFindUsagesOptions(final Project project, @Nullable final DataContext dataContext) {
+  @Nullable
+  protected String getHelpId() {
+    return FindUsagesManager.getHelpID(myPsiElement);
+  }
+
+  @NotNull
+  public static FindUsagesOptions createFindUsagesOptions(@NotNull Project project, @Nullable final DataContext dataContext) {
     FindUsagesOptions findUsagesOptions = new FindUsagesOptions(project, dataContext);
     findUsagesOptions.isUsages = true;
     findUsagesOptions.isSearchForTextOccurrences = true;
@@ -92,6 +98,7 @@ public abstract class FindUsagesHandler {
   public FindUsagesOptions getFindUsagesOptions() {
     return getFindUsagesOptions(null);
   }
+
   @NotNull
   public FindUsagesOptions getFindUsagesOptions(@Nullable final DataContext dataContext) {
     FindUsagesOptions options = createFindUsagesOptions(getProject(), dataContext);
@@ -146,53 +153,13 @@ public abstract class FindUsagesHandler {
       }
     });
     if (stringToSearch == null) return true;
-    final TextRange elementTextRange = ApplicationManager.getApplication().runReadAction(new NullableComputable<TextRange>() {
-      @Override
-      public TextRange compute() {
-        if (!element.isValid()) return null;
-        return element.getTextRange();
-      }
-    });
-    TextOccurrencesUtil.UsageInfoFactory factory = new TextOccurrencesUtil.UsageInfoFactory() {
-      @Override
-      public UsageInfo createUsageInfo(@NotNull PsiElement usage, int startOffset, int endOffset) {
-        if (elementTextRange != null
-            && usage.getContainingFile() == element.getContainingFile()
-            && elementTextRange.contains(startOffset)
-            && elementTextRange.contains(endOffset)) {
-          return null;
-        }
-
-        PsiReference someReference = usage.findReferenceAt(startOffset);
-        if (someReference != null) {
-          PsiElement refElement = someReference.getElement();
-          for (PsiReference ref : PsiReferenceService.getService().getReferences(refElement, new PsiReferenceService.Hints(element, null))) {
-            if (element.getManager().areElementsEquivalent(ref.resolve(), element)) {
-              TextRange range = ref.getRangeInElement().shiftRight(refElement.getTextRange().getStartOffset() - usage.getTextRange().getStartOffset());
-              return new UsageInfo(usage, range.getStartOffset(), range.getEndOffset(), true);
-            }
-          }
-
-        }
-
-        return new UsageInfo(usage, startOffset, endOffset, true);
-      }
-    };
-    for (String s : stringToSearch) {
-      if (!TextOccurrencesUtil.processTextOccurences(element, s, searchScope, processor, factory)) return false;
-    }
-    return true;
+    return FindUsagesHelper.processUsagesInText(element, stringToSearch, searchScope, processor);
   }
 
   @Nullable
-  protected Collection<String> getStringsToSearch(final PsiElement element) {
+  protected Collection<String> getStringsToSearch(@NotNull final PsiElement element) {
     if (element instanceof PsiNamedElement) {
-      return ApplicationManager.getApplication().runReadAction(new Computable<Collection<String>>() {
-        @Override
-        public Collection<String> compute() {
-          return ContainerUtil.createMaybeSingletonList(((PsiNamedElement)element).getName());
-        }
-      });
+      return ContainerUtil.createMaybeSingletonList(((PsiNamedElement)element).getName());
     }
 
     return Collections.singleton(element.getText());
@@ -202,7 +169,81 @@ public abstract class FindUsagesHandler {
     return false;
   }
 
+  @NotNull
   public Collection<PsiReference> findReferencesToHighlight(@NotNull PsiElement target, @NotNull SearchScope searchScope) {
     return ReferencesSearch.search(target, searchScope, false).findAll();
+  }
+
+  private static class NullFindUsagesHandler extends FindUsagesHandler {
+    private NullFindUsagesHandler() {
+      super(PsiUtilCore.NULL_PSI_ELEMENT);
+    }
+
+    @NotNull
+    @Override
+    public AbstractFindUsagesDialog getFindUsagesDialog(boolean isSingleFile, boolean toShowInNewTab, boolean mustOpenInNewTab) {
+      throw new IncorrectOperationException();
+    }
+
+    @NotNull
+    @Override
+    public PsiElement[] getPrimaryElements() {
+      throw new IncorrectOperationException();
+    }
+
+    @NotNull
+    @Override
+    public PsiElement[] getSecondaryElements() {
+      throw new IncorrectOperationException();
+    }
+
+    @Nullable
+    @Override
+    protected String getHelpId() {
+      throw new IncorrectOperationException();
+    }
+
+    @NotNull
+    @Override
+    public FindUsagesOptions getFindUsagesOptions() {
+      throw new IncorrectOperationException();
+    }
+
+    @NotNull
+    @Override
+    public FindUsagesOptions getFindUsagesOptions(@Nullable DataContext dataContext) {
+      throw new IncorrectOperationException();
+    }
+
+    @Override
+    public boolean processElementUsages(@NotNull PsiElement element,
+                                        @NotNull Processor<UsageInfo> processor,
+                                        @NotNull FindUsagesOptions options) {
+      throw new IncorrectOperationException();
+    }
+
+    @Override
+    public boolean processUsagesInText(@NotNull PsiElement element,
+                                       @NotNull Processor<UsageInfo> processor,
+                                       @NotNull GlobalSearchScope searchScope) {
+      throw new IncorrectOperationException();
+    }
+
+    @Nullable
+    @Override
+    protected Collection<String> getStringsToSearch(@NotNull PsiElement element) {
+      throw new IncorrectOperationException();
+    }
+
+    @Override
+    protected boolean isSearchForTextOccurencesAvailable(@NotNull PsiElement psiElement, boolean isSingleFile) {
+      throw new IncorrectOperationException();
+    }
+
+    @NotNull
+    @Override
+    public Collection<PsiReference> findReferencesToHighlight(@NotNull PsiElement target, @NotNull SearchScope searchScope) {
+      throw new IncorrectOperationException();
+    }
   }
 }

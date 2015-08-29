@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ public class PyOverridingMethodsSearchExecutor implements QueryExecutor<PyFuncti
             final Property overridingProperty = overridingMethod.getProperty();
             if (baseProperty != null && overridingProperty != null) {
               final AccessDirection direction = PyUtil.getPropertyAccessDirection(baseMethod);
-              final Callable callable = overridingProperty.getByDirection(direction).valueOrNull();
+              final PyCallable callable = overridingProperty.getByDirection(direction).valueOrNull();
               overridingMethod = (callable instanceof PyFunction) ? (PyFunction)callable : null;
             }
           }

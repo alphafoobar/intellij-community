@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,65 +13,68 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/*
- * @author max
- */
 package com.intellij.openapi.projectRoots;
 
+import com.intellij.execution.CommandLineWrapperUtil;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.execution.configurations.SimpleJavaParameters;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
-import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.util.PathUtil;
+import com.intellij.util.execution.ParametersListUtil;
+import com.intellij.util.lang.ClassPath;
 import com.intellij.util.lang.UrlClassLoader;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.charset.Charset;
+import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
+/**
+ * @author max
+ */
 public class JdkUtil {
+  /**
+   * The VM property is needed to workaround incorrect escaped URLs handling in WebSphere,
+   * see <a href="https://youtrack.jetbrains.com/issue/IDEA-126859#comment=27-778948">IDEA-126859</a> for additional details
+   */
+  public static final String PROPERTY_DO_NOT_ESCAPE_CLASSPATH_URL = "idea.do.not.escape.classpath.url";
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.projectRoots.JdkUtil");
   private static final String WRAPPER_CLASS = "com.intellij.rt.execution.CommandLineWrapper";
 
-  private JdkUtil() {
-  }
+  private JdkUtil() { }
 
   /**
    * @return the specified attribute of the JDK (examines rt.jar) or null if cannot determine the value
    */
   @Nullable
-  public static String getJdkMainAttribute(@NotNull Sdk jdk, Attributes.Name attributeName) {
-    final VirtualFile homeDirectory = jdk.getHomeDirectory();
-    if (homeDirectory == null) {
-      return null;
-    }
-    VirtualFile rtJar = homeDirectory.findFileByRelativePath("jre/lib/rt.jar");
-    if (rtJar == null) {
-      rtJar = homeDirectory.findFileByRelativePath("lib/rt.jar");
-    }
-    if (rtJar == null) {
-      rtJar = homeDirectory.findFileByRelativePath("jre/lib/vm.jar"); // for IBM jdk
-    }
-    if (rtJar == null) {
-      rtJar = homeDirectory.findFileByRelativePath("../Classes/classes.jar"); // for mac
-    }
+  public static String getJdkMainAttribute(@NotNull Sdk jdk, Attributes.Name attribute) {
+    VirtualFile homeDirectory = jdk.getHomeDirectory();
+    if (homeDirectory == null) return null;
+
+    VirtualFile rtJar = homeDirectory.findFileByRelativePath("jre/lib/rt.jar");                 // JDK
+    if (rtJar == null) rtJar = homeDirectory.findFileByRelativePath("lib/rt.jar");              // JRE
+    if (rtJar == null) rtJar = homeDirectory.findFileByRelativePath("jre/lib/vm.jar");          // IBM JDK
+    if (rtJar == null) rtJar = homeDirectory.findFileByRelativePath("../Classes/classes.jar");  // Apple JDK
+
     if (rtJar == null) {
       String versionString = jdk.getVersionString();
       if (versionString != null) {
@@ -81,48 +84,46 @@ public class JdkUtil {
       }
       return versionString;
     }
-    VirtualFile rtJarFileContent = JarFileSystem.getInstance().findFileByPath(rtJar.getPath() + JarFileSystem.JAR_SEPARATOR);
-    if (rtJarFileContent == null) {
-      return null;
-    }
-    com.intellij.openapi.vfs.JarFile manifestJarFile;
-    try {
-      manifestJarFile = JarFileSystem.getInstance().getJarFile(rtJarFileContent);
-    }
-    catch (IOException e) {
-      return null;
-    }
-    if (manifestJarFile == null) {
-      return null;
-    }
-    try {
-      com.intellij.openapi.vfs.JarFile.JarEntry entry = manifestJarFile.getEntry(JarFile.MANIFEST_NAME);
-      if (entry == null) {
-        return null;
+
+    VirtualFile jarRoot = JarFileSystem.getInstance().getJarRootForLocalFile(rtJar);
+    return jarRoot != null ? getJarMainAttribute(jarRoot, attribute) : null;
+  }
+
+  @Nullable
+  public static String getJarMainAttribute(@NotNull VirtualFile jarRoot, Attributes.Name attribute) {
+    VirtualFile manifestFile = jarRoot.findFileByRelativePath(JarFile.MANIFEST_NAME);
+    if (manifestFile != null) {
+      try {
+        InputStream stream = manifestFile.getInputStream();
+        try {
+          return new Manifest(stream).getMainAttributes().getValue(attribute);
+        }
+        finally {
+          stream.close();
+        }
       }
-      InputStream is = manifestJarFile.getInputStream(entry);
-      Manifest manifest = new Manifest(is);
-      is.close();
-      Attributes attributes = manifest.getMainAttributes();
-      return attributes.getValue(attributeName);
+      catch (IOException e) {
+        LOG.debug(e);
+      }
     }
-    catch (IOException e) {
-      // nothing
-    }
+
     return null;
   }
 
-  public static boolean checkForJdk(final File homePath) {
-    File binPath = new File(homePath.getAbsolutePath() + File.separator + "bin");
+  public static boolean checkForJdk(@NotNull String homePath) {
+    return checkForJdk(new File(FileUtil.toSystemDependentName(homePath)));
+  }
+
+  public static boolean checkForJdk(@NotNull File homePath) {
+    File binPath = new File(homePath, "bin");
     if (!binPath.exists()) return false;
 
     FileFilter fileFilter = new FileFilter() {
       @Override
-      @SuppressWarnings({"HardCodedStringLiteral"})
-      public boolean accept(File f) {
+      public boolean accept(@NotNull File f) {
         if (f.isDirectory()) return false;
-        return Comparing.strEqual(FileUtil.getNameWithoutExtension(f), "javac") ||
-               Comparing.strEqual(FileUtil.getNameWithoutExtension(f), "javah");
+        String name = FileUtil.getNameWithoutExtension(f);
+        return "javac".equals(name) || "javah".equals(name);
       }
     };
     File[] children = binPath.listFiles(fileFilter);
@@ -131,30 +132,33 @@ public class JdkUtil {
            checkForRuntime(homePath.getAbsolutePath());
   }
 
-  public static boolean checkForJre(String homePath) {
-    homePath = new File(FileUtil.toSystemDependentName(homePath)).getAbsolutePath();
-    File binPath = new File(homePath + File.separator + "bin");
+  public static boolean checkForJre(@NotNull String homePath) {
+    return checkForJre(new File(FileUtil.toSystemDependentName(homePath)));
+  }
+
+  public static boolean checkForJre(@NotNull File homePath) {
+    File binPath = new File(homePath, "bin");
     if (!binPath.exists()) return false;
 
     FileFilter fileFilter = new FileFilter() {
       @Override
-      @SuppressWarnings({"HardCodedStringLiteral"})
-      public boolean accept(File f) {
-        return !f.isDirectory() && Comparing.strEqual(FileUtil.getNameWithoutExtension(f), "java");
+      public boolean accept(@NotNull File f) {
+        return !f.isDirectory() && "java".equals(FileUtil.getNameWithoutExtension(f));
       }
     };
     File[] children = binPath.listFiles(fileFilter);
 
     return children != null && children.length >= 1 &&
-           checkForRuntime(homePath);
+           checkForRuntime(homePath.getAbsolutePath());
   }
 
-  public static boolean checkForRuntime(final String homePath) {
-    return new File(new File(new File(homePath, "jre"), "lib"), "rt.jar").exists() ||
-           new File(new File(homePath, "lib"), "rt.jar").exists() ||
-           new File(new File(new File(homePath, ".."), "Classes"), "classes.jar").exists() ||  // Apple JDK
-           new File(new File(new File(homePath, "jre"), "lib"), "vm.jar").exists() ||  // IBM JDK
-           new File(homePath, "classes").isDirectory();  // custom build
+  public static boolean checkForRuntime(@NotNull String homePath) {
+    return new File(homePath, "jre/lib/rt.jar").exists() ||          // JDK
+           new File(homePath, "lib/rt.jar").exists() ||              // JRE
+           new File(homePath, "lib/modules").exists() ||             // Jigsaw JDK/JRE
+           new File(homePath, "../Classes/classes.jar").exists() ||  // Apple JDK
+           new File(homePath, "jre/lib/vm.jar").exists() ||          // IBM JDK
+           new File(homePath, "classes").isDirectory();              // custom build
   }
 
   public static GeneralCommandLine setupJVMCommandLine(final String exePath,
@@ -169,78 +173,12 @@ public class JdkUtil {
 
     final Class commandLineWrapper;
     if ((commandLineWrapper = getCommandLineWrapperClass()) != null) {
-      if (forceDynamicClasspath) {
-        File classpathFile = null;
-        File vmParamsFile = null;
-        if (!vmParametersList.hasParameter("-classpath") && !vmParametersList.hasParameter("-cp")) {
-          if (javaParameters.isDynamicVMOptions() && useDynamicVMOptions()) {
-            try {
-              vmParamsFile = FileUtil.createTempFile("vm_params", null);
-              final PrintWriter writer = new PrintWriter(vmParamsFile);
-              try {
-                for (String param : vmParametersList.getList()) {
-                  if (param.startsWith("-D")) {
-                    writer.println(param);
-                  }
-                }
-              }
-              finally {
-                writer.close();
-              }
-            }
-            catch (IOException e) {
-              LOG.error(e);
-            }
-            final List<String> list = vmParametersList.getList();
-            for (String param : list) {
-              if (!param.trim().startsWith("-D")) {
-                commandLine.addParameter(param);
-              }
-            }
-          }
-          else {
-            commandLine.addParameters(vmParametersList.getList());
-          }
-          try {
-            classpathFile = FileUtil.createTempFile("classpath", null);
-            final PrintWriter writer = new PrintWriter(classpathFile);
-            try {
-              for (String path : javaParameters.getClassPath().getPathList()) {
-                writer.println(path);
-              }
-            }
-            finally {
-              writer.close();
-            }
-
-            String classpath = PathUtil.getJarPathForClass(commandLineWrapper);
-            final String utilRtPath = PathUtil.getJarPathForClass(StringUtilRt.class);
-            if (!classpath.equals(utilRtPath)) {
-              classpath += File.pathSeparator + utilRtPath;
-            }
-            final Class<UrlClassLoader> ourUrlClassLoader = UrlClassLoader.class;
-            if (ourUrlClassLoader.getName().equals(vmParametersList.getPropertyValue("java.system.class.loader"))) {
-              classpath += File.pathSeparator + PathUtil.getJarPathForClass(ourUrlClassLoader);
-              classpath += File.pathSeparator + PathUtil.getJarPathForClass(THashMap.class);
-            }
-
-            commandLine.addParameter("-classpath");
-            commandLine.addParameter(classpath);
-          }
-          catch (IOException e) {
-            LOG.error(e);
-          }
+      if (forceDynamicClasspath && !vmParametersList.hasParameter("-classpath") && !vmParametersList.hasParameter("-cp")) {
+        if (isClassPathJarEnabled(javaParameters, PathUtil.getJarPathForClass(ClassPath.class))) {
+          appendJarClasspathParams(javaParameters, commandLine, vmParametersList, commandLineWrapper);
         }
-
-        appendEncoding(javaParameters, commandLine, vmParametersList);
-        if (classpathFile != null) {
-          commandLine.addParameter(commandLineWrapper.getName());
-          commandLine.addParameter(classpathFile.getAbsolutePath());
-        }
-
-        if (vmParamsFile != null) {
-          commandLine.addParameter("@vm_params");
-          commandLine.addParameter(vmParamsFile.getAbsolutePath());
+        else {
+          appendOldCommandLineWrapper(javaParameters, commandLine, vmParametersList, commandLineWrapper);
         }
       }
       else {
@@ -252,12 +190,164 @@ public class JdkUtil {
     }
 
     final String mainClass = javaParameters.getMainClass();
-    commandLine.addParameter(mainClass);
+    String jarPath = javaParameters.getJarPath();
+    if (mainClass != null) {
+      commandLine.addParameter(mainClass);
+    }
+    else if (jarPath != null) {
+      commandLine.addParameter("-jar");
+      commandLine.addParameter(jarPath);
+    }
+
     commandLine.addParameters(javaParameters.getProgramParametersList().getList());
 
-    commandLine.setWorkDirectory(javaParameters.getWorkingDirectory());
+    commandLine.withWorkDirectory(javaParameters.getWorkingDirectory());
 
     return commandLine;
+  }
+
+  private static void appendOldCommandLineWrapper(SimpleJavaParameters javaParameters,
+                                                  GeneralCommandLine commandLine,
+                                                  ParametersList vmParametersList, Class commandLineWrapper) {
+    File classpathFile = null;
+    File vmParamsFile = null;
+    if (javaParameters.isDynamicVMOptions() && useDynamicVMOptions()) {
+      try {
+        vmParamsFile = FileUtil.createTempFile("vm_params", null);
+        final PrintWriter writer = new PrintWriter(vmParamsFile);
+        try {
+          for (String param : vmParametersList.getList()) {
+            if (param.startsWith("-D")) {
+              writer.println(param);
+            }
+          }
+        }
+        finally {
+          writer.close();
+        }
+      }
+      catch (IOException e) {
+        LOG.error(e);
+      }
+      final List<String> list = vmParametersList.getList();
+      for (String param : list) {
+        if (!param.trim().startsWith("-D")) {
+          commandLine.addParameter(param);
+        }
+      }
+    }
+    else {
+      commandLine.addParameters(vmParametersList.getList());
+    }
+    try {
+      classpathFile = FileUtil.createTempFile("classpath", null);
+      final PrintWriter writer = new PrintWriter(classpathFile);
+      try {
+        for (String path : javaParameters.getClassPath().getPathList()) {
+          writer.println(path);
+        }
+      }
+      finally {
+        writer.close();
+      }
+
+      String classpath = PathUtil.getJarPathForClass(commandLineWrapper);
+      final String utilRtPath = PathUtil.getJarPathForClass(StringUtilRt.class);
+      if (!classpath.equals(utilRtPath)) {
+        classpath += File.pathSeparator + utilRtPath;
+      }
+      final Class<UrlClassLoader> ourUrlClassLoader = UrlClassLoader.class;
+      if (ourUrlClassLoader.getName().equals(vmParametersList.getPropertyValue("java.system.class.loader"))) {
+        classpath += File.pathSeparator + PathUtil.getJarPathForClass(ourUrlClassLoader);
+        classpath += File.pathSeparator + PathUtil.getJarPathForClass(THashMap.class);
+      }
+
+      commandLine.addParameter("-classpath");
+      commandLine.addParameter(classpath);
+    }
+    catch (IOException e) {
+      LOG.error(e);
+    }
+    appendEncoding(javaParameters, commandLine, vmParametersList);
+    if (classpathFile != null) {
+      commandLine.addParameter(commandLineWrapper.getName());
+      commandLine.addParameter(classpathFile.getAbsolutePath());
+    }
+
+    if (vmParamsFile != null) {
+      commandLine.addParameter("@vm_params");
+      commandLine.addParameter(vmParamsFile.getAbsolutePath());
+    }
+  }
+
+  private static void appendJarClasspathParams(SimpleJavaParameters javaParameters,
+                                               GeneralCommandLine commandLine,
+                                               ParametersList vmParametersList, Class commandLineWrapper) {
+    try {
+      final Manifest manifest = new Manifest();
+      manifest.getMainAttributes().putValue("Created-By",
+                                            ApplicationNamesInfo.getInstance().getFullProductName());
+      final boolean writeDynamicVMOptions = javaParameters.isDynamicVMOptions() && useDynamicVMOptions();
+      if (writeDynamicVMOptions) {
+        List<String> dParams = new ArrayList<String>();
+        for (String param : vmParametersList.getList()) {
+          if (param.startsWith("-D")) {
+            dParams.add(param);
+          }
+        }
+
+        manifest.getMainAttributes().putValue("VM-Options", ParametersListUtil.join(dParams));
+        final ArrayList<String> restParams = new ArrayList<String>(vmParametersList.getList());
+        restParams.removeAll(dParams);
+        commandLine.addParameters(restParams);
+      }
+      else {
+        commandLine.addParameters(vmParametersList.getList());
+      }
+      final boolean notEscape = vmParametersList.hasParameter(PROPERTY_DO_NOT_ESCAPE_CLASSPATH_URL);
+      final List<String> classPathList = javaParameters.getClassPath().getPathList();
+      final String jarFile = CommandLineWrapperUtil.createClasspathJarFile(manifest, classPathList, notEscape).getAbsolutePath();
+      commandLine.addParameter("-classpath");
+      if (writeDynamicVMOptions) {
+        commandLine.addParameter(PathUtil.getJarPathForClass(commandLineWrapper) + File.pathSeparator + jarFile);
+        appendEncoding(javaParameters, commandLine, vmParametersList);
+        commandLine.addParameter(commandLineWrapper.getName());
+        commandLine.addParameter(jarFile);
+      }
+      else {
+        commandLine.addParameters(jarFile);
+        appendEncoding(javaParameters, commandLine, vmParametersList);
+      }
+    }
+    catch (IOException e) {
+      LOG.error(e);
+    }
+  }
+
+  private static boolean isClassPathJarEnabled(SimpleJavaParameters javaParameters, String currentPath) {
+    if (javaParameters.isUseClasspathJar() && useClasspathJar()) {
+      try {
+        final ArrayList<URL> urls = new ArrayList<URL>();
+        for (String path : javaParameters.getClassPath().getPathList()) {
+          if (!path.equals(currentPath)) {
+            try {
+              urls.add(new File(path).toURI().toURL());
+            }
+            catch (MalformedURLException ignore) {}
+          }
+        }
+        final Class<?> aClass = Class.forName("com.intellij.util.lang.ClassPath", false, UrlClassLoader.build().urls(urls).get());
+        try {
+          aClass.getDeclaredMethod("initLoaders", URL.class, boolean.class, int.class);
+        }
+        catch (NoSuchMethodException e) {
+          return false;
+        }
+      }
+      catch (Throwable ignore) {}
+      return true;
+    }
+    return false;
   }
 
   private static void appendParamsEncodingClasspath(SimpleJavaParameters javaParameters,
@@ -265,29 +355,28 @@ public class JdkUtil {
                                                     ParametersList parametersList) {
     commandLine.addParameters(parametersList.getList());
     appendEncoding(javaParameters, commandLine, parametersList);
-    if (!parametersList.hasParameter("-classpath") && !parametersList.hasParameter("-cp")){
+    if (!parametersList.hasParameter("-classpath") && !parametersList.hasParameter("-cp") && !javaParameters.getClassPath().getPathList().isEmpty()){
       commandLine.addParameter("-classpath");
       commandLine.addParameter(javaParameters.getClassPath().getPathsString());
     }
   }
 
   private static void appendEncoding(SimpleJavaParameters javaParameters, GeneralCommandLine commandLine, ParametersList parametersList) {
-    // Value of -Dfile.encoding and charset of GeneralCommandLine should be in sync in order process's input and output be correctly handled.
+    // Value of file.encoding and charset of GeneralCommandLine should be in sync in order process's input and output be correctly handled.
     String encoding = parametersList.getPropertyValue("file.encoding");
     if (encoding == null) {
       Charset charset = javaParameters.getCharset();
       if (charset == null) charset = EncodingManager.getInstance().getDefaultCharset();
-      if (charset == null) charset = CharsetToolkit.getDefaultSystemCharset();
       commandLine.addParameter("-Dfile.encoding=" + charset.name());
-      commandLine.setCharset(charset);
+      commandLine.withCharset(charset);
     }
     else {
       try {
         Charset charset = Charset.forName(encoding);
-        commandLine.setCharset(charset);
+        commandLine.withCharset(charset);
       }
-      catch (UnsupportedCharsetException ignore) {
-      }
+      catch (UnsupportedCharsetException ignore) { }
+      catch (IllegalCharsetNameException ignore) { }
     }
   }
 
@@ -302,13 +391,17 @@ public class JdkUtil {
   }
 
   public static boolean useDynamicClasspath(@Nullable Project project) {
-    final String hasDynamicProperty = System.getProperty("idea.dynamic.classpath", "false");
-    return Boolean.valueOf(project != null
-                           ? PropertiesComponent.getInstance(project).getOrInit("dynamic.classpath", hasDynamicProperty)
-                           : hasDynamicProperty).booleanValue();
+    boolean hasDynamicProperty = Boolean.parseBoolean(System.getProperty("idea.dynamic.classpath", "false"));
+    return project != null
+           ? PropertiesComponent.getInstance(project).getBoolean("dynamic.classpath", hasDynamicProperty)
+           : hasDynamicProperty;
   }
 
   public static boolean useDynamicVMOptions() {
-    return Boolean.valueOf(PropertiesComponent.getInstance().getOrInit("dynamic.vmoptions", "true")).booleanValue();
+    return PropertiesComponent.getInstance().getBoolean("dynamic.vmoptions", true);
+  }
+  
+  public static boolean useClasspathJar() {
+    return PropertiesComponent.getInstance().getBoolean("idea.dynamic.classpath.jar", true);
   }
 }

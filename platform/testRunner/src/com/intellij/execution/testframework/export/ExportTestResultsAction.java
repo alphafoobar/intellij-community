@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,7 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileEditorManager;
-import com.intellij.openapi.progress.PerformInBackgroundOption;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.progress.*;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
@@ -115,18 +112,17 @@ public class ExportTestResultsAction extends DumbAwareAction {
     boolean showDialog = true;
     while (showDialog) {
       final ExportTestResultsDialog d = new ExportTestResultsDialog(project, config, filename);
-      d.show();
-      if (!d.isOK()) {
+      if (!d.showAndGet()) {
         return;
       }
       filename = d.getFileName();
       showDialog = getOutputFile(config, project, filename).exists()
-          && Messages.showOkCancelDialog(
-               project,
-               ExecutionBundle.message("export.test.results.file.exists.message", filename),
-               ExecutionBundle.message("export.test.results.file.exists.title"),
-               Messages.getQuestionIcon()
-             ) != Messages.OK;
+                   && Messages.showOkCancelDialog(
+        project,
+        ExecutionBundle.message("export.test.results.file.exists.message", filename),
+        ExecutionBundle.message("export.test.results.file.exists.title"),
+        Messages.getQuestionIcon()
+      ) != Messages.OK;
     }
 
     final String filename_ = filename;
@@ -199,7 +195,10 @@ public class ExportTestResultsAction extends DumbAwareAction {
                   }
 
                   try {
-                    VirtualFile result = parent.createChildData(this, outputFile.getName());
+                    VirtualFile result = parent.findChild(outputFile.getName());
+                    if (result == null) {
+                      result = parent.createChildData(this, outputFile.getName());
+                    }
                     VfsUtil.saveText(result, outputText);
                     return result;
                   }
@@ -307,7 +306,12 @@ public class ExportTestResultsAction extends DumbAwareAction {
 
     StringWriter w = new StringWriter();
     handler.setResult(new StreamResult(w));
-    TestResultsXmlFormatter.execute(myModel.getRoot(), myRunConfiguration, handler);
+    try {
+      TestResultsXmlFormatter.execute(myModel.getRoot(), myRunConfiguration, myModel.getProperties(), handler);
+    }
+    catch (ProcessCanceledException e) {
+      return null;
+    }
     return w.toString();
   }
 

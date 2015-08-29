@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +26,11 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.URISyntaxException;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.GregorianCalendar;
-import java.util.List;
+import java.util.*;
 
 import static org.junit.Assert.assertEquals;
 
@@ -40,7 +39,7 @@ public class DateFormatUtilTest {
 
   @Test
   public void testBasics() throws ParseException {
-    Clock.setTime(2004, 11, 10, 17, 10);
+    Clock.setTime(2004, Calendar.DECEMBER, 10, 17, 10);
 
     doTestPrettyDate("Today", "10.12.2004 17.00.00");
     doTestPrettyDate("Today", "10.12.2004 00.00.00");
@@ -51,15 +50,20 @@ public class DateFormatUtilTest {
 
   @Test
   public void testTime() throws Exception {
-    Clock.setTime(2004, 11, 10, 17, 10, 15);
+    Clock.setTime(2004, Calendar.DECEMBER, 10, 17, 10, 15);
 
     if (SystemInfo.isMac) {
       assertEquals("17:10", DateFormatUtil.formatTime(Clock.getTime()));
       assertEquals("17:10:15", DateFormatUtil.formatTimeWithSeconds(Clock.getTime()));
     }
     else if (SystemInfo.isUnix) {
-      assertEquals("5:10:15 PM", printTimeForLocale("en_US.UTF-8"));
-      assertEquals("17:10:15", printTimeForLocale("de_DE.UTF-8"));
+      assertEquals("5:10:15 PM", printTimeForLocale("en_US.UTF-8", Clock.getTime()));
+      assertEquals("17:10:15", printTimeForLocale("de_DE.UTF-8", Clock.getTime()));
+    }
+    else if (SystemInfo.isWinVistaOrNewer) {
+      GregorianCalendar c = new GregorianCalendar(TimeZone.getTimeZone("UTC"));
+      c.set(2004, Calendar.DECEMBER, 10, 17, 10, 15);
+      assertEquals(printWindowsTime(c.getTimeInMillis()), DateFormatUtil.formatTimeWithSeconds(Clock.getTime()));
     }
     else {
       assertEquals(DateFormat.getTimeInstance(DateFormat.SHORT).format(Clock.getTime()),
@@ -71,7 +75,7 @@ public class DateFormatUtilTest {
 
   @Test
   public void testPrettyDateTime() throws ParseException {
-    Clock.setTime(2004, 11, 10, 17, 0);
+    Clock.setTime(2004, Calendar.DECEMBER, 10, 17, 0);
     doTestDateTime("Moments ago", "10.12.2004 16.59.31");
     doTestDateTime("A minute ago", "10.12.2004 16.59.29");
     doTestDateTime("5 minutes ago", "10.12.2004 16.55.00");
@@ -80,7 +84,7 @@ public class DateFormatUtilTest {
     doTestDateTime("Yesterday " + DateFormatUtil.formatTime(DATE_FORMAT.parse("09.12.2004 15.00.00")), "09.12.2004 15.00.00");
     doTestDateTime("Today " + DateFormatUtil.formatTime(DATE_FORMAT.parse("10.12.2004 19.00.00")), "10.12.2004 19.00.00");
 
-    Clock.setTime(2004, 0, 1, 15, 53);
+    Clock.setTime(2004, Calendar.JANUARY, 1, 15, 53);
     doTestDateTime(DateFormatUtil.formatDateTime(DATE_FORMAT.parse("01.01.2003 15.53.00")), "01.01.2003 15.53.00");
     doTestDateTime("Yesterday " + DateFormatUtil.formatTime(DATE_FORMAT.parse("31.12.2003 15.00.00")), "31.12.2003 15.00.00");
   }
@@ -109,7 +113,7 @@ public class DateFormatUtilTest {
     return new GregorianCalendar(year, month - 1, day, hour, minute, second).getTime();
   }
 
-  private static String printTimeForLocale(String locale) throws IOException {
+  private static String printTimeForLocale(String locale, long time) throws IOException {
     List<String> classpath = ContainerUtil.newArrayList();
     classpath.addAll(PathManager.getUtilClassPath());
     classpath.add(PathManager.getJarPathForClass(PrintTime.class));
@@ -118,11 +122,19 @@ public class DateFormatUtilTest {
                "-classpath",
                StringUtil.join(classpath, File.pathSeparator),
                PrintTime.class.getName(),
-               String.valueOf(Clock.getTime()))
-      .redirectErrorStream(true);
+               String.valueOf(time));
     builder.environment().put("LC_TIME", locale);
-    Process process = builder.start();
+    return execAndGetOutput(builder);
+  }
 
+  private static String printWindowsTime(long time) throws IOException, URISyntaxException {
+    String script = new File(DateFormatUtil.class.getResource("PrintTime.js").toURI()).getPath();
+    ProcessBuilder builder = new ProcessBuilder().command("cscript", "//Nologo", script, String.valueOf(time));
+    return execAndGetOutput(builder);
+  }
+
+  private static String execAndGetOutput(ProcessBuilder builder) throws IOException {
+    Process process = builder.redirectErrorStream(true).start();
     BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
     try {
       return reader.readLine();

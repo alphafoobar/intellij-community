@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.jetbrains.python.inspections;
 
 import com.intellij.codeInspection.LocalInspectionToolSession;
 import com.intellij.codeInspection.ProblemsHolder;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
 import com.jetbrains.python.PyBundle;
@@ -52,11 +51,7 @@ public class PyRaisingNewStyleClassInspection extends PyInspection {
 
     @Override
     public void visitPyRaiseStatement(PyRaiseStatement node) {
-      final VirtualFile virtualFile = node.getContainingFile().getVirtualFile();
-      if (virtualFile == null) {
-        return;
-      }
-      if (LanguageLevel.forFile(virtualFile).isAtLeast(LanguageLevel.PYTHON25)) {
+      if (LanguageLevel.forElement(node).isAtLeast(LanguageLevel.PYTHON25)) {
         return;
       }
       final PyExpression[] expressions = node.getExpressions();
@@ -67,9 +62,9 @@ public class PyRaisingNewStyleClassInspection extends PyInspection {
       if (expression instanceof PyCallExpression) {
         final PyExpression callee = ((PyCallExpression)expression).getCallee();
         if (callee instanceof PyReferenceExpression) {
-          final PsiElement psiElement = ((PyReferenceExpression)callee).getReference(resolveWithoutImplicits()).resolve();
+          final PsiElement psiElement = ((PyReferenceExpression)callee).getReference(getResolveContext()).resolve();
           if (psiElement instanceof PyClass) {
-            if (((PyClass)psiElement).isNewStyleClass()) {
+            if (((PyClass)psiElement).isNewStyleClass(null)) {
               registerProblem(expression, "Raising a new style class");
             }
           }

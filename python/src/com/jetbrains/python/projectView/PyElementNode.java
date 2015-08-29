@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,14 @@ import com.intellij.ide.projectView.PresentationData;
 import com.intellij.ide.projectView.ViewSettings;
 import com.intellij.ide.projectView.impl.nodes.BasePsiNode;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
+import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.project.Project;
+import com.jetbrains.python.PyNames;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyElement;
 import com.jetbrains.python.psi.PyFunction;
 
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -47,7 +50,7 @@ public class PyElementNode extends BasePsiNode<PyElement> {
       for (PyClass aClass : pyClass.getNestedClasses()) {
         result.add(new PyElementNode(myProject, aClass, getSettings()));
       }
-      for (PyFunction function : pyClass.getMethods()) {
+      for (PyFunction function : pyClass.getMethods(false)) {
         result.add(new PyElementNode(myProject, function, getSettings()));
       }
       return result;
@@ -57,14 +60,23 @@ public class PyElementNode extends BasePsiNode<PyElement> {
 
   @Override
   protected void updateImpl(PresentationData data) {
-    PyElement value = getValue();
+    final PyElement value = getValue();
     final String name = value.getName();
-    StringBuilder presentableText = new StringBuilder(name != null ? name : "<unnamed>");
-    if (value instanceof PyFunction) {
-      presentableText.append(((PyFunction) value).getParameterList().getPresentableText(false));
+    final ItemPresentation presentation = value.getPresentation();
+    String presentableText = name != null ? name : PyNames.UNNAMED_ELEMENT;
+    Icon presentableIcon = value.getIcon(0);
+    if (presentation != null) {
+      final String text = presentation.getPresentableText();
+      if (text != null) {
+        presentableText = text;
+      }
+      final Icon icon = presentation.getIcon(false);
+      if (icon != null) {
+        presentableIcon = icon;
+      }
     }
-    data.setPresentableText(presentableText.toString());
-    data.setIcon(value.getIcon(0));
+    data.setPresentableText(presentableText);
+    data.setIcon(presentableIcon);
   }
 
   @Override

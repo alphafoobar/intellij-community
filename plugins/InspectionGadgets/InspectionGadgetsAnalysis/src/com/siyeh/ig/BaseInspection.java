@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package com.siyeh.ig;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInspection.BaseJavaBatchLocalInspectionTool;
-import com.intellij.codeInspection.LocalInspectionToolSession;
+import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.ex.InspectionProfileImpl;
 import com.intellij.openapi.diagnostic.Logger;
@@ -25,9 +25,10 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
 import com.intellij.ui.DocumentAdapter;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ui.UIUtil;
-import com.siyeh.ig.telemetry.InspectionGadgetsTelemetry;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -36,7 +37,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.text.Document;
-import java.lang.reflect.Field;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.util.List;
@@ -44,25 +44,16 @@ import java.util.List;
 public abstract class BaseInspection extends BaseJavaBatchLocalInspectionTool {
   private static final Logger LOG = Logger.getInstance("#com.siyeh.ig.BaseInspection");
 
-  @NonNls private static final String INSPECTION = "Inspection";
-  @NonNls private static final String INSPECTION_BASE = "InspectionBase";
-
   private String m_shortName = null;
-  private long timestamp = -1L;
 
   @Override
   @NotNull
   public String getShortName() {
     if (m_shortName == null) {
       final Class<? extends BaseInspection> aClass = getClass();
-      final String name = aClass.getName();
-      if (name.endsWith(INSPECTION)) {
-        m_shortName = name.substring(name.lastIndexOf((int)'.') + 1, name.length() - INSPECTION.length());
-      }
-      else if (name.endsWith(INSPECTION_BASE)) {
-        m_shortName = name.substring(name.lastIndexOf((int)'.') + 1, name.length() - INSPECTION_BASE.length());
-      }
-      else {
+      final String name = aClass.getSimpleName();
+      m_shortName = InspectionProfileEntry.getShortName(name);
+      if (m_shortName.equals(name)) {
         throw new AssertionError("class name must end with 'Inspection' to correctly calculate the short name: " + name);
       }
     }
@@ -102,8 +93,11 @@ public abstract class BaseInspection extends BaseJavaBatchLocalInspectionTool {
 
   @Override
   @NotNull
-  public PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
+  public final PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
                                         boolean isOnTheFly) {
+    if (!shouldInspect(holder.getFile())) {
+      return new PsiElementVisitor() { };
+    }
     final BaseInspectionVisitor visitor = buildVisitor();
     visitor.setProblemsHolder(holder);
     visitor.setOnTheFly(isOnTheFly);
@@ -111,42 +105,43 @@ public abstract class BaseInspection extends BaseJavaBatchLocalInspectionTool {
     return visitor;
   }
 
-  protected JFormattedTextField prepareNumberEditor(@NonNls String fieldName) {
-    try {
-      final NumberFormat formatter = NumberFormat.getIntegerInstance();
-      formatter.setParseIntegerOnly(true);
-      final JFormattedTextField valueField = new JFormattedTextField(formatter);
-      final Field field = getClass().getField(fieldName);
-      valueField.setValue(field.get(this));
-      valueField.setColumns(2);
-      UIUtil.fixFormattedField(valueField);
-      final Document document = valueField.getDocument();
-      document.addDocumentListener(new DocumentAdapter() {
-        @Override
-        public void textChanged(DocumentEvent evt) {
-          try {
-            valueField.commitEdit();
-            final Number number = (Number)valueField.getValue();
-            field.set(BaseInspection.this,
-                      Integer.valueOf(number.intValue()));
-          }
-          catch (IllegalAccessException e) {
-            LOG.error(e);
-          }
-          catch (ParseException e) {
-            // No luck this time. Will update the field when correct value is entered.
-          }
+  /**
+   * To check precondition(s) on the entire file, to prevent doing the check on every PsiElement visited.
+   * Useful for e.g. a {@link com.intellij.psi.util.PsiUtil#isLanguageLevel5OrHigher(com.intellij.psi.PsiElement)} check
+   * which will be the same for all elements in the specified file.
+   * When this method returns false, {@link #buildVisitor()} will not be called.
+   */
+  public boolean shouldInspect(PsiFile file) {
+    return true;
+  }
+
+  protected JFormattedTextField prepareNumberEditor(@NonNls final String fieldName) {
+    final NumberFormat formatter = NumberFormat.getIntegerInstance();
+    formatter.setParseIntegerOnly(true);
+    final JFormattedTextField valueField = new JFormattedTextField(formatter);
+    Object value = ReflectionUtil.getField(getClass(), this, null, fieldName);
+    valueField.setValue(value);
+    valueField.setColumns(2);
+
+    // hack to work around text field becoming unusably small sometimes when using GridBagLayout
+    valueField.setMinimumSize(valueField.getPreferredSize());
+
+    UIUtil.fixFormattedField(valueField);
+    final Document document = valueField.getDocument();
+    document.addDocumentListener(new DocumentAdapter() {
+      @Override
+      public void textChanged(DocumentEvent evt) {
+        try {
+          valueField.commitEdit();
+          final Number number = (Number)valueField.getValue();
+          ReflectionUtil.setField(BaseInspection.this.getClass(), BaseInspection.this, int.class, fieldName, number.intValue());
         }
-      });
-      return valueField;
-    }
-    catch (NoSuchFieldException e) {
-      LOG.error(e);
-    }
-    catch (IllegalAccessException e) {
-      LOG.error(e);
-    }
-    return null;
+        catch (ParseException e) {
+          // No luck this time. Will update the field when correct value is entered.
+        }
+      }
+    });
+    return valueField;
   }
 
   protected static void parseString(String string, List<String>... outs) {
@@ -187,30 +182,6 @@ public abstract class BaseInspection extends BaseJavaBatchLocalInspectionTool {
     for (int i = 1; i < strings.length; i++) {
       out.append(',');
       out.append(strings[i].get(index));
-    }
-  }
-
-  @Override
-  public void inspectionStarted(@NotNull LocalInspectionToolSession session, boolean isOnTheFly) {
-    super.inspectionStarted(session, isOnTheFly);
-    if (InspectionGadgetsTelemetry.isEnabled()) {
-      timestamp = System.currentTimeMillis();
-    }
-  }
-
-  @Override
-  public void inspectionFinished(@NotNull LocalInspectionToolSession session,
-                                 @NotNull ProblemsHolder problemsHolder) {
-    super.inspectionFinished(session, problemsHolder);
-    if (InspectionGadgetsTelemetry.isEnabled()) {
-      if (timestamp < 0L) {
-        LOG.warn("finish reported without corresponding start");
-        return;
-      }
-      final long end = System.currentTimeMillis();
-      final String displayName = getDisplayName();
-      InspectionGadgetsTelemetry.getInstance().reportRun(displayName, end - timestamp);
-      timestamp = -1L;
     }
   }
 

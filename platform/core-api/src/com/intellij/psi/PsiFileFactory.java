@@ -20,6 +20,7 @@ import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -55,19 +56,27 @@ public abstract class PsiFileFactory {
 
   @NotNull
   public abstract PsiFile createFileFromText(@NonNls @NotNull String name, @NotNull FileType fileType, @NotNull CharSequence text,
-                                             long modificationStamp, boolean physical);
+                                             long modificationStamp, boolean eventSystemEnabled);
 
   @NotNull
   public abstract PsiFile createFileFromText(@NonNls @NotNull String name, @NotNull FileType fileType, @NotNull CharSequence text,
-                                             long modificationStamp, boolean physical, boolean markAsCopy);
+                                             long modificationStamp, boolean eventSystemEnabled, boolean markAsCopy);
 
   public abstract PsiFile createFileFromText(@NotNull String name, @NotNull Language language, @NotNull CharSequence text);
 
-  public abstract PsiFile createFileFromText(@NotNull String name, @NotNull Language language, @NotNull CharSequence text,
-                                             boolean physical, boolean markAsCopy);
+  public PsiFile createFileFromText(@NotNull Language language, @NotNull CharSequence text) {
+    return createFileFromText("foo.bar", language, text);
+  }
 
   public abstract PsiFile createFileFromText(@NotNull String name, @NotNull Language language, @NotNull CharSequence text,
-                                             boolean physical, boolean markAsCopy, boolean noSizeLimit);
+                                             boolean eventSystemEnabled, boolean markAsCopy);
+
+  public abstract PsiFile createFileFromText(@NotNull String name, @NotNull Language language, @NotNull CharSequence text,
+                                             boolean eventSystemEnabled, boolean markAsCopy, boolean noSizeLimit);
+
+  public abstract PsiFile createFileFromText(@NotNull String name, @NotNull Language language, @NotNull CharSequence text,
+                                             boolean eventSystemEnabled, boolean markAsCopy, boolean noSizeLimit,
+                                             @Nullable VirtualFile original);
 
   public abstract PsiFile createFileFromText(FileType fileType, String fileName, CharSequence chars, int startOffset, int endOffset);
 

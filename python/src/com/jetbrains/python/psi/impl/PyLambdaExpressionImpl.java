@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.codeInsight.controlflow.ControlFlowCache;
 import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.types.PyFunctionType;
+import com.jetbrains.python.psi.types.PyFunctionTypeImpl;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Map;
 
 /**
  * @author yole
@@ -46,7 +48,7 @@ public class PyLambdaExpressionImpl extends PyElementImpl implements PyLambdaExp
         return type;
       }
     }
-    return new PyFunctionType(this);
+    return new PyFunctionTypeImpl(this);
   }
 
   @NotNull
@@ -61,10 +63,23 @@ public class PyLambdaExpressionImpl extends PyElementImpl implements PyLambdaExp
 
   @Nullable
   @Override
-  public PyType getReturnType(@NotNull TypeEvalContext context, @Nullable PyQualifiedExpression callSite) {
+  public PyType getReturnType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key) {
     final PyExpression body = getBody();
-    if (body != null) return context.getType(body);
-    else return null;
+    return body != null ? context.getType(body) : null;
+  }
+
+  @Nullable
+  @Override
+  public PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteExpression callSite) {
+    return context.getReturnType(this);
+  }
+
+  @Nullable
+  @Override
+  public PyType getCallType(@Nullable PyExpression receiver,
+                            @NotNull Map<PyExpression, PyNamedParameter> parameters,
+                            @NotNull TypeEvalContext context) {
+    return context.getReturnType(this);
   }
 
   @Nullable

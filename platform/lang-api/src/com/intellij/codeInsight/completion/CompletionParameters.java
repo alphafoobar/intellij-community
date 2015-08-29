@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInsight.completion;
 
-import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.openapi.editor.Editor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,42 +28,40 @@ public final class CompletionParameters {
   private final PsiElement myPosition;
   private final PsiFile myOriginalFile;
   private final CompletionType myCompletionType;
-  private final Lookup myLookup;
+  private final Editor myEditor;
   private final int myOffset;
   private final int myInvocationCount;
 
   CompletionParameters(@NotNull final PsiElement position, @NotNull final PsiFile originalFile,
-                                 final CompletionType completionType, int offset, final int invocationCount, Lookup lookup) {
-    assert offset >= position.getTextRange().getStartOffset();
+                       @NotNull CompletionType completionType, int offset, final int invocationCount, @NotNull Editor editor) {
+    assert position.getTextRange().containsOffset(offset) : position;
     myPosition = position;
     assert position.isValid();
     myOriginalFile = originalFile;
     myCompletionType = completionType;
     myOffset = offset;
     myInvocationCount = invocationCount;
-    myLookup = lookup;
+    myEditor = editor;
   }
 
+  @NotNull
   public CompletionParameters delegateToClassName() {
     return withType(CompletionType.CLASS_NAME).withInvocationCount(myInvocationCount - 1);
   }
 
-  public CompletionParameters withType(CompletionType type) {
-    return new CompletionParameters(myPosition, myOriginalFile, type, myOffset, myInvocationCount, myLookup);
+  @NotNull
+  public CompletionParameters withType(@NotNull CompletionType type) {
+    return new CompletionParameters(myPosition, myOriginalFile, type, myOffset, myInvocationCount, myEditor);
   }
 
+  @NotNull
   public CompletionParameters withInvocationCount(int newCount) {
-    return new CompletionParameters(myPosition, myOriginalFile, myCompletionType, myOffset, newCount, myLookup);
+    return new CompletionParameters(myPosition, myOriginalFile, myCompletionType, myOffset, newCount, myEditor);
   }
 
   @NotNull
   public PsiElement getPosition() {
     return myPosition;
-  }
-
-  @NotNull
-  public Lookup getLookup() {
-    return myLookup;
   }
 
   @Nullable
@@ -100,15 +97,17 @@ public final class CompletionParameters {
     return myInvocationCount == 0;
   }
 
-  public CompletionParameters withPosition(PsiElement element, int offset) {
-    return new CompletionParameters(element, myOriginalFile, myCompletionType, offset, myInvocationCount, myLookup);
+  @NotNull
+  public CompletionParameters withPosition(@NotNull PsiElement element, int offset) {
+    return new CompletionParameters(element, myOriginalFile, myCompletionType, offset, myInvocationCount, myEditor);
   }
 
   public boolean isExtendedCompletion() {
     return myCompletionType == CompletionType.BASIC && myInvocationCount >= 2;
   }
 
+  @NotNull
   public Editor getEditor() {
-    return myLookup.getEditor();
+    return myEditor;
   }
 }

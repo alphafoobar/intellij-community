@@ -17,6 +17,7 @@ package com.intellij.psi.codeStyle.arrangement;
 
 import com.intellij.application.options.codeStyle.arrangement.color.ArrangementColorsProvider;
 import com.intellij.lang.Language;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.util.Ref;
@@ -27,6 +28,7 @@ import com.intellij.psi.codeStyle.arrangement.model.ArrangementCompositeMatchCon
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchConditionVisitor;
 import com.intellij.psi.codeStyle.arrangement.std.*;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.text.CharArrayUtil;
 import org.jdom.Element;
@@ -35,12 +37,15 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.*;
+
 /**
  * @author Denis Zhdanov
  * @since 7/17/12 11:24 AM
  */
 public class ArrangementUtil {
-  
+  private static final Logger LOG = Logger.getInstance(ArrangementUtil.class);
+
   private ArrangementUtil() {
   }
 
@@ -49,20 +54,28 @@ public class ArrangementUtil {
   @Nullable
   public static ArrangementSettings readExternal(@NotNull Element element, @NotNull Language language) {
     ArrangementSettingsSerializer serializer = getSerializer(language);
+    if (serializer == null) {
+      LOG.error("Can't find serializer for language: " + language.getDisplayName() + "(" + language.getID() + ")");
+      return null;
+    }
+
     return serializer.deserialize(element);
   }
 
   public static void writeExternal(@NotNull Element element, @NotNull ArrangementSettings settings, @NotNull Language language) {
     ArrangementSettingsSerializer serializer = getSerializer(language);
+    if (serializer == null) {
+      LOG.error("Can't find serializer for language: " + language.getDisplayName() + "(" + language.getID() + ")");
+      return;
+    }
+
     serializer.serialize(settings, element);
   }
 
+  @Nullable
   private static ArrangementSettingsSerializer getSerializer(@NotNull Language language) {
     Rearranger<?> rearranger = Rearranger.EXTENSION.forLanguage(language);
-    if (rearranger instanceof ArrangementSettingsSerializer) {
-      return (ArrangementSettingsSerializer)rearranger;
-    }
-    return DefaultArrangementSettingsSerializer.INSTANCE;
+    return rearranger == null ? null : rearranger.getSerializer();
   }
   
   //endregion
@@ -157,7 +170,8 @@ public class ArrangementUtil {
     condition.invite(new ArrangementMatchConditionVisitor() {
       @Override
       public void visit(@NotNull ArrangementAtomMatchCondition condition) {
-        if (StdArrangementTokenType.ENTRY_TYPE.is(condition.getType())) {
+        ArrangementSettingsToken type = condition.getType();
+        if (StdArrangementTokenType.ENTRY_TYPE.is(condition.getType()) || MODIFIER_AS_TYPE.contains(type)) {
           result.set(condition.getType());
         }
       }
@@ -194,7 +208,14 @@ public class ArrangementUtil {
       public void visit(@NotNull ArrangementAtomMatchCondition condition) {
         ArrangementSettingsToken type = condition.getType();
         Object value = condition.getValue();
-        result.put(condition.getType(), type.equals(value) ? null : value); 
+        result.put(condition.getType(), type.equals(value) ? null : value);
+        
+        if (type instanceof CompositeArrangementToken) {
+          Set<ArrangementSettingsToken> tokens = ((CompositeArrangementToken)type).getAdditionalTokens();
+          for (ArrangementSettingsToken token : tokens) {
+            result.put(token, null);
+          }
+        }
       }
 
       @Override
@@ -249,10 +270,10 @@ public class ArrangementUtil {
   @Nullable
   public static ArrangementEntryMatcher buildMatcher(@NotNull ArrangementAtomMatchCondition condition) {
     if (StdArrangementTokenType.ENTRY_TYPE.is(condition.getType())) {
-      return new ByTypeArrangementEntryMatcher(condition.getType());
+      return new ByTypeArrangementEntryMatcher(condition);
     }
     else if (StdArrangementTokenType.MODIFIER.is(condition.getType())) {
-      return new ByModifierArrangementEntryMatcher(condition.getType());
+      return new ByModifierArrangementEntryMatcher(condition);
     }
     else if (StdArrangementTokens.Regexp.NAME.equals(condition.getType())) {
       return new ByNameArrangementEntryMatcher(condition.getValue().toString());
@@ -293,10 +314,25 @@ public class ArrangementUtil {
     return result;
   }
 
+  //region Arrangement Sections
   @NotNull
-  public static List<? extends ArrangementMatchRule> getRulesSortedByPriority(@NotNull ArrangementSettings arrangementSettings) {
-    return arrangementSettings instanceof RulePriorityAwareSettings ?
-           ((RulePriorityAwareSettings)arrangementSettings).getRulesSortedByPriority() :
-           arrangementSettings.getRules();
+  public static List<StdArrangementMatchRule> collectMatchRules(@NotNull List<ArrangementSectionRule> sections) {
+    final List<StdArrangementMatchRule> matchRules = ContainerUtil.newArrayList();
+    for (ArrangementSectionRule section : sections) {
+      matchRules.addAll(section.getMatchRules());
+    }
+    return matchRules;
   }
+  //endregion
+
+  //region Arrangement Custom Tokens
+  public static List<ArrangementSectionRule> getExtendedSectionRules(@NotNull ArrangementSettings settings) {
+    return settings instanceof ArrangementExtendableSettings ?
+           ((ArrangementExtendableSettings)settings).getExtendedSectionRules() : settings.getSections();
+  }
+
+  public static boolean isAliasedCondition(@NotNull ArrangementAtomMatchCondition condition) {
+    return StdArrangementTokenType.ALIAS.is(condition.getType());
+  }
+  //endregion
 }

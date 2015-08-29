@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.openapi.options.BaseConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
 
 import javax.swing.*;
 import java.util.Iterator;
@@ -37,12 +38,14 @@ public class ThreadsViewConfigurable extends BaseConfigurable {
   private JCheckBox mySourceCheckBox;
   private JCheckBox myShowSyntheticsCheckBox;
   private JCheckBox myShowCurrentThreadChechBox;
+  private JCheckBox myPackageCheckBox;
   private final CompositeDataBinding myDataBinding = new CompositeDataBinding();
 
   public ThreadsViewConfigurable(ThreadsViewSettings settings) {
     mySettings = settings;
 
     myDataBinding.addBinding(new ToggleButtonBinding("SHOW_CLASS_NAME", myClassNameCheckBox));
+    myDataBinding.addBinding(new ToggleButtonBinding("SHOW_PACKAGE_NAME", myPackageCheckBox));
     myDataBinding.addBinding(new ToggleButtonBinding("SHOW_LINE_NUMBER", myLineNumberCheckBox));
     myDataBinding.addBinding(new ToggleButtonBinding("SHOW_SOURCE_NAME", mySourceCheckBox));
     myDataBinding.addBinding(new ToggleButtonBinding("SHOW_THREAD_GROUPS", myShowGroupsCheckBox));
@@ -66,6 +69,7 @@ public class ThreadsViewConfigurable extends BaseConfigurable {
       for (Iterator iterator = (DebuggerManagerEx.getInstanceEx(project)).getSessions().iterator(); iterator.hasNext();) {
         ((DebuggerSession)iterator.next()).refresh(false);
       }
+      XDebuggerUtilImpl.rebuildAllSessionsViews(project);
     }
   }
 

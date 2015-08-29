@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 
 package com.intellij.ui;
 
+import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.ui.EditableModel;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.*;
@@ -29,12 +31,26 @@ import java.util.*;
 public class CollectionListModel<T> extends AbstractListModel implements EditableModel {
   private final List<T> myItems;
 
+  public CollectionListModel(@NotNull final Collection<? extends T> items) {
+    myItems = new ArrayList<T>(items);
+  }
+
+  @SuppressWarnings("UnusedParameters")
+  protected CollectionListModel(@NotNull List<T> items, boolean useListAsIs) {
+    myItems = items;
+  }
+
   public CollectionListModel(@NotNull final List<? extends T> items) {
     myItems = new ArrayList<T>(items);
   }
 
   public CollectionListModel(final T... items) {
-    myItems = new ArrayList<T>(Arrays.asList(items));
+    myItems = ContainerUtilRt.newArrayList(items);
+  }
+
+  @NotNull
+  protected final List<T> getInternalList() {
+    return myItems;
   }
 
   @Override
@@ -65,19 +81,24 @@ public class CollectionListModel<T> extends AbstractListModel implements Editabl
     fireIntervalAdded(this, i, i + elements.size() - 1);
   }
 
-  public void remove(@NotNull final T element) {
-    int i = myItems.indexOf(element);
-    myItems.remove(element);
-    fireIntervalRemoved(this, i, i);
+  public void remove(@NotNull T element) {
+    int index = getElementIndex(element);
+    if (index != -1) {
+      remove(index);
+    }
   }
 
-  public void setElementAt(@NotNull final T element, final int index) {
-    myItems.set(index, element);
+  public void setElementAt(@NotNull final T item, final int index) {
+    itemReplaced(myItems.set(index, item), item);
     fireContentsChanged(this, index, index);
   }
 
+  @SuppressWarnings("UnusedParameters")
+  protected void itemReplaced(@NotNull T existingItem, @Nullable T newItem) {
+  }
+
   public void remove(final int index) {
-    myItems.remove(index);
+    itemReplaced(myItems.remove(index), null);
     fireIntervalRemoved(this, index, index);
   }
 
@@ -98,6 +119,7 @@ public class CollectionListModel<T> extends AbstractListModel implements Editabl
     Collections.sort(myItems, comparator);
   }
 
+  @NotNull
   public List<T> getItems() {
     return Collections.unmodifiableList(myItems);
   }
@@ -140,5 +162,9 @@ public class CollectionListModel<T> extends AbstractListModel implements Editabl
 
   public int getElementIndex(T item) {
     return myItems.indexOf(item);
+  }
+
+  public boolean isEmpty() {
+    return myItems.isEmpty();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,6 +67,8 @@ public class PyAttributeOutsideInitInspection extends PyInspection {
     public void visitPyFunction(PyFunction node) {
       final PyClass containingClass = node.getContainingClass();
       if (containingClass == null) return;
+      final String name = node.getName();
+      if (name != null && name.startsWith("_")) return;
       if (!isApplicable(containingClass)) {
         return;
       }
@@ -100,7 +102,7 @@ public class PyAttributeOutsideInitInspection extends PyInspection {
       for (Map.Entry<String, PyTargetExpression> attribute : attributes.entrySet()) {
         String attributeName = attribute.getKey();
         if (attributeName == null) continue;
-        final Property property = containingClass.findProperty(attributeName);
+        final Property property = containingClass.findProperty(attributeName, true, null);
         if (!attributesInInit.containsKey(attributeName) && property == null) {
           registerProblem(attribute.getValue(), PyBundle.message("INSP.attribute.$0.outside.init", attributeName),
                           new PyMoveAttributeToInitQuickFix());

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,11 +89,23 @@ public class PsiNamesElementSignatureProvider extends AbstractElementSignaturePr
       return candidate instanceof PsiComment ? candidate : null; 
     }
     else if (CODE_BLOCK_MARKER.equals(elementMarker)) {
+      int index = 0;
+      if (tokenizer.hasMoreTokens()) {
+        String indexStr = tokenizer.nextToken();
+        try {
+          index = Integer.parseInt(indexStr);
+        }
+        catch (NumberFormatException e) {
+          if (processingInfoStorage != null) {
+            processingInfoStorage.append("Invalid block index: ").append(indexStr).append("\n");
+          }
+        }
+      }
       for (PsiElement child = parent.getFirstChild(); child != null; child = child.getNextSibling()) {
-        PsiElement firstChild = child.getFirstChild();
-        PsiElement lastChild = child.getLastChild();
-        if (firstChild != null && lastChild != null && "{".equals(firstChild.getText()) && "}".equals(lastChild.getText())) {
-          return child;
+        if (isBlockElement(child)) {
+          if (--index < 0) {
+            return child;
+          }
         } 
       }
       return null;
@@ -111,7 +123,7 @@ public class PsiNamesElementSignatureProvider extends AbstractElementSignaturePr
         processingInfoStorage.append(String.format("Looking for the child with a name '%s' # %d at the element '%s'%n",
                                                    elementMarker, index, parent));
       }
-      return restoreElementInternal(parent, elementMarker, index, PsiNamedElement.class);
+      return restoreElementInternal(parent, unescape(elementMarker), index, PsiNamedElement.class);
     }
     catch (NumberFormatException e) {
       return null;
@@ -183,12 +195,12 @@ public class PsiNamesElementSignatureProvider extends AbstractElementSignaturePr
       if (StringUtil.isEmpty(name)) {
         return null;
       }
-      int index = getChildIndex(named, element.getParent(), name, (Class<PsiNamedElement>)named.getClass());
+      int index = getChildIndex(named, element.getParent(), name, PsiNamedElement.class);
       StringBuilder bufferToUse = buffer;
       if (bufferToUse == null) {
         bufferToUse = new StringBuilder();
       }
-      bufferToUse.append(TYPE_MARKER).append(ELEMENT_TOKENS_SEPARATOR).append(name)
+      bufferToUse.append(TYPE_MARKER).append(ELEMENT_TOKENS_SEPARATOR).append(escape(name))
         .append(ELEMENT_TOKENS_SEPARATOR).append(index);
       return bufferToUse;
     }
@@ -212,18 +224,39 @@ public class PsiNamesElementSignatureProvider extends AbstractElementSignaturePr
 
     PsiElement parent = element.getParent();
     if (parent instanceof PsiNamedElement && !(parent instanceof PsiFile)) {
-      PsiElement firstChild = element.getFirstChild();
-      PsiElement lastChild = element.getLastChild();
-      if (firstChild != null && "{".equals(firstChild.getText()) && lastChild != null && "}".equals(lastChild.getText())) {
+      if (isBlockElement(element)) {
+        int index = getBlockElementIndex(element);
         StringBuilder bufferToUse = buffer;
         if (bufferToUse == null) {
           bufferToUse = new StringBuilder();
         }
         bufferToUse.append(TYPE_MARKER).append(ELEMENT_TOKENS_SEPARATOR).append(CODE_BLOCK_MARKER);
+        if (index > 0) {
+          bufferToUse.append(ELEMENT_TOKENS_SEPARATOR).append(index);
+        }
         return bufferToUse;
       }
     } 
      
     return null;
+  }
+
+  private static boolean isBlockElement(@NotNull PsiElement element) {
+    PsiElement firstChild = element.getFirstChild();
+    PsiElement lastChild = element.getLastChild();
+    return firstChild != null && "{".equals(firstChild.getText()) && lastChild != null && "}".equals(lastChild.getText());
+  }
+
+  private static int getBlockElementIndex(@NotNull PsiElement element) {
+    int i = 0;
+    for (PsiElement sibling : element.getParent().getChildren()) {
+      if (element.equals(sibling)) {
+        return i;
+      }
+      if (isBlockElement(sibling)) {
+        i++;
+      }
+    }
+    throw new RuntimeException("Malformed PSI");
   }
 }

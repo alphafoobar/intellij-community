@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.io.StreamUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.xml.XmlFile;
@@ -28,15 +30,14 @@ import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.FileContent;
 import com.intellij.util.indexing.ID;
 import com.intellij.util.io.DataExternalizer;
+import com.intellij.util.io.DataInputOutputUtil;
+import com.intellij.util.io.IOUtil;
 import com.intellij.util.text.CharArrayUtil;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.util.*;
 
 /**
@@ -47,15 +48,25 @@ public class XmlNamespaceIndex extends XmlIndex<XsdNamespaceBuilder> {
   @Nullable
   public static String getNamespace(@NotNull VirtualFile file, final Project project, PsiFile context) {
     if (DumbService.isDumb(project) || (context != null && XmlUtil.isStubBuilding())) {
-      try {
-        return XsdNamespaceBuilder.computeNamespace(file.getInputStream());
-      }
-      catch (IOException e) {
-        return null;
-      }
+      return computeNamespace(file);
     }
     final List<XsdNamespaceBuilder> list = FileBasedIndex.getInstance().getValues(NAME, file.getUrl(), createFilter(project));
     return list.size() == 0 ? null : list.get(0).getNamespace();
+  }
+
+  @Nullable
+  public static String computeNamespace(@NotNull VirtualFile file) {
+    InputStream stream = null;
+    try {
+      stream = file.getInputStream();
+      return XsdNamespaceBuilder.computeNamespace(stream);
+    }
+    catch (IOException e) {
+      return null;
+    }
+    finally {
+      StreamUtil.closeStream(stream);
+    }
   }
 
   public static List<IndexedRelevantResource<String, XsdNamespaceBuilder>> getResourcesByNamespace(String namespace,
@@ -87,10 +98,10 @@ public class XmlNamespaceIndex extends XmlIndex<XsdNamespaceBuilder> {
     return new DataIndexer<String, XsdNamespaceBuilder, FileContent>() {
       @Override
       @NotNull
-      public Map<String, XsdNamespaceBuilder> map(final FileContent inputData) {
+      public Map<String, XsdNamespaceBuilder> map(@NotNull final FileContent inputData) {
         final XsdNamespaceBuilder builder;
         if ("dtd".equals(inputData.getFile().getExtension())) {
-          builder = new XsdNamespaceBuilder(inputData.getFileName(), "", Collections.<String>emptyList());
+          builder = new XsdNamespaceBuilder(inputData.getFileName(), "", Collections.<String>emptyList(), Collections.<String>emptyList());
         }
         else {
           builder = XsdNamespaceBuilder.computeNamespace(CharArrayUtil.readerFromCharSequence(inputData.getContentAsText()));
@@ -107,41 +118,56 @@ public class XmlNamespaceIndex extends XmlIndex<XsdNamespaceBuilder> {
     };
   }
 
+  @NotNull
   @Override
   public DataExternalizer<XsdNamespaceBuilder> getValueExternalizer() {
     return new DataExternalizer<XsdNamespaceBuilder>() {
       @Override
-      public void save(DataOutput out, XsdNamespaceBuilder value) throws IOException {
-        out.writeUTF(value.getNamespace() == null ? "" : value.getNamespace());
-        out.writeUTF(value.getVersion() == null ? "" : value.getVersion());
-        out.writeInt(value.getTags().size());
-        for (String s : value.getTags()) {
-          out.writeUTF(s);
-        }
+      public void save(@NotNull DataOutput out, XsdNamespaceBuilder value) throws IOException {
+        IOUtil.writeUTF(out, value.getNamespace() == null ? "" : value.getNamespace());
+        IOUtil.writeUTF(out, value.getVersion() == null ? "" : value.getVersion());
+        writeList(out, value.getTags());
+        writeList(out, value.getRootTags());
       }
 
       @Override
-      public XsdNamespaceBuilder read(DataInput in) throws IOException {
+      public XsdNamespaceBuilder read(@NotNull DataInput in) throws IOException {
 
-        int count;
-        XsdNamespaceBuilder builder = new XsdNamespaceBuilder(in.readUTF(), in.readUTF(), new ArrayList<String>(count = in.readInt()));
-        for (int i = 0; i < count; i++) {
-          builder.getTags().add(in.readUTF());
-        }
-        return builder;
+        return new XsdNamespaceBuilder(IOUtil.readUTF(in),
+                                       IOUtil.readUTF(in),
+                                       readList(in),
+                                       readList(in));
       }
     };
   }
 
+  private static void writeList(@NotNull DataOutput out, List<String> tags) throws IOException {
+    DataInputOutputUtil.writeINT(out, tags.size());
+    for (String s : tags) {
+      IOUtil.writeUTF(out, s);
+    }
+  }
+
+  @NotNull
+  private static ArrayList<String> readList(@NotNull DataInput in) throws IOException {
+    int count;
+    ArrayList<String> tags = new ArrayList<String>(count = DataInputOutputUtil.readINT(in));
+    for (int i = 0; i < count; i++) {
+      tags.add(IOUtil.readUTF(in));
+    }
+    return tags;
+  }
+
   @Override
   public int getVersion() {
-    return 2;
+    return 4;
   }
 
   @Nullable
   public static IndexedRelevantResource<String, XsdNamespaceBuilder> guessSchema(String namespace,
                                                                                  @Nullable final String tagName,
                                                                                  @Nullable final String version,
+                                                                                 @Nullable String schemaLocation,
                                                                                  @Nullable Module module,
                                                                                  @NotNull Project project) {
 
@@ -149,28 +175,43 @@ public class XmlNamespaceIndex extends XmlIndex<XsdNamespaceBuilder> {
       resources = getResourcesByNamespace(namespace, project, module);
 
     if (resources.isEmpty()) return null;
-
-    return Collections
-      .max(resources, new Comparator<IndexedRelevantResource<String, XsdNamespaceBuilder>>() {
+    if (resources.size() == 1) return resources.get(0);
+    final String fileName = schemaLocation == null ? null : new File(schemaLocation).getName();
+    IndexedRelevantResource<String, XsdNamespaceBuilder> resource =
+      Collections.max(resources, new Comparator<IndexedRelevantResource<String, XsdNamespaceBuilder>>() {
         @Override
         public int compare(IndexedRelevantResource<String, XsdNamespaceBuilder> o1,
                            IndexedRelevantResource<String, XsdNamespaceBuilder> o2) {
+          if (fileName != null) {
+            int i = Comparing.compare(fileName.equals(o1.getFile().getName()), fileName.equals(o2.getFile().getName()));
+            if (i != 0) return i;
+          }
+          if (tagName != null) {
+            int i = Comparing.compare(o1.getValue().hasTag(tagName), o2.getValue().hasTag(tagName));
+            if (i != 0) return i;
+          }
           int i = o1.compareTo(o2);
-          return i == 0 ? o1.getValue().getRating(tagName, version) - o2.getValue().getRating(tagName, version) : i;
+          if (i != 0) return i;
+          return o1.getValue().getRating(tagName, version) - o2.getValue().getRating(tagName, version);
         }
       });
+    if (tagName != null && !resource.getValue().hasTag(tagName)) {
+      return null;
+    }
+    return resource;
   }
 
   @Nullable
   public static XmlFile guessSchema(String namespace,
                                     @Nullable final String tagName,
                                     @Nullable final String version,
+                                    @Nullable String schemaLocation,
                                     @NotNull PsiFile file) {
 
     if (DumbService.isDumb(file.getProject()) || XmlUtil.isStubBuilding()) return null;
 
     IndexedRelevantResource<String,XsdNamespaceBuilder> resource =
-      guessSchema(namespace, tagName, version, ModuleUtilCore.findModuleForPsiElement(file), file.getProject());
+      guessSchema(namespace, tagName, version, schemaLocation, ModuleUtilCore.findModuleForPsiElement(file), file.getProject());
     if (resource == null) return null;
     return findSchemaFile(resource.getFile(), file);
   }

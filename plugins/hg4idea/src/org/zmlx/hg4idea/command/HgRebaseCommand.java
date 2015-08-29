@@ -12,27 +12,54 @@
 // limitations under the License.
 package org.zmlx.hg4idea.command;
 
+import com.intellij.dvcs.DvcsUtil;
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
-import org.zmlx.hg4idea.HgVcs;
+import org.jetbrains.annotations.Nullable;
 import org.zmlx.hg4idea.execution.HgCommandExecutor;
-
-import java.util.Arrays;
+import org.zmlx.hg4idea.execution.HgCommandResult;
+import org.zmlx.hg4idea.repo.HgRepository;
 
 public class HgRebaseCommand {
 
-  private final Project project;
-  private final VirtualFile repo;
+  @NotNull private final Project project;
+  @NotNull private final HgRepository repo;
 
-  public HgRebaseCommand(Project project, @NotNull VirtualFile repo) {
+  public HgRebaseCommand(@NotNull Project project, @NotNull HgRepository repo) {
     this.project = project;
     this.repo = repo;
   }
 
-  public void continueRebase() {
-    new HgCommandExecutor(project).execute(repo, "rebase", Arrays.asList("--continue"), null);
-    project.getMessageBus().syncPublisher(HgVcs.BRANCH_TOPIC).update(project, null);
+  @Nullable
+  public HgCommandResult startRebase() {
+    return performRebase(ArrayUtil.EMPTY_STRING_ARRAY);
   }
 
+  @Nullable
+  public HgCommandResult continueRebase() {
+    return performRebase("--continue");
+  }
+
+  @Nullable
+  public HgCommandResult abortRebase() {
+    return performRebase("--abort");
+  }
+
+  @Nullable
+  private HgCommandResult performRebase(@NotNull String... args) {
+    AccessToken token = DvcsUtil.workingTreeChangeStarted(project);
+    try {
+      HgCommandResult result =
+        new HgCommandExecutor(project)
+          .executeInCurrentThread(repo.getRoot(), "rebase", ContainerUtil.list(args));
+      repo.update();
+      return result;
+    }
+    finally {
+      DvcsUtil.workingTreeChangeFinished(project, token);
+    }
+  }
 }

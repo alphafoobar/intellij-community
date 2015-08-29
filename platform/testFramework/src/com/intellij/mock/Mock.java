@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.mock;
 
 import com.intellij.codeHighlighting.BackgroundEditorHighlighter;
@@ -13,7 +28,10 @@ import com.intellij.openapi.fileEditor.impl.EditorsSplitters;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.popup.Balloon;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.AsyncResult;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -132,12 +150,13 @@ public class Mock {
     @Override
     public ActionCallback notifyPublisher(@NotNull Runnable runnable) {
       runnable.run();
-      return new ActionCallback.Done();
+      return ActionCallback.DONE;
     }
 
+    @NotNull
     @Override
     public ActionCallback getReady(@NotNull Object requestor) {
-      return new ActionCallback.Done();
+      return ActionCallback.DONE;
     }
 
     @NotNull
@@ -305,10 +324,6 @@ public class Mock {
     public void closeAllFiles() {
     }
 
-    public Editor openTextEditorEnsureNoFocus(@NotNull OpenFileDescriptor descriptor) {
-      return null;
-    }
-
     @Override
     @NotNull
     public Pair<FileEditor[], FileEditorProvider[]> openFileWithProviders(@NotNull VirtualFile file,
@@ -423,7 +438,7 @@ public class Mock {
     }
 
     @Override
-    public void setSelectedEditor(@NotNull VirtualFile file, String fileEditorProviderId) {
+    public void setSelectedEditor(@NotNull VirtualFile file, @NotNull String fileEditorProviderId) {
     }
   }
 
@@ -437,9 +452,10 @@ public class Mock {
       throw new UnsupportedOperationException();
     }
 
+    @NotNull
     @Override
     public String getPath() {
-      return null;
+      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -477,14 +493,16 @@ public class Mock {
       return new VirtualFile[0];
     }
 
+    @NotNull
     @Override
-    public VirtualFile createChildDirectory(Object requestor, String name) throws IOException {
-      return null;
+    public VirtualFile createChildDirectory(Object requestor, @NotNull String name) throws IOException {
+      throw new IOException(name);
     }
 
+    @NotNull
     @Override
     public VirtualFile createChildData(Object requestor, @NotNull String name) throws IOException {
-      return null;
+      throw new IOException(name);
     }
 
     @Override
@@ -539,52 +557,66 @@ public class Mock {
       return false;
     }
 
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull String id, @NotNull JComponent component, @NotNull ToolWindowAnchor anchor) {
-      return null;
+      throw new RuntimeException();
     }
 
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull String id,
                                          @NotNull JComponent component,
                                          @NotNull ToolWindowAnchor anchor,
                                          Disposable parentDisposable,
                                          boolean canWorkInDumbMode, boolean canCloseContents) {
-      return null;
+      throw new RuntimeException();
     }
 
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull String id,
                                          @NotNull JComponent component,
                                          @NotNull ToolWindowAnchor anchor,
                                          Disposable parentDisposable,
                                          boolean canWorkInDumbMode) {
-      return null;
+      throw new RuntimeException();
     }
 
+    @NotNull
     @Override
-    public ToolWindow registerToolWindow(@NotNull String id, @NotNull JComponent component, @NotNull ToolWindowAnchor anchor, Disposable parentDisposable) {
-      return null;
+    public ToolWindow registerToolWindow(@NotNull String id, @NotNull JComponent component, @NotNull ToolWindowAnchor anchor, @NotNull Disposable parentDisposable) {
+      throw new RuntimeException();
     }
 
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull final String id, final boolean canCloseContent, @NotNull final ToolWindowAnchor anchor) {
-      return null;
+      throw new RuntimeException();
     }
 
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull final String id, final boolean canCloseContent, @NotNull final ToolWindowAnchor anchor,
                                          final Disposable parentDisposable, final boolean dumbAware) {
-      return null;
+      throw new RuntimeException();
     }
 
+    @NotNull
+    @Override
+    public ToolWindow registerToolWindow(@NotNull String id,
+                                         boolean canCloseContent,
+                                         @NotNull ToolWindowAnchor anchor,
+                                         Disposable parentDisposable,
+                                         boolean canWorkInDumbMode,
+                                         boolean secondary) {
+      throw new RuntimeException();
+    }
+
+    @NotNull
     @Override
     public ToolWindow registerToolWindow(@NotNull final String id, final boolean canCloseContent, @NotNull final ToolWindowAnchor anchor, final boolean secondary) {
-      return null;
-    }
-
-    public JComponent getFocusTargetFor(final JComponent comp) {
-      return null;
+      throw new RuntimeException();
     }
 
     @Override
@@ -595,19 +627,12 @@ public class Mock {
     public void activateEditorComponent() {
     }
 
-    public ActionCallback requestFocus(final Component c, final boolean forced) {
-      return new ActionCallback.Done();
-    }
-
-    public ActionCallback requestFocus(final ActiveRunnable command, final boolean forced) {
-      return new ActionCallback.Done();
-    }
-
     @Override
     public boolean isEditorComponentActive() {
       return false;
     }
 
+    @NotNull
     @Override
     public String[] getToolWindowIds() {
       return ArrayUtil.EMPTY_STRING_ARRAY;
@@ -624,9 +649,10 @@ public class Mock {
     }
 
     @Override
-    public void invokeLater(Runnable runnable) {
+    public void invokeLater(@NotNull Runnable runnable) {
     }
 
+    @NotNull
     @Override
     public IdeFocusManager getFocusManager() {
       return IdeFocusManagerHeadless.INSTANCE;
@@ -640,6 +666,15 @@ public class Mock {
     @Override
     public Balloon getToolWindowBalloon(String id) {
       return null;
+    }
+
+    @Override
+    public boolean isMaximized(@NotNull ToolWindow wnd) {
+      return false;
+    }
+
+    @Override
+    public void setMaximized(@NotNull ToolWindow wnd, boolean maximized) {
     }
 
     @Override

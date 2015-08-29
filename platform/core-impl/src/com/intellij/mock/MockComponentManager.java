@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,13 @@ import com.intellij.openapi.components.BaseComponent;
 import com.intellij.openapi.components.ComponentManager;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.UserDataHolderBase;
-import com.intellij.util.containers.ConcurrentHashSet;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusFactory;
-import com.intellij.util.pico.IdeaPicoContainer;
+import com.intellij.util.pico.DefaultPicoContainer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.picocontainer.MutablePicoContainer;
@@ -42,24 +43,28 @@ public class MockComponentManager extends UserDataHolderBase implements Componen
   private final MutablePicoContainer myPicoContainer;
 
   private final Map<Class, Object> myComponents = new HashMap<Class, Object>();
+  private final Set<Object> myDisposableComponents = ContainerUtil.newConcurrentSet();
 
   public MockComponentManager(@Nullable PicoContainer parent, @NotNull Disposable parentDisposable) {
-    myPicoContainer = new IdeaPicoContainer(parent) {
-      private Set<Object> myDisposableComponents = new ConcurrentHashSet<Object>();
-
+    myPicoContainer = new DefaultPicoContainer(parent) {
       @Override
       @Nullable
       public Object getComponentInstance(final Object componentKey) {
         final Object o = super.getComponentInstance(componentKey);
-        if (o instanceof Disposable && o != MockComponentManager.this) {
-          if (myDisposableComponents.add(o))
-            Disposer.register(MockComponentManager.this, (Disposable)o);
-        }
+        registerComponentInDisposer(o);
         return o;
       }
     };
+
     myPicoContainer.registerComponentInstance(this);
     Disposer.register(parentDisposable, this);
+  }
+
+  private void registerComponentInDisposer(@Nullable Object o) {
+    if (o instanceof Disposable && o != this) {
+      if (myDisposableComponents.add(o))
+        Disposer.register(this, (Disposable)o);
+    }
   }
 
   @Override
@@ -67,23 +72,26 @@ public class MockComponentManager extends UserDataHolderBase implements Componen
     return null;
   }
 
-  public <T> void registerService(Class<T> serviceInterface, Class<? extends T> serviceImplementation) {
+  public <T> void registerService(@NotNull Class<T> serviceInterface, @NotNull Class<? extends T> serviceImplementation) {
     myPicoContainer.unregisterComponent(serviceInterface.getName());
     myPicoContainer.registerComponentImplementation(serviceInterface.getName(), serviceImplementation);
   }
 
-  public <T> void registerService(Class<T> serviceImplementation) {
+  public <T> void registerService(@NotNull Class<T> serviceImplementation) {
     registerService(serviceImplementation, serviceImplementation);
   }
 
-  public <T> void registerService(Class<T> serviceInterface, T serviceImplementation) {
+  public <T> void registerService(@NotNull Class<T> serviceInterface, @NotNull T serviceImplementation) {
     myPicoContainer.registerComponentInstance(serviceInterface.getName(), serviceImplementation);
+    registerComponentInDisposer(serviceImplementation);
   }
 
-  public <T> void addComponent(Class<T> interfaceClass, T instance) {
+  public <T> void addComponent(@NotNull Class<T> interfaceClass, @NotNull T instance) {
     myComponents.put(interfaceClass, instance);
+    registerComponentInDisposer(instance);
   }
 
+  @Nullable
   @Override
   public <T> T getComponent(@NotNull Class<T> interfaceClass) {
     final Object o = myPicoContainer.getComponentInstance(interfaceClass);
@@ -137,6 +145,6 @@ public class MockComponentManager extends UserDataHolderBase implements Componen
   @NotNull
   @Override
   public Condition getDisposed() {
-    return Condition.FALSE;
+    return Conditions.alwaysFalse();
   }
 }

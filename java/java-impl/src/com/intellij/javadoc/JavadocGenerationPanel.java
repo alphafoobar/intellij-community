@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.psi.PsiKeyword;
 import com.intellij.ui.Gray;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
@@ -47,6 +48,7 @@ final class JavadocGenerationPanel extends JPanel {
   JCheckBox myOpenInBrowserCheckBox;
   JTextField myLocaleTextField;
   JCheckBox myIncludeLibraryCb;
+  JCheckBox myLinkToJdkDocs;
 
   JavadocGenerationPanel() {
     myTfOutputDir.addBrowseFolderListener(JavadocBundle.message("javadoc.generate.output.directory.browse"), null, null, FileChooserDescriptorFactory.createSingleFolderDescriptor());
@@ -69,7 +71,7 @@ final class JavadocGenerationPanel extends JPanel {
    );
 
     //noinspection UseOfObsoleteCollectionType
-    Hashtable<Integer, JLabel> labelTable = new Hashtable<Integer, JLabel>();
+    Hashtable<Integer, JComponent> labelTable = new Hashtable<Integer, JComponent>();
     labelTable.put(new Integer(1), new JLabel(PsiKeyword.PUBLIC));
     labelTable.put(new Integer(2), new JLabel(PsiKeyword.PROTECTED));
     labelTable.put(new Integer(3), new JLabel(PsiKeyword.PACKAGE));
@@ -80,7 +82,7 @@ final class JavadocGenerationPanel extends JPanel {
     myScopeSlider.setValue(1);
     myScopeSlider.setLabelTable(labelTable);
     myScopeSlider.putClientProperty(UIUtil.JSLIDER_ISFILLED, Boolean.TRUE);
-    myScopeSlider.setPreferredSize(new Dimension(80, 50));
+    myScopeSlider.setPreferredSize(JBUI.size(80, 50));
     myScopeSlider.setPaintLabels(true);
     myScopeSlider.setSnapToTicks(true);
     myScopeSlider.addChangeListener(new ChangeListener() {

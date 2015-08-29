@@ -17,20 +17,24 @@ package org.jetbrains.plugins.github.ui;
 
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.HyperlinkAdapter;
+import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.ThrowableConvertor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.github.util.GithubAuthData;
-import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException;
-import org.jetbrains.plugins.github.util.GithubNotifications;
-import org.jetbrains.plugins.github.util.GithubSettings;
-import org.jetbrains.plugins.github.util.GithubUtil;
+import org.jetbrains.plugins.github.api.GithubApiUtil;
+import org.jetbrains.plugins.github.api.GithubConnection;
 import org.jetbrains.plugins.github.api.GithubUser;
+import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException;
+import org.jetbrains.plugins.github.util.*;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -57,7 +61,7 @@ public class GithubSettingsPanel {
 
   private JTextField myLoginTextField;
   private JPasswordField myPasswordField;
-  private JPasswordField myTokenField;
+  private JPasswordField myTokenField; // look at createUIComponents() to understand
   private JTextPane mySignupTextField;
   private JPanel myPane;
   private JButton myTestButton;
@@ -66,6 +70,8 @@ public class GithubSettingsPanel {
   private JPanel myCardPanel;
   private JBLabel myAuthTypeLabel;
   private JSpinner myTimeoutSpinner;
+  private JButton myCreateTokenButton;
+  private JBCheckBox myCloneUsingSshCheckBox;
 
   private boolean myCredentialsModified;
 
@@ -84,11 +90,22 @@ public class GithubSettingsPanel {
     myAuthTypeComboBox.addItem(AUTH_PASSWORD);
     myAuthTypeComboBox.addItem(AUTH_TOKEN);
 
+    final Project project = ProjectManager.getInstance().getDefaultProject();
+
     myTestButton.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
         try {
-          GithubUser user = GithubUtil.checkAuthData(getAuthData());
+          final GithubAuthData auth = getAuthData();
+          GithubUser user = GithubUtil
+            .computeValueInModal(project, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, GithubUser, IOException>() {
+              @NotNull
+              @Override
+              public GithubUser convert(ProgressIndicator indicator) throws IOException {
+                return GithubUtil.checkAuthData(project, new GithubAuthDataHolder(auth), indicator);
+              }
+            });
+
           if (GithubAuthData.AuthType.TOKEN.equals(getAuthType())) {
             GithubNotifications.showInfoDialog(myPane, "Success", "Connection successful for user " + user.getLogin());
           }
@@ -97,11 +114,39 @@ public class GithubSettingsPanel {
           }
         }
         catch (GithubAuthenticationException ex) {
-          GithubNotifications.showErrorDialog(myPane, "Login Failure", "Can't login using given credentials: " + ex.getMessage());
+          GithubNotifications.showErrorDialog(myPane, "Login Failure", "Can't login using given credentials: ", ex);
         }
         catch (IOException ex) {
-          LOG.info(ex);
-          GithubNotifications.showErrorDialog(myPane, "Login Failure", "Can't login: " + GithubUtil.getErrorTextFromException(ex));
+          GithubNotifications.showErrorDialog(myPane, "Login Failure", "Can't login: ", ex);
+        }
+      }
+    });
+
+    myCreateTokenButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        try {
+          myPasswordField.setText(
+            GithubUtil.computeValueInModal(project, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, String, IOException>() {
+              @NotNull
+              @Override
+              public String convert(ProgressIndicator indicator) throws IOException {
+                return GithubUtil.runTaskWithBasicAuthForHost(project, GithubAuthDataHolder.createFromSettings(), indicator, getHost(),
+                                                              new ThrowableConvertor<GithubConnection, String, IOException>() {
+                                                                @NotNull
+                                                                @Override
+                                                                public String convert(@NotNull GithubConnection connection)
+                                                                  throws IOException {
+                                                                  return GithubApiUtil.getMasterToken(connection, "IntelliJ plugin");
+                                                                }
+                                                              }
+                );
+              }
+            })
+          );
+        }
+        catch (IOException ex) {
+          GithubNotifications.showErrorDialog(myPane, "Can't Create API Token", ex);
         }
       }
     });
@@ -223,7 +268,7 @@ public class GithubSettingsPanel {
     }
     Object selected = myAuthTypeComboBox.getSelectedItem();
     if (AUTH_PASSWORD.equals(selected)) return GithubAuthData.createBasicAuth(getHost(), getLogin(), getPassword());
-    if (AUTH_TOKEN.equals(selected)) return GithubAuthData.createTokenAuth(getHost(), getPassword());
+    if (AUTH_TOKEN.equals(selected)) return GithubAuthData.createTokenAuth(getHost(), StringUtil.trim(getPassword()));
     LOG.error("GithubSettingsPanel: illegal selection: anonymous AuthData created", selected.toString());
     return GithubAuthData.createAnonymous(getHost());
   }
@@ -242,20 +287,24 @@ public class GithubSettingsPanel {
     setPassword(mySettings.isAuthConfigured() ? DEFAULT_PASSWORD_TEXT : "");
     setAuthType(mySettings.getAuthType());
     setConnectionTimeout(mySettings.getConnectionTimeout());
+    myCloneUsingSshCheckBox.setSelected(mySettings.isCloneGitUsingSsh());
     resetCredentialsModification();
   }
 
   public void apply() {
     if (myCredentialsModified) {
-      mySettings.setCredentials(getHost(), getAuthData(), true);
+      mySettings.setAuthData(getAuthData(), true);
     }
     mySettings.setConnectionTimeout(getConnectionTimeout());
+    mySettings.setCloneGitUsingSsh(myCloneUsingSshCheckBox.isSelected());
     resetCredentialsModification();
   }
 
   public boolean isModified() {
-    return myCredentialsModified || !Comparing.equal(mySettings.getHost(), getHost()) ||
-           !Comparing.equal(mySettings.getConnectionTimeout(), getConnectionTimeout());
+    return myCredentialsModified ||
+           !Comparing.equal(mySettings.getHost(), getHost()) ||
+           !Comparing.equal(mySettings.getConnectionTimeout(), getConnectionTimeout()) ||
+           !Comparing.equal(mySettings.isCloneGitUsingSsh(), myCloneUsingSshCheckBox.isSelected());
   }
 
   public void resetCredentialsModification() {

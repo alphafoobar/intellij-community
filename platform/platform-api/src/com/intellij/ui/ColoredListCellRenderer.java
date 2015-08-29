@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.ui;
 
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -30,8 +31,15 @@ public abstract class ColoredListCellRenderer<T> extends SimpleColoredComponent 
   protected boolean mySelected;
   protected Color myForeground;
   protected Color mySelectionForeground;
+  @Nullable
+  private final JComboBox myComboBox;
 
   public ColoredListCellRenderer() {
+    this(null);
+  }
+
+  public ColoredListCellRenderer(@Nullable JComboBox comboBox) {
+    myComboBox = comboBox;
     setFocusBorderAroundIcon(true);
     getIpad().left = UIUtil.getListCellHPadding();
     getIpad().right = UIUtil.getListCellHPadding();
@@ -40,6 +48,9 @@ public abstract class ColoredListCellRenderer<T> extends SimpleColoredComponent 
   public Component getListCellRendererComponent(JList list, Object value, int index, boolean selected, boolean hasFocus) {
     clear();
 
+    if (myComboBox != null) {
+      setEnabled(myComboBox.isEnabled());
+    }
     setFont(list.getFont());
     mySelected = selected;
     myForeground = list.getForeground();
@@ -88,6 +99,7 @@ public abstract class ColoredListCellRenderer<T> extends SimpleColoredComponent 
     }
   }
 
+  @NotNull
   public Dimension getPreferredSize() {
     // There is a bug in BasicComboPopup. It does not add renderer into CellRendererPane,
     // so font can be null here.
@@ -105,4 +117,14 @@ public abstract class ColoredListCellRenderer<T> extends SimpleColoredComponent 
   }
 
   protected abstract void customizeCellRenderer(JList list, T value, int index, boolean selected, boolean hasFocus);
+
+  public abstract static class KotlinFriendlyColoredListCellRenderer<T> extends ColoredListCellRenderer<T> {
+    @Override
+    protected final void customizeCellRenderer(JList list, T value, int index, boolean selected, boolean hasFocus) {
+
+    }
+
+    // cannot specify type param in JList if JDK 6
+    protected abstract void customizeCellRenderer(T value, int index, boolean selected, boolean hasFocus);
+  }
 }

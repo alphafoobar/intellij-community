@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  */
 package com.intellij.psi.formatter.java;
 
-import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 
 /**
@@ -26,9 +26,9 @@ import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
  * @since Apr 29, 2010 4:06:15 PM
  */
 public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
-
-  public void testWrappingAnnotationArrayParameters() throws Exception {
-    getSettings().getRootSettings().RIGHT_MARGIN = 80;
+  @SuppressWarnings("SpellCheckingInspection")
+  public void testWrappingAnnotationArrayParameters() {
+    getSettings().RIGHT_MARGIN = 80;
     getSettings().ARRAY_INITIALIZER_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
     doTextTest(
       "@AttributeOverrides( { @AttributeOverride(name = \"id\", column = @Column(name = \"recovery_id\"))," +
@@ -42,7 +42,7 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "@AttributeOverride(name = \"systemExchangeRate\", column = @Column(name = \"system_exchange_rate\")) })\n" +
       "class Foo {\n" +
       "}",
-      
+
       "@AttributeOverrides({\n" +
       "        @AttributeOverride(name = \"id\", column = @Column(name = \"recovery_id\")),\n" +
       "        @AttributeOverride(name = \"transactionReference\", column = @Column(name = \"deal_reference\")),\n" +
@@ -58,9 +58,9 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
     );
   }
 
-  public void testAnnotationParamValueExceedingRightMargin() throws Exception {
+  public void testAnnotationParamValueExceedingRightMargin() {
     // Inspired by IDEA-18051
-    getSettings().getRootSettings().RIGHT_MARGIN = 80;
+    getSettings().RIGHT_MARGIN = 80;
     doTextTest(
       "package formatting;\n" +
       "\n" +
@@ -83,7 +83,8 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "    }\n" +
       "\n" +
       "\n" +
-      "    @TheAnnotation(value = {TheEnum.FIRST, TheEnum.SECOND}, comment = \"some long comment that goes longer that right margin 012345678901234567890\")\n" +
+      "    @TheAnnotation(value = {TheEnum.FIRST, TheEnum.SECOND}, comment =" +
+      " \"some long comment that goes longer that right margin 012345678901234567890\")\n" +
       "    public class Test {\n" +
       "\n" +
       "    }\n" +
@@ -110,7 +111,8 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "    }\n" +
       "\n" +
       "\n" +
-      "    @TheAnnotation(value = {TheEnum.FIRST, TheEnum.SECOND}, comment = \"some long comment that goes longer that right margin 012345678901234567890\")\n" +
+      "    @TheAnnotation(value = {TheEnum.FIRST, TheEnum.SECOND}, comment =" +
+      " \"some long comment that goes longer that right margin 012345678901234567890\")\n" +
       "    public class Test {\n" +
       "\n" +
       "    }\n" +
@@ -118,10 +120,11 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "}");
   }
 
+  @SuppressWarnings("SpellCheckingInspection")
   public void testEnumConstantsWrapping() {
     // Inspired by IDEA-54667
     getSettings().ENUM_CONSTANTS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
-    getSettings().getRootSettings().RIGHT_MARGIN = 80;
+    getSettings().RIGHT_MARGIN = 80;
 
     // Don't expect the constants to be placed on new line.
     doTextTest(
@@ -139,23 +142,39 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
     );
   }
 
-  public void testMethodAnnotationFollowedBySingleLineComment() throws Exception {
+  public void testIDEA123074() {
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    String before = "final GeoZone geoZone1 = new GeoZone(APPROACHING, new Polygon(point(\"0.0\", \"0.0\"), point(\"10.0\", \"0.0\")," +
+                    "point(\"10.0\", \"10.0\"), point(\"0.0\", \"10.0\")));";
+    String after = "final GeoZone geoZone1 = new GeoZone(APPROACHING,\n" +
+                   "        new Polygon(point(\"0.0\",\n" +
+                   "                \"0.0\"),\n" +
+                   "                point(\"10.0\",\n" +
+                   "                        \"0.0\"),\n" +
+                   "                point(\"10.0\",\n" +
+                   "                        \"10.0\"),\n" +
+                   "                point(\"0.0\",\n" +
+                   "                        \"10.0\")));";
+    doMethodTest(before, after);
+  }
+
+  public void testMethodAnnotationFollowedBySingleLineComment() {
     // Inspired by IDEA-22808
     getSettings().METHOD_ANNOTATION_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
 
     String text =
-      "@Test//mycomment\n" +
+      "@Test//my_comment\n" +
       "public void foo() {\n" +
       "}";
-    
+
     // Expecting the code to be left as-is
     doClassTest(text, text);
   }
 
   public void testWrapCompoundStringLiteralThatEndsAtRightMargin() {
     // Inspired by IDEA-82398
-    getSettings().getRootSettings().RIGHT_MARGIN = 30;
-    getSettings().getRootSettings().getCommonSettings(JavaLanguage.INSTANCE).WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 30;
+    getSettings().WRAP_LONG_LINES = true;
 
     final String text = "class Test {\n" +
                         "    String s = \"first line \" +\n" +
@@ -163,11 +182,11 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
                         "}";
     doTextTest(text, text);
   }
-  
+
   public void testWrapLongLine() {
     // Inspired by IDEA-55782
-    getSettings().getRootSettings().RIGHT_MARGIN = 50;
-    getSettings().getRootSettings().getCommonSettings(JavaLanguage.INSTANCE).WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 50;
+    getSettings().WRAP_LONG_LINES = true;
 
     doTextTest(
       "class TestClass {\n" +
@@ -195,8 +214,8 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
 
   public void testWrapLongLineWithTabs() {
     // Inspired by IDEA-55782
-    getSettings().getRootSettings().RIGHT_MARGIN = 20;
-    getSettings().getRootSettings().getCommonSettings(JavaLanguage.INSTANCE).WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 20;
+    getSettings().WRAP_LONG_LINES = true;
     getIndentOptions().USE_TAB_CHARACTER = true;
     getIndentOptions().TAB_SIZE = 4;
 
@@ -213,8 +232,8 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
 
   public void testWrapLongLineWithSelection() {
     // Inspired by IDEA-55782
-    getSettings().getRootSettings().RIGHT_MARGIN = 20;
-    getSettings().getRootSettings().getCommonSettings(JavaLanguage.INSTANCE).WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 20;
+    getSettings().WRAP_LONG_LINES = true;
 
     String initial =
       "class TestClass {\n" +
@@ -237,24 +256,23 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "}"
     );
   }
-  
-  public void testWrapMethodAnnotationBeforeParams() throws Exception {
+
+  public void testWrapMethodAnnotationBeforeParams() {
     // Inspired by IDEA-59536
-    getSettings().getRootSettings().RIGHT_MARGIN = 90;
+    getSettings().RIGHT_MARGIN = 90;
     getSettings().METHOD_ANNOTATION_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
     getSettings().METHOD_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
-    
+
     doClassTest(
-      "@SuppressWarnings({\"SomeInspectionIWantToIgnore\"}) public void doSomething(int x, int y) {}",
-      "@SuppressWarnings({\"SomeInspectionIWantToIgnore\"})\n" +
-      "public void doSomething(int x, int y) {" +
-      "\n}"
+        "@SuppressWarnings({\"SomeInspectionIWantToIgnore\"}) public void doSomething(int x, int y) {}",
+        "@SuppressWarnings({\"SomeInspectionIWantToIgnore\"})\n" +
+        "public void doSomething(int x, int y) {\n}"
     );
   }
-  
-  public void testMultipleExpressionInSameLine() throws Exception {
+
+  public void testMultipleExpressionInSameLine() {
     // Inspired by IDEA-64975.
-    
+
     getSettings().KEEP_MULTIPLE_EXPRESSIONS_IN_ONE_LINE = true;
     doMethodTest(
       "int i = 1; int j = 2;",
@@ -263,25 +281,25 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
 
     getSettings().KEEP_MULTIPLE_EXPRESSIONS_IN_ONE_LINE = false;
     doMethodTest(
-      "int i = 1; int j = 2;",
-      "int i = 1;\n" +
-      "int j = 2;"
-    );
-  }
-  
-  public void testIncompleteFieldAndAnnotationWrap() throws Exception {
-    // Inspired by IDEA-64725
-    
-    getSettings().FIELD_ANNOTATION_WRAP = CommonCodeStyleSettings.DO_NOT_WRAP;
-    doClassTest(
-      "@NotNull Comparable<String>",
-      "@NotNull Comparable<String>"
+        "int i = 1; int j = 2;",
+        "int i = 1;\n" +
+        "int j = 2;"
     );
   }
 
-  public void testResourceListWrap() throws Exception {
+  public void testIncompleteFieldAndAnnotationWrap() {
+    // Inspired by IDEA-64725
+
+    getSettings().FIELD_ANNOTATION_WRAP = CommonCodeStyleSettings.DO_NOT_WRAP;
+    doClassTest(
+        "@NotNull Comparable<String>",
+        "@NotNull Comparable<String>"
+    );
+  }
+
+  public void testResourceListWrap() {
     getSettings().KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
-    getSettings().getRootSettings().RIGHT_MARGIN = 40;
+    getSettings().RIGHT_MARGIN = 40;
     getSettings().RESOURCE_LIST_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
     doMethodTest("try (MyResource r1 = null; MyResource r2 = null) { }",
                  "try (MyResource r1 = null;\n" +
@@ -296,10 +314,11 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
                  ") { }");
   }
 
-  public void testLineLongEnoughToExceedAfterFirstWrapping() throws Exception {
+  @SuppressWarnings("SpellCheckingInspection")
+  public void testLineLongEnoughToExceedAfterFirstWrapping() {
     // Inspired by IDEA-103624
     getSettings().WRAP_LONG_LINES = true;
-    getSettings().getRootSettings().RIGHT_MARGIN = 40;
+    getSettings().RIGHT_MARGIN = 40;
     getSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     doMethodTest(
       "test(1,\n" +
@@ -316,10 +335,11 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
     );
   }
 
-  public void testNoUnnecessaryWrappingIsPerformedForLongLine() throws Exception {
+  @SuppressWarnings("SpellCheckingInspection")
+  public void testNoUnnecessaryWrappingIsPerformedForLongLine() {
     // Inspired by IDEA-103624
     getSettings().WRAP_LONG_LINES = true;
-    getSettings().getRootSettings().RIGHT_MARGIN = 40;
+    getSettings().RIGHT_MARGIN = 40;
     getSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     String text =
       "test(1,\n" +
@@ -330,5 +350,283 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "int i = 1;\n" +
       "int j = 2;";
     doMethodTest(text, text);
+  }
+
+  public void testEnforceIndentMethodCallParamWrap() {
+    getSettings().WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 140;
+    getSettings().PREFER_PARAMETERS_WRAP = true;
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM;
+
+    String before = "processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, " +
+                    "String.format(\"Could not process annotations: %s%n%s\", e.toString(), writer.toString()));";
+
+    String afterFirstReformat = "processingEnv.getMessenger().printMessage(\n" +
+                                "        Diagnostic.Kind.ERROR, String.format(\n" +
+                                "        \"Could not process annotations: %s%n%s\",\n" +
+                                "        e.toString(),\n" +
+                                "        writer.toString()\n" +
+                                ")\n" +
+                                ");";
+
+    String after = "processingEnv.getMessenger().printMessage(\n" +
+                   "        Diagnostic.Kind.ERROR, String.format(\n" +
+                   "                \"Could not process annotations: %s%n%s\",\n" +
+                   "                e.toString(),\n" +
+                   "                writer.toString()\n" +
+                   "        )\n" +
+                   ");";
+
+    doMethodTest(afterFirstReformat, after);
+
+    getSettings().CALL_PARAMETERS_RPAREN_ON_NEXT_LINE = true;
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+    doMethodTest(before,
+                 "processingEnv.getMessenger().printMessage(\n" +
+                 "        Diagnostic.Kind.ERROR,\n" +
+                 "        String.format(\"Could not process annotations: %s%n%s\", e.toString(), writer.toString())\n" +
+                 ");");
+
+    String literal = "\"" + StringUtil.repeatSymbol('A', 128) + "\"";
+    before = "processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, call(" + literal + "));\n";
+    after = "processingEnv.getMessenger().printMessage(\n" +
+            "        Diagnostic.Kind.ERROR,\n" +
+            "        call(" + literal + ")\n" +
+            ");\n";
+
+    doMethodTest(before, after);
+  }
+
+  @SuppressWarnings("SpellCheckingInspection")
+  public void testDoNotWrapMethodsWithMethodCallAsParameters() {
+    getSettings().WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 140;
+    getSettings().PREFER_PARAMETERS_WRAP = true;
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM;
+    getSettings().CALL_PARAMETERS_RPAREN_ON_NEXT_LINE = true;
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+
+    String before = "   processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, getMessage());";
+    String after = "processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, getMessage());";
+
+    doMethodTest(before, after);
+
+    before = "   processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, getMessage(loooooooooooooooooongParamName));";
+    after = "processingEnv.getMessenger().printMessage(Diagnostic.Kind.ERROR, getMessage(loooooooooooooooooongParamName));";
+
+    doMethodTest(before, after);
+  }
+
+  public void testFieldAnnotationWithoutModifier() {
+    doClassTest("@NotNull String myFoo = null;", "@NotNull\nString myFoo = null;");
+  }
+
+  public void testTypeAnnotationsInModifierList() {
+    getSettings().getRootSettings().FORMATTER_TAGS_ENABLED = true;
+
+    String prefix =
+      "import java.lang.annotation.*;\n\n" +
+      "//@formatter:off\n" +
+      "@interface A { }\n" +
+      "@Target({ElementType.TYPE_USE}) @interface TA { int value() default 0; }\n" +
+      "//@formatter:on\n\n";
+
+    doTextTest(
+        prefix + "interface C {\n" +
+        "    @TA(0)String m();\n" +
+        "    @A  @TA(1)  @TA(2)String m();\n" +
+        "    @A  public  @TA String m();\n" +
+        "}",
+
+        prefix + "interface C {\n" +
+        "    @TA(0) String m();\n\n" +
+        "    @A\n" +
+        "    @TA(1) @TA(2) String m();\n\n" +
+        "    @A\n" +
+        "    public @TA String m();\n" +
+        "}");
+  }
+
+  public void testKeepSingleFieldAnnotationOnSameLine() {
+    getJavaSettings().DO_NOT_WRAP_AFTER_SINGLE_ANNOTATION = true;
+    doClassTest(
+        "@NotNull public String result = \"OK\"\n" +
+        "@NotNull String newResult = \"OK\"\n" +
+        "@NotNull\n" +
+        "@Deprecated public String bad = \"bad\"",
+
+        "@NotNull public String result = \"OK\"\n" +
+        "@NotNull String newResult = \"OK\"\n" +
+        "@NotNull\n" +
+        "@Deprecated\n" +
+        "public String bad = \"bad\""
+    );
+  }
+
+  public void testMoveSingleAnnotationOnSameLine() {
+    getJavaSettings().DO_NOT_WRAP_AFTER_SINGLE_ANNOTATION = true;
+    getSettings().KEEP_LINE_BREAKS = false;
+    doClassTest(
+      "@NotNull\n" +
+      "public String test = \"tst\";\n" +
+      "String ok = \"ok\";\n",
+      "@NotNull public String test = \"tst\";\n" +
+      "String ok = \"ok\";\n"
+    );
+  }
+
+  public void test_Wrap_On_Method_Parameter_Declaration() {
+    getSettings().METHOD_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+    doClassTest(
+        "      public static void main(String[] args) {\n" +
+        "    boolean ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa = false;\n" +
+        "    soo.ifTrue(ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa, (v) -> v.setText(\"syyycuuuuuuuuurrrrrrrrrrrrrrennnnnnnnnnnnnnnnnnnnnt\"));\n" +
+        "}",
+        "public static void main(String[] args) {\n" +
+        "    boolean ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa = false;\n" +
+        "    soo.ifTrue(ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa, (v) -> v.setText(\"syyycuuuuuuuuurrrrrrrrrrrrrrennnnnnnnnnnnnnnnnnnnnt\"));\n" +
+        "}"
+    );
+
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+    doClassTest(
+        "      public static void main(String[] args) {\n" +
+        "    boolean ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa = false;\n" +
+        "    soo.ifTrue(ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa, (v) -> v.setText(\"syyycuuuuuuuuurrrrrrrrrrrrrrennnnnnnnnnnnnnnnnnnnnt\"));\n" +
+        "}",
+        "public static void main(String[] args) {\n" +
+        "    boolean ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa = false;\n" +
+        "    soo.ifTrue(ssuuuuuuuuuuuuuuuuuuupaaaaaaaaaaaaa,\n" +
+        "            (v) -> v.setText(\"syyycuuuuuuuuurrrrrrrrrrrrrrennnnnnnnnnnnnnnnnnnnnt\"));\n" +
+        "}"
+    );
+  }
+
+  public void test_Do_Not_Wrap_On_Nested_Call_Arguments_If_Not_Needed() {
+    getSettings().PREFER_PARAMETERS_WRAP = true;
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+
+    doMethodTest("call(aaaaaaaaaaabbbbbbbbbbbbsdfsdfsdfsdfsdfsdfsdfb, 1 + call(111111111, 32213123123, 123123123123, 234234234234324234234));",
+                 "call(aaaaaaaaaaabbbbbbbbbbbbsdfsdfsdfsdfsdfsdfsdfb,\n" +
+                 "        1 + call(111111111, 32213123123, 123123123123, 234234234234324234234));");
+  }
+
+  public void test_PlaceOnNewLineParenth_DoNotWork_IfLineNotExceedsRightMargin() {
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+
+    doMethodTest("run(new Runnable() {\n" +
+                 "public void run() {\n" +
+                 "}\n" +
+                 "});",
+                 "run(new Runnable() {\n" +
+                 "    public void run() {\n" +
+                 "    }\n" +
+                 "});");
+
+    doMethodTest("run(() -> {\n" +
+                 "int a = 2;\n" +
+                 "});",
+                 "run(() -> {\n" +
+                 "    int a = 2;\n" +
+                 "});");
+  }
+
+  public void test_WrapIfLong_ActivatesPlaceNewLineAfterParenthesis() {
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccccccccccccccccccccccc\");",
+                 "fuun(\n" +
+                 "        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+                 "        \"cccccccccccccccccccccccccccccccccc\");");
+
+  }
+
+  public void test_WrapIfLong_On_Second_Parameter_ActivatesPlaceNewLineAfterParenthesis() {
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");",
+                 "fuun(\n" +
+                 "        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n" +
+                 "        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");");
+  }
+
+  public void test_LParen_OnNextLine_IfWrapped() {
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = true;
+
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");",
+                 "fuun(\n" +
+                 "        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n" +
+                 "        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+                 "        \"cccccccccccccc\");");
+
+
+    getSettings().CALL_PARAMETERS_LPAREN_ON_NEXT_LINE = false;
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");",
+                 "fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n" +
+                 "        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+                 "        \"cccccccccccccc\");");
+
+  }
+
+  public void test_RParen_OnNextLine_IfWrapped() {
+    getSettings().CALL_PARAMETERS_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    getSettings().CALL_PARAMETERS_RPAREN_ON_NEXT_LINE = true;
+
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");",
+                 "fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n" +
+                 "        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+                 "        \"cccccccccccccc\"" +
+                 "\n);");
+
+
+    getSettings().CALL_PARAMETERS_RPAREN_ON_NEXT_LINE = false;
+    doMethodTest("fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccc\");",
+                 "fuun(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n" +
+                 "        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+                 "        \"cccccccccccccc\");");
+
+  }
+
+  public void test_ChainedCalls_FirstOnNewLine() {
+    getSettings().METHOD_CALL_CHAIN_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    getSettings().WRAP_FIRST_METHOD_IN_CALL_CHAIN = true;
+
+    doMethodTest(
+      "obj.call().call().call().call();",
+      "obj\n" +
+      "        .call()\n" +
+      "        .call()\n" +
+      "        .call()\n" +
+      "        .call();"
+    );
+
+    doMethodTest(
+      "call().call().call().call();",
+      "call()\n" +
+      "        .call()\n" +
+      "        .call()\n" +
+      "        .call();"
+    );
+
+    doMethodTest(
+      "nestedCall(call().call().call().call());",
+      "nestedCall(call()\n" +
+      "        .call()\n" +
+      "        .call()\n" +
+      "        .call());"
+    );
+  }
+
+  public void test_ChainedCalls_NoWrapOnSingleCall() {
+    getSettings().METHOD_CALL_CHAIN_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    getSettings().WRAP_FIRST_METHOD_IN_CALL_CHAIN = true;
+
+    doMethodTest(
+      "obj.call(    )",
+      "obj.call()"
+    );
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@ package com.intellij.execution.process;
 import com.intellij.execution.TaskExecutor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.io.BaseDataReader;
+import com.intellij.util.io.BaseInputStreamReader;
 import com.intellij.util.io.BaseOutputReader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -69,6 +71,15 @@ public class BaseOSProcessHandler extends ProcessHandler implements TaskExecutor
     return false;
   }
 
+  /**
+   * Override this method to read process output and error streams in blocking mode
+   *
+   * @return true to read non-blocking but sleeping, false for blocking read
+   */
+  protected boolean useNonBlockingRead() {
+    return !Registry.is("output.reader.blocking.mode", false);
+  }
+
   protected boolean processHasSeparateErrorStream() {
     return true;
   }
@@ -83,25 +94,22 @@ public class BaseOSProcessHandler extends ProcessHandler implements TaskExecutor
       @Override
       public void startNotified(final ProcessEvent event) {
         try {
-          BaseDataReader.SleepingPolicy sleepingPolicy =
-            useAdaptiveSleepingPolicyWhenReadingOutput() ? new AdaptiveSleepingPolicy() : BaseDataReader.SleepingPolicy.SIMPLE;
-          final BaseDataReader stdoutReader = createOutputDataReader(sleepingPolicy);
-          final BaseDataReader stderrReader = processHasSeparateErrorStream() ? createErrorDataReader(sleepingPolicy) : null;
+          final BaseDataReader stdOutReader = createOutputDataReader(getPolicy());
+          final BaseDataReader stdErrReader = processHasSeparateErrorStream() ? createErrorDataReader(getPolicy()) : null;
 
           myWaitFor.setTerminationCallback(new Consumer<Integer>() {
             @Override
             public void consume(Integer exitCode) {
               try {
                 // tell readers that no more attempts to read process' output should be made
-                if (stderrReader != null) stderrReader.stop();
-                stdoutReader.stop();
+                if (stdErrReader != null) stdErrReader.stop();
+                stdOutReader.stop();
 
                 try {
-                  if (stderrReader != null) stderrReader.waitFor();
-                  stdoutReader.waitFor();
+                  if (stdErrReader != null) stdErrReader.waitFor();
+                  stdOutReader.waitFor();
                 }
-                catch (InterruptedException ignore) {
-                }
+                catch (InterruptedException ignore) { }
               }
               finally {
                 onOSProcessTerminated(exitCode);
@@ -118,10 +126,19 @@ public class BaseOSProcessHandler extends ProcessHandler implements TaskExecutor
     super.startNotify();
   }
 
+  private BaseDataReader.SleepingPolicy getPolicy() {
+    if (useNonBlockingRead()) {
+      return useAdaptiveSleepingPolicyWhenReadingOutput() ? new AdaptiveSleepingPolicy() : BaseDataReader.SleepingPolicy.SIMPLE;
+    }
+    else {
+      //use blocking read policy
+      return BaseDataReader.SleepingPolicy.BLOCKING;
+    }
+  }
+
   @NotNull
   protected BaseDataReader createErrorDataReader(BaseDataReader.SleepingPolicy sleepingPolicy) {
-    return new SimpleOutputReader(createProcessErrReader(), ProcessOutputTypes.STDERR,
-                             sleepingPolicy);
+    return new SimpleOutputReader(createProcessErrReader(), ProcessOutputTypes.STDERR, sleepingPolicy);
   }
 
   @NotNull
@@ -142,12 +159,17 @@ public class BaseOSProcessHandler extends ProcessHandler implements TaskExecutor
   }
 
   private Reader createInputStreamReader(InputStream streamToRead) {
-    final Charset charset = getCharset();
+    Charset charset = charsetNotNull();
+    return new BaseInputStreamReader(streamToRead, charset);
+  }
+
+  private Charset charsetNotNull() {
+    Charset charset = getCharset();
     if (charset == null) {
       // use default charset
-      return new InputStreamReader(streamToRead);
+      charset = Charset.defaultCharset();
     }
-    return new InputStreamReader(streamToRead, charset);
+    return charset;
   }
 
   @Override

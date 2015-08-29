@@ -16,15 +16,16 @@
 package org.jetbrains.idea.svn.dialogs.browserCache;
 
 import com.intellij.openapi.components.ServiceManager;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.idea.svn.browse.DirectoryEntry;
 import org.jetbrains.idea.svn.dialogs.RepositoryTreeNode;
-import org.tmatesoft.svn.core.SVNDirEntry;
-import org.tmatesoft.svn.core.SVNErrorMessage;
 
 import javax.swing.*;
 import java.util.List;
 
 public class CacheLoader extends Loader {
-  private final Loader myRepositoryLoader;
+
+  @NotNull private final Loader myRepositoryLoader;
 
   public static Loader getInstance() {
     return ServiceManager.getService(Loader.class);
@@ -35,16 +36,16 @@ public class CacheLoader extends Loader {
     myRepositoryLoader = new RepositoryLoader(myCache);
   }
 
-  public void load(final RepositoryTreeNode node, final Expander expander) {
+  public void load(@NotNull final RepositoryTreeNode node, @NotNull final Expander expander) {
     SwingUtilities.invokeLater(new Runnable(){
       public void run() {
         final String nodeUrl = node.getURL().toString();
 
-        final List<SVNDirEntry> cached = myCache.getChildren(nodeUrl);
+        final List<DirectoryEntry> cached = myCache.getChildren(nodeUrl);
         if (cached != null) {
           refreshNode(node, cached, expander);
         }
-        final SVNErrorMessage error = myCache.getError(nodeUrl);
+        final String error = myCache.getError(nodeUrl);
         if (error != null) {
           refreshNodeError(node, error);
         }
@@ -54,15 +55,8 @@ public class CacheLoader extends Loader {
     });
   }
 
-  public void forceRefresh(final String repositoryRootUrl) {
-    myCache.clear(repositoryRootUrl);
-  }
-
+  @NotNull
   protected NodeLoadState getNodeLoadState() {
     return NodeLoadState.CACHED;
-  }
-
-  public Loader getRepositoryLoader() {
-    return myRepositoryLoader;
   }
 }

@@ -8,10 +8,9 @@ import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.Key;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * @author yole
@@ -20,8 +19,6 @@ public class ColoredOutputTypeRegistry {
   public static ColoredOutputTypeRegistry getInstance() {
     return ServiceManager.getService(ColoredOutputTypeRegistry.class);
   }
-
-  private final Map<String, Key> myRegisteredKeys = new HashMap<String, Key>();
 
   private static final TextAttributesKey[] myAnsiColorKeys = new TextAttributesKey[]{
     ConsoleHighlighter.BLACK,
@@ -73,11 +70,8 @@ public class ColoredOutputTypeRegistry {
      see full doc at http://en.wikipedia.org/wiki/ANSI_escape_code
   */
 
+  @NotNull
   public Key getOutputKey(@NonNls String attribute) {
-    final Key key = myRegisteredKeys.get(attribute);
-    if (key != null) {
-      return key;
-    }
     final String completeAttribute = attribute;
     if (attribute.startsWith("\u001B[")) {
       attribute = attribute.substring(2);
@@ -146,7 +140,6 @@ public class ColoredOutputTypeRegistry {
     Key newKey = new Key(completeAttribute);
     ConsoleViewContentType contentType = new ConsoleViewContentType(completeAttribute, attrs);
     ConsoleViewContentType.registerNewConsoleViewType(newKey, contentType);
-    myRegisteredKeys.put(completeAttribute, newKey);
     return newKey;
   }
 

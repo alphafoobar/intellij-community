@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,10 +34,10 @@ import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementFactory;
-import com.intellij.psi.PsiExpression;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.StringBuilderSpinAllocator;
+import com.intellij.xdebugger.settings.XDebuggerSettingsManager;
 import com.sun.jdi.*;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -58,15 +58,16 @@ public class ClassRenderer extends NodeRendererImpl{
   
   public static final @NonNls String UNIQUE_ID = "ClassRenderer";
 
-  public boolean SORT_ASCENDING = false;
   public boolean SHOW_SYNTHETICS = true;
   public boolean SHOW_VAL_FIELDS_AS_LOCAL_VARIABLES = true;
   public boolean SHOW_STATIC = false;
   public boolean SHOW_STATIC_FINAL = false;
 
-  public boolean SHOW_FQ_TYPE_NAMES = true;
+  public boolean SHOW_FQ_TYPE_NAMES = false;
   public boolean SHOW_DECLARED_TYPE = false;
   public boolean SHOW_OBJECT_ID = true;
+
+  public boolean SHOW_STRINGS_TYPE = false;
   
   public ClassRenderer() {
     myProperties.setEnabled(true);
@@ -83,22 +84,27 @@ public class ClassRenderer extends NodeRendererImpl{
     return typeName;
   }
 
+  @Override
   public String getUniqueId() {
     return UNIQUE_ID;
   }
 
+  @Override
   public boolean isEnabled() {
     return myProperties.isEnabled();
   }
 
+  @Override
   public void setEnabled(boolean enabled) {
     myProperties.setEnabled(enabled);
   }
 
+  @Override
   public ClassRenderer clone() {
     return (ClassRenderer) super.clone();
   }
 
+  @Override
   public String calcLabel(ValueDescriptor descriptor, EvaluationContext evaluationContext, DescriptorLabelListener labelListener)  throws EvaluateException {
     return calcLabel(descriptor);
   }
@@ -107,40 +113,31 @@ public class ClassRenderer extends NodeRendererImpl{
     final ValueDescriptorImpl valueDescriptor = (ValueDescriptorImpl)descriptor;
     final Value value = valueDescriptor.getValue();
     if (value instanceof ObjectReference) {
-      final StringBuilder buf = StringBuilderSpinAllocator.alloc();
-      try {
-        if (value instanceof StringReference) {
-          buf.append('\"');
-          buf.append(DebuggerUtils.convertToPresentationString(((StringReference)value).value()));
-          buf.append('\"');
-        }
-        else if (value instanceof ClassObjectReference) {
-          ReferenceType type = ((ClassObjectReference)value).reflectedType();
-          buf.append((type != null)?type.name():"{...}");
-        }
-        else {
-          final ObjectReference objRef = (ObjectReference)value;
-          final Type type = objRef.type();
-          if (type instanceof ClassType && ((ClassType)type).isEnum()) {
-            final String name = getEnumConstantName(objRef, (ClassType)type);
-            if (name != null) {
-              buf.append(name);
-            }
-            else {
-              buf.append(type.name());
-            }
+      if (value instanceof StringReference) {
+        return ((StringReference)value).value();
+      }
+      else if (value instanceof ClassObjectReference) {
+        ReferenceType type = ((ClassObjectReference)value).reflectedType();
+        return (type != null) ? type.name() : "{...}";
+      }
+      else {
+        final ObjectReference objRef = (ObjectReference)value;
+        final Type type = objRef.type();
+        if (type instanceof ClassType && ((ClassType)type).isEnum()) {
+          final String name = getEnumConstantName(objRef, (ClassType)type);
+          if (name != null) {
+            return name;
           }
           else {
-            buf.append(ValueDescriptorImpl.getIdLabel(objRef));
+            return type.name();
           }
         }
-        return buf.toString();
-      }
-      finally {
-        StringBuilderSpinAllocator.dispose(buf);
+        else {
+          return "";
+        }
       }
     }
-    else if(value == null) {
+    else if (value == null) {
       //noinspection HardCodedStringLiteral
       return "null";
     }
@@ -149,6 +146,7 @@ public class ClassRenderer extends NodeRendererImpl{
     }
   }
 
+  @Override
   public void buildChildren(final Value value, final ChildrenBuilder builder, final EvaluationContext evaluationContext) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     final ValueDescriptorImpl parentDescriptor = (ValueDescriptorImpl)builder.getParentDescriptor();
@@ -166,10 +164,10 @@ public class ClassRenderer extends NodeRendererImpl{
           if (!shouldDisplay(evaluationContext, objRef, field)) {
             continue;
           }
-          children.add(nodeManager.createNode(nodeDescriptorFactory.getFieldDescriptor(parentDescriptor, objRef, field), evaluationContext));
+          children.add(nodeManager.createNode(createFieldDescriptor(parentDescriptor, nodeDescriptorFactory, objRef, field, evaluationContext), evaluationContext));
         }
 
-        if(SORT_ASCENDING) {
+        if (XDebuggerSettingsManager.getInstance().getDataViewSettings().isSortValues()) {
           Collections.sort(children, NodeManagerImpl.getNodeComparator());
         }
       }
@@ -180,7 +178,16 @@ public class ClassRenderer extends NodeRendererImpl{
     builder.setChildren(children);
   }
 
-  private boolean shouldDisplay(EvaluationContext context, @NotNull ObjectReference objInstance, @NotNull Field field) {
+  @NotNull
+  protected FieldDescriptor createFieldDescriptor(ValueDescriptorImpl parentDescriptor,
+                                                  NodeDescriptorFactory nodeDescriptorFactory,
+                                                  ObjectReference objRef,
+                                                  Field field,
+                                                  EvaluationContext evaluationContext) {
+    return nodeDescriptorFactory.getFieldDescriptor(parentDescriptor, objRef, field);
+  }
+
+  protected boolean shouldDisplay(EvaluationContext context, @NotNull ObjectReference objInstance, @NotNull Field field) {
     final boolean isSynthetic = DebuggerUtils.isSynthetic(field);
     if (!SHOW_SYNTHETICS && isSynthetic) {
       return false;
@@ -209,17 +216,20 @@ public class ClassRenderer extends NodeRendererImpl{
     return true;
   }
 
+  @Override
   public void readExternal(Element element) throws InvalidDataException {
     super.readExternal(element);
     DefaultJDOMExternalizer.readExternal(this, element);
   }
 
+  @Override
   public void writeExternal(Element element) throws WriteExternalException {
     super.writeExternal(element);
     DefaultJDOMExternalizer.writeExternal(this, element);
   }
 
-  public PsiExpression getChildValueExpression(DebuggerTreeNode node, DebuggerContext context) throws EvaluateException {
+  @Override
+  public PsiElement getChildValueExpression(DebuggerTreeNode node, DebuggerContext context) throws EvaluateException {
     FieldDescriptor fieldDescriptor = (FieldDescriptor)node.getDescriptor();
 
     PsiElementFactory elementFactory = JavaPsiFacade.getInstance(node.getProject()).getElementFactory();
@@ -239,7 +249,8 @@ public class ClassRenderer extends NodeRendererImpl{
         return ((ArrayReference)value).length() > 0;
       }
       else if(value instanceof ObjectReference) {
-        return ((ObjectReference)value).referenceType().allFields().size() > 0;
+        return true; // if object has no fields, it contains a child-message about that
+        //return ((ObjectReference)value).referenceType().allFields().size() > 0;
       }
     }
     catch (ObjectCollectedException e) {
@@ -249,19 +260,23 @@ public class ClassRenderer extends NodeRendererImpl{
     return false;
   }
 
+  @Override
   public boolean isExpandable(Value value, EvaluationContext evaluationContext, NodeDescriptor parentDescriptor) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     return valueExpandable(value);
   }
 
+  @Override
   public boolean isApplicable(Type type) {
     return type instanceof ReferenceType && !(type instanceof ArrayType);
   }
 
+  @Override
   public @NonNls String getName() {
     return "Object";
   }
 
+  @Override
   public void setName(String text) {
     LOG.assertTrue(false);
   }

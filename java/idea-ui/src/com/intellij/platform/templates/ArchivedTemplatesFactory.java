@@ -15,9 +15,8 @@
  */
 package com.intellij.platform.templates;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.fileTemplates.impl.UrlUtil;
-import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.util.projectWizard.WizardContext;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -26,20 +25,28 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.platform.ProjectTemplate;
 import com.intellij.platform.ProjectTemplatesFactory;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.SmartList;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
+import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * @author Dmitry Avdeev
  * @since 10/1/12
  */
 public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
+  private final static Logger LOG = Logger.getInstance(ArchivedTemplatesFactory.class);
 
   static final String ZIP = ".zip";
 
@@ -47,28 +54,25 @@ public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
     @NotNull
     @Override
     protected MultiMap<String, Pair<URL, ClassLoader>> compute() {
-      MultiMap<String, Pair<URL, ClassLoader>> map = new MultiMap<String, Pair<URL, ClassLoader>>();
-      IdeaPluginDescriptor[] plugins = PluginManagerCore.getPlugins();
-      Map<URL, ClassLoader> urls = new HashMap<URL, ClassLoader>();
-      for (IdeaPluginDescriptor plugin : plugins) {
-        if (!plugin.isEnabled()) continue;
-        try {
-          ClassLoader loader = plugin.getPluginClassLoader();
-          Enumeration<URL> resources = loader.getResources("resources/projectTemplates");
-          ArrayList<URL> list = Collections.list(resources);
-          for (URL url : list) {
-            urls.put(url, loader);
-          }
-        }
-        catch (IOException e) {
-          LOG.error(e);
-        }
-      }
+      MultiMap<String, Pair<URL, ClassLoader>> map = MultiMap.createSmart();
+      Map<URL, ClassLoader> urls = new THashMap<URL, ClassLoader>();
+      //for (IdeaPluginDescriptor plugin : plugins) {
+      //  if (!plugin.isEnabled()) continue;
+      //  try {
+      //    ClassLoader loader = plugin.getPluginClassLoader();
+      //    Enumeration<URL> resources = loader.getResources("resources/projectTemplates");
+      //    ArrayList<URL> list = Collections.list(resources);
+      //    for (URL url : list) {
+      //      urls.put(url, loader);
+      //    }
+      //  }
+      //  catch (IOException e) {
+      //    LOG.error(e);
+      //  }
+      //}
 
       URL configURL = getCustomTemplatesURL();
-      if (configURL != null) {
-        urls.put(configURL, ClassLoader.getSystemClassLoader());
-      }
+      urls.put(configURL, ClassLoader.getSystemClassLoader());
 
       for (Map.Entry<URL, ClassLoader> url : urls.entrySet()) {
         try {
@@ -95,23 +99,23 @@ public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
     }
   };
 
+  @NotNull
   private static URL getCustomTemplatesURL() {
-    String path = getCustomTemplatesPath();
     try {
-      return new File(path).toURI().toURL();
+      return new File(getCustomTemplatesPath()).toURI().toURL();
     }
     catch (MalformedURLException e) {
       throw new RuntimeException(e);
     }
   }
 
+  @NotNull
   static String getCustomTemplatesPath() {
     return PathManager.getConfigPath() + "/projectTemplates";
   }
 
   public static File getTemplateFile(String name) {
-    String configURL = getCustomTemplatesPath();
-    return new File(configURL + "/" + name + ".zip");
+    return new File(getCustomTemplatesPath() + "/" + name + ".zip");
   }
 
   @NotNull
@@ -124,16 +128,21 @@ public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
 
   @NotNull
   @Override
-  public ProjectTemplate[] createTemplates(String group, WizardContext context) {
-    Collection<Pair<URL, ClassLoader>> urls = myGroups.getValue().get(group);
-    List<ProjectTemplate> templates = new ArrayList<ProjectTemplate>();
-    for (Pair<URL, ClassLoader> url : urls) {
+  public ProjectTemplate[] createTemplates(@Nullable String group, WizardContext context) {
+    // myGroups contains only not-null keys
+    if (group == null) {
+      return ProjectTemplate.EMPTY_ARRAY;
+    }
+
+    List<ProjectTemplate> templates = null;
+    for (Pair<URL, ClassLoader> url : myGroups.getValue().get(group)) {
       try {
-        List<String> children = UrlUtil.getChildrenRelativePaths(url.first);
-        for (String child : children) {
+        for (String child : UrlUtil.getChildrenRelativePaths(url.first)) {
           if (child.endsWith(ZIP)) {
-            URL templateUrl = new URL(url.first.toExternalForm() + "/" + child);
-            templates.add(new LocalArchivedTemplate(templateUrl, url.second));
+            if (templates == null) {
+              templates = new SmartList<ProjectTemplate>();
+            }
+            templates.add(new LocalArchivedTemplate(new URL(url.first.toExternalForm() + '/' + child), url.second));
           }
         }
       }
@@ -141,7 +150,7 @@ public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
         LOG.error(e);
       }
     }
-    return templates.toArray(new ProjectTemplate[templates.size()]);
+    return ContainerUtil.isEmpty(templates) ? ProjectTemplate.EMPTY_ARRAY : templates.toArray(new ProjectTemplate[templates.size()]);
   }
 
   @Override
@@ -149,5 +158,8 @@ public class ArchivedTemplatesFactory extends ProjectTemplatesFactory {
     return CUSTOM_GROUP.equals(group) ? -2 : 0;
   }
 
-  private final static Logger LOG = Logger.getInstance(ArchivedTemplatesFactory.class);
+  @Override
+  public Icon getGroupIcon(String group) {
+    return CUSTOM_GROUP.equals(group) ? AllIcons.Modules.Types.UserDefined : super.getGroupIcon(group);
+  }
 }

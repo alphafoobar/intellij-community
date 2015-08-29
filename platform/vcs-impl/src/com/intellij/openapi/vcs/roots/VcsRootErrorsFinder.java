@@ -1,5 +1,6 @@
 package com.intellij.openapi.vcs.roots;
 
+import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
@@ -15,23 +16,21 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * @author Nadya Zabrodina
- */
 public class VcsRootErrorsFinder {
-  private final @NotNull Project myProject;
-  private final @NotNull ProjectLevelVcsManager myVcsManager;
+  @NotNull private final Project myProject;
+  @NotNull private final ProjectLevelVcsManager myVcsManager;
+  @NotNull private final VcsRootDetector myRootDetector;
 
   public VcsRootErrorsFinder(@NotNull Project project) {
     myProject = project;
     myVcsManager = ProjectLevelVcsManager.getInstance(project);
+    myRootDetector = ServiceManager.getService(myProject, VcsRootDetector.class);
   }
 
   @NotNull
   public Collection<VcsRootError> find() {
     List<VcsDirectoryMapping> mappings = myVcsManager.getDirectoryMappings();
-    Collection<VcsRoot> vcsRoots = new VcsRootDetector(myProject).detect().getRoots();
-
+    Collection<VcsRoot> vcsRoots = myRootDetector.detect();
     Collection<VcsRootError> errors = new ArrayList<VcsRootError>();
     errors.addAll(findExtraMappings(mappings));
     errors.addAll(findUnregisteredRoots(mappings, vcsRoots));

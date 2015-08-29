@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +15,26 @@
  */
 package com.intellij.ide.actions;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.impl.NewProjectUtil;
-import com.intellij.ide.util.newProjectWizard.AddModuleWizard;
-import com.intellij.ide.util.newProjectWizard.AddModuleWizardPro;
+import com.intellij.ide.projectWizard.NewProjectWizard;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
-import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.wm.impl.welcomeScreen.NewWelcomeScreen;
+import org.jetbrains.annotations.NotNull;
 
 public class NewProjectAction extends AnAction implements DumbAware {
   public void actionPerformed(AnActionEvent e) {
-    NewProjectUtil.createNewProject(CommonDataKeys.PROJECT.getData(e.getDataContext()), Registry.is("new.project.wizard")
-                                   ? new AddModuleWizardPro(null, ModulesProvider.EMPTY_MODULES_PROVIDER, null)
-                                   : new AddModuleWizard(null, ModulesProvider.EMPTY_MODULES_PROVIDER, null));
+    NewProjectWizard wizard = new NewProjectWizard(null, ModulesProvider.EMPTY_MODULES_PROVIDER, null);
+    NewProjectUtil.createNewProject(getEventProject(e), wizard);
+  }
+
+  @Override
+  public void update(@NotNull AnActionEvent e) {
+    if (NewWelcomeScreen.isNewWelcomeScreen(e)) {
+      e.getPresentation().setIcon(AllIcons.Welcome.CreateNewProject);
+    }
   }
 }

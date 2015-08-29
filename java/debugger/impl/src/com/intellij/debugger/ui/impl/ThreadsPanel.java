@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ public class ThreadsPanel extends DebuggerTreePanel{
     registerDisposable(disposable);
 
     getThreadsTree().addKeyListener(new KeyAdapter() {
+      @Override
       public void keyPressed(KeyEvent e) {
         if (e.getKeyCode() == KeyEvent.VK_ENTER && getThreadsTree().getSelectionCount() == 1) {
           DebuggerTreeNodeImpl node = (DebuggerTreeNodeImpl)getThreadsTree().getLastSelectedPathComponent();
@@ -68,14 +69,15 @@ public class ThreadsPanel extends DebuggerTreePanel{
     });
     add(ScrollPaneFactory.createScrollPane(getThreadsTree()), BorderLayout.CENTER);
     stateManager.addListener(new DebuggerContextListener() {
-      public void changeEvent(DebuggerContextImpl newContext, int event) {
-        if (DebuggerSession.EVENT_ATTACHED == event || DebuggerSession.EVENT_RESUME == event) {
+      @Override
+      public void changeEvent(DebuggerContextImpl newContext, DebuggerSession.Event event) {
+        if (DebuggerSession.Event.ATTACHED == event || DebuggerSession.Event.RESUME == event) {
           startLabelsUpdate();
         }
-        else if (DebuggerSession.EVENT_PAUSE == event || DebuggerSession.EVENT_DETACHED == event || DebuggerSession.EVENT_DISPOSE == event) {
+        else if (DebuggerSession.Event.PAUSE == event || DebuggerSession.Event.DETACHED == event || DebuggerSession.Event.DISPOSE == event) {
           myUpdateLabelsAlarm.cancelAllRequests();
         }
-        if (DebuggerSession.EVENT_DETACHED == event || DebuggerSession.EVENT_DISPOSE == event) {
+        if (DebuggerSession.Event.DETACHED == event || DebuggerSession.Event.DISPOSE == event) {
           stateManager.removeListener(this);
         }
       }
@@ -84,8 +86,12 @@ public class ThreadsPanel extends DebuggerTreePanel{
   }
 
   private void startLabelsUpdate() {
+    if (myUpdateLabelsAlarm.isDisposed()) {
+      return;
+    }
     myUpdateLabelsAlarm.cancelAllRequests();
     myUpdateLabelsAlarm.addRequest(new Runnable() {
+      @Override
       public void run() {
         boolean updateScheduled = false;
         try {
@@ -96,6 +102,7 @@ public class ThreadsPanel extends DebuggerTreePanel{
               final DebugProcessImpl process = getContext().getDebugProcess();
               if (process != null) {
                 process.getManagerThread().invoke(new DebuggerCommandImpl() {
+                  @Override
                   protected void action() throws Exception {
                     try {
                       updateNodeLabels(root);
@@ -104,6 +111,7 @@ public class ThreadsPanel extends DebuggerTreePanel{
                       reschedule();
                     }
                   }
+                  @Override
                   protected void commandCancelled() {
                     reschedule();
                   }
@@ -122,7 +130,7 @@ public class ThreadsPanel extends DebuggerTreePanel{
 
       private void reschedule() {
         final DebuggerSession session = getContext().getDebuggerSession();
-        if (session != null && session.isAttached() && !session.isPaused()) {
+        if (session != null && session.isAttached() && !session.isPaused() && !myUpdateLabelsAlarm.isDisposed()) {
           myUpdateLabelsAlarm.addRequest(this, LABELS_UPDATE_DELAY_MS, ModalityState.NON_MODAL);
         }
       }
@@ -141,6 +149,7 @@ public class ThreadsPanel extends DebuggerTreePanel{
     for (int idx = 0; idx < childCount; idx++) {
       final DebuggerTreeNodeImpl child = (DebuggerTreeNodeImpl)from.getChildAt(idx);
       child.getDescriptor().updateRepresentation(null, new DescriptorLabelListener() {
+        @Override
         public void labelChanged() {
           child.labelChanged();
         }
@@ -149,15 +158,18 @@ public class ThreadsPanel extends DebuggerTreePanel{
     }
   }
   
+  @Override
   protected DebuggerTree createTreeView() {
     return new ThreadsDebuggerTree(getProject());
   }
 
+  @Override
   protected ActionPopupMenu createPopupMenu() {
     DefaultActionGroup group = (DefaultActionGroup)ActionManager.getInstance().getAction(DebuggerActions.THREADS_PANEL_POPUP);
     return ActionManager.getInstance().createActionPopupMenu(DebuggerActions.THREADS_PANEL_POPUP, group);
   }
 
+  @Override
   public Object getData(String dataId) {
     if (PlatformDataKeys.HELP_ID.is(dataId)) {
       return HELP_ID;

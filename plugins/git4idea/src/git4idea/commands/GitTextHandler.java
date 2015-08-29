@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -61,6 +62,9 @@ public abstract class GitTextHandler extends GitHandler {
   }
 
   protected void startHandlingStreams() {
+    if (myHandler == null) {
+      return;
+    }
     myHandler.addProcessListener(new ProcessListener() {
       public void startNotified(final ProcessEvent event) {
         // do nothing
@@ -124,17 +128,23 @@ public abstract class GitTextHandler extends GitHandler {
   }
 
   private static class MyOSProcessHandler extends OSProcessHandler {
+    @NotNull
     private final Charset myCharset;
 
-    public MyOSProcessHandler(Process process, GeneralCommandLine commandLine, Charset charset) {
+    public MyOSProcessHandler(Process process, GeneralCommandLine commandLine, @NotNull Charset charset) {
       super(process, commandLine.getCommandLineString());
       myCharset = charset;
     }
 
+    @NotNull
     @Override
     public Charset getCharset() {
-      Charset charset = myCharset;
-      return charset == null ? super.getCharset() : charset;
+      return myCharset;
+    }
+
+    @Override
+    protected boolean useNonBlockingRead() {
+      return !Registry.is("git.blocking.read");
     }
   }
 

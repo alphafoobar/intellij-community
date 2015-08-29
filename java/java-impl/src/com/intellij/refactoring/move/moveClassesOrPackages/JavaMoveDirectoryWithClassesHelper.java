@@ -3,6 +3,7 @@ package com.intellij.refactoring.move.moveClassesOrPackages;
 import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
@@ -47,7 +48,7 @@ public class JavaMoveDirectoryWithClassesHelper extends MoveDirectoryWithClasses
           }
         }
         if (remainsNothing) {
-          for (PsiReference reference : ReferencesSearch.search(aPackage)) {
+          for (PsiReference reference : ReferencesSearch.search(aPackage, GlobalSearchScope.projectScope(project))) {
             final PsiElement element = reference.getElement();
             final PsiImportStatementBase statementBase = PsiTreeUtil.getParentOfType(element, PsiImportStatementBase.class);
             if (statementBase != null && statementBase.isOnDemand()) {
@@ -78,11 +79,16 @@ public class JavaMoveDirectoryWithClassesHelper extends MoveDirectoryWithClasses
       return false;
     }
 
-    if (!FileTypeUtils.isInServerPageFile(file)) {
+    final PsiClass[] classes = ((PsiClassOwner)file).getClasses();
+    if (classes.length == 0) {
       return false;
     }
 
-    for (PsiClass psiClass : ((PsiClassOwner)file).getClasses()) {
+    if (FileTypeUtils.isInServerPageFile(file)) {
+      return false;
+    }
+
+    for (PsiClass psiClass : classes) {
       final PsiClass newClass = MoveClassesOrPackagesUtil.doMoveClass(psiClass, moveDestination);
       oldToNewElementsMapping.put(psiClass, newClass);
       listener.elementMoved(newClass);

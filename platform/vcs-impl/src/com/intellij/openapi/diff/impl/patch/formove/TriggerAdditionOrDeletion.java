@@ -17,10 +17,12 @@ package com.intellij.openapi.diff.impl.patch.formove;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.SortByVcsRoots;
 import com.intellij.openapi.vcs.checkin.CheckinEnvironment;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.FilePathByPathComparator;
@@ -45,7 +47,7 @@ public class TriggerAdditionOrDeletion {
 
   public TriggerAdditionOrDeletion(final Project project, boolean silentAddDelete) {
     myProject = project;
-    mySilentAddDelete = silentAddDelete;
+    mySilentAddDelete = Registry.is("vcs.add.remove.silent"); // TODO there is no sense in making add/remove non-silent anywhen; wait for users feedback, then remove
     myExisting = new HashSet<FilePath>();
     myDeleted = new HashSet<FilePath>();
     myVcsManager = ProjectLevelVcsManager.getInstance(myProject);
@@ -153,9 +155,6 @@ public class TriggerAdditionOrDeletion {
   }
 
   private void processAddition(SortByVcsRoots<FilePath> sortByVcsRoots) {
-    for (FilePath filePath : myExisting) {
-      filePath.hardRefresh();
-    }
     final MultiMap<VcsRoot, FilePath> map = sortByVcsRoots.sort(myExisting);
     myPreparedAddition = new MultiMap<VcsRoot, FilePath>();
     for (VcsRoot vcsRoot : map.keySet()) {
@@ -242,11 +241,10 @@ public class TriggerAdditionOrDeletion {
       while (current != null) {
         VirtualFile vf = current.getVirtualFile();
         if (vf == null) {
-          current.hardRefresh();
-          vf = current.getVirtualFile();
-          if (vf == null) {
-            return;
-          }
+          vf = LocalFileSystem.getInstance().refreshAndFindFileByPath(current.getPath());
+        }
+        if (vf == null) {
+          return;
         }
         if (! VfsUtil.isAncestor(myRoot, vf, true)) return;
 

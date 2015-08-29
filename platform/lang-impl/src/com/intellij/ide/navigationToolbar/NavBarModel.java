@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,20 +25,18 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleFileIndex;
-import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
-import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.PsiFileSystemItemProcessor;
-import com.intellij.psi.util.PsiUtilBase;
-import com.intellij.util.PathUtil;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.CommonProcessors;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -113,28 +111,8 @@ public class NavBarModel {
     else {
       if (UISettings.getInstance().SHOW_NAVIGATION_BAR && !myModel.isEmpty()) return;
 
-      // Narrow down the root element to the first interesting one
-      Object root = LangDataKeys.MODULE.getData(dataContext);
-      if (root == null) {
-        Project project = CommonDataKeys.PROJECT.getData(dataContext);
-        if (project != null) {
-          Module[] modules = getProjectChildren(project);
-          if (modules.length == 1) {
-            Module soleModule = modules[0];
-            List<Object> contentRoots = getModuleChildren(soleModule);
-            if (contentRoots.size() == 1) {
-              root = contentRoots.get(0);
-            }
-            else {
-              root = soleModule;
-            }
-          }
-          else {
-            root = project;
-          }
-        }
-      }
-      
+      Object root = calculateRoot(dataContext);
+
       if (root != null) {
         setModel(Collections.singletonList(root));
       }
@@ -142,6 +120,27 @@ public class NavBarModel {
     setChanged(false);
 
     updated = true;
+  }
+
+  private Object calculateRoot(DataContext dataContext) {
+    // Narrow down the root element to the first interesting one
+    Object root = LangDataKeys.MODULE.getData(dataContext);
+    if (root != null) return root;
+
+    Project project = CommonDataKeys.PROJECT.getData(dataContext);
+    if (project == null) return null;
+
+    Object projectChild;
+    Object projectGrandChild = null;
+
+    CommonProcessors.FindFirstAndOnlyProcessor<Object> processor = new CommonProcessors.FindFirstAndOnlyProcessor<Object>();
+    processChildren(project, processor);
+    projectChild = processor.reset();
+    if (projectChild != null) {
+      processChildren(projectChild, processor);
+      projectGrandChild = processor.reset();
+    }
+    return ObjectUtils.chooseNotNull(projectGrandChild, ObjectUtils.chooseNotNull(projectChild, project));
   }
 
   protected void updateModel(final PsiElement psiElement) {
@@ -175,7 +174,7 @@ public class NavBarModel {
       }
     });
 
-    setModel(updatedModel);
+    setModel(ContainerUtil.reverse(updatedModel));
   }
 
   void revalidate() {
@@ -216,90 +215,47 @@ public class NavBarModel {
     }
   }
 
-  private void traverseToRoot(@NotNull PsiElement psiElement, Set<VirtualFile> roots, List<Object> model) {
-    if (!psiElement.isValid()) return;
-    final PsiFile containingFile = psiElement.getContainingFile();
-    if (containingFile != null &&
-        (containingFile.getVirtualFile() == null || !containingFile.getViewProvider().isPhysical())) return; //non phisycal elements
-    psiElement = getOriginalElement(psiElement);
-    PsiElement resultElement = psiElement;
+  private static void traverseToRoot(@NotNull PsiElement psiElement, Set<VirtualFile> roots, List<Object> model) {
+    if (!isValid(psiElement)) return;
 
-    for (final NavBarModelExtension modelExtension : Extensions.getExtensions(NavBarModelExtension.EP_NAME)) {
-      resultElement = modelExtension.adjustElement(resultElement);
-    }
+    NavBarModelExtension[] extensions = Extensions.getExtensions(NavBarModelExtension.EP_NAME);
 
-    boolean foundByExtension = false;
-    for (final NavBarModelExtension modelExtension : Extensions.getExtensions(NavBarModelExtension.EP_NAME)) {
-      final PsiElement parent = modelExtension.getParent(resultElement);
-      if (parent != null) {
-        if (parent != resultElement) { // HACK is to return same element to stop traversing
-          traverseToRoot(parent, roots, model);
-        }
-        foundByExtension = true;
-        break;
-      }
-    }
+    for (PsiElement e = normalize(getOriginalElement(psiElement)), next = null;
+         e != null; e = normalize(getOriginalElement(next)), next = null) {
+      // check if we're running circles due to getParent()->normalize/adjust()
+      if (model.contains(e)) break;
 
-    if (!foundByExtension) {
-      if (containingFile != null) {
-        final PsiDirectory containingDirectory = containingFile.getContainingDirectory();
-        if (containingDirectory != null) {
-            traverseToRoot(containingDirectory, roots, model);
-          }
-      }
-      else if (psiElement instanceof PsiDirectory) {
-        final PsiDirectory psiDirectory = (PsiDirectory)psiElement;
+      model.add(e);
 
-        if (!roots.contains(psiDirectory.getVirtualFile())) {
-          PsiDirectory parentDirectory = psiDirectory.getParentDirectory();
+      // check if a root is reached
+      VirtualFile vFile = PsiUtilCore.getVirtualFile(e);
+      if (roots.contains(vFile)) break;
 
-          if (parentDirectory == null) {
-            VirtualFile jar = PathUtil.getLocalFile(psiDirectory.getVirtualFile());
-            if (ProjectRootManager.getInstance(myProject).getFileIndex().isInContent(jar)) {
-              parentDirectory = PsiManager.getInstance(myProject).findDirectory(jar.getParent());
-            }
-          }
-
-
-          if (parentDirectory != null) {
-            traverseToRoot(parentDirectory, roots, model);
-          }
-        }
-      }
-      else if (psiElement instanceof PsiFileSystemItem) {
-        final VirtualFile virtualFile = ((PsiFileSystemItem)psiElement).getVirtualFile();
-        if (virtualFile == null) return;
-        final PsiManager psiManager = PsiManager.getInstance(myProject);
-        if (virtualFile.isDirectory()) {
-          resultElement =  psiManager.findDirectory(virtualFile);
-        }
-        else {
-          resultElement =  psiManager.findFile(virtualFile);
-        }
-        if (resultElement == null) return;
-        final VirtualFile parentVFile = virtualFile.getParent();
-        if (parentVFile != null && !roots.contains(parentVFile)) {
-          final PsiDirectory parentDirectory = psiManager.findDirectory(parentVFile);
-          if (parentDirectory != null) {
-            traverseToRoot(parentDirectory, roots, model);
-          }
+      for (NavBarModelExtension ext : extensions) {
+        PsiElement parent = ext.getParent(e);
+        if (parent != null && parent != e) {
+          //noinspection AssignmentToForLoopParameter
+          next = parent;
+          break;
         }
       }
     }
-
-    model.add(resultElement);
   }
 
-  private static PsiElement getOriginalElement(PsiElement psiElement) {
-    final PsiElement originalElement = psiElement.getOriginalElement();
-    return !(psiElement instanceof PsiCompiledElement) && originalElement instanceof PsiCompiledElement ? psiElement : originalElement;
+  @Nullable
+  private static PsiElement getOriginalElement(@Nullable PsiElement e) {
+    if (e == null || !e.isValid()) return null;
+
+    PsiFile containingFile = e.getContainingFile();
+    if (containingFile != null && containingFile.getVirtualFile() == null) return null;
+
+    PsiElement orig = e.getOriginalElement();
+    return !(e instanceof PsiCompiledElement) && orig instanceof PsiCompiledElement ? e : orig;
   }
 
 
   protected boolean hasChildren(Object object) {
-    if (!isValid(object)) return false;
-
-    return !getChildren(object).isEmpty();
+    return !processChildren(object, new CommonProcessors.FindFirstProcessor<Object>());
   }
 
   //to avoid the following situation: element was taken from NavBarPanel via data context and all left children
@@ -329,127 +285,46 @@ public class NavBarModel {
     return object != null;
   }
 
-  public static void getDirectoryChildren(final PsiDirectory psiDirectory, final Object rootElement, final List<Object> result) {
-    final ModuleFileIndex moduleFileIndex =
-      rootElement instanceof Module ? ModuleRootManager.getInstance((Module)rootElement).getFileIndex() : null;
-    final PsiElement[] children = psiDirectory.getChildren();
-    for (PsiElement child : children) {
-      if (child != null && child.isValid()) {
-        if (moduleFileIndex != null) {
-          final VirtualFile virtualFile = PsiUtilBase.getVirtualFile(child);
-          if (virtualFile != null && !moduleFileIndex.isInContent(virtualFile)) continue;
-        }
-        result.add(normalize(child));
-      }
-    }
-  }
-
   @Nullable
-  private static PsiElement normalize(PsiElement child) {
+  private static PsiElement normalize(@Nullable PsiElement child) {
     if (child == null) return null;
-    for (NavBarModelExtension modelExtension : Extensions.getExtensions(NavBarModelExtension.EP_NAME)) {
+
+    NavBarModelExtension[] extensions = Extensions.getExtensions(NavBarModelExtension.EP_NAME);
+    for (int i = extensions.length - 1; i >= 0; i--) {
+      NavBarModelExtension modelExtension = extensions[i];
       child = modelExtension.adjustElement(child);
-      if (child == null ) return null;
+      if (child == null) return null;
     }
     return child;
   }
 
   protected List<Object> getChildren(final Object object) {
-    if (!isValid(object)) return new ArrayList<Object>();
-    final List<Object> result = new ArrayList<Object>();
-    final Object rootElement = size() > 1 ? getElement(1) : null;
-    if (!(object instanceof Project) && rootElement instanceof Module && ((Module)rootElement).isDisposed()) return result;
-    if (object instanceof Project) {
-      ContainerUtil.addAll(result, getProjectChildren((Project)object));
-    }
-    else if (object instanceof Module) {
-      ContainerUtil.addAll(result, getModuleChildren((Module)object));
-    }
-    else if (object instanceof PsiDirectoryContainer) {
-      final PsiDirectoryContainer psiPackage = (PsiDirectoryContainer)object;
-      final PsiDirectory[] psiDirectories = ApplicationManager.getApplication().runReadAction(
-          new Computable<PsiDirectory[]>() {
-            @Override
-            public PsiDirectory[] compute() {
-              return rootElement instanceof Module
-                                            ? psiPackage.getDirectories(GlobalSearchScope.moduleScope((Module)rootElement))
-                                            : psiPackage.getDirectories();
-            }
-          }
-      );
-      for (final PsiDirectory psiDirectory : psiDirectories) {
-        ApplicationManager.getApplication().runReadAction(new Runnable() {
-            @Override
-            public void run(){
-              getDirectoryChildren(psiDirectory, rootElement, result);
-            }
-        });
+    final List<Object> result = ContainerUtil.newArrayList();
+    Processor<Object> processor = new Processor<Object>() {
+      @Override
+      public boolean process(Object o) {
+        ContainerUtil.addIfNotNull(result, o instanceof PsiElement ? normalize((PsiElement)o) : o);
+        return true;
       }
-    }
-    else if (object instanceof PsiDirectory) {
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-          @Override
-          public void run(){
-              getDirectoryChildren((PsiDirectory)object, rootElement, result);
-          }
-      });
+    };
 
-    }
-    else if (object instanceof PsiFileSystemItem) {
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-          @Override
-          public void run() {
-            ((PsiFileSystemItem)object).processChildren(new PsiFileSystemItemProcessor() {
-              @Override
-              public boolean acceptItem(String name, boolean isDirectory) {
-                return true;
-              }
+    processChildren(object, processor);
 
-              @Override
-              public boolean execute(@NotNull PsiFileSystemItem element) {
-                result.add(element);
-                return true;
-              }
-            });
-          }
-      });
-    }
     Collections.sort(result, new SiblingsComparator());
     return result;
   }
 
-  private static Module[] getProjectChildren(final Project object) {
-    return ApplicationManager.getApplication().runReadAction(
-      new Computable<Module[]>() {
-        @Override
-        public Module[] compute() {
-          return ModuleManager.getInstance(object).getModules();
-        }
-      }
-    );
-  }
+  private boolean processChildren(Object object, @NotNull Processor<Object> processor) {
+    if (!isValid(object)) return true;
+    final Object rootElement = size() > 1 ? getElement(1) : null;
+    if (rootElement != null && !isValid(rootElement)) return true;
 
-  private List<Object> getModuleChildren(Module module) {
-    if (module.isDisposed()) return Collections.emptyList();
-
-    final PsiManager psiManager = PsiManager.getInstance(myProject);
-    ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
-    VirtualFile[] roots = moduleRootManager.getContentRoots();
-    List<Object> result = new ArrayList<Object>(roots.length);
-    for (final VirtualFile root : roots) {
-      final PsiDirectory psiDirectory = ApplicationManager.getApplication().runReadAction(
-        new Computable<PsiDirectory>() {
-          @Override
-          public PsiDirectory compute() {
-            return psiManager.findDirectory(root);
-          }
-        }
-      );
-      if (psiDirectory != null) {
-        result.add(psiDirectory);
+    for (NavBarModelExtension modelExtension : Extensions.getExtensions(NavBarModelExtension.EP_NAME)) {
+      if (modelExtension instanceof AbstractNavBarModelExtension) {
+        if (!((AbstractNavBarModelExtension)modelExtension).processChildren(object, rootElement, processor)) return false;
       }
     }
-    return result;
+    return true;
   }
 
   public Object get(final int index) {
@@ -481,7 +356,7 @@ public class NavBarModel {
       if (!w1.first.equals(w2.first)) {
         return -w1.first.intValue() + w2.first.intValue();
       }
-      return w1.second.compareToIgnoreCase(w2.second);
+      return Comparing.compare(w1.second, w2.second, String.CASE_INSENSITIVE_ORDER);
     }
 
     @Nullable

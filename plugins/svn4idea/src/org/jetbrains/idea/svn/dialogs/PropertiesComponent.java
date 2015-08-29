@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,9 +36,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnPropertyKeys;
 import org.jetbrains.idea.svn.SvnVcs;
-import org.tmatesoft.svn.core.*;
-import org.tmatesoft.svn.core.wc.ISVNPropertyHandler;
-import org.tmatesoft.svn.core.wc.SVNPropertyData;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.properties.PropertyConsumer;
+import org.jetbrains.idea.svn.properties.PropertyData;
+import org.jetbrains.idea.svn.properties.PropertyValue;
+import org.tmatesoft.svn.core.SVNException;
+import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc2.SvnTarget;
 
@@ -150,23 +153,23 @@ public class PropertiesComponent extends JPanel {
     }
   }
 
-  private void collectProperties(@NotNull SvnVcs vcs, @NotNull File file, @NotNull final Map<String, String> props) {
+  private static void collectProperties(@NotNull SvnVcs vcs, @NotNull File file, @NotNull final Map<String, String> props) {
     try {
-      ISVNPropertyHandler handler = new ISVNPropertyHandler() {
-        public void handleProperty(File path, SVNPropertyData property) throws SVNException {
-          final SVNPropertyValue value = property.getValue();
+      PropertyConsumer handler = new PropertyConsumer() {
+        public void handleProperty(File path, PropertyData property) throws SVNException {
+          final PropertyValue value = property.getValue();
           if (value != null) {
-            props.put(property.getName(), SVNPropertyValue.getPropertyAsString(property.getValue()));
+            props.put(property.getName(), PropertyValue.toString(property.getValue()));
           }
         }
 
-        public void handleProperty(SVNURL url, SVNPropertyData property) throws SVNException {
+        public void handleProperty(SVNURL url, PropertyData property) throws SVNException {
         }
 
-        public void handleProperty(long revision, SVNPropertyData property) throws SVNException {
+        public void handleProperty(long revision, PropertyData property) throws SVNException {
         }
       };
-      vcs.getFactory(file).createPropertyClient().list(SvnTarget.fromFile(file, SVNRevision.UNDEFINED), SVNRevision.WORKING, SVNDepth.EMPTY,
+      vcs.getFactory(file).createPropertyClient().list(SvnTarget.fromFile(file, SVNRevision.UNDEFINED), SVNRevision.WORKING, Depth.EMPTY,
                                                        handler);
     }
     catch (VcsException e) {
@@ -228,10 +231,12 @@ public class PropertiesComponent extends JPanel {
       String url = "file://" + myFile.getPath().replace(File.separatorChar, '/');
       VirtualFile file = VirtualFileManager.getInstance().findFileByUrl(url);
       if (file != null) {
+        VcsDirtyScopeManager dirtyScopeManager = VcsDirtyScopeManager.getInstance(myVcs.getProject());
+
         if (recursive && file.isDirectory()) {
-          VcsDirtyScopeManager.getInstance(myVcs.getProject()).dirDirtyRecursively(file, true);
+          dirtyScopeManager.dirDirtyRecursively(file);
         } else {
-          VcsDirtyScopeManager.getInstance(myVcs.getProject()).fileDirty(file);
+          dirtyScopeManager.fileDirty(file);
         }
       }
     }
@@ -271,8 +276,7 @@ public class PropertiesComponent extends JPanel {
       if (!StringUtil.isEmpty(property)) {
         try {
           myVcs.getFactory(myFile).createPropertyClient()
-            .setProperty(myFile, property, value != null ? SVNPropertyValue.create(value) : null,
-                         SVNDepth.getInfinityOrEmptyDepth(recursive), force);
+            .setProperty(myFile, property, PropertyValue.create(value), Depth.allOrEmpty(recursive), force);
         }
         catch (VcsException error) {
           VcsBalloonProblemNotifier
@@ -301,19 +305,17 @@ public class PropertiesComponent extends JPanel {
 
     public void actionPerformed(AnActionEvent e) {
       Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
-      SVNPropertyData propValue = null;
+      PropertyValue propValue = null;
       try {
         propValue = myVcs.getFactory(myFile).createPropertyClient()
-          .getProperty(SvnTarget.fromFile(myFile), SVNProperty.KEYWORDS, false, SVNRevision.WORKING);
+          .getProperty(SvnTarget.fromFile(myFile), SvnPropertyKeys.SVN_KEYWORDS, false, SVNRevision.WORKING);
       }
       catch (VcsException e1) {
         // show erorr message
       }
 
-      SetKeywordsDialog dialog = new SetKeywordsDialog(project,
-                                                       propValue != null ? SVNPropertyValue.getPropertyAsString(propValue.getValue()) : null);
-      dialog.show();
-      if (dialog.isOK()) {
+      SetKeywordsDialog dialog = new SetKeywordsDialog(project, propValue);
+      if (dialog.showAndGet()) {
         setProperty(SvnPropertyKeys.SVN_KEYWORDS, dialog.getKeywords(), false, false);
       }
       updateFileView(false);
@@ -349,11 +351,10 @@ public class PropertiesComponent extends JPanel {
 
     public void actionPerformed(AnActionEvent e) {
       Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
-      SetPropertyDialog dialog = new SetPropertyDialog(project, new File[] {myFile}, null,
-              myFile.isDirectory());
-      dialog.show();
+      SetPropertyDialog dialog = new SetPropertyDialog(project, new File[]{myFile}, null,
+                                                       myFile.isDirectory());
       boolean recursive = false;
-      if (dialog.isOK()) {
+      if (dialog.showAndGet()) {
         recursive = dialog.isRecursive();
         setProperty(dialog.getPropertyName(), dialog.getPropertyValue(), recursive, false);
       }
@@ -373,10 +374,9 @@ public class PropertiesComponent extends JPanel {
 
     public void actionPerformed(AnActionEvent e) {
       Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
-      SetPropertyDialog dialog = new SetPropertyDialog(project, new File[] {myFile}, getSelectedPropertyName(), myFile.isDirectory());
-      dialog.show();
+      SetPropertyDialog dialog = new SetPropertyDialog(project, new File[]{myFile}, getSelectedPropertyName(), myFile.isDirectory());
       boolean recursive = false;
-      if (dialog.isOK()) {
+      if (dialog.showAndGet()) {
         recursive = dialog.isRecursive();
         setProperty(dialog.getPropertyName(), dialog.getPropertyValue(), recursive, false);
       }

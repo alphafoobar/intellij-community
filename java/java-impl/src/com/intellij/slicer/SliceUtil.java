@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,13 +49,13 @@ import java.util.Set;
 /**
  * @author cdr
  */
-public class SliceUtil {
-  public static boolean processUsagesFlownDownTo(@NotNull PsiElement expression,
-                                                 @NotNull Processor<SliceUsage> processor,
-                                                 @NotNull SliceUsage parent,
-                                                 @NotNull PsiSubstitutor parentSubstitutor,
-                                                 int indexNesting,
-                                                 @NotNull String syntheticField) {
+class SliceUtil {
+  static boolean processUsagesFlownDownTo(@NotNull PsiElement expression,
+                                          @NotNull Processor<SliceUsage> processor,
+                                          @NotNull SliceUsage parent,
+                                          @NotNull PsiSubstitutor parentSubstitutor,
+                                          int indexNesting,
+                                          @NotNull String syntheticField) {
     assert indexNesting >= 0 : indexNesting;
     expression = simplify(expression);
     PsiElement original = expression;
@@ -64,14 +64,25 @@ public class SliceUtil {
       expression = ((PsiArrayAccessExpression)expression).getArrayExpression();
       indexNesting++;
     }
-    if (expression instanceof PsiExpressionList && indexNesting != 0 && expression.getParent() instanceof PsiMethodCallExpression) {
+    PsiElement par = expression == null ? null : expression.getParent();
+    if (expression instanceof PsiExpressionList && par instanceof PsiMethodCallExpression) {
       // expression list ends up here if we track varargs
-      // unfold varargs list into individual expressions
-      PsiExpression[] expressions = ((PsiExpressionList)expression).getExpressions();
-      for (PsiExpression arg : expressions) {
-        if (!handToProcessor(arg, processor, parent, parentSubstitutor, indexNesting -1, syntheticField)) return false;
+      PsiMethod method = ((PsiMethodCallExpression)par).resolveMethod();
+      if (method != null) {
+        int parametersCount = method.getParameterList().getParametersCount();
+        if (parametersCount != 0) {
+          // unfold varargs list into individual expressions
+          PsiExpression[] expressions = ((PsiExpressionList)expression).getExpressions();
+          if (indexNesting != 0) {
+            // should skip not-vararg arguments
+            for (int i = parametersCount-1; i < expressions.length; i++) {
+              PsiExpression arg = expressions[i];
+              if (!handToProcessor(arg, processor, parent, parentSubstitutor, indexNesting - 1, syntheticField)) return false;
+            }
+          }
+          return true;
+        }
       }
-      return true;
     }
 
     boolean needToReportDeclaration = false;
@@ -127,7 +138,8 @@ public class SliceUtil {
       }
     }
     if (expression instanceof PsiMethodCallExpression) { // ctr call can't return value or be container get, so don't use PsiCall here
-      Flow anno = isMethodFlowAnnotated(((PsiMethodCallExpression)expression).resolveMethod());
+      PsiMethod method = ((PsiMethodCallExpression)expression).resolveMethod();
+      Flow anno = isMethodFlowAnnotated(method);
       if (anno != null) {
         String target = anno.target();
         if (target.equals(Flow.DEFAULT_TARGET)) target = Flow.RETURN_METHOD_TARGET;
@@ -258,9 +270,10 @@ public class SliceUtil {
 
       body.accept(new JavaRecursiveElementWalkingVisitor() {
         @Override
-        public void visitAnonymousClass(PsiAnonymousClass aClass) {
-          // do not look for returns there
-        }
+        public void visitClass(PsiClass aClass) {}
+
+        @Override
+        public void visitLambdaExpression(PsiLambdaExpression expression) {}
 
         @Override
         public void visitReturnStatement(final PsiReturnStatement statement) {
@@ -324,16 +337,18 @@ public class SliceUtil {
   }
 
   @NotNull
-  public static SliceUsage createSliceUsage(@NotNull PsiElement element,
-                                            @NotNull SliceUsage parent,
-                                            @NotNull PsiSubstitutor substitutor,
-                                            int indexNesting,
-                                            @NotNull String syntheticField) {
+  static SliceUsage createSliceUsage(@NotNull PsiElement element,
+                                     @NotNull SliceUsage parent,
+                                     @NotNull PsiSubstitutor substitutor,
+                                     int indexNesting,
+                                     @NotNull String syntheticField) {
     return new SliceUsage(simplify(element), parent, substitutor,indexNesting, syntheticField);
   }
 
   @NotNull
-  public static SliceUsage createTooComplexDFAUsage(@NotNull PsiElement element, @NotNull SliceUsage parent, @NotNull PsiSubstitutor substitutor) {
+  private static SliceUsage createTooComplexDFAUsage(@NotNull PsiElement element,
+                                                     @NotNull SliceUsage parent,
+                                                     @NotNull PsiSubstitutor substitutor) {
     return new SliceTooComplexDFAUsage(simplify(element), parent, substitutor);
   }
 
@@ -409,7 +424,6 @@ public class SliceUtil {
           PsiType actualExpressionType;
           if (actualParameterType instanceof PsiEllipsisType) {
             passExpression = argumentList;
-            //passExpression = createArrayInitializerFromExpressions(argumentList, ((PsiEllipsisType)actualType).getComponentType(), expressions);
             actualExpressionType = expressions[paramSeqNo].getType();
           }
           else {
@@ -446,6 +460,10 @@ public class SliceUtil {
           if (substituted == null) return true;
           PsiType typeToCheck;
           if (actualParameterType instanceof PsiEllipsisType) {
+            // there may be the case of passing the vararg argument to the other vararg method: foo(int... ints) { bar(ints); } bar(int... ints) {}
+            if (TypeConversionUtil.areTypesConvertible(substituted, actualParameterType)) {
+              return handToProcessor(expressions[paramSeqNo], processor, parent, combined, indexNesting, syntheticField);
+            }
             typeToCheck = ((PsiEllipsisType)actualParameterType).getComponentType();
           }
           else {

@@ -87,14 +87,15 @@ public class FixedSizeButton extends JButton {
   public Dimension getPreferredSize() {
     if (myComponent != null) {
       int size = myComponent.getPreferredSize().height;
+      if (myComponent instanceof JComboBox && (UIUtil.isUnderIntelliJLaF() || UIUtil.isUnderDarcula())) {
+        size -= 2; // decrement to match JTextField's preferred height
+      }
       return new Dimension(size, size);
     }
-    else if (mySize != -1) {
+    if (mySize != -1) {
       return new Dimension(mySize, mySize);
     }
-    else {
-      return super.getPreferredSize();
-    }
+    return super.getPreferredSize();
   }
 
   public void setAttachedComponent(JComponent component) {
@@ -108,5 +109,19 @@ public class FixedSizeButton extends JButton {
   public void setSize(int size) {
     mySize = size;
   }
-}
 
+  @Override
+  public void setBounds(int x, int y, int width, int height) {
+    int size = Math.min(width, height);
+    super.setBounds(x, y, size, size);
+  }
+
+  @Override
+  public void setBounds(Rectangle r) {
+    if (r.width != r.height) {
+      int size = Math.min(r.width, r.height);
+      r = new Rectangle(r.x, r.y, size, size);
+    }
+    super.setBounds(r);
+  }
+}

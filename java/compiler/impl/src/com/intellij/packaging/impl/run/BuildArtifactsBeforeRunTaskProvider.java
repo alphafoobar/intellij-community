@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.execution.BeforeRunTaskProvider;
 import com.intellij.execution.RunManagerEx;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.impl.ConfigurationSettingsEditorWrapper;
+import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
@@ -29,24 +30,21 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.compiler.*;
-import com.intellij.openapi.compiler.Compiler;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogBuilder;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Ref;
 import com.intellij.packaging.artifacts.*;
-import com.intellij.packaging.impl.compiler.ArtifactAwareCompiler;
 import com.intellij.packaging.impl.compiler.ArtifactCompileScope;
-import com.intellij.packaging.impl.compiler.ArtifactsCompiler;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBUI;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -137,7 +135,7 @@ public class BuildArtifactsBeforeRunTaskProvider extends BeforeRunTaskProvider<B
     pointers.addAll(task.getArtifactPointers());
     ArtifactChooser chooser = new ArtifactChooser(new ArrayList<ArtifactPointer>(pointers));
     chooser.markElements(task.getArtifactPointers());
-    chooser.setPreferredSize(new Dimension(400, 300));
+    chooser.setPreferredSize(JBUI.size(400, 300));
 
     DialogBuilder builder = new DialogBuilder(myProject);
     builder.setTitle(CompilerBundle.message("build.artifacts.before.run.selector.title"));
@@ -164,14 +162,14 @@ public class BuildArtifactsBeforeRunTaskProvider extends BeforeRunTaskProvider<B
 
   public boolean executeTask(DataContext context,
                              RunConfiguration configuration,
-                             ExecutionEnvironment env,
+                             final ExecutionEnvironment env,
                              final BuildArtifactsBeforeRunTask task) {
     final Ref<Boolean> result = Ref.create(false);
     final Semaphore finished = new Semaphore();
 
     final List<Artifact> artifacts = new ArrayList<Artifact>();
     new ReadAction() {
-      protected void run(final Result result) {
+      protected void run(@NotNull final Result result) {
         for (ArtifactPointer pointer : task.getArtifactPointers()) {
           ContainerUtil.addIfNotNull(pointer.getArtifact(), artifacts);
         }
@@ -184,18 +182,17 @@ public class BuildArtifactsBeforeRunTaskProvider extends BeforeRunTaskProvider<B
         finished.up();
       }
     };
-    final CompilerFilter compilerFilter = new CompilerFilter() {
-      public boolean acceptCompiler(Compiler compiler) {
-        return compiler instanceof ArtifactsCompiler
-               || compiler instanceof ArtifactAwareCompiler && ((ArtifactAwareCompiler)compiler).shouldRun(artifacts);
-      }
-    };
 
     ApplicationManager.getApplication().invokeAndWait(new Runnable() {
       public void run() {
+        if (myProject.isDisposed()) {
+          return;
+        }
         final CompilerManager manager = CompilerManager.getInstance(myProject);
+        final CompileScope scope = ArtifactCompileScope.createArtifactsScope(myProject, artifacts);
+        ExecutionManagerImpl.EXECUTION_SESSION_ID_KEY.set(scope, ExecutionManagerImpl.EXECUTION_SESSION_ID_KEY.get(env));
         finished.down();
-        manager.make(ArtifactCompileScope.createArtifactsScope(myProject, artifacts), compilerFilter, callback);
+        manager.make(scope, CompilerFilter.ALL, callback);
       }
     }, ModalityState.NON_MODAL);
 

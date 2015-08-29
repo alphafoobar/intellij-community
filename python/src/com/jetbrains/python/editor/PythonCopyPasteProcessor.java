@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ public class PythonCopyPasteProcessor implements CopyPastePreProcessor {
     return null;
   }
 
+  @NotNull
   @Override
   public String preprocessOnPaste(Project project,
                                   PsiFile file,
@@ -175,7 +176,7 @@ public class PythonCopyPasteProcessor implements CopyPastePreProcessor {
       if (indent < minIndent && !StringUtil.isEmptyOrSpaces(s))
         minIndent = indent;
     }
-    return minIndent;
+    return minIndent >= 0 ? minIndent : 0;
   }
 
   private static boolean isApplicable(@NotNull final PsiFile file, @NotNull String text, int caretOffset) {

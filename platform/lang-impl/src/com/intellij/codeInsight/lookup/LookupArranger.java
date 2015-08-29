@@ -19,7 +19,9 @@ package com.intellij.codeInsight.lookup;
 import com.intellij.codeInsight.completion.PrefixMatcher;
 import com.intellij.codeInsight.completion.impl.CompletionServiceImpl;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -65,15 +67,31 @@ public abstract class LookupArranger {
   }
 
   public void prefixChanged(Lookup lookup) {
+    myAdditionalPrefix = ((LookupImpl)lookup).getAdditionalPrefix();
+    rebuildItemCache(lookup);
+  }
+
+  private void rebuildItemCache(Lookup lookup) {
     myMatchingItems.clear();
     myExactPrefixItems.clear();
     myInexactPrefixItems.clear();
 
-    myAdditionalPrefix = ((LookupImpl)lookup).getAdditionalPrefix();
-
     for (LookupElement item : myItems) {
       updateCache(lookup, item);
     }
+  }
+
+  protected List<LookupElement> retainItems(final Set<LookupElement> retained, Lookup lookup) {
+    List<LookupElement> filtered = ContainerUtil.newArrayList();
+    List<LookupElement> removed = ContainerUtil.newArrayList();
+    for (LookupElement item : myItems) {
+      (retained.contains(item) ? filtered : removed).add(item);
+    }
+    myItems.clear();
+    myItems.addAll(filtered);
+
+    rebuildItemCache(lookup);
+    return removed;
   }
 
   public abstract Pair<List<LookupElement>, Integer> arrangeItems(@NotNull Lookup lookup, boolean onExplicitAction);
@@ -86,7 +104,7 @@ public abstract class LookupArranger {
 
   protected static boolean isPrefixItem(Lookup lookup, LookupElement item, final boolean exactly) {
     final String pattern = lookup.itemPattern(item);
-    if (pattern.equals(item.getLookupString())) {
+    if (Comparing.strEqual(pattern, item.getLookupString(), item.isCaseSensitive())) {
       return true;
     }
 
@@ -101,7 +119,7 @@ public abstract class LookupArranger {
   }
 
   protected List<LookupElement> getMatchingItems() {
-    return Collections.unmodifiableList(myMatchingItems);
+    return myMatchingItems;
   }
 
   public Map<LookupElement,StringBuilder> getRelevanceStrings() {
@@ -117,7 +135,7 @@ public abstract class LookupArranger {
 
       List<LookupElement> items = getMatchingItems();
       for (LookupElement item : items) {
-        if (CompletionServiceImpl.isStartMatch(item, lookup)) {
+        if (CompletionServiceImpl.isStartMatch(item, (LookupImpl)lookup)) {
           result.add(item);
         }
       }

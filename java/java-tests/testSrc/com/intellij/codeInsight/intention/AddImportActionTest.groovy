@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.intellij.codeInsight.intention;
-
+package com.intellij.codeInsight.intention
+import com.intellij.lang.java.JavaLanguage
 import com.intellij.pom.java.LanguageLevel
+import com.intellij.psi.codeStyle.CodeStyleSettings
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager
+import com.intellij.psi.statistics.StatisticsManager
+import com.intellij.psi.statistics.impl.StatisticsManagerImpl
 import com.intellij.testFramework.IdeaTestUtil
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
 
 public class AddImportActionTest extends LightCodeInsightFixtureTestCase {
+  private CodeStyleSettings settings
+
   public void testMap15() {
     IdeaTestUtil.withLevel(myModule, LanguageLevel.JDK_1_5, {
       myFixture.configureByText 'a.java', '''\
 public class Foo {
     void foo() {
-        Ma<caret>p<> l;
+        Ma<caret>p l;
     }
 }
 '''
@@ -34,7 +40,7 @@ public class Foo {
 
 public class Foo {
     void foo() {
-        Ma<caret>p<> l;
+        Ma<caret>p l;
     }
 }
 '''
@@ -45,7 +51,7 @@ public class Foo {
     myFixture.configureByText 'a.java', '''\
 public class Foo {
     void foo() {
-        Ma<caret>p<> l;
+        Ma<caret>p l;
     }
 }
 '''
@@ -54,7 +60,7 @@ public class Foo {
 
 public class Foo {
     void foo() {
-        Ma<caret>p<> l;
+        Ma<caret>p l;
     }
 }
 '''
@@ -69,7 +75,7 @@ public class Foo {
 }
 '''
     importClass()
-    myFixture.checkResult '''import foo.*;
+    myFixture.checkResult '''import foo.StringValue;
 
 public class Foo {
     String<caret>Value sv;
@@ -115,6 +121,58 @@ public class Foo extends goo.Super {
 '''
   }
 
+  public void testImportFoldingWithConflicts() {
+
+    myFixture.addClass 'package p1; public class B {}'
+    myFixture.addClass 'package p1; public class A1 {}'
+    myFixture.addClass 'package p1; public class A2 {}'
+    myFixture.addClass 'package p1; public class A3 {}'
+    myFixture.addClass 'package p1; public class A4 {}'
+    myFixture.addClass 'package p1; public class A5 {}'
+
+    myFixture.addClass 'package p2; public class B {}'
+    myFixture.configureByText 'C.java', '''package p2;
+
+import p1.A1;
+import p1.A2;
+import p1.A3;
+import p1.A4;
+import p1.B;
+
+class C {
+
+     A1 a1;
+     A2 a2;
+     A3 a3;
+     A4 a4;
+     A<caret>5 a5;
+
+     B b;
+}
+
+'''
+    importClass()
+
+    myFixture.checkResult '''package p2;
+
+import p1.*;
+import p1.B;
+
+class C {
+
+     A1 a1;
+     A2 a2;
+     A3 a3;
+     A4 a4;
+     A5 a5;
+
+     B b;
+}
+
+'''
+  }
+
+
   public void testAnnotatedImport() {
     myFixture.configureByText 'a.java', '''
 import java.lang.annotation.*;
@@ -133,8 +191,7 @@ import java.util.Collection;
 @Target(ElementType.TYPE_USE) @interface TA { }
 
 class Test {
-    @TA
-    Collection<caret> c;
+    @TA Collection<caret> c;
 }
 '''
   }
@@ -157,8 +214,7 @@ import java.util.Collection;
 @Target(ElementType.TYPE_USE) @interface TA { }
 
 class Test {
-    @TA
-    Collection<caret> c;
+    @TA Collection<caret> c;
 }
 '''
   }
@@ -179,11 +235,312 @@ class Test {
 '''
   }
 
+  public void "test import class in class reference expression"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      equals(Co<caret>llection.class);
+    }
+}
+'''
+    importClass();
+    myFixture.checkResult '''import java.util.Collection;
+
+class Test {
+    {
+      equals(Co<caret>llection.class);
+    }
+}
+'''
+  }
+
+  public void "test import class in qualifier expression"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      equals(Co<caret>llections.emptySet());
+    }
+}
+'''
+    importClass();
+    myFixture.checkResult '''import java.util.Collections;
+
+class Test {
+    {
+      equals(Co<caret>llections.emptySet());
+    }
+}
+'''
+  }
+
+  public void "test don't import class in method call argument"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      equals(Co<caret>llection);
+    }
+}
+'''
+    assert !myFixture.filterAvailableIntentions("Import class")
+  }
+
+  public void "test don't import class if qualified name is not valid"() {
+    myFixture.addClass('''
+package a..p;
+public class MMM {}
+''')
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      MM<caret>M m;
+    }
+}
+'''
+    assert !myFixture.filterAvailableIntentions("Import class")
+  }
+
+  public void "test don't import class in assignment"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      Co<caret>llection = 2;
+    }
+}
+'''
+    assert !myFixture.filterAvailableIntentions("Import class")
+  }
+
+  public void "test don't import class in qualified reference at reference name"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      Test.Te<caret>st
+    }
+}
+'''
+    assert !myFixture.filterAvailableIntentions("Import class")
+  }
+
+  public void "test don't import class in qualified reference at foreign place"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+    {
+      String s = "";
+      s.<caret>
+      String p = "";
+    }
+}
+'''
+    assert !myFixture.filterAvailableIntentions("Import class")
+  }
+
+    public void "test allow to add import from javadoc"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+
+  /**
+   * {@link java.util.Ma<caret>p}
+   */
+  void run() {
+  }
+}
+'''
+    reimportClass()
+    myFixture.checkResult '''\
+import java.util.Map;
+
+class Test {
+
+  /**
+   * {@link Map}
+   */
+  void run() {
+  }
+}
+'''
+  }
+
+  public void "test do not add import for default package"() {
+    myFixture.configureByText 'a.java', '''
+class Test {
+
+  /**
+   * {@link java.lang.Ma<caret>th}
+   */
+  void run() {
+  }
+}
+'''
+    reimportClass()
+    myFixture.checkResult '''
+class Test {
+
+  /**
+   * {@link Math}
+   */
+  void run() {
+  }
+}
+'''
+  }
+
+  public void "test do not allow to add import in package-info file"() {
+    myFixture.configureByText 'package-info.java', '''
+
+/**
+ * {@link java.lang.Ma<caret>th}
+ */
+package com.rocket.test;
+'''
+    assert myFixture.filterAvailableIntentions('Replace qualified name').isEmpty()
+  }
+
+
+  public void "test keep methods formatting on add import"() {
+    settings.getCommonSettings(JavaLanguage.INSTANCE).ALIGN_GROUP_FIELD_DECLARATIONS = true;
+
+    myFixture.configureByText 'Tq.java', '''
+class Tq {
+
+    private Li<caret>st<String> test = null;
+
+    private String varA = "AAA";
+    private String varBLonger = "BBB";
+
+
+    public String getA         () { return varA;       }
+
+    public String getVarBLonger() { return varBLonger; }
+
+}
+'''
+    importClass()
+    myFixture.checkResult '''import java.util.List;
+
+class Tq {
+
+    private List<String> test = null;
+
+    private String varA = "AAA";
+    private String varBLonger = "BBB";
+
+
+    public String getA         () { return varA;       }
+
+    public String getVarBLonger() { return varBLonger; }
+
+}
+'''
+  }
+
+  @Override
+  public void setUp() throws Exception {
+    super.setUp();
+    settings = new CodeStyleSettings()
+    CodeStyleSettingsManager.getInstance(myFixture.project).setTemporarySettings(settings);
+  }
+
+  @Override
+  public void tearDown() throws Exception {
+    CodeStyleSettingsManager.getInstance(myFixture.project).dropTemporarySettings();
+    settings = null
+    super.tearDown();
+  }
+
   private def importClass() {
-    myFixture.launchAction(myFixture.findSingleIntention("Import Class"))
+    myFixture.launchAction(myFixture.findSingleIntention("Import class"))
   }
 
   private def reimportClass() {
     myFixture.launchAction(myFixture.findSingleIntention("Replace qualified name with 'import'"))
+  }
+
+  public void "test disprefer deprecated classes"() {
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package bar; @Deprecated public class Log {}'
+    myFixture.configureByText 'a.java', '''\
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import foo.Log;
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+
+  }
+
+  public void "prefer from imported package"() {
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package foo; public class Imported {}'
+    myFixture.addClass 'package bar; public class Log {}'
+    myFixture.configureByText 'a.java', '''import foo.Imported;
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import foo.Log;
+import foo.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+  }
+
+  public void "test prefer from imported package sibling"() {
+    myFixture.addClass 'package com.foo.doo; public class Log {}'
+    myFixture.addClass 'package com.foo.imported; public class Imported {}'
+    myFixture.addClass 'package com.bar; public class Log {}'
+    myFixture.configureByText 'a.java', '''import com.foo.imported.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import com.foo.doo.Log;
+import com.foo.imported.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+
+  }
+
+  public void "test remember chosen variants"() {
+    ((StatisticsManagerImpl)StatisticsManager.getInstance()).enableStatistics(getTestRootDisposable());
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package bar; public class Log {}'
+
+    def textBefore = '''\
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    def textAfter = '''import bar.Log;
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    myFixture.configureByText 'a.java', textBefore
+    importClass()
+    myFixture.checkResult textAfter
+
+    myFixture.addClass("package aPackage; public class Log {}")
+    myFixture.configureByText 'b.java', textBefore
+    importClass()
+    myFixture.checkResult textAfter
   }
 }

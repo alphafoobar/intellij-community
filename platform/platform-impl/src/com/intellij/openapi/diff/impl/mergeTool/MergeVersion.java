@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,18 +32,20 @@ import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.projectImport.ProjectOpenProcessor;
+import gnu.trove.THashSet;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Set;
 
 public interface MergeVersion {
   Document createWorkingDocument(Project project);
 
-  void applyText(String text, Project project);
+  void applyText(@NotNull String text, Project project);
 
+  @Nullable
   VirtualFile getFile();
 
   byte[] getBytes() throws IOException;
@@ -66,6 +68,7 @@ public interface MergeVersion {
       myOriginalText = originalText;
     }
 
+    @Override
     public Document createWorkingDocument(final Project project) {
       //TODO[ik]: do we really need to create copy here?
       final Document workingDocument = myDocument; //DocumentUtil.createCopy(myDocument, project);
@@ -74,6 +77,7 @@ public interface MergeVersion {
       final DocumentReference ref = DocumentReferenceManager.getInstance().create(workingDocument);
       myTextBeforeMerge = myDocument.getText();
       ApplicationManager.getApplication().runWriteAction(new Runnable() {
+        @Override
         public void run() {
           setDocumentText(workingDocument, myOriginalText, DiffBundle.message("merge.init.merge.content.command.name"), project);
           if (project != null) {
@@ -87,8 +91,10 @@ public interface MergeVersion {
       return workingDocument;
     }
 
-    public void applyText(final String text, final Project project) {
+    @Override
+    public void applyText(@NotNull final String text, final Project project) {
       ApplicationManager.getApplication().runWriteAction(new Runnable() {
+        @Override
         public void run() {
           CommandProcessor.getInstance().executeCommand(project, new Runnable() {
             @Override
@@ -100,29 +106,26 @@ public interface MergeVersion {
       });
     }
 
-    protected void doApplyText(String text, Project project) {
+    protected void doApplyText(@NotNull String text, Project project) {
       setDocumentText(myDocument, text, DiffBundle.message("save.merge.result.command.name"), project);
 
       FileDocumentManager.getInstance().saveDocument(myDocument);
-      final VirtualFile file = getFile();
-      reportProjectFileChangeIfNeeded(project, file);
+      reportProjectFileChangeIfNeeded(project, getFile());
     }
 
-    public static void reportProjectFileChangeIfNeeded(Project project, VirtualFile file) {
-      if (file != null && ! file.isDirectory()) {
-        if (ProjectCoreUtil.isProjectOrWorkspaceFile(file) || isProjectFile(file)) {
-          ProjectManagerEx.getInstanceEx().saveChangedProjectFile(file, project);
-        }
+    public static void reportProjectFileChangeIfNeeded(@Nullable Project project, @Nullable VirtualFile file) {
+      if (project != null && file != null && !file.isDirectory() && (ProjectCoreUtil.isProjectOrWorkspaceFile(file) || isProjectFile(file))) {
+        ProjectManagerEx.getInstanceEx().saveChangedProjectFile(file, project);
       }
     }
 
     @Nullable
-    public static Runnable prepareToReportChangedProjectFiles(final Project project, final Collection<VirtualFile> files) {
-      final Set<VirtualFile> vfs = new HashSet<VirtualFile>();
-      for (VirtualFile vf : files) {
-        if (vf != null && ! vf.isDirectory()) {
-          if (ProjectCoreUtil.isProjectOrWorkspaceFile(vf) || isProjectFile(vf)) {
-            vfs.add(vf);
+    public static Runnable prepareToReportChangedProjectFiles(@NotNull final Project project, @NotNull Collection<VirtualFile> files) {
+      final Set<VirtualFile> vfs = new THashSet<VirtualFile>();
+      for (VirtualFile file : files) {
+        if (file != null && !file.isDirectory()) {
+          if (ProjectCoreUtil.isProjectOrWorkspaceFile(file) || isProjectFile(file)) {
+            vfs.add(file);
           }
         }
       }
@@ -140,6 +143,7 @@ public interface MergeVersion {
     @Override
     public void restoreOriginalContent(final Project project) {
       ApplicationManager.getApplication().runWriteAction(new Runnable() {
+        @Override
         public void run() {
           doRestoreOriginalContent(project);
         }
@@ -151,28 +155,32 @@ public interface MergeVersion {
       return importProvider != null && importProvider.lookForProjectsInDirectory();
     }
 
-    protected void doRestoreOriginalContent(Project project) {
+    protected void doRestoreOriginalContent(@Nullable Project project) {
       setDocumentText(myDocument, myTextBeforeMerge, "", project);
     }
 
+    @Override
+    @Nullable
     public VirtualFile getFile() {
       return FileDocumentManager.getInstance().getFile(myDocument);
     }
 
+    @Override
     public byte[] getBytes() throws IOException {
       VirtualFile file = getFile();
-      if (file != null) return file.contentsToByteArray();
-      return myDocument.getText().getBytes();
+      return file != null ? file.contentsToByteArray() : myDocument.getText().getBytes();
     }
 
+    @Override
     public FileType getContentType() {
       VirtualFile file = getFile();
       if (file == null) return FileTypes.PLAIN_TEXT;
       return file.getFileType();
     }
 
-    private static void setDocumentText(final Document document, final String text, String name, Project project) {
+    private static void setDocumentText(@NotNull final Document document, @NotNull final String text, @Nullable String name, @Nullable Project project) {
       CommandProcessor.getInstance().executeCommand(project, new Runnable() {
+        @Override
         public void run() {
           document.replaceString(0, document.getTextLength(), StringUtil.convertLineSeparators(text));
         }

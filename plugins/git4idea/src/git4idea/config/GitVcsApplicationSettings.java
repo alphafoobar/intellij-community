@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,12 @@ import org.jetbrains.annotations.Nullable;
  */
 @State(
   name = "Git.Application.Settings",
-  storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/vcs.xml")})
+  storages = {
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/git.xml", roamingType = RoamingType.PER_OS),
+    @Storage(file = StoragePathMacros.APP_CONFIG + "/vcs.xml", deprecated = true)
+  }
+)
 public class GitVcsApplicationSettings implements PersistentStateComponent<GitVcsApplicationSettings.State> {
-
-
   private State myState = new State();
 
   /**
@@ -52,6 +54,7 @@ public class GitVcsApplicationSettings implements PersistentStateComponent<GitVc
     return myState;
   }
 
+  @Override
   public void loadState(State state) {
     myState = state;
   }
@@ -77,5 +80,4 @@ public class GitVcsApplicationSettings implements PersistentStateComponent<GitVc
   SshExecutable getIdeaSsh() {
     return myState.SSH_EXECUTABLE;
   }
-
 }

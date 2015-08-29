@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,12 +33,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.svn.SvnBundle;
 import org.jetbrains.idea.svn.SvnStatusUtil;
 import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.api.Depth;
+import org.jetbrains.idea.svn.commandLine.SvnBindException;
 import org.jetbrains.idea.svn.conflict.ConflictClient;
 import org.jetbrains.idea.svn.dialogs.SelectFilesDialog;
-import org.jetbrains.idea.svn.portable.SvnStatusClientI;
-import org.tmatesoft.svn.core.SVNDepth;
-import org.tmatesoft.svn.core.SVNException;
-import org.tmatesoft.svn.core.wc.*;
+import org.jetbrains.idea.svn.status.Status;
+import org.jetbrains.idea.svn.status.StatusClient;
+import org.jetbrains.idea.svn.status.StatusConsumer;
+import org.jetbrains.idea.svn.status.StatusType;
+import org.tmatesoft.svn.core.wc.SVNRevision;
 
 import java.io.File;
 import java.util.Collection;
@@ -79,16 +82,16 @@ public class MarkResolvedAction extends BasicAction {
     ApplicationManager.getApplication().saveAll();
     Collection<String> paths = collectResolvablePaths(vcs, files);
     if (paths.isEmpty()) {
-      Messages.showInfoMessage(project, SvnBundle.message("message.text.no.conflicts.found"), SvnBundle.message("message.title.no.conflicts.found"));
+      Messages.showInfoMessage(project, SvnBundle.message("message.text.no.conflicts.found"),
+                               SvnBundle.message("message.title.no.conflicts.found"));
       return;
     }
     String[] pathsArray = ArrayUtil.toStringArray(paths);
     SelectFilesDialog dialog = new SelectFilesDialog(project, SvnBundle.message("label.select.files.and.directories.to.mark.resolved"),
                                                      SvnBundle.message("dialog.title.mark.resolved"),
                                                      SvnBundle.message("action.name.mark.resolved"), pathsArray, "vcs.subversion.resolve"
-                                                     );
-    dialog.show();
-    if (!dialog.isOK()) {
+    );
+    if (!dialog.showAndGet()) {
       return;
     }
     pathsArray = dialog.getSelectedPaths();
@@ -98,7 +101,7 @@ public class MarkResolvedAction extends BasicAction {
         ConflictClient client = vcs.getFactory(ioFile).createConflictClient();
 
         // TODO: Probably false should be passed to "resolveTree", but previous logic used true implicitly
-        client.resolve(ioFile, SVNDepth.EMPTY, true, true, true);
+        client.resolve(ioFile, Depth.EMPTY, true, true, true);
       }
     }
     finally {
@@ -109,7 +112,6 @@ public class MarkResolvedAction extends BasicAction {
           file.getParent().refresh(true, false);
         }
       }
-
     }
   }
 
@@ -122,18 +124,19 @@ public class MarkResolvedAction extends BasicAction {
     for (VirtualFile file : files) {
       try {
         File path = new File(file.getPath());
-        SvnStatusClientI client = vcs.getFactory(path).createStatusClient();
+        StatusClient client = vcs.getFactory(path).createStatusClient();
 
-        client.doStatus(path, true, false, false, false, new ISVNStatusHandler() {
-          public void handleStatus(SVNStatus status) {
-            if (status.getContentsStatus() == SVNStatusType.STATUS_CONFLICTED ||
-                status.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED) {
+        client.doStatus(path, SVNRevision.UNDEFINED, Depth.INFINITY, false, false, false, false, new StatusConsumer() {
+          @Override
+          public void consume(Status status) {
+            if (status.getContentsStatus() == StatusType.STATUS_CONFLICTED ||
+                status.getPropertiesStatus() == StatusType.STATUS_CONFLICTED) {
               target.add(status.getFile().getAbsolutePath());
             }
           }
-        });
+        }, null);
       }
-      catch (SVNException e) {
+      catch (SvnBindException e) {
         LOG.warn(e);
       }
     }

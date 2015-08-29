@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.popup.HintUpdateSupply;
 import com.intellij.ui.speedSearch.ListWithFilter;
 import com.intellij.util.Function;
 import com.intellij.util.NotNullFunction;
@@ -92,10 +93,8 @@ public class NavBarPopup extends LightweightHint implements Disposable{
   protected void onPopupCancel() {
     final JComponent component = getComponent();
     if (component != null) {
-      final Object o = component.getClientProperty(JBLIST_KEY);
-      if (o instanceof JBListWithHintProvider) {
-        ((JBListWithHintProvider)o).hideHint();
-      }
+      Object o = component.getClientProperty(JBLIST_KEY);
+      if (o instanceof JComponent) HintUpdateSupply.hideHint((JComponent)o);
     }
     //noinspection unchecked
     for (Disposable disposable : ((List<Disposable>)getList().getClientProperty(DISPOSED_OBJECTS))) {
@@ -131,7 +130,7 @@ public class NavBarPopup extends LightweightHint implements Disposable{
       show(myPanel, p.x - offset, p.y, myPanel, new HintHint(myPanel, p));
       final JBList list = getList();
       if (0 <= myIndex && myIndex < list.getItemsCount()) {
-       ListScrollingUtil.selectItem(list, myIndex);
+       ScrollingUtil.selectItem(list, myIndex);
       }
     }
     if (myPanel.isInFloatingMode()) {

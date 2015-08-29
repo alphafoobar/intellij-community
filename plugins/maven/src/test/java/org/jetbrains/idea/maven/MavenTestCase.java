@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.testFramework.IdeaTestCase;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
@@ -56,7 +55,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
   // should not be static
   protected static MavenProgressIndicator EMPTY_MAVEN_PROCESS = new MavenProgressIndicator(new EmptyProgressIndicator());
 
-  private static File ourTempDir;
+  private File ourTempDir;
 
   protected IdeaProjectTestFixture myTestFixture;
 
@@ -68,10 +67,6 @@ public abstract class MavenTestCase extends UsefulTestCase {
   protected VirtualFile myProjectPom;
   protected List<VirtualFile> myAllPoms = new ArrayList<VirtualFile>();
 
-  static {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
   @Override
   protected void setUp() throws Exception {
     super.setUp();
@@ -79,7 +74,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
     ensureTempDirCreated();
 
     myDir = new File(ourTempDir, getTestName(false));
-    myDir.mkdirs();
+    FileUtil.ensureExists(myDir);
 
     setUpFixtures();
 
@@ -92,18 +87,29 @@ public abstract class MavenTestCase extends UsefulTestCase {
       getMavenGeneralSettings().setMavenHome(home);
     }
 
-    restoreSettingsFile();
-
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
+        try {
+          restoreSettingsFile();
+        }
+        catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+
         ApplicationManager.getApplication().runWriteAction(new Runnable() {
           @Override
           public void run() {
             try {
               setUpInWriteAction();
             }
-            catch (Exception e) {
+            catch (Throwable e) {
+              try {
+                tearDown();
+              }
+              catch (Exception e1) {
+                e1.printStackTrace();
+              }
               throw new RuntimeException(e);
             }
           }
@@ -113,12 +119,12 @@ public abstract class MavenTestCase extends UsefulTestCase {
 
   }
 
-  private static void ensureTempDirCreated() {
+  private void ensureTempDirCreated() throws IOException {
     if (ourTempDir != null) return;
 
     ourTempDir = new File(FileUtil.getTempDirectory(), "mavenTests");
     FileUtil.delete(ourTempDir);
-    ourTempDir.mkdirs();
+    FileUtil.ensureExists(ourTempDir);
   }
 
   protected void setUpFixtures() throws Exception {
@@ -134,28 +140,34 @@ public abstract class MavenTestCase extends UsefulTestCase {
 
   @Override
   protected void tearDown() throws Exception {
-    myProject = null;
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          tearDownFixtures();
+    try {
+      myProject = null;
+      UIUtil.invokeAndWaitIfNeeded(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            tearDownFixtures();
+          }
+          catch (Exception e) {
+            throw new RuntimeException(e);
+          }
         }
-        catch (Exception e) {
-          throw new RuntimeException(e);
-        }
-      }
-    });
-    if (!FileUtil.delete(myDir) && myDir.exists()) {
-      System.err.println("Cannot delete " + myDir);
-      //printDirectoryContent(myDir);
-      myDir.deleteOnExit();
+      });
+
+      MavenIndicesManager.getInstance().clear();
     }
-
-    MavenIndicesManager.getInstance().clear();
-
-    super.tearDown();
-    resetClassFields(getClass());
+    finally {
+      super.tearDown();
+      FileUtil.delete(myDir);
+      // cannot use reliably the result of the com.intellij.openapi.util.io.FileUtil.delete() method
+      // because com.intellij.openapi.util.io.FileUtilRt.deleteRecursivelyNIO() does not honor this contract
+      if (myDir.exists()) {
+        System.err.println("Cannot delete " + myDir);
+        //printDirectoryContent(myDir);
+        myDir.deleteOnExit();
+      }
+      resetClassFields(getClass());
+    }
   }
 
   private static void printDirectoryContent(File dir) {
@@ -205,7 +217,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
       if (runInWriteAction()) {
         new WriteAction() {
           @Override
-          protected void run(Result result) throws Throwable {
+          protected void run(@NotNull Result result) throws Throwable {
             MavenTestCase.super.runTest();
           }
         }.executeSilently().throwException();
@@ -228,7 +240,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
   }
 
   @Override
-  protected void invokeTestRunnable(Runnable runnable) throws Exception {
+  protected void invokeTestRunnable(@NotNull Runnable runnable) throws Exception {
     runnable.run();
   }
 
@@ -309,14 +321,16 @@ public abstract class MavenTestCase extends UsefulTestCase {
 
   private static String createSettingsXmlContent(String content) {
     String mirror = System.getProperty("idea.maven.test.mirror",
-                                       "http://maven.labs.intellij.net:8081/nexus/content/groups/public/");
+                                       // use JB maven proxy server for internal use by default, see details at
+                                       // https://confluence.jetbrains.com/display/JBINT/Maven+proxy+server
+                                       "http://maven.labs.intellij.net/repo");
     return "<settings>" +
            content +
            "<mirrors>" +
            "  <mirror>" +
-           "    <id>Nexus</id>" +
+           "    <id>jb-central-proxy</id>" +
            "    <url>" + mirror + "</url>" +
-           "    <mirrorOf>*</mirrorOf>" +
+           "    <mirrorOf>external:*</mirrorOf>" +
            "  </mirror>" +
            "</mirrors>" +
            "</settings>";
@@ -333,7 +347,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
   protected Module createModule(final String name, final ModuleType type) throws IOException {
     return new WriteCommandAction<Module>(myProject) {
       @Override
-      protected void run(Result<Module> moduleResult) throws Throwable {
+      protected void run(@NotNull Result<Module> moduleResult) throws Throwable {
         VirtualFile f = createProjectSubFile(name + "/" + name + ".iml");
         Module module = ModuleManager.getInstance(myProject).newModule(f.getPath(), type.getId());
         PsiTestUtil.addContentRoot(module, f.getParent());
@@ -355,7 +369,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
     if (f == null) {
       f = new WriteAction<VirtualFile>() {
         @Override
-        protected void run(Result<VirtualFile> result) throws Throwable {
+        protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
           VirtualFile res = dir.createChildData(null, "pom.xml");
           result.setResult(res);
         }
@@ -410,7 +424,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
     if (f == null) {
       f = new WriteAction<VirtualFile>() {
         @Override
-        protected void run(Result<VirtualFile> result) throws Throwable {
+        protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
           VirtualFile res = dir.createChildData(null, "profiles.xml");
           result.setResult(res);
         }
@@ -481,7 +495,7 @@ public abstract class MavenTestCase extends UsefulTestCase {
   private static void setFileContent(final VirtualFile file, final String content, final boolean advanceStamps) throws IOException {
     new WriteAction<VirtualFile>() {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         if (advanceStamps) {
           file.setBinaryContent(content.getBytes(), -1, file.getTimeStamp() + 4000);
         }

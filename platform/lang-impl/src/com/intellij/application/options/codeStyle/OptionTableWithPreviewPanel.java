@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
  */
 package com.intellij.application.options.codeStyle;
 
-import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
 import com.intellij.ui.SpeedSearchComparator;
 import com.intellij.ui.TreeTableSpeedSearch;
+import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.editors.JBComboBoxTableCellEditorComponent;
 import com.intellij.ui.treeStructure.treetable.ListTreeTableModel;
@@ -51,8 +52,8 @@ import java.util.List;
 /**
  * @author max
  */
-public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyleAbstractPanel {
-  private TreeTable myTreeTable;
+public abstract class OptionTableWithPreviewPanel extends CustomizableLanguageCodeStylePanel {
+  protected TreeTable myTreeTable;
   private final JPanel myPanel = new JPanel();
 
   private final List<Option> myOptions = new ArrayList<Option>();
@@ -60,8 +61,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
   private final Set<String> myAllowedOptions = new THashSet<String>();
   private final Map<String, String> myRenamedFields = new THashMap<String, String>();
   private boolean myShowAllStandardOptions;
-  private boolean isFirstUpdate = true;
-
+  protected boolean isFirstUpdate = true;
 
   public OptionTableWithPreviewPanel(CodeStyleSettings settings) {
     super(settings);
@@ -75,6 +75,8 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     initTables();
 
     myTreeTable = createOptionsTree(getSettings());
+    myTreeTable.setBackground(UIUtil.getPanelBackground());
+    myTreeTable.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 10));
     JBScrollPane scrollPane = new JBScrollPane(myTreeTable) {
       @Override
       public Dimension getMinimumSize() {
@@ -83,7 +85,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     };
     myPanel.add(scrollPane
       , new GridBagConstraints(0, 0, 1, 1, 0, 1, GridBagConstraints.CENTER, GridBagConstraints.BOTH,
-                                       new Insets(0, 0, 0, 8), 0, 0));
+                                       new Insets(0, 0, 0, 0), 0, 0));
 
     final JPanel previewPanel = createPreviewPanel();
     myPanel.add(previewPanel,
@@ -94,15 +96,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     addPanelToWatch(myPanel);
 
     isFirstUpdate = false;
-  }
-
-  @Override
-  protected void onLanguageChange(Language language) {
-    if (myTreeTable.isEditing()) {
-      myTreeTable.getCellEditor().stopCellEditing();
-    }
-    resetImpl(getSettings());
-    myTreeTable.repaint();
+    customizeSettings();
   }
 
   @Override
@@ -258,6 +252,9 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
 
     expandTree(tree);
 
+    treeTable.getColumnModel().getSelectionModel().setAnchorSelectionIndex(1);
+    treeTable.getColumnModel().getSelectionModel().setLeadSelectionIndex(1);
+
     int maxWidth = tree.getPreferredScrollableViewportSize().width + 10;
     final TableColumn titleColumn = treeTable.getColumnModel().getColumn(0);
     titleColumn.setPreferredWidth(maxWidth);
@@ -284,7 +281,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     return result == null ? defaultName : result;
   }
 
-  private void expandTree(final JTree tree) {
+  private static void expandTree(final JTree tree) {
     int oldRowCount = 0;
     do {
       int rowCount = tree.getRowCount();
@@ -340,6 +337,16 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     addOption(fieldName, title, null, options, values);
   }
 
+  protected void addOption(@NotNull String fieldName,
+                           @NotNull String title,
+                           @Nullable String groupName,
+                           int minValue,
+                           int maxValue,
+                           int defaultValue,
+                           String defaultValueText) {
+    myOptions.add(new IntOption(null, fieldName, title, groupName, null, null, minValue, maxValue, defaultValue, defaultValueText));
+  }
+
   protected void addOption(@NotNull String fieldName, @NotNull String title, @Nullable String groupName) {
     myOptions.add(new BooleanOption(null, fieldName, title, groupName, null, null));
   }
@@ -356,7 +363,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     @Nullable final String groupName;
     private boolean myEnabled = false;
 
-    public Option(Class<? extends CustomCodeStyleSettings> clazz,
+    public Option(@Nullable Class<? extends CustomCodeStyleSettings> clazz,
                   @NotNull String fieldName,
                   @NotNull String title,
                   @Nullable String groupName,
@@ -368,7 +375,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
       this.groupName = groupName;
 
       try {
-        Class styleSettingsClass = clazz == null ? CodeStyleSettings.class : clazz;
+        Class styleSettingsClass = clazz == null ? CommonCodeStyleSettings.class : clazz;
         this.field = styleSettingsClass.getField(fieldName);
       }
       catch (NoSuchFieldException e) {
@@ -390,7 +397,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
 
     protected Object getSettings(CodeStyleSettings settings) {
       if (clazz != null) return settings.getCustomSettings(clazz);
-      return settings.getCommonSettings(getSelectedLanguage());
+      return settings.getCommonSettings(getDefaultLanguage());
     }
   }
 
@@ -407,7 +414,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     @Override
     public Object getValue(CodeStyleSettings settings) {
       try {
-        return field.getBoolean(getSettings(settings)) ? Boolean.TRUE : Boolean.FALSE;
+        return field.getBoolean(getSettings(settings));
       }
       catch (IllegalAccessException ignore) {
         return null;
@@ -464,8 +471,79 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
           }
         }
       }
+      catch (IllegalAccessException ignore) {
+      }
+    }
+  }
+
+  private class IntOption extends Option {
+
+    private final int myMinValue;
+    private final int myMaxValue;
+    private final int myDefaultValue;
+    @Nullable private String myDefaultValueText;
+
+    public IntOption(Class<? extends CustomCodeStyleSettings> clazz,
+                     @NotNull String fieldName,
+                     @NotNull String title,
+                     @Nullable String groupName, 
+                     @Nullable OptionAnchor anchor, 
+                     @Nullable String anchorFiledName,
+                     int minValue,
+                     int maxValue,
+                     int defaultValue,
+                     @Nullable String defaultValueText) {
+      super(clazz, fieldName, title, groupName, anchor, anchorFiledName);
+      myMinValue = minValue;
+      myMaxValue = maxValue;
+      myDefaultValue = defaultValue;
+      myDefaultValueText = defaultValueText;
+    }
+
+    @Override
+    public Object getValue(CodeStyleSettings settings) {
+      try {
+        return field.getInt(getSettings(settings));
+      }
+      catch (IllegalAccessException e) {
+        return null;
+      }      
+    }
+
+    @Override
+    public void setValue(Object value, CodeStyleSettings settings) {
+      //noinspection EmptyCatchBlock
+      try {
+        if (value instanceof Integer) {
+          field.setInt(getSettings(settings), ((Integer)value).intValue());
+        }
+        else {
+          field.setInt(getSettings(settings), myDefaultValue);
+        }
+      }
       catch (IllegalAccessException e) {
       }
+    }
+
+    public int getMinValue() {
+      return myMinValue;
+    }
+
+    public int getMaxValue() {
+      return myMaxValue;
+    }
+
+    public int getDefaultValue() {
+      return myDefaultValue;
+    }
+
+    public boolean isDefaultValue(Object value) {
+      return value instanceof Integer && ((Integer)value).intValue() == myDefaultValue;
+    }
+
+    @Nullable
+    public String getDefaultValueText() {
+      return myDefaultValueText;
     }
   }
 
@@ -513,7 +591,7 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
 
     @Override
     public boolean isCellEditable(Object o) {
-      return (o instanceof MyTreeNode) && (((MyTreeNode)o).isEnabled());
+      return o instanceof MyTreeNode && ((MyTreeNode)o).isEnabled();
     }
 
     @Override
@@ -528,8 +606,9 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
   private final TreeCellRenderer myTitleRenderer = new TreeCellRenderer() {
     private final JLabel myLabel = new JLabel();
 
+    @NotNull
     @Override
-    public Component getTreeCellRendererComponent(JTree tree,
+    public Component getTreeCellRendererComponent(@NotNull JTree tree,
                                                   Object value,
                                                   boolean selected,
                                                   boolean expanded,
@@ -602,11 +681,13 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
 
   private class MyValueRenderer implements TableCellRenderer {
     private final JLabel myComboBox = new JLabel();
-    private final JCheckBox myCheckBox = new JCheckBox();
+    private final JCheckBox myCheckBox = new JBCheckBox();
     private final JPanel myEmptyLabel = new JPanel();
+    private final JLabel myIntLabel = new JLabel();
 
+    @NotNull
     @Override
-    public Component getTableCellRendererComponent(JTable table,
+    public Component getTableCellRendererComponent(@NotNull JTable table,
                                                    Object value,
                                                    boolean isSelected,
                                                    boolean hasFocus,
@@ -615,8 +696,13 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
       boolean isEnabled = true;
       final DefaultMutableTreeNode node = (DefaultMutableTreeNode)((TreeTable)table).getTree().
         getPathForRow(row).getLastPathComponent();
+      Option key = null;
       if (node instanceof MyTreeNode) {
         isEnabled = ((MyTreeNode)node).isEnabled();
+        key = ((MyTreeNode)node).getKey();
+      }
+      if (!table.isEnabled()) {
+        isEnabled = false;
       }
 
       Color background = table.getBackground();
@@ -636,6 +722,15 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
         myComboBox.setEnabled(isEnabled);
         return myComboBox;
       }
+      else if (value instanceof Integer) {
+        if (key instanceof IntOption && ((IntOption)key).isDefaultValue(value)) {
+          myIntLabel.setText(((IntOption)key).getDefaultValueText());
+        }
+        else {
+          myIntLabel.setText(value.toString());
+        }
+        return myIntLabel;
+      }
 
       myCheckBox.putClientProperty("JComponent.sizeVariant", "small");
       myComboBox.putClientProperty("JComponent.sizeVariant", "small");
@@ -645,19 +740,56 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
     }
   }
 
+  private static class MyIntOptionEditor extends JTextField {
+    private int myMinValue;
+    private int myMaxValue;
+    private int myDefaultValue;
+
+    private MyIntOptionEditor() {
+      super();
+    }
+
+    public Object getPresentableValue() {
+      return validateAndGetIntOption();
+    }
+
+    private int validateAndGetIntOption() {
+      try {
+        int value = Integer.parseInt(getText());
+        return value >= myMinValue && value <= myMaxValue ? value : myDefaultValue;
+      }
+      catch (NumberFormatException nfe) {
+        return myDefaultValue;
+      }
+    }
+
+    public void setMinValue(int minValue) {
+      myMinValue = minValue;
+    }
+
+    public void setMaxValue(int maxValue) {
+      myMaxValue = maxValue;
+    }
+
+    public void setDefaultValue(int defaultValue) {
+      myDefaultValue = defaultValue;
+    }
+  }
+
   /**
    * @author Konstantin Bulenkov
    */
   private class MyValueEditor extends AbstractTableCellEditor {
-    private final JCheckBox myBooleanEditor = new JCheckBox();
+    private final JCheckBox myBooleanEditor = new JBCheckBox();
     private JBComboBoxTableCellEditorComponent myOptionsEditor = new JBComboBoxTableCellEditorComponent();
+    private MyIntOptionEditor myIntOptionsEditor = new MyIntOptionEditor();
     private Component myCurrentEditor = null;
     private MyTreeNode myCurrentNode = null;
 
     public MyValueEditor() {
       final ActionListener itemChoosen = new ActionListener() {
         @Override
-        public void actionPerformed(ActionEvent e) {
+        public void actionPerformed(@NotNull ActionEvent e) {
           if (myCurrentNode != null) {
             myCurrentNode.setValue(getCellEditorValue());
             somethingChanged();
@@ -682,7 +814,10 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
         return myOptionsEditor.getEditorValue();
       }
       else if (myCurrentEditor == myBooleanEditor) {
-        return myBooleanEditor.isSelected() ? Boolean.TRUE : Boolean.FALSE;
+        return myBooleanEditor.isSelected();
+      }
+      else if (myCurrentEditor == myIntOptionsEditor) {
+        return myIntOptionsEditor.getPresentableValue();
       }
 
       return null;
@@ -701,6 +836,14 @@ public abstract class OptionTableWithPreviewPanel extends MultilanguageCodeStyle
           myCurrentEditor = myBooleanEditor;
           myBooleanEditor.setSelected(node.getValue() == Boolean.TRUE);
           myBooleanEditor.setEnabled(node.isEnabled());
+        }
+        else if (node.getKey() instanceof IntOption) {
+          IntOption intOption = (IntOption)node.getKey();
+          myCurrentEditor = myIntOptionsEditor;
+          myIntOptionsEditor.setText(intOption.isDefaultValue(node.getValue()) ? "" : node.getValue().toString());
+          myIntOptionsEditor.setMinValue(intOption.getMinValue());
+          myIntOptionsEditor.setMaxValue(intOption.getMaxValue());
+          myIntOptionsEditor.setDefaultValue(intOption.getDefaultValue());
         }
         else {
           myCurrentEditor = myOptionsEditor;

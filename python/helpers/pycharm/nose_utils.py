@@ -1,8 +1,12 @@
-from tcmessages import TeamcityServiceMessages
-import sys, traceback, datetime
+import sys
+import traceback
+import datetime
 import unittest
+
+from tcmessages import TeamcityServiceMessages
 from tcunittest import strclass
 from tcunittest import TeamcityTestResult
+
 
 try:
   from nose.util import isclass # backwards compat
@@ -54,12 +58,15 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
     if exctype == SkipTest:
         self.messages.testIgnored(self.getTestName(test), message='Skip')
     else:
-        self.messages.testError(self.getTestName(test), message='Error', details=err)
+        self.messages.testError(self.getTestName(test), message='Error', details=err, duration=self.__getDuration(test))
 
   def formatErr(self, err):
     exctype, value, tb = err
     if isinstance(value, str):
-      value = exctype(value)
+      try:
+        value = exctype(value)
+      except TypeError:
+        pass
     return ''.join(traceback.format_exception(exctype, value, tb))
 
   def is_gen(self, test):
@@ -79,9 +86,6 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
     ind_1 = test_name_full.rfind('(')
     if ind_1 != -1:
       return test_name_full[:ind_1]
-    ind = test_name_full.rfind('.')
-    if ind != -1:
-      return test_name_full[test_name_full.rfind(".") + 1:]
     return test_name_full
 
 
@@ -96,7 +100,7 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
     self.messages.testIgnored(self.getTestName(test), message=reason)
 
 
-  def __getSuite(self, test):
+  def _getSuite(self, test):
     if hasattr(test, "suite"):
       suite = strclass(test.suite)
       suite_location = test.suite.location
@@ -109,7 +113,7 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
       suite = strclass(test.__class__)
       suite_location = "python_nosetestid://" + suite
       try:
-        from nose_helper.util import func_lineno
+        from nose.util import func_lineno
 
         if hasattr(test.test, "descriptor") and test.test.descriptor:
           suite_location = "file://" + self.test_address(
@@ -153,14 +157,12 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
   def getSuiteName(self, test):
     test_name_full = str(test)
 
-    if self.is_gen(test):
-      ind_1 = test_name_full.rfind('(')
-      if ind_1 != -1:
-        ind = test_name_full.rfind('.')
-        if ind != -1:
-          return test_name_full[:test_name_full.rfind(".")]
-
     ind_1 = test_name_full.rfind('(')
+    if self.is_gen(test) and ind_1 != -1:
+      ind = test_name_full[:ind_1].rfind('.')
+      if ind != -1:
+        return test_name_full[:ind]
+
     if ind_1 != -1:
       return test_name_full[ind_1 + 1: -1]
     ind = test_name_full.rfind('.')
@@ -170,7 +172,7 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
 
 
   def startTest(self, test):
-    location, suite_location = self.__getSuite(test)
+    location, suite_location = self._getSuite(test)
     suite = self.getSuiteName(test)
     if suite != self.current_suite:
       if self.current_suite:
@@ -183,12 +185,15 @@ class TeamcityPlugin(ErrorClassPlugin, TextTestResult, TeamcityTestResult):
 
 
   def stopTest(self, test):
-    start = getattr(test, "startTime", datetime.datetime.now())
-    d = datetime.datetime.now() - start
-    duration = d.microseconds / 1000 + d.seconds * 1000 + d.days * 86400000
+    duration = self.__getDuration(test)
     self.messages.testFinished(self.getTestName(test),
       duration=int(duration))
 
+  def __getDuration(self, test):
+    start = getattr(test, "startTime", datetime.datetime.now())
+    d = datetime.datetime.now() - start
+    duration = d.microseconds / 1000 + d.seconds * 1000 + d.days * 86400000
+    return duration
 
   def finalize(self, result):
     if self.current_suite:

@@ -17,8 +17,10 @@
 package com.intellij.packageDependencies.ui;
 
 import com.intellij.analysis.AnalysisScopeBundle;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.dnd.aware.DnDAwareTree;
 import com.intellij.ide.projectView.impl.ModuleGroup;
+import com.intellij.ide.projectView.impl.nodes.ProjectViewDirectoryHelper;
 import com.intellij.ide.scopeView.nodes.BasePsiNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -72,6 +74,8 @@ public class FileTreeModelBuilder {
   private final Map<VirtualFile,DirectoryNode> myModuleDirNodes = new HashMap<VirtualFile, DirectoryNode>();
   private final Map<Module, ModuleNode> myModuleNodes = new HashMap<Module, ModuleNode>();
   private final Map<String, ModuleGroupNode> myModuleGroupNodes = new HashMap<String, ModuleGroupNode>();
+  private GeneralGroupNode myExternalNode;
+
   private int myScannedFileCount = 0;
   private int myTotalFileCount = 0;
   private int myMarkedFileCount = 0;
@@ -86,8 +90,9 @@ public class FileTreeModelBuilder {
     myContentRoots = ProjectRootManager.getInstance(myProject).getContentRoots();
     final boolean multiModuleProject = ModuleManager.getInstance(myProject).getModules().length > 1;
     myShowModules = settings.UI_SHOW_MODULES && multiModuleProject;
-    myFlattenPackages = settings.UI_FLATTEN_PACKAGES;
-    myCompactEmptyMiddlePackages = settings.UI_COMPACT_EMPTY_MIDDLE_PACKAGES;
+    final ProjectViewDirectoryHelper directoryHelper = ProjectViewDirectoryHelper.getInstance(myProject);
+    myFlattenPackages = directoryHelper.supportsFlattenPackages() && settings.UI_FLATTEN_PACKAGES;
+    myCompactEmptyMiddlePackages = directoryHelper.supportsHideEmptyMiddlePackages() && settings.UI_COMPACT_EMPTY_MIDDLE_PACKAGES;
     myShowFiles = settings.UI_SHOW_FILES;
     myShowModuleGroups = settings.UI_SHOW_MODULE_GROUPS && multiModuleProject;
     myMarker = marker;
@@ -539,6 +544,13 @@ public class FileTreeModelBuilder {
         }
         if (root != null) {
           getModuleDirNode(root, module, null).add(directoryNode);
+        } else {
+          if (myExternalNode == null) {
+            myExternalNode = new GeneralGroupNode("External Dependencies", AllIcons.Nodes.PpLibFolder, myProject);
+            myRoot.add(myExternalNode);
+          }
+
+          myExternalNode.add(directoryNode);
         }
       }
     }

@@ -23,8 +23,7 @@
 package com.intellij.xml.util;
 
 import com.intellij.codeInsight.FileModificationService;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.LocalQuickFixOnPsiElement;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
@@ -32,6 +31,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.xml.XmlBundle;
 import org.jetbrains.annotations.NotNull;
 
@@ -39,39 +39,33 @@ import org.jetbrains.annotations.NotNull;
  * @author Maxim Mossienko
  */
 public class CheckValidXmlInScriptBodyInspection extends CheckValidXmlInScriptBodyInspectionBase {
-
   @Override
-  protected InsertQuotedCharacterQuickFix createFix(PsiFile psiFile,
-                                                    PsiElement psiElement,
+  protected InsertQuotedCharacterQuickFix createFix(PsiElement psiElement,
                                                     int offsetInElement) {
     return new InsertQuotedCharacterQuickFix(
-      psiFile,
       psiElement,
       offsetInElement
     );
   }
 
-  private static class InsertQuotedCharacterQuickFix implements LocalQuickFix {
-    private final PsiFile psiFile;
-    private final PsiElement psiElement;
+  private static class InsertQuotedCharacterQuickFix extends LocalQuickFixOnPsiElement {
     private final int startInElement;
 
-    public InsertQuotedCharacterQuickFix(PsiFile psiFile, PsiElement psiElement, int startInElement) {
-      this.psiFile = psiFile;
-      this.psiElement = psiElement;
+    public InsertQuotedCharacterQuickFix(PsiElement psiElement, int startInElement) {
+      super(psiElement);
       this.startInElement = startInElement;
     }
 
     @Override
     @NotNull
-    public String getName() {
+    public String getText() {
       final String character = getXmlCharacter();
 
       return XmlBundle.message(
         "unescaped.xml.character.fix.message",
         character.equals("&") ?
-          XmlBundle.message("unescaped.xml.character.fix.message.parameter"):
-          character
+        XmlBundle.message("unescaped.xml.character.fix.message.parameter") :
+        character
       );
     }
 
@@ -82,9 +76,10 @@ public class CheckValidXmlInScriptBodyInspection extends CheckValidXmlInScriptBo
     }
 
     @Override
-    public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor problemDescriptor) {
+    public void invoke(@NotNull Project project, @NotNull PsiFile file, @NotNull PsiElement startElement, @NotNull PsiElement endElement) {
+      final PsiFile psiFile = startElement.getContainingFile();
       if (!FileModificationService.getInstance().prepareFileForWrite(psiFile)) return;
-      final TextRange range = psiElement.getTextRange();
+      final TextRange range = startElement.getTextRange();
       OpenFileDescriptor descriptor = new OpenFileDescriptor(
         project,
         psiFile.getVirtualFile(),
@@ -96,9 +91,9 @@ public class CheckValidXmlInScriptBodyInspection extends CheckValidXmlInScriptBo
 
       final String xmlCharacter = getXmlCharacter();
       String replacement = xmlCharacter.equals("&") ? AMP_ENTITY_REFERENCE : LT_ENTITY_REFERENCE;
-      replacement = psiElement.getText().replace(xmlCharacter,replacement);
+      replacement = startElement.getText().replace(xmlCharacter,replacement);
 
-      editor.getDocument().replaceString(
+      InjectedLanguageUtil.getTopLevelEditor(editor).getDocument().replaceString(
         range.getStartOffset(),
         range.getEndOffset(),
         replacement
@@ -106,7 +101,7 @@ public class CheckValidXmlInScriptBodyInspection extends CheckValidXmlInScriptBo
     }
 
     private String getXmlCharacter() {
-      return psiElement.getText().substring(startInElement, startInElement + 1);
+      return getStartElement().getText().substring(startInElement, startInElement + 1);
     }
   }
 }

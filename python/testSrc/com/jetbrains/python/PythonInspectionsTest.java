@@ -101,6 +101,12 @@ public class PythonInspectionsTest extends PyTestCase {
     doTest(getTestName(false), inspection);
   }
 
+  // PY-9778
+  public void testPyUnusedLocalCoroutine() {
+    myFixture.copyDirectoryToProject("inspections/" + getTestName(false), "");
+    doHighlightingTest(PyUnusedLocalInspection.class, LanguageLevel.PYTHON34);
+  }
+
   public void testPyDictCreationInspection() {
     doHighlightingTest(PyDictCreationInspection.class, LanguageLevel.PYTHON26);
   }
@@ -187,8 +193,7 @@ public class PythonInspectionsTest extends PyTestCase {
   }
 
   public void testPyByteLiteralInspection() {
-    LocalInspectionTool inspection = new PyByteLiteralInspection();
-    doTest(getTestName(false), inspection);
+    doHighlightingTest(PyByteLiteralInspection.class);
   }
 
   public void testPyTupleItemAssignmentInspection() {
@@ -245,6 +250,11 @@ public class PythonInspectionsTest extends PyTestCase {
     doTestWithLanguageLevel(getTestName(false), new PyPropertyDefinitionInspection(), LanguageLevel.PYTHON26);
   }
 
+  // PY-11426
+  public void testPyPropertyDefinitionInspection33() {
+    doTestWithLanguageLevel(getTestName(false), new PyPropertyDefinitionInspection(), LanguageLevel.PYTHON33);
+  }
+
   public void testInconsistentIndentation() {
     doHighlightingTest(PyInconsistentIndentationInspection.class, LanguageLevel.PYTHON26);
   }
@@ -297,6 +307,10 @@ public class PythonInspectionsTest extends PyTestCase {
   }
 
   public void testPyNonAsciiCharInspection() {    //PY-5868
+    doHighlightingTest(PyNonAsciiCharInspection.class);
+  }
+
+  public void testPyNonAsciiCharReferenceInspection() {
     doHighlightingTest(PyNonAsciiCharInspection.class);
   }
 

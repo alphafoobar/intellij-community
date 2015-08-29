@@ -18,15 +18,23 @@ package com.intellij.ui;
 import com.intellij.codeInsight.completion.*;
 import com.intellij.codeInsight.lookup.AutoCompletionPolicy;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.concurrency.SensitiveProgressWrapper;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
@@ -37,7 +45,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * @author Roman.Chernyatchik
  */
-public class TextFieldWithAutoCompletionContributor<T> extends CompletionContributor {
+public class TextFieldWithAutoCompletionContributor<T> extends CompletionContributor implements DumbAware {
+  private static final Logger LOG = Logger.getInstance("#com.intellij.ui.TextFieldWithAutoCompletionContributor");
   private static final Key<TextFieldWithAutoCompletionListProvider> KEY = Key.create("text field simple completion available");
   private static final Key<Boolean> AUTO_POPUP_KEY = Key.create("text Field simple completion auto-popup");
 
@@ -55,11 +64,11 @@ public class TextFieldWithAutoCompletionContributor<T> extends CompletionContrib
 
 
   @Override
-  public void fillCompletionVariants(final CompletionParameters parameters, CompletionResultSet result) {
+  public void fillCompletionVariants(@NotNull final CompletionParameters parameters, @NotNull CompletionResultSet result) {
     PsiFile file = parameters.getOriginalFile();
     final TextFieldWithAutoCompletionListProvider<T> provider = file.getUserData(KEY);
 
-    if (provider == null) {
+    if (provider == null || (DumbService.isDumb(file.getProject()) && !DumbService.isDumbAware(provider))) {
       return;
     }
     String adv = provider.getAdvertisement();
@@ -88,12 +97,20 @@ public class TextFieldWithAutoCompletionContributor<T> extends CompletionContrib
     Collection<T> items = provider.getItems(prefix, true, parameters);
     addCompletionElements(result, provider, items, -10000);
 
+    final ProgressManager progressManager = ProgressManager.getInstance();
+    ProgressIndicator mainIndicator = progressManager.getProgressIndicator();
+    final ProgressIndicator indicator = mainIndicator != null ? new SensitiveProgressWrapper(mainIndicator) : new EmptyProgressIndicator();
     Future<Collection<T>>
       future =
       ApplicationManager.getApplication().executeOnPooledThread(new Callable<Collection<T>>() {
         @Override
         public Collection<T> call() {
-          return provider.getItems(prefix, false, parameters);
+          return progressManager.runProcess(new Computable<Collection<T>>() {
+            @Override
+            public Collection<T> compute() {
+              return provider.getItems(prefix, false, parameters);
+            }
+          }, indicator);
         }
       });
 
@@ -124,6 +141,11 @@ public class TextFieldWithAutoCompletionContributor<T> extends CompletionContrib
                                                   : AutoCompletionPolicy.NEVER_AUTOCOMPLETE;
     int grouping = index;
     for (final T item : items) {
+      if (item == null) {
+        LOG.error("Null item from " + listProvider);
+        continue;
+      }
+
       LookupElementBuilder builder = listProvider.createLookupBuilder(item);
 
       result.addElement(PrioritizedLookupElement.withGrouping(builder.withAutoCompletionPolicy(completionPolicy), grouping--));

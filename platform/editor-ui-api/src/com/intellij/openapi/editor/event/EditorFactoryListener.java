@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,10 +20,16 @@ import org.jetbrains.annotations.NotNull;
 import java.util.EventListener;
 
 /**
- * @see {@link com.intellij.openapi.editor.EditorFactory#addEditorFactoryListener(com.intellij.openapi.editor.event.EditorFactoryListener)}
+ * @see {@link com.intellij.openapi.editor.EditorFactory#addEditorFactoryListener(EditorFactoryListener, com.intellij.openapi.Disposable)}
  */
 public interface EditorFactoryListener extends EventListener {
+  /**
+   * Called after {@link com.intellij.openapi.editor.Editor} instance has been created.
+   */
   void editorCreated(@NotNull EditorFactoryEvent event);
+  /**
+   * Called before {@link com.intellij.openapi.editor.Editor} instance will be released.
+   */
   void editorReleased(@NotNull EditorFactoryEvent event);
 }
 

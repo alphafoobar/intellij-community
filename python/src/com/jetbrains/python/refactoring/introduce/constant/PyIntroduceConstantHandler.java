@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.imports.AddImportHelper;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyParameterList;
 import com.jetbrains.python.refactoring.PyReplaceExpressionUtil;
 import com.jetbrains.python.refactoring.introduce.IntroduceHandler;
 import com.jetbrains.python.refactoring.introduce.IntroduceOperation;
@@ -66,7 +67,17 @@ public class PyIntroduceConstantHandler extends IntroduceHandler {
   }
 
   @Override
+  protected boolean isValidIntroduceContext(PsiElement element) {
+    return super.isValidIntroduceContext(element) || PsiTreeUtil.getParentOfType(element, PyParameterList.class) != null;
+  }
+
+  @Override
   protected String getHelpId() {
     return "python.reference.introduceConstant";
+  }
+
+  @Override
+  protected String getRefactoringId() {
+    return "refactoring.python.introduce.constant";
   }
 }

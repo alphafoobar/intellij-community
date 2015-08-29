@@ -33,7 +33,8 @@ import java.util.List;
  * @author Mikhail Golubev
  */
 public class TrelloTask extends Task {
-  private static final TrelloIconBuilder iconBuilder = new TrelloIconBuilder(16);
+  private static final TrelloIconBuilder ourIconBuilder = new TrelloIconBuilder(16);
+
   private TrelloCard myCard;
   private TaskRepository myRepository;
 
@@ -71,7 +72,7 @@ public class TrelloTask extends Task {
   @NotNull
   @Override
   public Icon getIcon() {
-    return iconBuilder.buildIcon(myCard.getColors());
+    return ourIconBuilder.buildIcon(myCard.getColors());
   }
 
   @NotNull
@@ -83,7 +84,7 @@ public class TrelloTask extends Task {
   @Nullable
   @Override
   public Date getUpdated() {
-    return null;
+    return myCard.getDateLastActivity();
   }
 
   @Nullable
@@ -118,5 +119,11 @@ public class TrelloTask extends Task {
   @Override
   public TaskRepository getRepository() {
     return myRepository;
+  }
+
+  @NotNull
+  @Override
+  public String getNumber() {
+    return myCard.getIdShort();
   }
 }

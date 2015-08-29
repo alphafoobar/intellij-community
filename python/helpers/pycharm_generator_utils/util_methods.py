@@ -6,7 +6,7 @@ except ImportError:
     inspect = None
 
 def create_named_tuple():   #TODO: user-skeleton
-        return """
+    return """
 class __namedtuple(tuple):
     '''A mock base class for named tuples.'''
 
@@ -38,12 +38,12 @@ class __namedtuple(tuple):
 """
 
 def create_generator():
-        # Fake <type 'generator'>
-        if version[0] < 3:
-            next_name = "next"
-        else:
-            next_name = "__next__"
-        txt = """
+    # Fake <type 'generator'>
+    if version[0] < 3:
+        next_name = "next"
+    else:
+        next_name = "__next__"
+    txt = """
 class __generator(object):
     '''A mock class representing the generator function type.'''
     def __init__(self):
@@ -59,8 +59,8 @@ class __generator(object):
         '''Return the next item from the container.'''
         pass
 """ % (next_name,)
-        if version[0] >= 3 or (version[0] == 2 and version[1] >= 5):
-            txt += """
+    if version[0] >= 3 or (version[0] == 2 and version[1] >= 5):
+        txt += """
     def close(self):
         '''Raises new GeneratorExit exception inside the generator to terminate the iteration.'''
         pass
@@ -73,10 +73,70 @@ class __generator(object):
         '''Used to raise an exception inside the generator.'''
         pass
 """
-        return txt
+    return txt
+
+def create_function():
+    txt = """
+class __function(object):
+    '''A mock class representing function type.'''
+
+    def __init__(self):
+        self.__name__ = ''
+        self.__doc__ = ''
+        self.__dict__ = ''
+        self.__module__ = ''
+"""
+    if version[0] == 2:
+        txt += """
+        self.func_defaults = {}
+        self.func_globals = {}
+        self.func_closure = None
+        self.func_code = None
+        self.func_name = ''
+        self.func_doc = ''
+        self.func_dict = ''
+"""
+    if version[0] >= 3 or (version[0] == 2 and version[1] >= 6):
+        txt += """
+        self.__defaults__ = {}
+        self.__globals__ = {}
+        self.__closure__ = None
+        self.__code__ = None
+        self.__name__ = ''
+"""
+    if version[0] >= 3:
+        txt += """
+        self.__annotations__ = {}
+        self.__kwdefaults__ = {}
+"""
+    if version[0] >= 3 and version[1] >= 3:
+        txt += """
+        self.__qualname__ = ''
+"""
+    return txt
+
+def create_method():
+    txt = """
+class __method(object):
+    '''A mock class representing method type.'''
+
+    def __init__(self):
+"""
+    if version[0] == 2:
+        txt += """
+        self.im_class = None
+        self.im_self = None
+        self.im_func = None
+"""
+    if version[0] >= 3 or (version[0] == 2 and version[1] >= 6):
+        txt += """
+        self.__func__ = None
+        self.__self__ = None
+"""
+    return txt
 
 def _searchbases(cls, accum):
-# logic copied from inspect.py
+    # logic copied from inspect.py
     if cls not in accum:
         accum.append(cls)
         for x in cls.__bases__:
@@ -84,7 +144,7 @@ def _searchbases(cls, accum):
 
 
 def get_mro(a_class):
-# logic copied from inspect.py
+    # logic copied from inspect.py
     """Returns a tuple of MRO classes."""
     if hasattr(a_class, "__mro__"):
         return a_class.__mro__
@@ -236,7 +296,7 @@ def transform_seq(results, toplevel=True):
                 if toplevel and not has_item_starting_with(ret, "*"):
                     ret.append("*more")
                 else:
-                # we're in a "foo, (bar1, bar2, ...)"; make it "foo, bar_tuple"
+                    # we're in a "foo, (bar1, bar2, ...)"; make it "foo, bar_tuple"
                     return extract_alpha_prefix(results[0][1]) + "_tuple"
             else: # just name
                 ret.append(sanitize_ident(token_name, is_clr))
@@ -271,7 +331,7 @@ def transform_optional_seq(results):
             if len(token) == 3: # name with value; little sense, but can happen in a deeply nested optional
                 ret.append(sanitize_ident(token_name, is_clr) + "=" + sanitize_value(token[2]))
             elif token_name == '...':
-            # we're in a "foo, [bar, ...]"; make it "foo, *bar"
+                # we're in a "foo, [bar, ...]"; make it "foo, *bar"
                 return ["*" + extract_alpha_prefix(
                     results[1][1])] # we must return a seq; [1] is first simple, [1][1] is its name
             else: # just name
@@ -520,25 +580,58 @@ def is_clr_type(clr_type):
 def restore_clr(p_name, p_class):
     """
     Restore the function signature by the CLR type signature
+    :return (is_static, spec, sig_note)
     """
     clr_type = clr.GetClrType(p_class)
     if p_name == '__new__':
         methods = [c for c in clr_type.GetConstructors()]
         if not methods:
-            return p_name + '(*args)', 'cannot find CLR constructor'
+            return False, p_name + '(self, *args)', 'cannot find CLR constructor' # "self" is always first argument of any non-static method
     else:
         methods = [m for m in clr_type.GetMethods() if m.Name == p_name]
         if not methods:
             bases = p_class.__bases__
             if len(bases) == 1 and p_name in dir(bases[0]):
-            # skip inherited methods
-                return None, None
-            return p_name + '(*args)', 'cannot find CLR method'
+                # skip inherited methods
+                return False, None, None
+            return False, p_name + '(self, *args)', 'cannot find CLR method'
+            # "self" is always first argument of any non-static method
 
     parameter_lists = []
     for m in methods:
         parameter_lists.append([p.Name for p in m.GetParameters()])
     params = restore_parameters_for_overloads(parameter_lists)
+    is_static = False
     if not methods[0].IsStatic:
         params = ['self'] + params
-    return build_signature(p_name, params), None
+    else:
+        is_static = True
+    return is_static, build_signature(p_name, params), None
+
+def build_output_name(dirname, qualified_name):
+    qualifiers = qualified_name.split(".")
+    if dirname and not dirname.endswith("/") and not dirname.endswith("\\"):
+        dirname += os.path.sep # "a -> a/"
+    for pathindex in range(len(qualifiers) - 1): # create dirs for all qualifiers but last
+        subdirname = dirname + os.path.sep.join(qualifiers[0: pathindex + 1])
+        if not os.path.isdir(subdirname):
+            action("creating subdir %r", subdirname)
+            os.makedirs(subdirname)
+        init_py = os.path.join(subdirname, "__init__.py")
+        if os.path.isfile(subdirname + ".py"):
+            os.rename(subdirname + ".py", init_py)
+        elif not os.path.isfile(init_py):
+            init = fopen(init_py, "w")
+            init.close()
+    target_name = dirname + os.path.sep.join(qualifiers)
+    if os.path.isdir(target_name):
+        fname = os.path.join(target_name, "__init__.py")
+    else:
+        fname = target_name + ".py"
+
+    dirname = os.path.dirname(fname)
+
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
+
+    return fname

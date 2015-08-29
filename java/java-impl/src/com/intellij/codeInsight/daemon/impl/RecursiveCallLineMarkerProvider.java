@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,18 +62,17 @@ public class RecursiveCallLineMarkerProvider implements LineMarkerProvider {
   }
 
   public static boolean isRecursiveMethodCall(@NotNull PsiMethodCallExpression methodCall) {
-    final PsiMethod method = PsiTreeUtil.getParentOfType(methodCall, PsiMethod.class);
+    final PsiExpression qualifier = methodCall.getMethodExpression().getQualifierExpression();
+    if (qualifier != null && !(qualifier instanceof PsiThisExpression)) {
+      return false;
+    }
+
+    final PsiMethod method = PsiTreeUtil.getParentOfType(methodCall, PsiMethod.class, true, PsiLambdaExpression.class, PsiClass.class);
     if (method == null || !method.getName().equals(methodCall.getMethodExpression().getReferenceName())) {
       return false;
     }
 
-    final PsiMethod resolvedMethod = methodCall.resolveMethod();
-
-    if (!Comparing.equal(method, resolvedMethod)) {
-      return false;
-    }
-    final PsiExpression qualifier = methodCall.getMethodExpression().getQualifierExpression();
-    return qualifier == null || qualifier instanceof PsiThisExpression;
+    return Comparing.equal(method, methodCall.resolveMethod());
   }
 
   private static class RecursiveMethodCallMarkerInfo extends LineMarkerInfo<PsiMethodCallExpression> {

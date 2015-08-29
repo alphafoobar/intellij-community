@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ package com.intellij.execution.process;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressIndicator;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.Charset;
 
@@ -29,24 +31,29 @@ import java.nio.charset.Charset;
  */
 public class CapturingProcessHandler extends OSProcessHandler {
   private static final Logger LOG = Logger.getInstance(CapturingProcessHandler.class);
+
   private final ProcessOutput myOutput = new ProcessOutput();
 
   public CapturingProcessHandler(@NotNull GeneralCommandLine commandLine) throws ExecutionException {
     super(commandLine);
-    addProcessListener(new CapturingProcessAdapter(myOutput));
+    addProcessListener(createProcessAdapter(myOutput));
   }
 
-  public CapturingProcessHandler(final Process process) {
+  public CapturingProcessHandler(@NotNull Process process) {
     this(process, null, "");
   }
 
-  public CapturingProcessHandler(final Process process, final Charset charset) {
+  public CapturingProcessHandler(@NotNull Process process, @Nullable Charset charset) {
     this(process, charset, "");
   }
 
-  public CapturingProcessHandler(final Process process, final Charset charset, final String commandLine) {
+  public CapturingProcessHandler(@NotNull Process process, @Nullable Charset charset, @Nullable String commandLine) {
     super(process, commandLine, charset);
-    addProcessListener(new CapturingProcessAdapter(myOutput));
+    addProcessListener(createProcessAdapter(myOutput));
+  }
+
+  protected CapturingProcessAdapter createProcessAdapter(ProcessOutput processOutput) {
+    return new CapturingProcessAdapter(processOutput);
   }
 
   public ProcessOutput runProcess() {
@@ -96,9 +103,27 @@ public class CapturingProcessHandler extends OSProcessHandler {
 
   @Override
   public Charset getCharset() {
-    if (myCharset != null) {
-      return myCharset;
+    return myCharset != null ? myCharset : super.getCharset();
+  }
+
+  @NotNull
+  public ProcessOutput runProcessWithProgressIndicator(@NotNull ProgressIndicator indicator) {
+    startNotify();
+    while (!waitFor(100)) {
+      if (indicator.isCanceled()) {
+        if (!isProcessTerminating() && !isProcessTerminated()) {
+          destroyProcess();
+        }
+        myOutput.setCancelled();
+        break;
+      }
     }
-    return super.getCharset();
+    if (waitFor()) {
+      myOutput.setExitCode(getProcess().exitValue());
+    }
+    else {
+      LOG.info("runProcess: exit value unavailable");
+    }
+    return myOutput;
   }
 }

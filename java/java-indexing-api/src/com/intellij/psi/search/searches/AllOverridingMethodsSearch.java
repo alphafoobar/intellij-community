@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,9 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiModifier;
-import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.SearchScope;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.EmptyQuery;
 import com.intellij.util.Query;
 import com.intellij.util.QueryExecutor;
@@ -33,7 +34,7 @@ import com.intellij.util.QueryExecutor;
  * (method in original class, overriding method)
  */
 public class AllOverridingMethodsSearch extends ExtensibleQueryFactory<Pair<PsiMethod, PsiMethod>, AllOverridingMethodsSearch.SearchParameters> {
-  public static ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.allOverridingMethodsSearch");
+  public static final ExtensionPointName<QueryExecutor> EP_NAME = ExtensionPointName.create("com.intellij.allOverridingMethodsSearch");
   public static final AllOverridingMethodsSearch INSTANCE = new AllOverridingMethodsSearch();
 
   public static class SearchParameters {
@@ -63,6 +64,6 @@ public class AllOverridingMethodsSearch extends ExtensibleQueryFactory<Pair<PsiM
   }
 
   public static Query<Pair<PsiMethod, PsiMethod>> search(final PsiClass aClass) {
-    return search(aClass, GlobalSearchScope.allScope(aClass.getProject()));
+    return search(aClass, GlobalSearchScope.allScope(PsiUtilCore.getProjectInReadAction(aClass)));
   }
 }

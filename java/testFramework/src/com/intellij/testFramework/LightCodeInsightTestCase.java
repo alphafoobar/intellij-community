@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,12 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.impl.JavaPsiFacadeEx;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * A TestCase for single PsiFile being opened in Editor conversion. See configureXXX and checkResultXXX method docs.
  */
 public abstract class LightCodeInsightTestCase extends LightPlatformCodeInsightTestCase {
-  private LanguageLevel myOldLanguageLevel;
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  protected LightCodeInsightTestCase() {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
   public static JavaPsiFacadeEx getJavaFacade() {
     return JavaPsiFacadeEx.getInstanceEx(ourProject);
   }
@@ -40,18 +34,11 @@ public abstract class LightCodeInsightTestCase extends LightPlatformCodeInsightT
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    myOldLanguageLevel = LanguageLevelProjectExtension.getInstance(getProject()).getLanguageLevel();
     setLanguageLevel(getLanguageLevel());
   }
 
   protected LanguageLevel getLanguageLevel() {
     return LanguageLevel.HIGHEST;
-  }
-
-  @Override
-  protected void tearDown() throws Exception {
-    setLanguageLevel(myOldLanguageLevel);
-    super.tearDown();
   }
 
   protected static void setLanguageLevel(final LanguageLevel level) {
@@ -63,6 +50,7 @@ public abstract class LightCodeInsightTestCase extends LightPlatformCodeInsightT
     return IdeaTestUtil.getMockJdk17();
   }
 
+  @NotNull
   @Override
   protected ModuleType getModuleType() {
     return StdModuleTypes.JAVA;

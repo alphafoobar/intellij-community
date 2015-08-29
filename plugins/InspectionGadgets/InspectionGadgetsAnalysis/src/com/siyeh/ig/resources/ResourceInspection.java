@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2013 Bas Leijdekkers
+ * Copyright 2008-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.siyeh.ig.resources;
 
 import com.intellij.codeInspection.ui.SingleCheckboxOptionsPanel;
+import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -24,6 +25,7 @@ import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
+import com.siyeh.ig.psiutils.MethodCallUtils;
 import com.siyeh.ig.psiutils.ParenthesesUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,8 +34,8 @@ import javax.swing.*;
 
 public abstract class ResourceInspection extends BaseInspection {
 
-  @SuppressWarnings({"PublicField"})
-  public boolean insideTryAllowed = false;
+  @SuppressWarnings("PublicField")
+  public boolean insideTryAllowed;
 
   @Override
   public JComponent createOptionsPanel() {
@@ -43,7 +45,7 @@ public abstract class ResourceInspection extends BaseInspection {
 
   @Override
   @NotNull
-  public String buildErrorString(Object... infos) {
+  public final String buildErrorString(Object... infos) {
     final PsiExpression expression = (PsiExpression)infos[0];
     final PsiType type = expression.getType();
     assert type != null;
@@ -60,33 +62,30 @@ public abstract class ResourceInspection extends BaseInspection {
     @Override
     public void visitMethodCallExpression(@NotNull PsiMethodCallExpression expression) {
       super.visitMethodCallExpression(expression);
-      checkExpression(expression);
+      if (!isNotSafelyClosedResource(expression)) {
+        return;
+      }
+      registerMethodCallError(expression, expression);
     }
 
     @Override
     public void visitNewExpression(@NotNull PsiNewExpression expression) {
       super.visitNewExpression(expression);
-      checkExpression(expression);
+      if (!isNotSafelyClosedResource(expression)) {
+        return;
+      }
+      registerNewExpressionError(expression, expression);
     }
 
-    private void checkExpression(PsiExpression expression) {
+    private boolean isNotSafelyClosedResource(PsiExpression expression) {
       if (!isResourceCreation(expression)) {
-        return;
+        return false;
       }
       final PsiVariable boundVariable = getVariable(expression);
-      if (boundVariable instanceof PsiResourceVariable) {
-        return;
-      }
-      if (isSafelyClosed(boundVariable, expression, insideTryAllowed)) {
-        return;
-      }
-      if (isResourceFactoryClosed(expression, insideTryAllowed)) {
-        return;
-      }
-      if (isResourceEscapingFromMethod(boundVariable, expression)) {
-        return;
-      }
-      registerError(expression, expression);
+      return !(boundVariable instanceof PsiResourceVariable) &&
+             !isSafelyClosed(boundVariable, expression, insideTryAllowed) &&
+             !isResourceFactoryClosed(expression, insideTryAllowed) &&
+             !isResourceEscapingFromMethod(boundVariable, expression);
     }
   }
 
@@ -120,7 +119,7 @@ public abstract class ResourceInspection extends BaseInspection {
     }
   }
 
-  private static boolean isSafelyClosed(@Nullable PsiVariable variable, PsiElement context, boolean insideTryAllowed) {
+  private boolean isSafelyClosed(@Nullable PsiVariable variable, PsiElement context, boolean insideTryAllowed) {
     if (variable == null) {
       return false;
     }
@@ -140,6 +139,9 @@ public abstract class ResourceInspection extends BaseInspection {
           return true;
         }
       }
+    }
+    while (nextStatement != null && !isSignificant(nextStatement)) {
+      nextStatement = PsiTreeUtil.getNextSiblingOfType(nextStatement, PsiStatement.class);
     }
     while (nextStatement == null) {
       statement = PsiTreeUtil.getParentOfType(statement, PsiStatement.class, true);
@@ -163,7 +165,20 @@ public abstract class ResourceInspection extends BaseInspection {
     return isResourceClose(nextStatement, variable);
   }
 
-  protected static boolean isResourceClosedInFinally(@NotNull PsiTryStatement tryStatement, @NotNull PsiVariable variable) {
+  private static boolean isSignificant(@NotNull PsiStatement statement) {
+    final Ref<Boolean> result = new Ref<Boolean>(Boolean.TRUE);
+    statement.accept(new JavaRecursiveElementWalkingVisitor() {
+      @Override
+      public void visitExpression(PsiExpression expression) {
+        super.visitExpression(expression);
+        result.set(Boolean.FALSE);
+        stopWalking();
+      }
+    });
+    return !result.get().booleanValue();
+  }
+
+  boolean isResourceClosedInFinally(@NotNull PsiTryStatement tryStatement, @NotNull PsiVariable variable) {
     final PsiCodeBlock finallyBlock = tryStatement.getFinallyBlock();
     if (finallyBlock == null) {
       return false;
@@ -177,7 +192,7 @@ public abstract class ResourceInspection extends BaseInspection {
     return visitor.containsClose();
   }
 
-  private static boolean isResourceClose(PsiStatement statement, PsiVariable variable) {
+  private boolean isResourceClose(PsiStatement statement, PsiVariable variable) {
     if (statement instanceof PsiExpressionStatement) {
       final PsiExpressionStatement expressionStatement = (PsiExpressionStatement)statement;
       final PsiExpression expression = expressionStatement.getExpression();
@@ -187,7 +202,7 @@ public abstract class ResourceInspection extends BaseInspection {
       final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)expression;
       return isResourceClose(methodCallExpression, variable);
     }
-    else if (statement instanceof PsiTryStatement) {
+    if (statement instanceof PsiTryStatement) {
       final PsiTryStatement tryStatement = (PsiTryStatement)statement;
       final PsiCodeBlock tryBlock = tryStatement.getTryBlock();
       if (tryBlock == null) {
@@ -249,27 +264,38 @@ public abstract class ResourceInspection extends BaseInspection {
     return false;
   }
 
-  private static boolean isResourceClose(PsiMethodCallExpression call, PsiVariable resource) {
-    final PsiReferenceExpression methodExpression = call.getMethodExpression();
-    final String methodName = methodExpression.getReferenceName();
-    if (!HardcodedMethodConstants.CLOSE.equals(methodName)) {
-      return false;
-    }
-    final PsiExpression qualifier = methodExpression.getQualifierExpression();
-    if (!(qualifier instanceof PsiReferenceExpression)) {
-      return false;
-    }
-    final PsiReference reference = (PsiReference)qualifier;
-    final PsiElement referent = reference.resolve();
-    return referent != null && referent.equals(resource);
+  protected boolean isResourceClose(PsiMethodCallExpression call, PsiVariable resource) {
+    return MethodCallUtils.isMethodCallOnVariable(call, resource, HardcodedMethodConstants.CLOSE);
   }
 
-  public static boolean isResourceEscapingFromMethod(PsiVariable boundVariable, PsiExpression resourceCreationExpression) {
-    final PsiElement parent = ParenthesesUtils.getParentSkipParentheses(resourceCreationExpression);
+  static boolean isResourceEscapingFromMethod(PsiVariable boundVariable, PsiExpression resourceCreationExpression) {
+    if (resourceCreationExpression instanceof PsiMethodCallExpression) {
+      final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)resourceCreationExpression;
+      final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
+      final PsiExpression qualifierExpression = methodExpression.getQualifierExpression();
+      if (qualifierExpression instanceof PsiReferenceExpression) {
+        final PsiReferenceExpression referenceExpression = (PsiReferenceExpression)qualifierExpression;
+        final PsiElement target = referenceExpression.resolve();
+        if (target instanceof PsiField) {
+          final PsiField field = (PsiField)target;
+          final String fieldName = field.getName();
+          if ("out".equals(fieldName) || "err".equals(fieldName)) {
+            final PsiClass containingClass = field.getContainingClass();
+            if (containingClass != null && "java.lang.System".equals(containingClass.getQualifiedName())) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    PsiElement parent = ParenthesesUtils.getParentSkipParentheses(resourceCreationExpression);
+    if (parent instanceof PsiConditionalExpression) {
+      parent = ParenthesesUtils.getParentSkipParentheses(parent);
+    }
     if (parent instanceof PsiReturnStatement) {
       return true;
     }
-    else if (parent instanceof PsiAssignmentExpression) {
+    if (parent instanceof PsiAssignmentExpression) {
       final PsiAssignmentExpression assignmentExpression = (PsiAssignmentExpression)parent;
       if (ParenthesesUtils.stripParentheses(assignmentExpression.getRExpression()) != resourceCreationExpression) {
         return true; // non-sensical code
@@ -304,9 +330,8 @@ public abstract class ResourceInspection extends BaseInspection {
     return visitor.isEscaped();
   }
 
-  private static class CloseVisitor extends JavaRecursiveElementVisitor {
-
-    private boolean containsClose = false;
+  private class CloseVisitor extends JavaRecursiveElementWalkingVisitor {
+    private boolean containsClose;
     private final PsiVariable resource;
     private final String resourceName;
 
@@ -387,15 +412,15 @@ public abstract class ResourceInspection extends BaseInspection {
       }
     }
 
-    public boolean containsClose() {
+    private boolean containsClose() {
       return containsClose;
     }
   }
 
-  private static class EscapeVisitor extends JavaRecursiveElementVisitor {
+  private static class EscapeVisitor extends JavaRecursiveElementWalkingVisitor {
 
     private final PsiVariable boundVariable;
-    private boolean escaped = false;
+    private boolean escaped;
 
     public EscapeVisitor(@NotNull PsiVariable boundVariable) {
       this.boundVariable = boundVariable;

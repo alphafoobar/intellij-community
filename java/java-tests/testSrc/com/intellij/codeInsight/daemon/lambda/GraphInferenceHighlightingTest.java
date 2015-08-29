@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,10 @@ public class GraphInferenceHighlightingTest extends LightDaemonAnalyzerTestCase 
     doTest();
   }
 
+  public void testCyclicParamsDependency() throws Exception {
+    doTest();
+  }
+
   public void testInferenceForFirstArg() throws Exception {
     doTest();
   }
@@ -92,6 +96,10 @@ public class GraphInferenceHighlightingTest extends LightDaemonAnalyzerTestCase 
     doTest();
   }
 
+  public void testClsCapturedReturnTypes() throws Exception {
+    doTest();
+  }
+
   public void testOverloadChooserOfReturnType() throws Exception {
     doTest();
   }
@@ -108,13 +116,192 @@ public class GraphInferenceHighlightingTest extends LightDaemonAnalyzerTestCase 
     doTest();
   }
 
+  public void testErasedByReturnConstraint() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA104429() throws Exception {
+    doTest();
+  }
+
+  public void testTargetTypeByOverloadedMethod() throws Exception {
+    doTest();
+  }
+
+  public void testTargetTypeByOverloadedMethod2() throws Exception {
+    doTest();
+  }
+
+  public void testGrandParentTypeParams() throws Exception {
+    doTest();
+  }
+
+  public void testDeepCallsChain() throws Exception {
+    doTest();
+  }
+
+  public void testArrayPassedToVarargsMethod() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA121055() throws Exception {
+    doTest();
+  }
+
+  public void testTargetTypeByAnonymousClass() throws Exception {
+    doTest();
+  }
+
+  public void testStaticInheritorsAmbiguity() throws Exception {
+    doTest();
+  }
+
+  public void testNestedCalls1() throws Exception {
+    doTest();
+  }
+
+  public void testMostSpecificVarargsCase() throws Exception {
+    doTest();
+  }
+
+  public void testLiftedCaptureToOuterCall() throws Exception {
+    doTest();
+  }
+
+  public void testSiteSubstitutionForReturnConstraint() throws Exception {
+    doTest();
+  }
+
+  public void testSiteSubstitutionInExpressionConstraints() throws Exception {
+    doTest();
+  }
+
+  public void testIncorporationWithEqualsBoundsSubstitution() throws Exception {
+    doTest();
+  }
+
+  public void testOuterCallConflictResolution() throws Exception {
+    doTest();
+  }
+
+  public void testVarargsOnNonPertinentPlace() throws Exception {
+    doTest();
+  }
+
+  public void testRawTypeFromParent() throws Exception {
+    doTest();
+  }
+
+  public void testRawTypeFromParentArrayType() throws Exception {
+    doTest();
+  }
+
+  public void testInferFromConditionalExpressionCondition() throws Exception {
+    doTest();
+  }
+
+  public void testPrimitiveWrapperConditionInReturnConstraint() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA128174() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA128101() throws Exception {
+    doTest();
+  }
+
+  public void testOuterCallOverloads() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA127928() throws Exception {
+    doTest();
+  }
+  public void testIDEA128766() throws Exception {
+    doTest();
+  }
+
+  public void testSameMethodNestedChainedCallsNearFunctionInterfaces() throws Exception {
+    doTest();
+  }
+
+  public void testInfiniteTypes() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA126163() throws Exception {
+    doTest();
+  }
+
+  public void testIncompatibleBoundsFromAssignment() throws Exception {
+    doTest();
+  }
+
+  public void testFreshVariablesCreatedDuringResolveDependingOnAlreadyResolvedVariables() throws Exception {
+    doTest();
+  }
+
+  public void testCallToGenericMethodsOfNonGenericClassInsideRawInheritor() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA130549() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA130547() throws Exception {
+    doTest();
+  }
+
+  public void testUncheckedConversionWithRecursiveTypeParams() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA132725() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA134277() throws Exception {
+    doTest();
+  }
+
+  public void testSameMethodCalledWithDifferentArgsResultingInDependenciesBetweenSameTypeParams() throws Exception {
+    doTest();
+  }
+
+  public void testNestedMethodCallsWithVarargs() throws Exception {
+    doTest();
+  }
+
+  public void testDisjunctionTypeEquality() throws Exception {
+    doTest();
+  }
+
+  public void testNestedConditionalExpressions() throws Exception {
+    doTest();
+  }
+
+  public void testOuterMethodCallOnRawType() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA143390() throws Exception {
+    doTest();
+  }
+
+  public void testIntersectionWithArray() throws Exception {
+    doTest();
+  }
+
   private void doTest() throws Exception {
     doTest(false);
   }
 
   private void doTest(final boolean checkWarnings) throws Exception {
     IdeaTestUtil.setTestVersion(JavaSdkVersion.JDK_1_8, getModule(), getTestRootDisposable());
-    doTestNewInference(BASE_PATH + "/" + getTestName(false) + ".java", checkWarnings, false);
+    doTest(BASE_PATH + "/" + getTestName(false) + ".java", checkWarnings, false);
   }
 
   @Override

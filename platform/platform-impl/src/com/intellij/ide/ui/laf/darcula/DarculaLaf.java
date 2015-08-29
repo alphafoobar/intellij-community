@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,25 +24,26 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.ColorUtil;
 import com.intellij.util.containers.hash.HashMap;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import sun.awt.AppContext;
 
 import javax.swing.*;
-import javax.swing.plaf.ColorUIResource;
-import javax.swing.plaf.FontUIResource;
-import javax.swing.plaf.IconUIResource;
-import javax.swing.plaf.InsetsUIResource;
+import javax.swing.plaf.*;
 import javax.swing.plaf.basic.BasicLookAndFeel;
 import javax.swing.plaf.metal.DefaultMetalTheme;
 import javax.swing.plaf.metal.MetalLookAndFeel;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.html.StyleSheet;
 import java.awt.*;
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.URL;
+import java.util.*;
 import java.util.List;
-import java.util.Properties;
 
 /**
  * @author Konstantin Bulenkov
@@ -88,13 +89,25 @@ public class DarculaLaf extends BasicLookAndFeel {
       final Method superMethod = BasicLookAndFeel.class.getDeclaredMethod("getDefaults");
       superMethod.setAccessible(true);
       final UIDefaults metalDefaults = (UIDefaults)superMethod.invoke(new MetalLookAndFeel());
+
       final UIDefaults defaults = (UIDefaults)superMethod.invoke(base);
-      if (SystemInfo.isLinux && !Registry.is("darcula.use.native.fonts.on.linux")) {
-        Font font = findFont("DejaVu Sans");
-        if (font != null) {
+      if (SystemInfo.isLinux) {
+        if (!Registry.is("darcula.use.native.fonts.on.linux")) {
+          Font font = findFont("DejaVu Sans");
+          if (font != null) {
+            for (Object key : defaults.keySet()) {
+              if (key instanceof String && ((String)key).endsWith(".font")) {
+                defaults.put(key, new FontUIResource(font.deriveFont(13f)));
+              }
+            }
+          }
+        } else if (Arrays.asList("CN", "JP", "KR", "TW").contains(Locale.getDefault().getCountry())) {
           for (Object key : defaults.keySet()) {
             if (key instanceof String && ((String)key).endsWith(".font")) {
-              defaults.put(key, new FontUIResource(font.deriveFont(13f)));
+              final Font font = defaults.getFont(key);
+              if (font != null) {
+                defaults.put(key, new FontUIResource("Dialog", font.getStyle(), font.getSize()));
+              }
             }
           }
         }
@@ -102,13 +115,17 @@ public class DarculaLaf extends BasicLookAndFeel {
 
       LafManagerImpl.initInputMapDefaults(defaults);
       initIdeaDefaults(defaults);
-      patchStyledEditorKit();
+      patchStyledEditorKit(defaults);
       patchComboBox(metalDefaults, defaults);
       defaults.remove("Spinner.arrowButtonBorder");
-      defaults.put("Spinner.arrowButtonSize", new Dimension(16, 5));
+      defaults.put("Spinner.arrowButtonSize", JBUI.size(16, 5).asUIResource());
       MetalLookAndFeel.setCurrentTheme(createMetalTheme());
-      if (SystemInfo.isWindows) {
-        //JFrame.setDefaultLookAndFeelDecorated(true);
+      if (SystemInfo.isWindows && Registry.is("ide.win.frame.decoration")) {
+        JFrame.setDefaultLookAndFeelDecorated(true);
+        JDialog.setDefaultLookAndFeelDecorated(true);
+      }
+      if (SystemInfo.isLinux && JBUI.isHiDPI()) {
+        applySystemFonts(defaults);
       }
       defaults.put("EditorPane.font", defaults.getFont("TextField.font"));
       return defaults;
@@ -117,6 +134,23 @@ public class DarculaLaf extends BasicLookAndFeel {
       log(e);
     }
     return super.getDefaults();
+  }
+
+  private static void applySystemFonts(UIDefaults defaults) {
+    try {
+      String fqn = UIManager.getSystemLookAndFeelClassName();
+      Object systemLookAndFeel = Class.forName(fqn).newInstance();
+      final Method superMethod = BasicLookAndFeel.class.getDeclaredMethod("getDefaults");
+      superMethod.setAccessible(true);
+      final UIDefaults systemDefaults = (UIDefaults)superMethod.invoke(systemLookAndFeel);
+      for (Map.Entry<Object, Object> entry : systemDefaults.entrySet()) {
+        if (entry.getValue() instanceof Font) {
+          defaults.put(entry.getKey(), entry.getValue());
+        }
+      }
+    } catch (Exception e) {
+      log(e);
+    }
   }
 
   protected DefaultMetalTheme createMetalTheme() {
@@ -140,20 +174,16 @@ public class DarculaLaf extends BasicLookAndFeel {
   }
 
   @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
-  private void patchStyledEditorKit() {
+  private void patchStyledEditorKit(UIDefaults defaults) {
+    URL url = getClass().getResource(getPrefix() + (JBUI.isHiDPI() ? "@2x.css" : ".css"));
+    StyleSheet styleSheet = UIUtil.loadStyleSheet(url);
+    defaults.put("StyledEditorKit.JBDefaultStyle", styleSheet);
     try {
-      InputStream is = getClass().getResourceAsStream(getPrefix() + ".css");
-      if (is != null) {
-        StyleSheet defaultStyles = new StyleSheet();
-        Reader r = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-        defaultStyles.loadRules(r, null);
-        r.close();
-        final Field keyField = HTMLEditorKit.class.getDeclaredField("DEFAULT_STYLES_KEY");
-        keyField.setAccessible(true);
-        final Object key = keyField.get(null);
-        AppContext.getAppContext().put(key, defaultStyles);
-      }
-    } catch (Exception e) {
+      Field keyField = HTMLEditorKit.class.getDeclaredField("DEFAULT_STYLES_KEY");
+      keyField.setAccessible(true);
+      AppContext.getAppContext().put(keyField.get(null), UIUtil.loadStyleSheet(url));
+    }
+    catch (Exception e) {
       log(e);
     }
   }
@@ -227,7 +257,8 @@ public class DarculaLaf extends BasicLookAndFeel {
       //"ENTER", "selectNextRowCell",
       "shift ENTER", "selectPreviousRowCell",
       "ctrl A", "selectAll",
-      //"ESCAPE", "cancel",
+      "meta A", "selectAll",
+      "ESCAPE", "cancel",
       "F2", "startEditing"
     }));
   }
@@ -272,23 +303,30 @@ public class DarculaLaf extends BasicLookAndFeel {
   }
 
   protected Object parseValue(String key, @NotNull String value) {
+    if ("null".equals(value)) {
+      return null;
+    }
+
     if (key.endsWith("Insets")) {
-      final List<String> numbers = StringUtil.split(value, ",");
-      return new InsetsUIResource(Integer.parseInt(numbers.get(0)),
-                                             Integer.parseInt(numbers.get(1)),
-                                             Integer.parseInt(numbers.get(2)),
-                                             Integer.parseInt(numbers.get(3)));
-    } else if (key.endsWith(".border")) {
+      return parseInsets(value);
+    } else if (key.endsWith("Border") || key.endsWith("border")) {
+
       try {
-        return Class.forName(value).newInstance();
-      } catch (Exception e) {log(e);}
+        if (StringUtil.split(value, ",").size() == 4) {
+          return new BorderUIResource.EmptyBorderUIResource(parseInsets(value));
+        } else {
+          return Class.forName(value).newInstance();
+        }
+      } catch (Exception e) {
+        log(e);
+      }
     } else {
       final Color color = parseColor(value);
       final Integer invVal = getInteger(value);
       final Boolean boolVal = "true".equals(value) ? Boolean.TRUE : "false".equals(value) ? Boolean.FALSE : null;
       Icon icon = value.startsWith("AllIcons.") ? IconLoader.getIcon(value) : null;
       if (icon == null && value.endsWith(".png")) {
-        icon = IconLoader.findIcon(value, getClass(), true);
+        icon = IconLoader.findIcon(value, DarculaLaf.class, true);
       }
       if (color != null) {
         return  new ColorUIResource(color);
@@ -301,6 +339,14 @@ public class DarculaLaf extends BasicLookAndFeel {
       }
     }
     return value;
+  }
+
+  private static Insets parseInsets(String value) {
+    final List<String> numbers = StringUtil.split(value, ",");
+    return new InsetsUIResource(Integer.parseInt(numbers.get(0)),
+                                           Integer.parseInt(numbers.get(1)),
+                                           Integer.parseInt(numbers.get(2)),
+                                           Integer.parseInt(numbers.get(3)));
   }
 
   @SuppressWarnings("UseJBColor")
@@ -390,5 +436,9 @@ public class DarculaLaf extends BasicLookAndFeel {
   @Override
   public boolean getSupportsWindowDecorations() {
     return true;
+  }
+
+  public static Icon loadIcon(String iconName) {
+    return IconLoader.findIcon("/com/intellij/ide/ui/laf/icons/" + iconName, DarculaLaf.class, true);
   }
 }

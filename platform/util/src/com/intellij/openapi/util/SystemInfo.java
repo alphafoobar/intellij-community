@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,13 +42,14 @@ public class SystemInfo extends SystemInfoRt {
   public static final boolean isMac = SystemInfoRt.isMac;
   public static final boolean isOS2 = SystemInfoRt.isOS2;
   public static final boolean isLinux = SystemInfoRt.isLinux;
-  public static final boolean isFreeBSD = _OS_NAME.startsWith("freebsd");
-  public static final boolean isSolaris = _OS_NAME.startsWith("sunos");
+  public static final boolean isFreeBSD = SystemInfoRt.isFreeBSD;
+  public static final boolean isSolaris = SystemInfoRt.isSolaris;
   public static final boolean isUnix = SystemInfoRt.isUnix;
 
   public static final boolean isAppleJvm = isAppleJvm();
   public static final boolean isOracleJvm = isOracleJvm();
   public static final boolean isSunJvm = isSunJvm();
+  public static final boolean isJetbrainsJvm = isJetbrainsJvm();
 
   public static boolean isOsVersionAtLeast(@NotNull String version) {
     return StringUtil.compareVersionNumbers(OS_VERSION, version) >= 0;
@@ -58,6 +59,7 @@ public class SystemInfo extends SystemInfoRt {
   public static final boolean isWin2kOrNewer = isWindows && isOsVersionAtLeast("5.0");
   public static final boolean isWinVistaOrNewer = isWindows && isOsVersionAtLeast("6.0");
   public static final boolean isWin7OrNewer = isWindows && isOsVersionAtLeast("6.1");
+  public static final boolean isWindowsXP = isWindows && (OS_VERSION.equals("5.1") || OS_VERSION.equals("5.2"));
 
   public static final boolean isXWindow = isUnix && !isMac;
 
@@ -129,15 +131,13 @@ public class SystemInfo extends SystemInfoRt {
     return ourHasXdgOpen.getValue();
   }
 
-  /** @deprecated useless (to remove in IDEA 14) */
-  public static final boolean isIntelMac = isMac && "i386".equals(OS_ARCH);
-
   public static final boolean isMacOSTiger = isMac && isOsVersionAtLeast("10.4");
   public static final boolean isMacOSLeopard = isMac && isOsVersionAtLeast("10.5");
   public static final boolean isMacOSSnowLeopard = isMac && isOsVersionAtLeast("10.6");
   public static final boolean isMacOSLion = isMac && isOsVersionAtLeast("10.7");
   public static final boolean isMacOSMountainLion = isMac && isOsVersionAtLeast("10.8");
   public static final boolean isMacOSMavericks = isMac && isOsVersionAtLeast("10.9");
+  public static final boolean isMacOSYosemite = isMac && isOsVersionAtLeast("10.10");
 
   @NotNull
   public static String getMacOSMajorVersion() {
@@ -220,5 +220,10 @@ public class SystemInfo extends SystemInfoRt {
   private static boolean isAppleJvm() {
     final String vendor = SystemProperties.getJavaVmVendor();
     return vendor != null && StringUtil.containsIgnoreCase(vendor, "Apple");
+  }
+
+  private static boolean isJetbrainsJvm() {
+    final String vendor = SystemProperties.getJavaVendor();
+    return vendor != null && StringUtil.containsIgnoreCase(vendor, "jetbrains");
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.psi.xml.XmlTag;
 import com.intellij.semantic.SemService;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.Timings;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.xml.impl.DomFileElementImpl;
 import com.intellij.util.xml.impl.DomTestCase;
 import com.intellij.util.xml.reflect.DomExtender;
@@ -82,6 +83,7 @@ public class DomConcurrencyStressTest extends DomTestCase {
       public void run() {
         for (int i = 0; i < ITERATIONS; i++) {
           ApplicationManager.getApplication().runReadAction(new Runnable() {
+            @Override
             public void run() {
               final DomFileElementImpl<DomElement> element = getDomManager().getFileElement(file);
               assertNotNull(element);
@@ -115,7 +117,7 @@ public class DomConcurrencyStressTest extends DomTestCase {
 
       final CountDownLatch reads = new CountDownLatch(8);
       for (int j = 0; j < 8; j++) {
-        new Thread(){
+        new Thread("dom concurrency"){
           @Override
           public void run() {
             try {
@@ -166,12 +168,8 @@ public class DomConcurrencyStressTest extends DomTestCase {
           element.getFooElements();
         }
       if (myRandom.nextInt(20) < 2) {
-          try {
-            Thread.sleep(1);
-          }
-          catch (InterruptedException ignored) {
-          }
-        }
+        TimeoutUtil.sleep(1);
+      }
       registrar.registerFixedNumberChildExtension(new XmlName("custom-foo", null), MyElement.class);
       myElement.getSomeChild().getFooElements();
       myElement.getFooChild().getFooChild().getAttr();
@@ -197,6 +195,7 @@ public class DomConcurrencyStressTest extends DomTestCase {
         final Random random = new Random();
         for (int i = 0; i < ITERATIONS; i++) {
           ApplicationManager.getApplication().runReadAction(new Runnable() {
+            @Override
             public void run() {
               int offset = random.nextInt(file.getTextLength() - 10);
               XmlTag tag = PsiTreeUtil.findElementOfClassAtOffset(file, offset, XmlTag.class, false);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.StdFileTypes;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
@@ -41,6 +42,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.ClassUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
@@ -82,7 +84,7 @@ public class ImportHelper{
     List<Pair<String, Boolean>> resultList = sortItemsAccordingToSettings(names, mySettings);
 
     final Set<String> classesOrPackagesToImportOnDemand = new THashSet<String>();
-    collectOnDemandImports(resultList, classesOrPackagesToImportOnDemand, ImportHelper.this.mySettings);
+    collectOnDemandImports(resultList, classesOrPackagesToImportOnDemand, this.mySettings);
 
     Set<String> classesToUseSingle = findSingleImports(file, resultList, classesOrPackagesToImportOnDemand);
     Set<String> toReimport = new THashSet<String>();
@@ -362,7 +364,11 @@ public class ImportHelper{
    * Adds import if it is needed.
    * @return false when the FQ-name have to be used in code (e.g. when conflicting imports already exist)
    */
-  public boolean addImport(@NotNull PsiJavaFile file, @NotNull PsiClass refClass){
+  public boolean addImport(@NotNull PsiJavaFile file, @NotNull PsiClass refClass) {
+    return addImport(file, refClass, false);
+  }
+
+  private boolean addImport(@NotNull PsiJavaFile file, @NotNull PsiClass refClass, boolean forceReimport){
     final JavaPsiFacade facade = JavaPsiFacade.getInstance(file.getProject());
     PsiElementFactory factory = facade.getElementFactory();
     PsiResolveHelper helper = facade.getResolveHelper();
@@ -370,14 +376,14 @@ public class ImportHelper{
     String className = refClass.getQualifiedName();
     if (className == null) return true;
 
-    if (!ImportFilter.shouldImport(className)) {
+    if (!ImportFilter.shouldImport(file, className)) {
       return false;
     }
     String packageName = getPackageOrClassName(className);
     String shortName = PsiNameHelper.getShortClassName(className);
 
     PsiClass conflictSingleRef = findSingleImportByShortName(file, shortName);
-    if (conflictSingleRef != null){
+    if (conflictSingleRef != null && !forceReimport){
       return className.equals(conflictSingleRef.getQualifiedName());
     }
 
@@ -406,7 +412,7 @@ public class ImportHelper{
         useOnDemand = false;
       }
       // name of class we try to import is the same as of the class defined in this file
-      if (curRefClass != null) {
+      if (containsInCurrentFile(file, curRefClass)) {
         useOnDemand = true;
       }
       // check conflicts
@@ -422,10 +428,9 @@ public class ImportHelper{
     }
 
     if (useOnDemand &&
-        curRefClass != null &&
         refClass.getContainingClass() != null &&
         mySettings.INSERT_INNER_CLASS_IMPORTS &&
-        "java.lang".equals(StringUtil.getPackageName(curRefClass.getQualifiedName()))) {
+        containsInCurrentFile(file, curRefClass)) {
       return false;
     }
 
@@ -437,15 +442,19 @@ public class ImportHelper{
         for (PsiJavaCodeReferenceElement ref : importRefs) {
           LOG.assertTrue(ref.getParent() instanceof PsiImportStatement);
           if (!ref.isValid()) continue; // todo[dsl] Q?
-          classesToReimport.add((PsiClass)ref.resolve());
           PsiImportStatement importStatement = (PsiImportStatement) ref.getParent();
+          if (importStatement.isForeignFileImport()) {
+            // we should not optimize imports from include files
+            continue;
+          }
+          classesToReimport.add((PsiClass)ref.resolve());
           importStatement.delete();
         }
       }
 
       for (PsiClass aClass : classesToReimport) {
         if (aClass != null) {
-          addImport(file, aClass);
+          addImport(file, aClass, true);
         }
       }
     }
@@ -453,6 +462,17 @@ public class ImportHelper{
       LOG.error(e);
     }
     return true;
+  }
+
+  private static boolean containsInCurrentFile(@NotNull PsiJavaFile file, PsiClass curRefClass) {
+    if (curRefClass != null) {
+      final String curRefClassQualifiedName = curRefClass.getQualifiedName();
+      if (curRefClassQualifiedName != null && 
+          ArrayUtil.find(file.getImplicitlyImportedPackages(), StringUtil.getPackageName(curRefClassQualifiedName)) < 0) {
+         return true;
+      }
+    }
+    return false;
   }
 
   private static void calcClassesToReimport(PsiJavaFile file, JavaPsiFacade facade, PsiResolveHelper helper, String packageName, List<PsiClass> classesToReimport,
@@ -554,6 +574,15 @@ public class ImportHelper{
       }
     }
     return null;
+  }
+  
+  public static boolean isAlreadyImported(@NotNull PsiJavaFile file, @NotNull String fullyQualifiedName) {
+    String className = ClassUtil.extractClassName(fullyQualifiedName);
+    Project project = file.getProject();
+    PsiResolveHelper resolveHelper = PsiResolveHelper.SERVICE.getInstance(project);
+
+    PsiClass psiClass = resolveHelper.resolveReferencedClass(className, file);
+    return psiClass != null && fullyQualifiedName.equals(psiClass.getQualifiedName());
   }
 
   public ASTNode getDefaultAnchor(@NotNull PsiImportList list, @NotNull PsiImportStatementBase statement){
@@ -766,7 +795,7 @@ public class ImportHelper{
             continue;
           }
           if (reference instanceof PsiJavaCodeReferenceElementImpl
-              && ((PsiJavaCodeReferenceElementImpl)reference).getKind() == PsiJavaCodeReferenceElementImpl.CLASS_IN_QUALIFIED_NEW_KIND) {
+              && ((PsiJavaCodeReferenceElementImpl)reference).getKind(((PsiJavaCodeReferenceElementImpl)reference).getContainingFile()) == PsiJavaCodeReferenceElementImpl.CLASS_IN_QUALIFIED_NEW_KIND) {
             continue;
           }
         }
@@ -774,7 +803,7 @@ public class ImportHelper{
         final JavaResolveResult resolveResult = javaReference.advancedResolve(true);
         PsiElement refElement = resolveResult.getElement();
         if (refElement == null && referenceElement != null) {
-          refElement = ResolveClassUtil.resolveClass(referenceElement); // might be uncomplete code
+          refElement = ResolveClassUtil.resolveClass(referenceElement, referenceElement.getContainingFile()); // might be uncomplete code
         }
         if (refElement == null) continue;
 

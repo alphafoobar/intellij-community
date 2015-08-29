@@ -52,12 +52,12 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
 
   public void testNewListAlwaysFirst() {
     def lookup = invokeCompletion(getTestName(false) + ".java")
-    assertPreferredItems 1, 'List', 'AbstractList', 'AbstractSequentialList', 'ArrayList'
+    assertPreferredItems 1, 'List', 'ArrayList', 'AbstractList', 'AbstractSequentialList'
     for (int i = 0; i < StatisticsManager.OBLIVION_THRESHOLD + 10; i++) {
-      imitateItemSelection(lookup, 3) //ArrayList
+      imitateItemSelection(lookup, 3) //AbstractSequentialList
     }
     refreshSorting(lookup)
-    assertPreferredItems 1, 'List', 'ArrayList', 'AbstractList', 'AbstractSequentialList'
+    assertPreferredItems 1, 'List', 'AbstractSequentialList', 'ArrayList', 'AbstractList'
   }
   
   public void testNoStatsOnUnsuccessfulAttempt() {
@@ -149,7 +149,7 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testBooleanValueOf() throws Throwable {
-    checkPreferredItems(0, "b", "valueOf", "valueOf", "Boolean.FALSE", "Boolean.TRUE");
+    checkPreferredItems(0, "b", "Boolean.FALSE", "Boolean.TRUE", "equals", "false", "true", "valueOf", "valueOf");
   }
   
   public void testXmlTagGetAttribute() throws Throwable {
@@ -160,8 +160,12 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
     checkPreferredItems(0, "myVersion", "getVersion", "getSelectedVersion", "calculateVersion");
   }
 
+  public void testPreferFieldsToConstants() {
+    checkPreferredItems(0, "dateField", "LocalDate.MAX", "LocalDate.MIN");
+  }
+
   public void testPreferParametersToGetters() throws Throwable {
-    checkPreferredItems(0, "a", "I._1", "valueOf", "getLastI");
+    checkPreferredItems(0, "a", "I._1", "getLastI", "valueOf");
   }
 
   public void testExpectedInterfaceShouldGoFirst() throws Throwable {
@@ -170,15 +174,15 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
 
   public void testStatisticsAffectsNonPreferableExpectedItems() throws Throwable {
     final LookupImpl lookup = invokeCompletion(getTestName(false) + ".java");
-    assertPreferredItems(1, "List", "AbstractList", "AbstractSequentialList", "ArrayList");
+    assertPreferredItems(1, "List", "ArrayList", "AbstractList", "AbstractSequentialList");
     incUseCount(lookup, 0);
-    assertPreferredItems(1, "List", "AbstractList", "AbstractSequentialList", "ArrayList");
+    assertPreferredItems(1, "List", "ArrayList", "AbstractList", "AbstractSequentialList");
     incUseCount(lookup, 0);
-    assertPreferredItems(0, "List", "AbstractList", "AbstractSequentialList", "ArrayList");
+    assertPreferredItems(0, "List", "ArrayList", "AbstractList", "AbstractSequentialList");
   }
 
   public void testPreferNonRecursiveMethodParams() throws Throwable {
-    checkPreferredItems(0, "b", "hashCode", "s", "a");
+    checkPreferredItems(0, "b", "s", "a", "hashCode");
   }
 
   public void testPreferDelegatingMethodParams() throws Throwable {
@@ -229,8 +233,8 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
     checkPreferredItems(0, "local", "Foo.class", "Bar.class");
   }
 
-  public void testDontPreferCasted() throws Throwable {
-    checkPreferredItems(0, "b", "_o");
+  public void testPreferInstanceofed() throws Throwable {
+    checkPreferredItems(0, "_o", "b");
   }
 
   public void testInnerClassesProximity() throws Throwable {
@@ -302,13 +306,16 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testDispreferGetterInSetterCall() {
-    checkPreferredItems 0, 'getZooColor', 'hashCode', 'color', 'getColor'
+    checkPreferredItems 0, 'color', 'getZooColor', 'getColor', 'hashCode'
   }
   public void testPreferOtherGetterInSetterCall() {
     checkPreferredItems 0, 'color', 'getColor', 'getZooColor', 'hashCode'
   }
   public void testPreferLocalOverFactoryMatchingName() {
     checkPreferredItems 0, 'e', 'createEvent'
+  }
+  public void testPreferLocalOverThis() {
+    checkPreferredItems 0, 'value', 'this', 'hashCode'
   }
 
   public void testGetLogger() {
@@ -319,6 +326,25 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
   public void testPreferLocalWildcardClassOverObject() {
     checkPreferredItems 0, 'type', 'Object.class'
+  }
+
+  public void testPreferStringsInStringConcatenation() {
+    checkPreferredItems 0, 'toString'
+  }
+
+  public void testGlobalStaticMemberStats() {
+    configureNoCompletion(getTestName(false) + ".java")
+    myFixture.complete(CompletionType.SMART, 2)
+    assertPreferredItems 0, 'newLinkedSet0', 'newLinkedSet1', 'newLinkedSet2'
+    incUseCount lookup, 1
+    assertPreferredItems 0, 'newLinkedSet1', 'newLinkedSet0', 'newLinkedSet2'
+  }
+
+  public void testPreferExpectedTypeMembers() {
+    configureNoCompletion(getTestName(false) + ".java")
+    myFixture.complete(CompletionType.SMART, 2)
+    assertPreferredItems 0, 'MyColor.RED', 'Another.RED'
+    assert lookup.items.size() == 2
   }
 
   @Override

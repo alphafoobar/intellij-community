@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
+import java.util.Locale;
 
 public class StringSearcher {
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.text.StringSearcher");
@@ -43,17 +44,26 @@ public class StringSearcher {
   }
 
   public StringSearcher(@NotNull String pattern, boolean caseSensitive, boolean forwardDirection, boolean handleEscapeSequences) {
+    this(pattern, caseSensitive, forwardDirection, handleEscapeSequences, true);
+  }
+
+  public StringSearcher(@NotNull String pattern,
+                        boolean caseSensitive,
+                        boolean forwardDirection,
+                        boolean handleEscapeSequences,
+                        boolean lookForJavaIdentifiersOnlyIfPossible) {
     myHandleEscapeSequences = handleEscapeSequences;
     LOG.assertTrue(!pattern.isEmpty());
     myPattern = pattern;
     myCaseSensitive = caseSensitive;
     myForwardDirection = forwardDirection;
-    myPatternArray = myCaseSensitive ? myPattern.toCharArray() : myPattern.toLowerCase().toCharArray();
+    myPatternArray = myCaseSensitive ? myPattern.toCharArray() : myPattern.toLowerCase(Locale.US).toCharArray();
     myPatternLength = myPatternArray.length;
     Arrays.fill(mySearchTable, -1);
-    myJavaIdentifier = pattern.isEmpty() ||
+    myJavaIdentifier = lookForJavaIdentifiersOnlyIfPossible &&
+                       (pattern.isEmpty() ||
                        Character.isJavaIdentifierPart(pattern.charAt(0)) &&
-                       Character.isJavaIdentifierPart(pattern.charAt(pattern.length() - 1));
+                       Character.isJavaIdentifierPart(pattern.charAt(pattern.length() - 1)));
   }
 
   @NotNull
@@ -122,7 +132,7 @@ public class StringSearcher {
           }
         }
 
-        int step = 0 <= lastChar && lastChar < 128 ? mySearchTable[lastChar] : 1;
+        int step = lastChar < 128 ? mySearchTable[lastChar] : 1;
 
         if (step <= 0) {
           int index;
@@ -159,7 +169,7 @@ public class StringSearcher {
           if (i < 0) return end - start - myPatternLength + 1;
         }
 
-        int step = 0 <= lastChar && lastChar < 128 ? mySearchTable[lastChar] : 1;
+        int step = lastChar < 128 ? mySearchTable[lastChar] : 1;
 
         if (step <= 0) {
           int index;
@@ -187,5 +197,29 @@ public class StringSearcher {
   @Override
   public String toString() {
     return "pattern " + myPattern;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+
+    StringSearcher searcher = (StringSearcher)o;
+
+    if (myCaseSensitive != searcher.myCaseSensitive) return false;
+    if (myForwardDirection != searcher.myForwardDirection) return false;
+    if (myJavaIdentifier != searcher.myJavaIdentifier) return false;
+    if (myHandleEscapeSequences != searcher.myHandleEscapeSequences) return false;
+    return myPattern.equals(searcher.myPattern);
+  }
+
+  @Override
+  public int hashCode() {
+    int result = myPattern.hashCode();
+    result = 31 * result + (myCaseSensitive ? 1 : 0);
+    result = 31 * result + (myForwardDirection ? 1 : 0);
+    result = 31 * result + (myJavaIdentifier ? 1 : 0);
+    result = 31 * result + (myHandleEscapeSequences ? 1 : 0);
+    return result;
   }
 }

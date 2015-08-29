@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,15 @@
  */
 package com.intellij.ide.ui.laf;
 
-import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.laf.darcula.DarculaLaf;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.ui.mac.foundation.Foundation;
 
 import javax.swing.*;
+import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.metal.DefaultMetalTheme;
+import java.awt.*;
+import java.util.HashSet;
 
 /**
  * @author Konstantin Bulenkov
@@ -37,20 +40,44 @@ public class IntelliJLaf extends DarculaLaf {
   }
 
   @Override
+  protected DefaultMetalTheme createMetalTheme() {
+    return new IdeaBlueMetalTheme();
+  }
+
+  @Override
   public UIDefaults getDefaults() {
     UIDefaults defaults = super.getDefaults();
-    if (SystemInfo.isLinux) {
-      try {
-        LafManagerImpl.initFontDefaults(defaults, "Dialog", 12);
-      }
-      catch (Exception ignore) {
-      }
+    if (SystemInfo.isMacOSYosemite) {
+      installMacOSXFonts(defaults);
     }
     return defaults;
   }
 
-  @Override
-  protected DefaultMetalTheme createMetalTheme() {
-    return new IdeaBlueMetalTheme();
+  private static void installMacOSXFonts(UIDefaults defaults) {
+    String face = "HelveticaNeue-CondensedBlack";
+    LafManagerImpl.initFontDefaults(defaults, face, 13);
+    for (Object key : new HashSet<Object>(defaults.keySet())) {
+      Object value = defaults.get(key);
+      if (value instanceof FontUIResource) {
+        FontUIResource font = (FontUIResource)value;
+        if (font.getFamily().equals("Lucida Grande") || font.getFamily().equals("Serif")) {
+          if (!key.toString().contains("Menu")) {
+            defaults.put(key, new FontUIResource(face, font.getStyle(), font.getSize()));
+          }
+        }
+      }
+    }
+    FontUIResource buttonFont = new FontUIResource("HelveticaNeue-Medium", Font.PLAIN, 13);
+    defaults.put("Button.font", buttonFont);
+    Font menuFont = new FontUIResource("Lucida Grande", Font.PLAIN, 14);
+    defaults.put("Menu.font", menuFont);
+    defaults.put("MenuItem.font", menuFont);
+    defaults.put("MenuItem.acceleratorFont", menuFont);
+  }
+
+  public static boolean isGraphite() {
+    // https://developer.apple.com/library/mac/documentation/Cocoa/Reference/ApplicationKit/Classes/NSCell_Class/index.html#//apple_ref/doc/c_ref/NSGraphiteControlTint
+    // NSGraphiteControlTint = 6
+    return Foundation.invoke("NSColor", "currentControlTint").intValue() == 6;
   }
 }

@@ -23,12 +23,9 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Ref;
 import com.intellij.ui.components.JBTabbedPane;
-import org.jetbrains.idea.svn.SvnBundle;
-import org.jetbrains.idea.svn.SvnConfiguration;
-import org.jetbrains.idea.svn.SvnServerFileManager;
-import org.jetbrains.idea.svn.SvnVcs;
-import org.tmatesoft.svn.core.SVNException;
-import org.tmatesoft.svn.core.io.SVNRepository;
+import org.jetbrains.idea.svn.*;
+import org.jetbrains.idea.svn.commandLine.SvnBindException;
+import org.tmatesoft.svn.core.wc.SVNRevision;
 
 import javax.swing.*;
 import java.awt.*;
@@ -45,7 +42,7 @@ public class SvnConfigureProxiesDialog extends DialogWrapper implements Validati
     super(project, true);
     valid = true;
     myProject = project;
-    
+
     setTitle(SvnBundle.message("dialog.title.edit.http.proxies.settings"));
 
     final Ref<SvnServerFileManager> systemManager = new Ref<SvnServerFileManager>();
@@ -58,7 +55,7 @@ public class SvnConfigureProxiesDialog extends DialogWrapper implements Validati
     myUserTab = new SvnConfigureProxiesComponent(userManager.get(), myValidator, this);
 
     init();
-    
+
     mySystemTab.reset();
     myUserTab.reset();
     myValidator.run();
@@ -66,16 +63,10 @@ public class SvnConfigureProxiesDialog extends DialogWrapper implements Validati
 
   public void onError(final String text, final JComponent component, final boolean forbidSave) {
     myTabbedPane.setSelectedComponent(component);
-    String prefixString = "";
-    for (int i = 0; i < myTabbedPane.getComponentCount(); i++) {
-      final Component currentComponent = myTabbedPane.getComponentAt(i);
-      // compare referencies - same objects
-      if (currentComponent == component) {
-        prefixString = myTabbedPane.getTitleAt(i) + ": ";
-      }
-    }
+    String errorPrefix = myTabbedPane.getTitleAt(myTabbedPane.indexOfComponent(component)) + ": ";
+
     setOKActionEnabled(! forbidSave);
-    setInvalid(prefixString + text);
+    setInvalid(errorPrefix + text);
   }
 
   public void onSuccess() {
@@ -131,7 +122,7 @@ public class SvnConfigureProxiesDialog extends DialogWrapper implements Validati
     if(! applyImpl()) {
       return;
     }
-    final Ref<SVNException> excRef = new Ref<SVNException>();
+    final Ref<Exception> excRef = new Ref<Exception>();
     final ProgressManager pm = ProgressManager.getInstance();
     pm.runProcessWithProgressSynchronously(new Runnable() {
       public void run() {
@@ -139,16 +130,11 @@ public class SvnConfigureProxiesDialog extends DialogWrapper implements Validati
         if (pi != null) {
           pi.setText("Connecting to " + url);
         }
-        SVNRepository repository = null;
         try {
-          repository = SvnVcs.getInstance(myProject).createRepository(url);
-          repository.testConnection();
-        } catch (SVNException exc) {
-          excRef.set(exc);
-        } finally {
-          if (repository != null) {
-            repository.closeSession();
-          }
+          SvnVcs.getInstance(myProject).getInfo(SvnUtil.createUrl(url), SVNRevision.HEAD);
+        }
+        catch (SvnBindException e) {
+          excRef.set(e);
         }
       }
     }, "Test connection", true, myProject);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,7 @@
  */
 package com.intellij.openapi.vcs.changes;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.diff.impl.ComparisonPolicy;
 import com.intellij.openapi.diff.impl.external.DiffManagerImpl;
 import com.intellij.openapi.diff.impl.fragments.LineFragment;
 import com.intellij.openapi.diff.impl.highlighting.FragmentSide;
@@ -37,6 +35,7 @@ import com.intellij.openapi.vcs.changes.actions.ShowDiffAction;
 import com.intellij.openapi.vcs.ex.Range;
 import com.intellij.openapi.vcs.impl.LineStatusTrackerManager;
 import com.intellij.openapi.vcs.impl.LineStatusTrackerManagerI;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.BeforeAfter;
 import com.intellij.util.containers.SLRUMap;
@@ -71,7 +70,7 @@ public class FragmentedDiffRequestFromChange {
   }
 
   public PreparedFragmentedContent getRanges(Change change) throws VcsException {
-    final FilePath filePath = ChangesUtil.getFilePath(change);
+    FilePath filePath = ChangesUtil.getFilePath(change);
 
     final RangesCalculator calculator = new RangesCalculator();
     calculator.execute(change, filePath, myRangesCache, LineStatusTrackerManager.getInstance(myProject));
@@ -82,20 +81,15 @@ public class FragmentedDiffRequestFromChange {
     }
     List<BeforeAfter<TextRange>> ranges = calculator.getRanges();
     if (ranges == null || ranges.isEmpty()) return null;
-    FragmentedContent fragmentedContent = new FragmentedContent(calculator.getOldDocument(), calculator.getDocument(), ranges);
-    final FileStatus fs = change.getFileStatus();
-    fragmentedContent.setIsAddition(FileStatus.ADDED.equals(fs));
-    fragmentedContent.setOneSide(FileStatus.ADDED.equals(fs) || FileStatus.DELETED.equals(fs));
+    FragmentedContent fragmentedContent = new FragmentedContent(calculator.getOldDocument(), calculator.getDocument(), ranges, change);
     VirtualFile file = filePath.getVirtualFile();
     if (file == null) {
-      filePath.hardRefresh();
-      file = filePath.getVirtualFile();
+      file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath.getPath());
     }
-    final PreparedFragmentedContent preparedFragmentedContent = new PreparedFragmentedContent(myProject, fragmentedContent,
+    return new PreparedFragmentedContent(myProject, fragmentedContent,
                                     filePath.getName(), filePath.getFileType(),
                                     change.getBeforeRevision() == null ? null : change.getBeforeRevision().getRevisionNumber(),
                                     change.getAfterRevision() == null ? null : change.getAfterRevision().getRevisionNumber(), filePath, file);
-    return preparedFragmentedContent;
   }
 
   private static class RangesCalculator {
@@ -112,66 +106,69 @@ public class FragmentedDiffRequestFromChange {
       return myOldDocument;
     }
 
-    public void execute(final Change change, final FilePath filePath, final SLRUMap<Pair<Long, String>, List<BeforeAfter<TextRange>>> cache,
+    public void execute(final Change change,
+                        final FilePath filePath,
+                        final SLRUMap<Pair<Long, String>, List<BeforeAfter<TextRange>>> cache,
                         final LineStatusTrackerManagerI lstManager) {
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            myDocument = null;
-            myOldDocument = documentFromRevision(change.getBeforeRevision());
-            final String convertedPath = FilePathsHelper.convertPath(filePath);
-            if (filePath.getVirtualFile() != null) {
-              myDocument = FileStatus.DELETED.equals(change.getFileStatus()) ? new DocumentImpl("") :
-                           FileDocumentManager.getInstance().getDocument(filePath.getVirtualFile());
-              if (myDocument != null) {
-                final List<BeforeAfter<TextRange>> cached = cache.get(new Pair<Long, String>(myDocument.getModificationStamp(), convertedPath));
-                if (cached != null) {
-                  myRanges = cached;
-                  return;
-                }
-              }
+      try {
+        myDocument = null;
+        myOldDocument = documentFromRevision(change.getBeforeRevision());
+        final String convertedPath = FilePathsHelper.convertPath(filePath);
+        if (filePath.getVirtualFile() != null) {
+          myDocument = FileStatus.DELETED.equals(change.getFileStatus())
+                       ? new DocumentImpl("")
+                       : FileDocumentManager.getInstance().getDocument(filePath.getVirtualFile());
+          if (myDocument != null) {
+            final List<BeforeAfter<TextRange>> cached = cache.get(new Pair<Long, String>(myDocument.getModificationStamp(), convertedPath));
+            if (cached != null) {
+              myRanges = cached;
+              return;
             }
-
-            if (myDocument == null) {
-              myDocument = documentFromRevision(change.getAfterRevision());
-              final List<BeforeAfter<TextRange>> cached = cache.get(new Pair<Long, String>(-1L, convertedPath));
-              if (cached != null) {
-                myRanges = cached;
-                return;
-              }
-            }
-
-            ComparisonPolicy comparisonPolicy = DiffManagerImpl.getInstanceEx().getComparisonPolicy();
-            if (comparisonPolicy == null) {
-              comparisonPolicy = ComparisonPolicy.DEFAULT;
-            }
-            final TextCompareProcessor processor = new TextCompareProcessor(comparisonPolicy);
-            final ArrayList<LineFragment> lineFragments = processor.process(myOldDocument.getText(), myDocument.getText());
-            myRanges = new ArrayList<BeforeAfter<TextRange>>(lineFragments.size());
-            for (LineFragment lineFragment : lineFragments) {
-              if (! lineFragment.isEqual()) {
-                final TextRange oldRange = lineFragment.getRange(FragmentSide.SIDE1);
-                final TextRange newRange = lineFragment.getRange(FragmentSide.SIDE2);
-                myRanges.add(new BeforeAfter<TextRange>(new UnfairTextRange(myOldDocument.getLineNumber(oldRange.getStartOffset()),
-                                           myOldDocument.getLineNumber(correctRangeEnd(oldRange.getEndOffset(), myOldDocument))),
-                                                        new UnfairTextRange(myDocument.getLineNumber(newRange.getStartOffset()),
-                                           myDocument.getLineNumber(correctRangeEnd(newRange.getEndOffset(), myDocument)))));
-              }
-            }
-            cache.put(new Pair<Long, String>(myDocument.getModificationStamp(), convertedPath), new ArrayList<BeforeAfter<TextRange>>(myRanges));
-          }
-          catch (VcsException e) {
-            myException = e;
-          }
-          catch (FilesTooBigForDiffException e) {
-            myException = new VcsException(e);
           }
         }
-      });
+
+        if (myDocument == null) {
+          myDocument = documentFromRevision(change.getAfterRevision());
+          final List<BeforeAfter<TextRange>> cached = cache.get(new Pair<Long, String>(-1L, convertedPath));
+          if (cached != null) {
+            myRanges = cached;
+            return;
+          }
+        }
+
+        TextCompareProcessor processor = new TextCompareProcessor(DiffManagerImpl.getInstanceEx().getComparisonPolicy());
+        List<LineFragment> lineFragments = processor.process(myOldDocument.getText(), myDocument.getText());
+        myRanges = new ArrayList<BeforeAfter<TextRange>>(lineFragments.size());
+        for (LineFragment lineFragment : lineFragments) {
+          if (!lineFragment.isEqual()) {
+            final TextRange oldRange = lineFragment.getRange(FragmentSide.SIDE1);
+            final TextRange newRange = lineFragment.getRange(FragmentSide.SIDE2);
+            int beforeBegin = myOldDocument.getLineNumber(oldRange.getStartOffset());
+            int beforeEnd = myOldDocument.getLineNumber(correctRangeEnd(oldRange.getEndOffset(), myOldDocument));
+            int afterBegin = myDocument.getLineNumber(newRange.getStartOffset());
+            int afterEnd = myDocument.getLineNumber(correctRangeEnd(newRange.getEndOffset(), myDocument));
+            if (oldRange.isEmpty()) {
+              beforeEnd = beforeBegin - 1;
+            }
+            if (newRange.isEmpty()) {
+              afterEnd = afterBegin - 1;
+            }
+            myRanges
+              .add(new BeforeAfter<TextRange>(new UnfairTextRange(beforeBegin, beforeEnd), new UnfairTextRange(afterBegin, afterEnd)));
+          }
+        }
+        cache
+          .put(new Pair<Long, String>(myDocument.getModificationStamp(), convertedPath), new ArrayList<BeforeAfter<TextRange>>(myRanges));
+      }
+      catch (VcsException e) {
+        myException = e;
+      }
+      catch (FilesTooBigForDiffException e) {
+        myException = new VcsException(e);
+      }
     }
     
-    private int correctRangeEnd(final int end, final Document document) {
+    private static int correctRangeEnd(final int end, final Document document) {
       if (end == 0) return end;
       return "\n".equals(document.getText(new TextRange(end - 1, end))) ? end - 1 : end;
     }
@@ -184,7 +181,7 @@ public class FragmentedDiffRequestFromChange {
       return myException;
     }
 
-    private Document documentFromRevision(final ContentRevision cr) throws VcsException {
+    private static Document documentFromRevision(final ContentRevision cr) throws VcsException {
       final Document oldDocument = new DocumentImpl(StringUtil.convertLineSeparators(notNullContentRevision(cr)),true);
       // todo !!! a question how to show line separators in diff etc
       // todo currently document doesn't allow to put \r as separator
@@ -192,7 +189,7 @@ public class FragmentedDiffRequestFromChange {
       return oldDocument;
     }
 
-    private String notNullContentRevision(final ContentRevision cr) throws VcsException {
+    private static String notNullContentRevision(final ContentRevision cr) throws VcsException {
       if (cr == null) return "";
       String content = cr.getContent();
       return content == null ? "" : content;
@@ -215,8 +212,8 @@ public class FragmentedDiffRequestFromChange {
       final List<BeforeAfter<TextRange>> result = new ArrayList<BeforeAfter<TextRange>>();
       if (myRanges == null || myRanges.isEmpty()) return Collections.emptyList();
       for (Range range : myRanges) {
-        final TextRange before = new TextRange(range.getUOffset1(), range.getUOffset2());
-        final TextRange after = new TextRange(range.getOffset1(), range.getOffset2());
+        final TextRange before = new TextRange(range.getVcsLine1(), range.getVcsLine2());
+        final TextRange after = new TextRange(range.getLine1(), range.getLine2());
         result.add(new BeforeAfter<TextRange>(before, after));
       }
       return result;

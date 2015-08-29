@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
  */
 package com.intellij.openapi.roots.ui.configuration;
 
-import com.intellij.compiler.ModuleCompilerUtil;
 import com.intellij.facet.Facet;
 import com.intellij.facet.FacetModel;
 import com.intellij.facet.impl.ProjectFacetsConfigurator;
 import com.intellij.facet.impl.ui.FacetEditorImpl;
 import com.intellij.ide.actions.ImportModuleAction;
-import com.intellij.ide.util.newProjectWizard.AddModuleWizard;
+import com.intellij.ide.projectWizard.NewProjectWizard;
+import com.intellij.ide.util.newProjectWizard.AbstractProjectWizard;
 import com.intellij.ide.util.projectWizard.ModuleBuilder;
 import com.intellij.ide.util.projectWizard.ProjectBuilder;
 import com.intellij.openapi.Disposable;
@@ -32,6 +32,8 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.ShowSettingsUtil;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -45,16 +47,15 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.StructureConfigurableContext;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.daemon.ModuleProjectStructureElement;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ModifiableArtifactModel;
 import com.intellij.projectImport.ProjectImportBuilder;
 import com.intellij.util.containers.HashMap;
-import com.intellij.util.graph.GraphGenerator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -70,18 +71,20 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
   private static final Logger LOG = Logger.getInstance("#" + ModulesConfigurator.class.getName());
 
   private final Project myProject;
-  private final List<ModuleEditor> myModuleEditors = new ArrayList<ModuleEditor>();
-  private final Comparator<ModuleEditor> myModuleEditorComparator = new Comparator<ModuleEditor>() {
-    @Override
-    public int compare(ModuleEditor editor1, ModuleEditor editor2) {
-      return ModulesAlphaComparator.INSTANCE.compare(editor1.getModule(), editor2.getModule());
-    }
 
-    @SuppressWarnings({"EqualsWhichDoesntCheckParameterClass"})
-    public boolean equals(Object o) {
-      return false;
+  private final Map<Module, ModuleEditor> myModuleEditors = new TreeMap<Module, ModuleEditor>(new Comparator<Module>() {
+    @Override
+    public int compare(Module o1, Module o2) {
+      String n1 = o1.getName();
+      String n2 = o2.getName();
+      int result = n1.compareToIgnoreCase(n2);
+      if (result != 0) {
+        return result;
+      }
+      return n1.compareTo(n2);
     }
-  };
+  });
+
   private boolean myModified = false;
   private ModifiableModuleModel myModuleModel;
   private boolean myModuleModelCommitted = false;
@@ -108,17 +111,18 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
       @Override
       public void run() {
-        for (final ModuleEditor moduleEditor : myModuleEditors) {
+        for (final ModuleEditor moduleEditor : myModuleEditors.values()) {
           Disposer.dispose(moduleEditor);
         }
         myModuleEditors.clear();
 
         myModuleModel.dispose();
 
-        myFacetsConfigurator.disposeEditors();
+        if (myFacetsConfigurator != null) {
+          myFacetsConfigurator.disposeEditors();
+        }
       }
     });
-
   }
 
   @Override
@@ -139,12 +143,7 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
 
   @Nullable
   public ModuleEditor getModuleEditor(Module module) {
-    for (final ModuleEditor moduleEditor : myModuleEditors) {
-      if (module.equals(moduleEditor.getModule())) {
-        return moduleEditor;
-      }
-    }
-    return null;
+    return myModuleEditors.get(module);
   }
 
   @Override
@@ -169,7 +168,7 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
       }
     };
 
-    myModuleEditors.add(moduleEditor);
+    myModuleEditors.put(moduleEditor.getModule(), moduleEditor);
 
     moduleEditor.addChangeListener(this);
     Disposer.register(moduleEditor, new Disposable() {
@@ -201,7 +200,6 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
           for (Module module : modules) {
             getOrCreateModuleEditor(module);
           }
-          Collections.sort(myModuleEditors, myModuleEditorComparator);
         }
       }
     });
@@ -221,19 +219,11 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     myAllModulesChangeListeners.add(listener);
   }
 
-  public GraphGenerator<ModuleRootModel> createGraphGenerator() {
-    final Map<Module, ModuleRootModel> models = new HashMap<Module, ModuleRootModel>();
-    for (ModuleEditor moduleEditor : myModuleEditors) {
-      models.put(moduleEditor.getModule(), moduleEditor.getRootModel());
-    }
-    return ModuleCompilerUtil.createGraphGenerator(models);
-  }
-
   public void apply() throws ConfigurationException {
     // validate content and source roots 
     final Map<VirtualFile, String> contentRootToModuleNameMap = new HashMap<VirtualFile, String>();
     final Map<VirtualFile, VirtualFile> srcRootsToContentRootMap = new HashMap<VirtualFile, VirtualFile>();
-    for (final ModuleEditor moduleEditor : myModuleEditors) {
+    for (final ModuleEditor moduleEditor : myModuleEditors.values()) {
       final ModifiableRootModel rootModel = moduleEditor.getModifiableRootModel();
       final ContentEntry[] contents = rootModel.getContentEntries();
       for (ContentEntry contentEntry : contents) {
@@ -285,7 +275,7 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     }
 
     final List<ModifiableRootModel> models = new ArrayList<ModifiableRootModel>(myModuleEditors.size());
-    for (ModuleEditor moduleEditor : myModuleEditors) {
+    for (ModuleEditor moduleEditor : myModuleEditors.values()) {
       moduleEditor.canApply();
     }
     
@@ -294,44 +284,59 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     for (Map.Entry<Sdk, Sdk> entry : projectJdksModel.getProjectSdks().entrySet()) {
       modifiedToOriginalMap.put(entry.getValue(), entry.getKey());
     }
-    
-    for (final ModuleEditor moduleEditor : myModuleEditors) {
-      final ModifiableRootModel model = moduleEditor.apply();
-      if (model != null) {
-        if (!model.isSdkInherited()) {
-          // make sure the sdk is set to original SDK stored in the JDK Table
-          final Sdk modelSdk = model.getSdk();
-          if (modelSdk != null) {
-            final Sdk original = modifiedToOriginalMap.get(modelSdk);
-            if (original != null) {
-              model.setSdk(original);
+
+    final Ref<ConfigurationException> exceptionRef = Ref.create();
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+      public void run() {
+        ApplicationManager.getApplication().runWriteAction(new Runnable() {
+          @Override
+          public void run() {
+            try {
+              for (final ModuleEditor moduleEditor : myModuleEditors.values()) {
+                final ModifiableRootModel model = moduleEditor.apply();
+                if (model != null) {
+                  if (!model.isSdkInherited()) {
+                    // make sure the sdk is set to original SDK stored in the JDK Table
+                    final Sdk modelSdk = model.getSdk();
+                    if (modelSdk != null) {
+                      final Sdk original = modifiedToOriginalMap.get(modelSdk);
+                      if (original != null) {
+                        model.setSdk(original);
+                      }
+                    }
+                  }
+                  models.add(model);
+                }
+              }
+              myFacetsConfigurator.applyEditors();
+            }
+            catch (ConfigurationException e) {
+              exceptionRef.set(e);
+              return;
+            }
+
+            try {
+              final ModifiableRootModel[] rootModels = models.toArray(new ModifiableRootModel[models.size()]);
+              ModifiableModelCommitter.multiCommit(rootModels, myModuleModel);
+              myModuleModelCommitted = true;
+              myFacetsConfigurator.commitFacets();
+
+            }
+            finally {
+              ModuleStructureConfigurable.getInstance(myProject).getFacetEditorFacade().clearMaps(false);
+
+              myFacetsConfigurator = createFacetsConfigurator();
+              myModuleModel = ModuleManager.getInstance(myProject).getModifiableModel();
+              myModuleModelCommitted = false;
             }
           }
-        }
-        models.add(model);
-      }
-    }
-    myFacetsConfigurator.applyEditors();
-
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          final ModifiableRootModel[] rootModels = models.toArray(new ModifiableRootModel[models.size()]);
-          ModifiableModelCommitter.multiCommit(rootModels, myModuleModel);
-          myModuleModelCommitted = true;
-          myFacetsConfigurator.commitFacets();
-
-        }
-        finally {
-          ModuleStructureConfigurable.getInstance(myProject).getFacetEditorFacade().clearMaps(false);
-
-          myFacetsConfigurator = createFacetsConfigurator();
-          myModuleModel = ModuleManager.getInstance(myProject).getModifiableModel();
-          myModuleModelCommitted = false;
-        }
+        });
       }
     });
+
+    if (!exceptionRef.isNull()) {
+      throw exceptionRef.get();
+    }
 
     myModified = false;
   }
@@ -365,51 +370,50 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     final ProjectBuilder builder = runModuleWizard(parent, anImport);
     if (builder != null ) {
       final List<Module> modules = new ArrayList<Module>();
-      final List<Module> commitedModules;
-      if (builder instanceof ProjectImportBuilder<?>) {
-        final ModifiableArtifactModel artifactModel =
-            ProjectStructureConfigurable.getInstance(myProject).getArtifactsStructureConfigurable().getModifiableArtifactModel();
-        commitedModules = ((ProjectImportBuilder<?>)builder).commit(myProject, myModuleModel, this, artifactModel);
-      }
-      else {
-        commitedModules = builder.commit(myProject, myModuleModel, this);
-      }
-      if (commitedModules != null) {
-        modules.addAll(commitedModules);
-      }
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
-         @Override
-         public void run() {
-           for (Module module : modules) {
-             getOrCreateModuleEditor(module);
-           }
-         }
-       });
+      DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+        @Override
+        public void run() {
+          final List<Module> committedModules;
+          if (builder instanceof ProjectImportBuilder<?>) {
+            final ModifiableArtifactModel artifactModel =
+              ProjectStructureConfigurable.getInstance(myProject).getArtifactsStructureConfigurable().getModifiableArtifactModel();
+            committedModules = ((ProjectImportBuilder<?>)builder).commit(myProject, myModuleModel, ModulesConfigurator.this, artifactModel);
+          }
+          else {
+            committedModules = builder.commit(myProject, myModuleModel, ModulesConfigurator.this);
+          }
+          if (committedModules != null) {
+            modules.addAll(committedModules);
+          }
+          ApplicationManager.getApplication().runWriteAction(new Runnable() {
+            @Override
+            public void run() {
+              for (Module module : modules) {
+                getOrCreateModuleEditor(module);
+              }
+            }
+          });
+        }
+      });
       return modules;
     }
     return null;
   }
 
   private Module createModule(final ModuleBuilder builder) {
-    final Exception[] ex = new Exception[]{null};
-    final Module module = ApplicationManager.getApplication().runWriteAction(new Computable<Module>() {
-      @Override
-      @SuppressWarnings({"ConstantConditions"})
-      public Module compute() {
-        try {
+    try {
+      return ApplicationManager.getApplication().runWriteAction(new ThrowableComputable<Module, Exception>() {
+        @Override
+        public Module compute() throws Exception {
           return builder.createModule(myModuleModel);
         }
-        catch (Exception e) {
-          ex[0] = e;
-          return null;
-        }
-      }
-    });
-    if (ex[0] != null) {
-      Messages.showErrorDialog(ProjectBundle.message("module.add.error.message", ex[0].getMessage()),
-                               ProjectBundle.message("module.add.error.title"));
+      });
     }
-    return module;
+    catch (Exception e) {
+      Messages.showErrorDialog(ProjectBundle.message("module.add.error.message", e.getMessage()),
+                               ProjectBundle.message("module.add.error.title"));
+      return null;
+    }
   }
 
   @Nullable
@@ -420,7 +424,6 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
         @Override
         public void run() {
           getOrCreateModuleEditor(module);
-          Collections.sort(myModuleEditors, myModuleEditorComparator);
         }
       });
       processModuleCountChanged();
@@ -430,17 +433,20 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
 
   @Nullable
   ProjectBuilder runModuleWizard(Component dialogParent, boolean anImport) {
-    AddModuleWizard wizard;
+    AbstractProjectWizard wizard;
     if (anImport) {
       wizard = ImportModuleAction.selectFileAndCreateWizard(myProject, dialogParent);
       if (wizard == null) return null;
-      if (wizard.getStepCount() == 0) return wizard.getProjectBuilder();
+      if (wizard.getStepCount() == 0) {
+        ProjectBuilder builder = wizard.getProjectBuilder();
+        Disposer.dispose(wizard.getDisposable());
+        return builder;
+      }
     }
     else {
-      wizard = new AddModuleWizard(dialogParent, myProject, this);
+      wizard = new NewProjectWizard(myProject, dialogParent, this);
     }
-    wizard.show();
-    if (wizard.isOK()) {
+    if (wizard.showAndGet()) {
       final ProjectBuilder builder = wizard.getProjectBuilder();
       if (builder instanceof ModuleBuilder) {
         final ModuleBuilder moduleBuilder = (ModuleBuilder)builder;
@@ -476,13 +482,13 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
       return false;
     }
     // do remove
-    myModuleEditors.remove(selectedEditor);
+    myModuleEditors.remove(selectedEditor.getModule());
 
     // destroyProcess removed module
     final Module moduleToRemove = selectedEditor.getModule();
     // remove all dependencies on the module that is about to be removed
     List<ModifiableRootModel> modifiableRootModels = new ArrayList<ModifiableRootModel>();
-    for (final ModuleEditor moduleEditor : myModuleEditors) {
+    for (final ModuleEditor moduleEditor : myModuleEditors.values()) {
       final ModifiableRootModel modifiableRootModel = moduleEditor.getModifiableRootModelProxy();
       modifiableRootModels.add(modifiableRootModel);
     }
@@ -497,13 +503,13 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
 
 
   private void processModuleCountChanged() {
-    for (ModuleEditor moduleEditor : myModuleEditors) {
+    for (ModuleEditor moduleEditor : myModuleEditors.values()) {
       moduleEditor.moduleCountChanged();
     }
   }
 
   public void processModuleCompilerOutputChanged(String baseUrl) {
-    for (ModuleEditor moduleEditor : myModuleEditors) {
+    for (ModuleEditor moduleEditor : myModuleEditors.values()) {
       moduleEditor.updateCompilerOutputPathChanged(baseUrl, moduleEditor.getName());
     }
   }
@@ -512,7 +518,7 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
     if (myModuleModel.isChanged()) {
       return true;
     }
-    for (ModuleEditor moduleEditor : myModuleEditors) {
+    for (ModuleEditor moduleEditor : myModuleEditors.values()) {
       if (moduleEditor.isModified()) {
         return true;
       }
@@ -562,13 +568,12 @@ public class ModulesConfigurator implements ModulesProvider, ModuleEditor.Change
   }
 
   public void moduleRenamed(Module module, final String oldName, final String name) {
-    for (ModuleEditor moduleEditor : myModuleEditors) {
-      if (module == moduleEditor.getModule() && Comparing.strEqual(moduleEditor.getName(), oldName)) {
-        moduleEditor.setModuleName(name);
-        moduleEditor.updateCompilerOutputPathChanged(ProjectStructureConfigurable.getInstance(myProject).getProjectConfig().getCompilerOutputUrl(), name);
-        myContext.getDaemonAnalyzer().queueUpdate(new ModuleProjectStructureElement(myContext, module));
-        return;
-      }
+    ModuleEditor moduleEditor = myModuleEditors.get(module);
+    if (moduleEditor != null) {
+      moduleEditor.setModuleName(name);
+      moduleEditor.updateCompilerOutputPathChanged(
+        ProjectStructureConfigurable.getInstance(myProject).getProjectConfig().getCompilerOutputUrl(), name);
+      myContext.getDaemonAnalyzer().queueUpdate(new ModuleProjectStructureElement(myContext, module));
     }
   }
 

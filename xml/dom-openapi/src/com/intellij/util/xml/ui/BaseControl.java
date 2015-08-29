@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.xml.DomElement;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -90,9 +91,11 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
     final JComponent component = getComponentToListenFocusLost(myBoundComponent);
     if (component != null) {
       component.addFocusListener(new FocusListener() {
+        @Override
         public void focusGained(FocusEvent e) {
         }
 
+        @Override
         public void focusLost(FocusEvent e) {
           if (!e.isTemporary() && isValid()) {
             commit();
@@ -111,18 +114,22 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
 
   protected abstract Bound createMainComponent(Bound boundedComponent);
 
+  @Override
   public void bind(JComponent component) {
     initialize((Bound)component);
   }
 
+  @Override
   public void addCommitListener(CommitListener listener) {
     myDispatcher.addListener(listener);
   }
 
+  @Override
   public void removeCommitListener(CommitListener listener) {
     myDispatcher.removeListener(listener);
   }
 
+  @Override
   public final DomElement getDomElement() {
     return myDomWrapper.getWrappedElement();
   }
@@ -131,14 +138,17 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
     return myDomWrapper;
   }
 
+  @Override
   public final Bound getComponent() {
     checkInitialized();
     return myBoundComponent;
   }
 
+  @Override
   public void dispose() {
   }
 
+  @Override
   public final void commit() {
     if (isValid() && !isCommitted()) {
       setValueToXml(getValue());
@@ -160,6 +170,7 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
     return valueInXml instanceof String && valueInControl instanceof String && ((String)valueInXml).trim().equals(((String)valueInControl).trim());
   }
 
+  @Override
   public final void reset() {
     if (!myCommitting) {
       doReset();
@@ -167,6 +178,7 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
     }
   }
 
+  @Override
   public void updateHighlighting() {
     updateComponent();
   }
@@ -195,7 +207,8 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
       final CommitListener multicaster = myDispatcher.getMulticaster();
       multicaster.beforeCommit(this);
       new WriteCommandAction(getProject(), getDomWrapper().getFile()) {
-        protected void run(Result result) throws Throwable {
+        @Override
+        protected void run(@NotNull Result result) throws Throwable {
           doCommit(value);
         }
       }.execute();
@@ -227,10 +240,12 @@ public abstract class BaseControl<Bound extends JComponent, T> extends DomUICont
   }
 
 
+  @Override
   public boolean canNavigate(DomElement element) {
     return false;
   }
 
+  @Override
   public void navigate(DomElement element) {
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,29 +15,16 @@
  */
 package com.intellij.openapi.components.impl.stores;
 
-import com.intellij.openapi.components.StateStorage;
-import com.intellij.openapi.components.StateStorageException;
 import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.components.TrackingPathMacroSubstitutor;
-import com.intellij.openapi.project.impl.ProjectImpl;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-import java.util.Set;
+import java.util.List;
 
-/**
- * @see com.intellij.openapi.project.ex.ProjectEx#getStateStore()
- */
 public interface IProjectStore extends IComponentStore {
-  boolean checkVersion();
-
-  void setProjectFilePath(@NotNull String filePath);
-
   @Nullable
   VirtualFile getProjectBaseDir();
 
@@ -47,7 +34,8 @@ public interface IProjectStore extends IComponentStore {
   @NotNull
   String getProjectName();
 
-  TrackingPathMacroSubstitutor[] getSubstitutors();
+  @NotNull
+  List<TrackingPathMacroSubstitutor> getSubstitutors();
 
   @NotNull
   StorageScheme getStorageScheme();
@@ -55,20 +43,19 @@ public interface IProjectStore extends IComponentStore {
   @Nullable
   String getPresentableUrl();
 
-  boolean reload(@NotNull Set<Pair<VirtualFile,StateStorage>> changedFiles) throws StateStorageException, IOException;
-
-  //------ This methods should be got rid of
-  /** @deprecated to remove in IDEA 14 */
-  void loadProject() throws IOException, JDOMException, InvalidDataException, StateStorageException;
-
   @Nullable
   VirtualFile getProjectFile();
+
+  @NotNull
+  String getProjectFilePath();
 
   @Nullable
   VirtualFile getWorkspaceFile();
 
-  void loadProjectFromTemplate(@NotNull ProjectImpl project);
+  @Nullable
+  String getWorkspaceFilePath();
 
-  @NotNull
-  String getProjectFilePath();
+  void loadProjectFromTemplate(@NotNull Project project);
+
+  void clearStorages();
 }

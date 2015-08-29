@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,64 +15,109 @@
  */
 package com.intellij.execution.ui;
 
+import com.intellij.execution.DefaultExecutionResult;
+import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.process.ProcessHandler;
-import com.intellij.ide.DataManager;
 import com.intellij.ide.HelpIdProvider;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.content.Content;
-import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 
 public class RunContentDescriptor implements Disposable {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.execution.ui.RunContentDescriptor");
-
   private ExecutionConsole myExecutionConsole;
   private ProcessHandler myProcessHandler;
   private JComponent myComponent;
   private final String myDisplayName;
   private final Icon myIcon;
   private final String myHelpId;
+  private RunnerLayoutUi myRunnerLayoutUi = null;
 
   private boolean myActivateToolWindowWhenAdded = true;
+  private boolean myReuseToolWindowActivation = false;
   private long myExecutionId = 0;
   private Computable<JComponent> myFocusComputable = null;
   private boolean myAutoFocusContent = false;
 
-  /**
-   * Used to hack {@link com.intellij.execution.runners.RestartAction}
-   */
   private Content myContent;
-  private Runnable myRestarter;
+  @NotNull
+  private final AnAction[] myRestartActions;
 
-  public RunContentDescriptor(final ExecutionConsole executionConsole,
-                              final ProcessHandler processHandler, final JComponent component, final String displayName, final Icon icon) {
+  @Nullable
+  private final Runnable myActivationCallback;
+
+  public RunContentDescriptor(@Nullable ExecutionConsole executionConsole,
+                              @Nullable ProcessHandler processHandler,
+                              @NotNull JComponent component,
+                              String displayName,
+                              @Nullable Icon icon,
+                              @Nullable Runnable activationCallback) {
+    this(executionConsole, processHandler, component, displayName, icon, activationCallback, null);
+  }
+
+  public RunContentDescriptor(@Nullable ExecutionConsole executionConsole,
+                              @Nullable ProcessHandler processHandler,
+                              @NotNull JComponent component,
+                              String displayName,
+                              @Nullable Icon icon,
+                              @Nullable Runnable activationCallback,
+                              @Nullable AnAction[] restartActions) {
     myExecutionConsole = executionConsole;
     myProcessHandler = processHandler;
     myComponent = component;
     myDisplayName = displayName;
     myIcon = icon;
     myHelpId = myExecutionConsole instanceof HelpIdProvider ? ((HelpIdProvider)myExecutionConsole).getHelpId() : null;
-    DataManager.registerDataProvider(myComponent, new DataProvider() {
+    myActivationCallback = activationCallback;
+    if (myExecutionConsole != null) {
+      Disposer.register(this, myExecutionConsole);
+    }
 
-      @Override
-      public Object getData(@NonNls final String dataId) {
-        if (RunContentManager.RUN_CONTENT_DESCRIPTOR.is(dataId)) {
-          return RunContentDescriptor.this;
-        }
-        return null;
-      }
-    });
+    myRestartActions = restartActions == null ? AnAction.EMPTY_ARRAY : restartActions;
   }
 
-  public RunContentDescriptor(final ExecutionConsole executionConsole,
-                              final ProcessHandler processHandler, final JComponent component, final String displayName) {
-    this(executionConsole, processHandler, component, displayName, null);
+  public RunContentDescriptor(@Nullable ExecutionConsole executionConsole,
+                              @Nullable ProcessHandler processHandler,
+                              @NotNull JComponent component,
+                              String displayName,
+                              @Nullable Icon icon) {
+    this(executionConsole, processHandler, component, displayName, icon, null, null);
+  }
+
+  public RunContentDescriptor(@Nullable ExecutionConsole executionConsole,
+                              @Nullable ProcessHandler processHandler,
+                              @NotNull JComponent component,
+                              String displayName) {
+    this(executionConsole, processHandler, component, displayName, null, null, null);
+  }
+
+  public RunContentDescriptor(@NotNull RunProfile profile, @NotNull ExecutionResult executionResult, @NotNull RunnerLayoutUi ui) {
+    this(executionResult.getExecutionConsole(),
+         executionResult.getProcessHandler(),
+         ui.getComponent(),
+         profile.getName(),
+         profile.getIcon(),
+         null,
+         executionResult instanceof DefaultExecutionResult ? ((DefaultExecutionResult)executionResult).getRestartActions() : null);
+    myRunnerLayoutUi = ui;
+  }
+
+  public Runnable getActivationCallback() {
+    return myActivationCallback;
+  }
+
+  /**
+   * @return actions to restart or rerun
+   */
+  @NotNull
+  public AnAction[] getRestartActions() {
+    return myRestartActions.length == 0 ? AnAction.EMPTY_ARRAY : myRestartActions.clone();
   }
 
   public ExecutionConsole getExecutionConsole() {
@@ -81,15 +126,10 @@ public class RunContentDescriptor implements Disposable {
 
   @Override
   public void dispose() {
-    if (myExecutionConsole != null) {
-      Disposer.dispose(myExecutionConsole);
-      myExecutionConsole = null;
-    }
-    if (myComponent != null) {
-      DataManager.removeDataProvider(myComponent);
-      myComponent = null;
-    }
-    myRestarter = null;
+    myExecutionConsole = null;
+    myComponent = null;
+    myProcessHandler = null;
+    myContent = null;
   }
 
   /**
@@ -127,26 +167,13 @@ public class RunContentDescriptor implements Disposable {
     return myHelpId;
   }
 
-  /**
-   * @see #myContent
-   */
-  public void setAttachedContent(final Content content) {
-    myContent = content;
-  }
-
-  /**
-   * @see #myContent
-   */
+  @Nullable
   public Content getAttachedContent() {
     return myContent;
   }
 
-  public void setRestarter(Runnable runnable) {
-    myRestarter = runnable;
-  }
-
-  public Runnable getRestarter() {
-    return myRestarter;
+  public void setAttachedContent(@NotNull Content content) {
+    myContent = content;
   }
 
   public boolean isActivateToolWindowWhenAdded() {
@@ -155,6 +182,14 @@ public class RunContentDescriptor implements Disposable {
 
   public void setActivateToolWindowWhenAdded(boolean activateToolWindowWhenAdded) {
     myActivateToolWindowWhenAdded = activateToolWindowWhenAdded;
+  }
+
+  public boolean isReuseToolWindowActivation() {
+    return myReuseToolWindowActivation;
+  }
+
+  public void setReuseToolWindowActivation(boolean reuseToolWindowActivation) {
+    myReuseToolWindowActivation = reuseToolWindowActivation;
   }
 
   public long getExecutionId() {
@@ -184,5 +219,18 @@ public class RunContentDescriptor implements Disposable {
 
   public void setAutoFocusContent(boolean autoFocusContent) {
     myAutoFocusContent = autoFocusContent;
+  }
+
+  /**
+   * Returns the runner layout UI interface that can be used to manage the sub-tabs in this run/debug tab, if available.
+   * (The runner layout UI is used, for example, by debugger tabs which have multiple sub-tabs, but is not used by other tabs
+   * which only display a single piece of content.
+   *
+   * @since 14.1
+   * @return the RunnerLayoutUi instance or null if this tab does not use RunnerLayoutUi for managing its contents.
+   */
+  @Nullable
+  public RunnerLayoutUi getRunnerLayoutUi() {
+    return myRunnerLayoutUi;
   }
 }

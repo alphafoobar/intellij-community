@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -152,6 +152,11 @@ public class XmlUnboundNsPrefixInspection extends XmlSuppressableInspectionTool 
       LocalQuickFix fix = isOnTheFly ? XmlQuickFixFactory.getInstance().createNSDeclarationIntentionFix(context, namespacePrefix, token) : null;
       reportTagProblem(element, localizedMessage, range, highlightType, fix, holder);
     }
+    else if (element instanceof XmlAttribute) {
+      LocalQuickFix fix = isOnTheFly ? XmlQuickFixFactory.getInstance().createNSDeclarationIntentionFix(element, namespacePrefix, token) : null;
+      XmlAttribute attribute = (XmlAttribute)element;
+      holder.registerProblem(attribute.getNameElement(), localizedMessage, highlightType, range, fix);
+    }
     else {
       holder.registerProblem(element, localizedMessage, highlightType, range);
     }
@@ -186,7 +191,7 @@ public class XmlUnboundNsPrefixInspection extends XmlSuppressableInspectionTool 
   @Override
   @NotNull
   public String getGroupDisplayName() {
-    return XmlBundle.message("xml.inspections.group.name");
+    return XmlInspectionGroupNames.XML_INSPECTIONS;
   }
 
   @Override

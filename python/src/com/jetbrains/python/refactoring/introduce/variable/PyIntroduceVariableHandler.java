@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,11 @@ public class PyIntroduceVariableHandler extends IntroduceHandler {
 
   @Override
   protected String getHelpId() {
-    return "python.reference.introduceVariable";
+    return "refactoring.introduceVariable";
+  }
+
+  @Override
+  protected String getRefactoringId() {
+    return "refactoring.python.introduce.variable";
   }
 }

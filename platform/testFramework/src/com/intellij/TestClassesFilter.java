@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.intellij;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -26,14 +25,14 @@ import java.util.regex.Pattern;
 public abstract class TestClassesFilter {
   public static final TestClassesFilter ALL_CLASSES = new TestClassesFilter() {
     @Override
-    public boolean matches(String className) {
+    public boolean matches(String className, String moduleName) {
       return true;
     }
   };
 
-  public abstract boolean matches(String className);
+  public abstract boolean matches(String className, String moduleName);
 
-  protected static ArrayList<Pattern> compilePatterns(List<String> filterList) {
+  protected static ArrayList<Pattern> compilePatterns(Collection<String> filterList) {
     ArrayList<Pattern> patterns = new ArrayList<Pattern>();
     for (String aFilter : filterList) {
       String filter = aFilter.trim();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ public class PyMandatoryEncodingInspection extends PyInspection {
 
     @Override
     public void visitPyFile(PyFile node) {
-      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(node.getText());
+      final String charsetString = PythonFileType.getCharsetFromEncodingDeclaration(node);
       if (charsetString == null) {
         TextRange tr = new TextRange(0,0);
         ProblemsHolder holder = getHolder();

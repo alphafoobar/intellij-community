@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,14 @@ import com.intellij.codeInsight.lookup.impl.LookupImpl;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.text.StringUtil;
 
+import java.awt.datatransfer.StringSelection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,16 +54,25 @@ public class DumpLookupElementWeights extends AnAction implements DumbAware {
   }
 
   public static void dumpLookupElementWeights(final LookupImpl lookup) {
-    String sb = StringUtil.join(getLookupElementWeights(lookup), "\n");
+    LookupElement selected = lookup.getCurrentItem();
+    String sb = "selected: " + selected;
+    if (selected != null) {
+      sb += "\nprefix: " + lookup.itemPattern(selected);
+    }
+    sb += "\nweights:\n" + StringUtil.join(getLookupElementWeights(lookup), "\n");
     System.out.println(sb);
     LOG.info(sb);
+    try {
+      CopyPasteManager.getInstance().setContents(new StringSelection(sb));
+    } catch (Exception ignore){}
   }
 
   public static List<String> getLookupElementWeights(LookupImpl lookup) {
     final Map<LookupElement,StringBuilder> strings = lookup.getRelevanceStrings();
     List<String> sb = new ArrayList<String>();
     for (LookupElement item : lookup.getItems()) {
-      String weight = strings.get(item).toString();
+      StringBuilder builder = strings.get(item);
+      String weight = builder == null ? "null" : builder.toString();
       final String s = item.getLookupString() + "\t" + weight;
       sb.add(s);
     }

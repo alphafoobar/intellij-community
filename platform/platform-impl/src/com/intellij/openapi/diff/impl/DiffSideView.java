@@ -23,7 +23,6 @@ import com.intellij.openapi.diff.impl.highlighting.FragmentSide;
 import com.intellij.openapi.diff.impl.util.LabeledEditor;
 import com.intellij.openapi.diff.impl.util.SyncScrollSupport;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.event.EditorMouseAdapter;
 import com.intellij.openapi.editor.event.EditorMouseEvent;
 import com.intellij.openapi.editor.event.EditorMouseEventArea;
@@ -37,6 +36,7 @@ import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.IJSwingUtilities;
 import com.intellij.util.ui.ScrollUtil;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -94,7 +94,7 @@ public class DiffSideView {
       if (fileEditor != null) {
         ScrollUtil.scrollVertically(fileEditor.getComponent(), 0);
         ScrollUtil.scrollHorizontally(fileEditor.getComponent(), 0);
-
+        UIUtil.removeScrollBorder(fileEditor.getComponent());
       }
     } else {
       DataManager.removeDataProvider(myPanel);
@@ -103,6 +103,7 @@ public class DiffSideView {
       applyHighlighter();
       setMouseListeners(source);
       MyEditorFocusListener.install(this);
+      UIUtil.removeScrollBorder(editor.getComponent());
 
       state.restore();
     }
@@ -122,7 +123,7 @@ public class DiffSideView {
     if (editor == null) return;
     EditorHighlighter highlighter = myHighlighterFactory.createHighlighter();
     if (highlighter != null) editor.setHighlighter(highlighter);
-    editor.getColorsScheme().setColor(EditorColors.CARET_ROW_COLOR, null);
+    editor.getSettings().setCaretRowShown(false);
   }
 
   public void setTitle(@NotNull JComponent title) {
@@ -253,7 +254,10 @@ public class DiffSideView {
 
   public JComponent getFocusableComponent() {
     Editor editor = getEditor();
-    return editor != null ? editor.getContentComponent() : MOCK_COMPONENT;
+    if (editor != null) return editor.getContentComponent();
+    FileEditor fileEditor = myEditorSource.getFileEditor();
+    if (fileEditor != null) return fileEditor.getComponent();
+    return MOCK_COMPONENT;
   }
 
   public void becomeMaster() {

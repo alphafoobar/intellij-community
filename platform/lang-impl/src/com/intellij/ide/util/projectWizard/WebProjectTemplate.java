@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,10 @@
  */
 package com.intellij.ide.util.projectWizard;
 
-import com.intellij.openapi.module.*;
-import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModifiableRootModel;
-import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
+import com.intellij.ide.ui.LafManager;
+import com.intellij.ide.ui.LafManagerListener;
+import com.intellij.openapi.module.WebModuleBuilder;
+import com.intellij.openapi.module.WebModuleType;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.platform.ProjectTemplate;
@@ -28,21 +27,35 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.List;
 
 /**
  * @author Dmitry Avdeev
  *         Date: 9/28/12
  */
 public abstract class WebProjectTemplate<T> extends WebProjectGenerator<T> implements ProjectTemplate {
+  private NotNullLazyValue<GeneratorPeer<T>> myPeerHolder;
 
-  private final NotNullLazyValue<GeneratorPeer<T>> myPeerHolder = new NotNullLazyValue<GeneratorPeer<T>>() {
-    @NotNull
-    @Override
-    protected GeneratorPeer<T> compute() {
-      return createPeer();
-    }
-  };
+  public WebProjectTemplate() {
+    reset();
+    //peer stays in memory forever. So, adding hard reference is OK here
+    //todo[Dmitry]: pass some Disposable object here
+    LafManager.getInstance().addLafManagerListener(new LafManagerListener() {
+      @Override
+      public void lookAndFeelChanged(LafManager source) {
+        reset();
+      }
+    });
+  }
+
+  public void reset() {
+    myPeerHolder = new NotNullLazyValue<GeneratorPeer<T>>() {
+      @NotNull
+      @Override
+      protected GeneratorPeer<T> compute() {
+        return createPeer();
+      }
+    };
+  }
 
   @NotNull
   @Override
@@ -60,8 +73,13 @@ public abstract class WebProjectTemplate<T> extends WebProjectGenerator<T> imple
     return WebModuleBuilder.ICON;
   }
 
+  public Icon getLogo() {
+    return getIcon();
+  }
+
   @NotNull
   public GeneratorPeer<T> getPeer() {
     return myPeerHolder.getValue();
   }
+
 }

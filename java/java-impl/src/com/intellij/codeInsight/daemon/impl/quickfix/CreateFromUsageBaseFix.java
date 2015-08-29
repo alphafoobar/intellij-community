@@ -35,6 +35,7 @@ import com.intellij.openapi.ui.popup.PopupChooserBuilder;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.PsiUtilCore;
@@ -118,7 +119,8 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
   protected abstract PsiElement getElement();
 
   private void chooseTargetClass(List<PsiClass> classes, final Editor editor) {
-    final Project project = classes.get(0).getProject();
+    final PsiClass firstClass = classes.get(0);
+    final Project project = firstClass.getProject();
 
     final JList list = new JBList(classes);
     PsiElementListCellRenderer renderer = new PsiClassListCellRenderer();
@@ -127,12 +129,18 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
     final PopupChooserBuilder builder = new PopupChooserBuilder(list);
     renderer.installSpeedSearch(builder);
 
+    final PsiClass preselection = AnonymousTargetClassPreselectionUtil.getPreselection(classes, firstClass);
+    if (preselection != null) {
+      list.setSelectedValue(preselection, true);
+    }
+
     Runnable runnable = new Runnable() {
       @Override
       public void run() {
         int index = list.getSelectedIndex();
         if (index < 0) return;
         final PsiClass aClass = (PsiClass) list.getSelectedValue();
+        AnonymousTargetClassPreselectionUtil.rememberSelection(aClass, firstClass);
         CommandProcessor.getInstance().executeCommand(project, new Runnable() {
           @Override
           public void run() {
@@ -162,20 +170,29 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
     return FileEditorManager.getInstance(project).openTextEditor(descriptor, true);
   }
 
-  protected void setupVisibility(PsiClass parentClass, PsiClass targetClass, PsiModifierList list) throws IncorrectOperationException {
+  protected void setupVisibility(PsiClass parentClass, @NotNull PsiClass targetClass, PsiModifierList list) throws IncorrectOperationException {
     if (targetClass.isInterface() && list.getFirstChild() != null) {
       list.deleteChildRange(list.getFirstChild(), list.getLastChild());
       return;
     }
-    VisibilityUtil.setVisibility(list, getVisibility(parentClass, targetClass));
+    if (targetClass.isInterface()) {
+      return;
+    }
+    final String visibility = getVisibility(parentClass, targetClass);
+    if (VisibilityUtil.ESCALATE_VISIBILITY.equals(visibility)) {
+      list.setModifierProperty(PsiModifier.PRIVATE, true);
+      VisibilityUtil.escalateVisibility(list, parentClass);
+    } else {
+      VisibilityUtil.setVisibility(list, visibility);
+    }
   }
 
   @PsiModifier.ModifierConstant
-  protected String getVisibility(PsiClass parentClass, PsiClass targetClass) {
+  protected String getVisibility(PsiClass parentClass, @NotNull PsiClass targetClass) {
     if (parentClass != null && (parentClass.equals(targetClass) || PsiTreeUtil.isAncestor(targetClass, parentClass, true))) {
       return PsiModifier.PRIVATE;
     } else {
-      return PsiModifier.PUBLIC;
+      return CodeStyleSettingsManager.getSettings(targetClass.getProject()).VISIBILITY;
     }
   }
 
@@ -194,7 +211,10 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
       return resolvedElement instanceof PsiClass;
     } else if (qualifierExpression != null) {
       return false;
-    } else {
+    } else if (ref instanceof PsiMethodReferenceExpression) {
+      return true;
+    }
+    else {
       assert PsiTreeUtil.isAncestor(targetClass, ref, true);
       PsiModifierListOwner owner = PsiTreeUtil.getParentOfType(ref, PsiModifierListOwner.class);
       if (owner instanceof PsiMethod && ((PsiMethod)owner).isConstructor()) {
@@ -287,12 +307,27 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
       PsiJavaCodeReferenceElement ref = newExpression.getClassOrAnonymousClassReference();
       if (ref != null) {
         PsiElement refElement = ref.resolve();
-        if (refElement instanceof PsiClass) psiClass = (PsiClass)refElement;
+        if (refElement instanceof PsiClass) {
+          psiClass = (PsiClass)refElement;
+        } else {
+          final PsiElement refQualifier = ref.getQualifier();
+          if (refQualifier instanceof PsiJavaCodeReferenceElement) {
+            refElement = ((PsiJavaCodeReferenceElement)refQualifier).resolve();
+            if (refElement instanceof PsiClass) {
+              psiClass = (PsiClass)refElement;
+            }
+          }
+        }
       }
     }
     else if (element instanceof PsiReferenceExpression) {
       qualifier = ((PsiReferenceExpression)element).getQualifierExpression();
-      if (qualifier == null) {
+      if (qualifier == null && element instanceof PsiMethodReferenceExpression) {
+        final PsiTypeElement qualifierTypeElement = ((PsiMethodReferenceExpression)element).getQualifierType();
+        if (qualifierTypeElement != null) {
+          psiClass = PsiUtil.resolveClassInType(qualifierTypeElement.getType());
+        }
+      } else if (qualifier == null) {
         final PsiElement parent = element.getParent();
         if (parent instanceof PsiSwitchLabelStatement) {
           final PsiSwitchStatement switchStatement = PsiTreeUtil.getParentOfType(parent, PsiSwitchStatement.class);
@@ -440,7 +475,7 @@ public abstract class CreateFromUsageBaseFix extends BaseIntentionAction {
       } else {
         while (true) {
           final String paramName = idx > 0 ? "T" + idx : "T";
-          if (!typeParamNames.contains(paramName)) {
+          if (typeParamNames.add(paramName)) {
             targetClass.getTypeParameterList().add(factory.createTypeParameterFromText(paramName, null));
             break;
           }

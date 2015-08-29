@@ -16,16 +16,14 @@
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.openapi.fileTypes.StdFileTypes;
-import com.intellij.openapi.module.LanguageLevelUtil;
+import com.intellij.openapi.module.EffectiveLanguageLevelUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
-import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.FileAttribute;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.io.DataInputOutputUtil;
 import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NotNull;
@@ -39,7 +37,7 @@ import java.io.IOException;
  * @author Gregory.Shrago
  */
 public class JavaLanguageLevelPusher implements FilePropertyPusher<LanguageLevel> {
-  public static void pushLanguageLevel(final Project project) {
+  public static void pushLanguageLevel(@NotNull final Project project) {
     PushedFilePropertiesUpdater.getInstance(project).pushAll(new JavaLanguageLevelPusher());
   }
 
@@ -72,7 +70,7 @@ public class JavaLanguageLevelPusher implements FilePropertyPusher<LanguageLevel
 
   @Override
   public LanguageLevel getImmediateValue(@NotNull Module module) {
-    return LanguageLevelUtil.getEffectiveLanguageLevel(module);
+    return EffectiveLanguageLevelUtil.getEffectiveLanguageLevel(module);
   }
 
   @Override
@@ -88,7 +86,7 @@ public class JavaLanguageLevelPusher implements FilePropertyPusher<LanguageLevel
   private static final FileAttribute PERSISTENCE = new FileAttribute("language_level_persistence", 3, true);
 
   @Override
-  public void persistAttribute(@NotNull VirtualFile fileOrDir, @NotNull LanguageLevel level) throws IOException {
+  public void persistAttribute(@NotNull Project project, @NotNull VirtualFile fileOrDir, @NotNull LanguageLevel level) throws IOException {
     final DataInputStream iStream = PERSISTENCE.readAttribute(fileOrDir);
     if (iStream != null) {
       try {
@@ -106,7 +104,7 @@ public class JavaLanguageLevelPusher implements FilePropertyPusher<LanguageLevel
 
     for (VirtualFile child : fileOrDir.getChildren()) {
       if (!child.isDirectory() && StdFileTypes.JAVA.equals(child.getFileType())) {
-        FileBasedIndex.getInstance().requestReindex(child);
+        PushedFilePropertiesUpdater.getInstance(project).filePropertiesChanged(child);
       }
     }
   }

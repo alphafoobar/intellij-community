@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,53 +20,45 @@ import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.UIBasedFileType;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.encoding.EncodingRegistry;
+import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 
 /**
- * Represents bytes as content. May has text representaion.
+ * A {@link DiffContent} represented as a byte array. It still contain a text though.
  */
 public class BinaryContent extends DiffContent {
-  @NotNull
-  private final FileType myFileType;
+  private final Project myProject;
   private final byte[] myBytes;
   private final Charset myCharset;
+  private final FileType myFileType;
+  private final String myFilePath;
   private Document myDocument = null;
-  private String myFilePath;
 
   /**
-   * @param charset use to convert bytes to String. null means bytes can't be converted to text.
-   * Has no sense if fileType.isBinary()
+   * @param charset use to convert bytes to String. null means bytes can't be converted to text. Has no sense if fileType.isBinary()
    * @param fileType type of content
    */
-  public BinaryContent(byte[] bytes, Charset charset, @NotNull FileType fileType) {
-    myFileType = fileType;
+  public BinaryContent(@NotNull Project project, byte[] bytes, @Nullable Charset charset, @NotNull FileType fileType, @Nullable String filePath) {
+    myProject = project;
     myBytes = bytes;
-    if (fileType.isBinary()) {
-      myCharset = null;
-    }
-    else {
-      myCharset = charset;
-    }
-  }
-  
-  public BinaryContent(byte[] bytes, Charset charset, @NotNull FileType fileType, String filePath) {
-    this(bytes, charset, fileType);
+    myCharset = fileType.isBinary() ? null : charset;
+    myFileType = fileType;
     myFilePath = filePath;
   }
 
   @Override
-  @SuppressWarnings({"EmptyCatchBlock"})
   @Nullable
   public Document getDocument() {
     if (myDocument == null) {
@@ -74,15 +66,10 @@ public class BinaryContent extends DiffContent {
 
       String text = null;
       try {
-        if (myCharset == null) {
-          text = CharsetToolkit.bytesToString(myBytes, EncodingRegistry.getInstance().getDefaultCharset());
-        }
-        else {
-          text = CharsetToolkit.bytesToString(myBytes, myCharset);
-        }
+        Charset charset = ObjectUtils.notNull(myCharset, EncodingProjectManager.getInstance(myProject).getDefaultCharset());
+        text = CharsetToolkit.bytesToString(myBytes, charset);
       }
-      catch (IllegalCharsetNameException e) {
-      }
+      catch (IllegalCharsetNameException ignored) { }
 
       //  Still NULL? only if not supported or an exception was thrown.
       //  Decode a string using the truly default encoding.
@@ -92,22 +79,26 @@ public class BinaryContent extends DiffContent {
       myDocument = EditorFactory.getInstance().createDocument(text);
       myDocument.setReadOnly(true);
     }
+
     return myDocument;
   }
 
-  /**
-   * @return null
-   */
   @Override
   public OpenFileDescriptor getOpenFileDescriptor(int offset) {
-    return null;
+    VirtualFile file = findVirtualFile();
+    return file == null ? null : new OpenFileDescriptor(myProject, file, offset);
+  }
+
+  @Nullable
+  private VirtualFile findVirtualFile() {
+    return myFilePath != null ? LocalFileSystem.getInstance().findFileByPath(FileUtil.toSystemIndependentName(myFilePath)) : null;
   }
 
   @Override
   @Nullable
   public VirtualFile getFile() {
     if (myFileType instanceof UIBasedFileType) {
-      final VirtualFile file = LocalFileSystem.getInstance().findFileByIoFile(new File(myFilePath));
+      final VirtualFile file = findVirtualFile();
       if (file != null) {
         final LightVirtualFile lightFile = new LightVirtualFile(file, new String(myBytes), 1);
         lightFile.setOriginalFile(file);

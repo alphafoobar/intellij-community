@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.roots.impl.storage.ClassPathStorageUtil;
 import com.intellij.openapi.roots.impl.storage.ClasspathStorage;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author yole
@@ -27,36 +28,29 @@ import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 @State(
   name = "NewModuleRootManager",
   storages = {
-    @Storage(
-      id = ClassPathStorageUtil.DEFAULT_STORAGE,
-      file = "$MODULE_FILE$"
-    ),
-
-    @Storage(
-          id = ClasspathStorage.SPECIAL_STORAGE,
-          storageClass = ClasspathStorage.class
-    )
-  },
-  storageChooser = ModuleRootManagerComponent.StorageChooser.class
+    @Storage(file = StoragePathMacros.MODULE_FILE),
+    @Storage(id = ClasspathStorage.SPECIAL_STORAGE, storageClass = ClasspathStorage.class)
+  }
 )
 public class ModuleRootManagerComponent extends ModuleRootManagerImpl implements
-                                                                      PersistentStateComponent<ModuleRootManagerImpl.ModuleRootManagerState> {
+                                                                      PersistentStateComponent<ModuleRootManagerImpl.ModuleRootManagerState>,
+                                                                      StateStorageChooserEx {
   public ModuleRootManagerComponent(Module module,
-                                    DirectoryIndex directoryIndex,
                                     ProjectRootManagerImpl projectRootManager,
                                     VirtualFilePointerManager filePointerManager) {
-    super(module, directoryIndex, projectRootManager, filePointerManager);
+    super(module, projectRootManager, filePointerManager);
   }
 
-  public static class StorageChooser implements StateStorageChooser<ModuleRootManagerImpl> {
-    @Override
-    public Storage[] selectStorages(Storage[] storages, ModuleRootManagerImpl moduleRootManager, final StateStorageOperation operation) {
-      final boolean isDefaultStorageType = ClassPathStorageUtil.isDefaultStorage(moduleRootManager.getModule());
-      final String id = isDefaultStorageType ? ClassPathStorageUtil.DEFAULT_STORAGE: ClasspathStorage.SPECIAL_STORAGE;
-      for (Storage storage : storages) {
-        if (storage.id().equals(id)) return new Storage[]{storage};
-      }
-      throw new IllegalArgumentException();
+  @NotNull
+  @Override
+  public Resolution getResolution(@NotNull Storage storage, @NotNull StateStorageOperation operation) {
+    boolean isEffectiveStorage = storage.id().equals(ClassPathStorageUtil.isDefaultStorage(getModule()) ? ClassPathStorageUtil.DEFAULT_STORAGE : ClasspathStorage.SPECIAL_STORAGE);
+    if (operation == StateStorageOperation.READ) {
+      return isEffectiveStorage ? Resolution.DO : Resolution.SKIP;
+    }
+    else {
+      // IDEA-133480 Eclipse integration: .iml content is not reduced on setting Dependencies Storage Format = Eclipse
+      return isEffectiveStorage ? Resolution.DO : (storage.id().equals(ClassPathStorageUtil.DEFAULT_STORAGE) ? Resolution.CLEAR : Resolution.SKIP);
     }
   }
 }

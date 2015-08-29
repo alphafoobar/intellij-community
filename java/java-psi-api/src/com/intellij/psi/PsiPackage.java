@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,6 +84,15 @@ public interface PsiPackage extends PsiCheckedRenameElement, NavigationItem, Psi
   PsiClass[] getClasses(@NotNull GlobalSearchScope scope);
 
   /**
+   * Returns the list of all files in the package, restricted by the specified scope. (This is
+   * normally the list of all files in all directories corresponding to the package, but it can
+   * be modified by custom language plugins which have a different notion of packages.)
+   *
+   * @since 14.1
+   */
+  PsiFile[] getFiles(@NotNull GlobalSearchScope scope);
+
+  /**
    * Returns the list of package-level annotations for the package.
    *
    * @return the list of annotations, or null if the package does not have any package-level annotations.
@@ -111,7 +120,7 @@ public interface PsiPackage extends PsiCheckedRenameElement, NavigationItem, Psi
   @NonNls
   String getName();
 
-  boolean containsClassNamed(String name);
+  boolean containsClassNamed(@NotNull String name);
 
   @NotNull
   PsiClass[] findClassByShortName(@NotNull String name, @NotNull GlobalSearchScope scope);

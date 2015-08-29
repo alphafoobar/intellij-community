@@ -34,6 +34,16 @@ public class PyArgumentListInspectionTest extends PyTestCase {
   public void testDecorators() {
     doTest();
   }
+
+  public void testDecoratorsPy3K() {
+    PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), LanguageLevel.PYTHON30);
+    try {
+      doTest();
+    }
+    finally {
+      PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), null);
+    }
+  }
   
   public void testTupleVsLiteralList() {
     doTest();
@@ -174,6 +184,10 @@ public class PyArgumentListInspectionTest extends PyTestCase {
   }
 
   public void testParameterWithDefaultAfterKeywordContainer2() {  // PY-10351
+    doTest();
+  }
+
+  public void testUnionTypeAttributeCall() {
     doTest();
   }
 }

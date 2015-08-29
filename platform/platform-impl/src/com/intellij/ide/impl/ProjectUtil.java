@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,16 +18,18 @@ package com.intellij.ide.impl;
 import com.intellij.CommonBundle;
 import com.intellij.ide.GeneralSettings;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.RecentProjectsManager;
 import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.components.ComponentsPackage;
 import com.intellij.openapi.components.StorageScheme;
+import com.intellij.openapi.components.impl.stores.IComponentStore;
 import com.intellij.openapi.components.impl.stores.IProjectStore;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.ex.ProjectEx;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.ActionCallback;
@@ -75,7 +77,7 @@ public class ProjectUtil {
       LOG.info(e);
       return;
     }
-    GeneralSettings.getInstance().setLastProjectCreationLocation(path.replace(File.separatorChar, '/'));
+    RecentProjectsManager.getInstance().setLastProjectCreationLocation(path.replace(File.separatorChar, '/'));
   }
 
   /**
@@ -158,7 +160,7 @@ public class ProjectUtil {
 
     Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
     for (Project project : openProjects) {
-      if (isSameProject(path, project)) {
+      if (!project.isDefault() && isSameProject(path, project)) {
         focusProjectWindow(project, false);
         return project;
       }
@@ -205,7 +207,7 @@ public class ProjectUtil {
    */
   public static int confirmOpenNewProject(boolean isNewProject) {
     final GeneralSettings settings = GeneralSettings.getInstance();
-    int confirmOpenNewProject = settings.getConfirmOpenNewProject();
+    int confirmOpenNewProject = ApplicationManager.getApplication().isUnitTestMode() ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW : settings.getConfirmOpenNewProject();
     if (confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK) {
       if (isNewProject) {
         int exitCode = Messages.showYesNoDialog(IdeBundle.message("prompt.open.project.in.new.frame"),
@@ -232,7 +234,7 @@ public class ProjectUtil {
   }
 
   private static boolean isSameProject(String path, Project p) {
-    final IProjectStore projectStore = ((ProjectEx)p).getStateStore();
+    final IProjectStore projectStore = (IProjectStore)ComponentsPackage.getStateStore(p);
 
     String toOpen = FileUtil.toSystemIndependentName(path);
     String existing = FileUtil.toSystemIndependentName(projectStore.getProjectFilePath());
@@ -262,7 +264,7 @@ public class ProjectUtil {
           f.toFront();
           //f.requestFocus();
         }
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     };
 
@@ -275,7 +277,7 @@ public class ProjectUtil {
   }
 
   public static String getBaseDir() {
-    final String lastProjectLocation = GeneralSettings.getInstance().getLastProjectCreationLocation();
+    final String lastProjectLocation = RecentProjectsManager.getInstance().getLastProjectCreationLocation();
     if (lastProjectLocation != null) {
       return lastProjectLocation.replace('/', File.separatorChar);
     }
@@ -283,5 +285,10 @@ public class ProjectUtil {
     //noinspection HardCodedStringLiteral
     return userHome.replace('/', File.separatorChar) + File.separator + ApplicationNamesInfo.getInstance().getLowercaseProductName() +
            "Projects";
+  }
+
+  public static boolean isDirectoryBased(@NotNull Project project) {
+    IComponentStore store = ComponentsPackage.getStateStore(project);
+    return store instanceof IProjectStore && StorageScheme.DIRECTORY_BASED.equals(((IProjectStore)store).getStorageScheme());
   }
 }

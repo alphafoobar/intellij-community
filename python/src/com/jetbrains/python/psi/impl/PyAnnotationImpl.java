@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@
 package com.jetbrains.python.psi.impl;
 
 import com.intellij.lang.ASTNode;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiPolyVariantReference;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.psi.PyAnnotation;
-import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyExpression;
-import com.jetbrains.python.psi.PyReferenceExpression;
 import com.jetbrains.python.psi.stubs.PyAnnotationStub;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * @author yole
@@ -37,21 +34,9 @@ public class PyAnnotationImpl extends PyBaseElementImpl<PyAnnotationStub> implem
     super(stub, PyElementTypes.ANNOTATION);
   }
 
+  @Nullable
   @Override
   public PyExpression getValue() {
     return findChildByClass(PyExpression.class);
-  }
-
-  @Override
-  public PyClass resolveToClass() {
-    PyExpression expr = getValue();
-    if (expr instanceof PyReferenceExpression) {
-      final PsiPolyVariantReference reference = ((PyReferenceExpression)expr).getReference();
-      final PsiElement result = reference.resolve();
-      if (result instanceof PyClass) {
-        return (PyClass) result;
-      }
-    }
-    return null;
   }
 }

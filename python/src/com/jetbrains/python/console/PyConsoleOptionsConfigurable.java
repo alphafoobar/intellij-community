@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -172,7 +172,7 @@ public class PyConsoleOptionsConfigurable extends SearchableConfigurable.Parent.
   private static class PyConsoleOptionsPanel {
     private JPanel myWholePanel;
     private JBCheckBox myShowDebugConsoleByDefault;
-    private JBCheckBox myShowSeparatorLine;
+    private JBCheckBox myIpythonEnabledCheckbox;
     private PyConsoleOptions myOptionsProvider;
 
     public JPanel createPanel(PyConsoleOptions optionsProvider) {
@@ -183,17 +183,17 @@ public class PyConsoleOptionsConfigurable extends SearchableConfigurable.Parent.
 
     public void apply() {
       myOptionsProvider.setShowDebugConsoleByDefault(myShowDebugConsoleByDefault.isSelected());
-      myOptionsProvider.setShowSeparatorLine(myShowSeparatorLine.isSelected());
+      myOptionsProvider.setIpythonEnabled(myIpythonEnabledCheckbox.isSelected());
     }
 
     public void reset() {
       myShowDebugConsoleByDefault.setSelected(myOptionsProvider.isShowDebugConsoleByDefault());
-      myShowSeparatorLine.setSelected(myOptionsProvider.isShowSeparatorLine());
+      myIpythonEnabledCheckbox.setSelected(myOptionsProvider.isIpythonEnabled());
     }
 
     public boolean isModified() {
       return myShowDebugConsoleByDefault.isSelected() != myOptionsProvider.isShowDebugConsoleByDefault() ||
-             myShowSeparatorLine.isSelected() != myOptionsProvider.isShowSeparatorLine();
+             myIpythonEnabledCheckbox.isSelected()  != myOptionsProvider.isIpythonEnabled();
 
     }
   }

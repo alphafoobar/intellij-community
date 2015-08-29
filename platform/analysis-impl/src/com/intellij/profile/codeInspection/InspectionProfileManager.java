@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
 package com.intellij.profile.codeInspection;
 
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.PathManager;
-import com.intellij.openapi.components.NamedComponent;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.profile.ApplicationProfileManager;
@@ -29,9 +27,7 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
@@ -39,9 +35,8 @@ import java.util.List;
  * User: anna
  * Date: 29-Nov-2005
  */
-public abstract class InspectionProfileManager extends ApplicationProfileManager implements SeverityProvider, NamedComponent {
-  @NonNls protected static final String INSPECTION_DIR = "inspection";
-  @NonNls protected static final String FILE_SPEC = "$ROOT_CONFIG$/" + INSPECTION_DIR;
+public abstract class InspectionProfileManager extends ApplicationProfileManager implements SeverityProvider {
+  @NonNls public static final String INSPECTION_DIR = "inspection";
 
   private final List<ProfileChangeAdapter> myProfileChangeAdapters = ContainerUtil.createLockFreeCopyOnWriteList();
 
@@ -57,12 +52,6 @@ public abstract class InspectionProfileManager extends ApplicationProfileManager
   protected abstract void initProfiles();
 
   public abstract Profile loadProfile(@NotNull String path) throws IOException, JDOMException;
-
-  @Override
-  @NotNull
-  public String getComponentName() {
-    return "InspectionProfileManager";
-  }
 
   @Override
   public void addProfileChangeListener(@NotNull final ProfileChangeAdapter listener) {
@@ -94,18 +83,6 @@ public abstract class InspectionProfileManager extends ApplicationProfileManager
     for (ProfileChangeAdapter adapter : myProfileChangeAdapters) {
       adapter.profileActivated(oldProfile, profile);
     }
-  }
-
-  @Nullable
-  public static File getProfileDirectory() {
-    String directoryPath = PathManager.getConfigPath() + File.separator + INSPECTION_DIR;
-    File directory = new File(directoryPath);
-    if (!directory.exists()) {
-      if (!directory.mkdir()) {
-        return null;
-      }
-    }
-    return directory;
   }
 
   @Override

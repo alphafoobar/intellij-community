@@ -17,20 +17,18 @@ package git4idea.stash;
 
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vcs.impl.LocalChangesUnderRoots;
 import com.intellij.openapi.vcs.merge.MergeDialogCustomizer;
-import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.continuation.ContinuationContext;
 import git4idea.GitPlatformFacade;
-import git4idea.GitVcs;
 import git4idea.commands.Git;
 import git4idea.commands.GitCommandResult;
 import git4idea.commands.GitHandlerUtil;
@@ -70,16 +68,7 @@ public class GitStashChangesSaver extends GitChangesSaver {
   }
 
   @Override
-  protected void load(@NotNull ContinuationContext context) {
-    try {
-      load();
-    }
-    catch (VcsException e) {
-      context.handleException(e, false);
-    }
-  }
-
-  public void load() throws VcsException {
+  public void load() {
     for (VirtualFile root : myStashedRoots) {
       loadRoot(root);
     }
@@ -103,12 +92,6 @@ public class GitStashChangesSaver extends GitChangesSaver {
     GitUnstashDialog.showUnstashDialog(myProject, new ArrayList<VirtualFile>(myStashedRoots), myStashedRoots.iterator().next());
   }
 
-  @Override
-  public void refresh() {
-    // we'll refresh more but this way we needn't compute what files under roots etc
-    LocalFileSystem.getInstance().refreshIoFiles(myChangeManager.getAffectedPaths());
-  }
-
   private void stash(Collection<VirtualFile> roots) throws VcsException {
     for (VirtualFile root : roots) {
       final String message = GitHandlerUtil.formatOperationName("Stashing changes from", root);
@@ -130,7 +113,7 @@ public class GitStashChangesSaver extends GitChangesSaver {
    * Returns true if the root was loaded with conflict.
    * False is returned in all other cases: in the case of success and in case of some other error.
    */
-  private boolean loadRoot(final VirtualFile root) throws VcsException {
+  private boolean loadRoot(final VirtualFile root) {
     LOG.info("loadRoot " + root);
     myProgressIndicator.setText(GitHandlerUtil.formatOperationName("Unstashing changes to", root));
 
@@ -142,6 +125,7 @@ public class GitStashChangesSaver extends GitChangesSaver {
 
     GitSimpleEventDetector conflictDetector = new GitSimpleEventDetector(GitSimpleEventDetector.Event.MERGE_CONFLICT_ON_UNSTASH);
     GitCommandResult result = myGit.stashPop(repository, conflictDetector);
+    VfsUtil.markDirtyAndRefresh(false, true, false, root);
     if (result.success()) {
       return false;
     }
@@ -179,24 +163,30 @@ public class GitStashChangesSaver extends GitChangesSaver {
 
     @Override
     protected void notifyUnresolvedRemain() {
-      GitVcs.IMPORTANT_ERROR_NOTIFICATION.createNotification("Local changes were restored with conflicts",
-                                                "Your uncommitted changes were saved to <a href='saver'>stash</a>.<br/>" +
-                                                "Unstash is not complete, you have unresolved merges in your working tree<br/>" +
-                                                "<a href='resolve'>Resolve</a> conflicts and drop the stash.",
-                                                NotificationType.WARNING, new NotificationListener() {
-          @Override
-          public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
-            if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
-              if (event.getDescription().equals("saver")) {
-                // we don't use #showSavedChanges to specify unmerged root first
-                GitUnstashDialog.showUnstashDialog(myProject, new ArrayList<VirtualFile>(myStashedRoots), myStashedRoots.iterator().next()
-                );
-              } else if (event.getDescription().equals("resolve")) {
-                mergeNoProceed();
-              }
-            }
-          }
-      }).notify(myProject);
+      VcsNotifier.getInstance(myProject).notifyImportantWarning("Local changes were restored with conflicts",
+                                                                "Your uncommitted changes were saved to <a href='saver'>stash</a>.<br/>" +
+                                                                "Unstash is not complete, you have unresolved merges in your working tree<br/>" +
+                                                                "<a href='resolve'>Resolve</a> conflicts and drop the stash.",
+                                                                new NotificationListener() {
+                                                                  @Override
+                                                                  public void hyperlinkUpdate(@NotNull Notification notification,
+                                                                                              @NotNull HyperlinkEvent event) {
+                                                                    if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                                                                      if (event.getDescription().equals("saver")) {
+                                                                        // we don't use #showSavedChanges to specify unmerged root first
+                                                                        GitUnstashDialog.showUnstashDialog(myProject,
+                                                                                                           new ArrayList<VirtualFile>(
+                                                                                                             myStashedRoots),
+                                                                                                           myStashedRoots.iterator().next()
+                                                                        );
+                                                                      }
+                                                                      else if (event.getDescription().equals("resolve")) {
+                                                                        mergeNoProceed();
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+      );
     }
 
   }

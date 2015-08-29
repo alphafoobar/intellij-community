@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.IdeBorderFactory;
+import com.intellij.ui.LicensingFacade;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,10 +39,20 @@ import java.awt.*;
 public abstract class AbstractUpdateDialog extends DialogWrapper {
   private final boolean myEnableLink;
 
+  protected String myLicenseInfo = null;
+  protected boolean myPaidUpgrade;
+  protected boolean mySubscriptionLicense = false;
+
   protected AbstractUpdateDialog(boolean enableLink) {
     super(true);
     myEnableLink = enableLink;
-    setTitle(IdeBundle.message("updates.info.dialog.title"));
+    setTitle(IdeBundle.message("update.notifications.title"));
+  }
+
+  protected AbstractUpdateDialog(Component parent, boolean enableLink) {
+    super(parent, true);
+    myEnableLink = enableLink;
+    setTitle(IdeBundle.message("update.notifications.title"));
   }
 
   @Override
@@ -70,8 +81,34 @@ public abstract class AbstractUpdateDialog extends DialogWrapper {
     });
   }
 
+  protected void initLicensingInfo(@NotNull UpdateChannel channel, @NotNull BuildInfo build) {
+    LicensingFacade facade = LicensingFacade.getInstance();
+    if (facade != null) {
+      mySubscriptionLicense = facade.isSubscriptionLicense();
+      if (!channel.getLicensing().equals(UpdateChannel.LICENSING_EAP)) {
+        int majorVersion = build.getMajorVersion();
+        if (majorVersion < 0) {
+          majorVersion = channel.getMajorVersion(); // fallback
+        }
+        final Boolean paidUpgrade = facade.isPaidUpgrade(majorVersion, build.getReleaseDate());
+        if (paidUpgrade == Boolean.TRUE) {
+          myPaidUpgrade = true;
+          myLicenseInfo = IdeBundle.message("updates.channel.key.needed", channel.getEvalDays());
+        }
+        else if (paidUpgrade == Boolean.FALSE) {
+          myLicenseInfo = IdeBundle.message("updates.channel.existing.key");
+        }
+      }
+      else {
+        myLicenseInfo = IdeBundle.message("updates.channel.bundled.key");
+      }
+    }
+  }
+
+
   protected void configureMessageArea(@NotNull JEditorPane area) {
-    configureMessageArea(area, IdeBundle.message("updates.configure.label", ShowSettingsUtil.getSettingsMenuName()), null, null);
+    String messageBody = myEnableLink ? IdeBundle.message("updates.configure.label", ShowSettingsUtil.getSettingsMenuName()) : "";
+    configureMessageArea(area, messageBody, null, null);
   }
 
   protected void configureMessageArea(final @NotNull JEditorPane area,
@@ -95,8 +132,7 @@ public abstract class AbstractUpdateDialog extends DialogWrapper {
         @Override
         public void hyperlinkUpdate(final HyperlinkEvent e) {
           if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
-            UpdateSettingsConfigurable settings = new UpdateSettingsConfigurable();
-            settings.setCheckNowEnabled(false);
+            UpdateSettingsConfigurable settings = new UpdateSettingsConfigurable(false);
             ShowSettingsUtil.getInstance().editConfigurable(area, settings);
           }
         }

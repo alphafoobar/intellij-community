@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.compiler.server.BuildManager;
 import com.intellij.facet.Facet;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -26,9 +27,7 @@ import com.intellij.openapi.options.BaseConfigurable;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectBundle;
-import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.project.*;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.LibraryOrderEntry;
 import com.intellij.openapi.roots.OrderEntry;
@@ -38,17 +37,21 @@ import com.intellij.openapi.roots.ui.configuration.artifacts.ArtifactsStructureC
 import com.intellij.openapi.roots.ui.configuration.projectRoot.*;
 import com.intellij.openapi.ui.DetailsComponent;
 import com.intellij.openapi.ui.MasterDetailsComponent;
-import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.ui.JBSplitter;
+import com.intellij.ui.OnePixelSplitter;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.navigation.BackAction;
 import com.intellij.ui.navigation.ForwardAction;
 import com.intellij.ui.navigation.History;
 import com.intellij.ui.navigation.Place;
 import com.intellij.util.io.storage.HeavyProcessLatch;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
@@ -62,12 +65,13 @@ import java.util.List;
 
 import static com.intellij.openapi.roots.ui.configuration.ProjectStructureConfigurableFilter.ConfigurableId;
 
-public class ProjectStructureConfigurable extends BaseConfigurable implements SearchableConfigurable, Place.Navigator {
+public class ProjectStructureConfigurable extends BaseConfigurable implements SearchableConfigurable, Place.Navigator,
+                                                                              Configurable.NoMargin, Configurable.NoScroll {
 
   public static final DataKey<ProjectStructureConfigurable> KEY = DataKey.create("ProjectStructureConfiguration");
 
   protected final UIState myUiState = new UIState();
-  private Splitter mySplitter;
+  private JBSplitter mySplitter;
   private JComponent myToolbarComponent;
   @NonNls public static final String CATEGORY = "category";
   private JComponent myToFocus;
@@ -173,7 +177,8 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   public JComponent createComponent() {
     myComponent = new MyPanel();
 
-    mySplitter = new Splitter(false, .15f);
+    mySplitter = Registry.is("ide.new.project.settings") ? new OnePixelSplitter(false, .15f) : new JBSplitter(false, .15f);
+    mySplitter.setSplitterProportionKey("ProjectStructure.TopLevelElements");
     mySplitter.setHonorComponentsMinimumSize(true);
 
     initSidePanel();
@@ -192,6 +197,10 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     final ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, toolbarGroup, true);
     toolbar.setTargetComponent(myComponent);
     myToolbarComponent = toolbar.getComponent();
+    if (Registry.is("ide.new.project.settings")) {
+      left.setBackground(UIUtil.SIDE_PANEL_BACKGROUND);
+      myToolbarComponent.setBackground(UIUtil.SIDE_PANEL_BACKGROUND);
+    }
     left.add(myToolbarComponent, BorderLayout.NORTH);
     left.add(mySidePanel, BorderLayout.CENTER);
 
@@ -199,8 +208,10 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     mySplitter.setSecondComponent(myDetails);
 
     myComponent.add(mySplitter, BorderLayout.CENTER);
-    myErrorsComponent = new ConfigurationErrorsComponent(myProject);
-    myComponent.add(myErrorsComponent, BorderLayout.SOUTH);
+    if (!Registry.is("ide.new.project.settings")) {
+      myErrorsComponent = new ConfigurationErrorsComponent(myProject);
+      myComponent.add(myErrorsComponent, BorderLayout.SOUTH);
+    }
 
     myUiInitialized = true;
 
@@ -238,6 +249,11 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
       for (Configurable configurable : adder.getExtraPlatformConfigurables(myProject, myContext)) {
         addConfigurable(configurable, true);
       }
+    }
+
+    if (Registry.is("ide.new.project.settings")) {
+      mySidePanel.addSeparator("--");
+      addErrorPane();
     }
   }
 
@@ -285,6 +301,15 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     addConfigurable(myProjectLibrariesConfig, ConfigurableId.PROJECT_LIBRARIES);
   }
 
+  private void addErrorPane() {
+    addConfigurable(new ErrorPaneConfigurable(myProject, myContext, new Runnable() {
+      @Override
+      public void run() {
+        mySidePanel.getList().repaint();
+      }
+    }), true);
+  }
+
   private void addGlobalLibrariesConfig() {
     addConfigurable(myGlobalLibrariesConfig, ConfigurableId.GLOBAL_LIBRARIES);
   }
@@ -310,10 +335,25 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
         ((BaseStructureConfigurable)each).checkCanApply();
       }
     }
-    for (Configurable each : myName2Config) {
-      if (each.isModified()) {
-        each.apply();
+    final Ref<ConfigurationException> exceptionRef = Ref.create();
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+      @Override
+      public void run() {
+        try {
+          for (Configurable each : myName2Config) {
+            if (each.isModified()) {
+              each.apply();
+            }
+          }
+        }
+        catch (ConfigurationException e) {
+          exceptionRef.set(e);
+        }
       }
+    });
+
+    if (!exceptionRef.isNull()) {
+      throw exceptionRef.get();
     }
 
     myContext.getDaemonAnalyzer().clearCaches();
@@ -328,7 +368,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   public void reset() {
     // need this to ensure VFS operations will not block because of storage flushing
     // and other maintenance IO tasks run in background
-    HeavyProcessLatch.INSTANCE.processStarted();
+    AccessToken token = HeavyProcessLatch.INSTANCE.processStarted("Resetting Project Structure");
 
     try {
       myWasUiDisposed = false;
@@ -363,7 +403,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
       }
     }
     finally {
-      HeavyProcessLatch.INSTANCE.processFinished();
+      token.finish();
     }
   }
 
@@ -392,7 +432,9 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
 
     myModuleConfigurator.getFacetsConfigurator().clearMaps();
 
-    Disposer.dispose(myErrorsComponent);
+    if (myErrorsComponent != null) {
+      Disposer.dispose(myErrorsComponent);
+    }
 
     myUiInitialized = false;
   }
@@ -417,8 +459,11 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   }
 
   public ActionCallback selectProjectGeneralSettings(final boolean requestFocus) {
-    Place place = createPlaceFor(myProjectConfig);
-    return navigateTo(place, requestFocus);
+    return navigateTo(createProjectConfigurablePlace(), requestFocus);
+  }
+
+  public Place createProjectConfigurablePlace() {
+    return createPlaceFor(myProjectConfig);
   }
 
   public ActionCallback select(@Nullable final String moduleToSelect, @Nullable String editorNameToSelect, final boolean requestFocus) {
@@ -644,7 +689,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
 
     @Override
     public Dimension getPreferredSize() {
-      return new Dimension(1024, 768);
+      return JBUI.size(1024, 768);
     }
   }
 
@@ -660,9 +705,4 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   public JComponent getPreferredFocusedComponent() {
     return myToFocus;
   }
-
-  protected void hideErrorsComponent() {
-    myErrorsComponent.setVisible(false);
-  }
-
 }

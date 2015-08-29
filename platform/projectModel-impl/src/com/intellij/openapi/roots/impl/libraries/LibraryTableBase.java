@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,9 @@
 package com.intellij.openapi.roots.impl.libraries;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.roots.OrderRootType;
@@ -41,6 +43,7 @@ public abstract class LibraryTableBase implements PersistentStateComponent<Eleme
   private LibraryModel myModel = new LibraryModel();
   private boolean myFirstLoad = true;
 
+  @NotNull
   @Override
   public ModifiableModel getModifiableModel() {
     return new LibraryModel(myModel);
@@ -65,9 +68,15 @@ public abstract class LibraryTableBase implements PersistentStateComponent<Eleme
         myModel.readExternal(element);
       }
       else {
-        final LibraryModel model = new LibraryModel();
-        model.readExternal(element);
-        commit(model);
+        LibraryModel model = new LibraryModel();
+        AccessToken token = WriteAction.start();
+        try {
+          model.readExternal(element);
+          commit(model);
+        }
+        finally {
+          token.finish();
+        }
       }
 
       myFirstLoad = false;
@@ -95,17 +104,17 @@ public abstract class LibraryTableBase implements PersistentStateComponent<Eleme
   }
 
   @Override
-  public void addListener(Listener listener) {
+  public void addListener(@NotNull Listener listener) {
     myDispatcher.addListener(listener);
   }
 
   @Override
-  public void addListener(Listener listener, Disposable parentDisposable) {
+  public void addListener(@NotNull Listener listener, @NotNull Disposable parentDisposable) {
     myDispatcher.addListener(listener, parentDisposable);
   }
 
   @Override
-  public void removeListener(Listener listener) {
+  public void removeListener(@NotNull Listener listener) {
     myDispatcher.removeListener(listener);
   }
 
@@ -156,6 +165,7 @@ public abstract class LibraryTableBase implements PersistentStateComponent<Eleme
   }
 
   private void commit(LibraryModel model) {
+    myFirstLoad = false;
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     //todo[nik] remove LibraryImpl#equals method instead of using identity sets
     Set<Library> addedLibraries = ContainerUtil.newIdentityTroveSet(model.myLibraries);
@@ -190,8 +200,10 @@ public abstract class LibraryTableBase implements PersistentStateComponent<Eleme
     myModel.writeExternal(element);
   }
 
+  /**
+   * @deprecated to be removed in IDEA 15 (please use ModifiableModel base interface directly)
+   */
   public interface ModifiableModelEx extends ModifiableModel {
-    Library createLibrary(String name, @Nullable PersistentLibraryKind type);
   }
 
   public class LibraryModel implements ModifiableModelEx, JDOMExternalizable {

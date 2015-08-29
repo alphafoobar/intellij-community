@@ -15,22 +15,23 @@
  */
 package org.jetbrains.jps.intellilang.instrumentation;
 
+import com.intellij.compiler.instrumentation.FailSafeMethodVisitor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.asm4.MethodVisitor;
-import org.jetbrains.asm4.Opcodes;
+import org.jetbrains.org.objectweb.asm.MethodVisitor;
+import org.jetbrains.org.objectweb.asm.Opcodes;
 
 /**
  * @author Eugene Zhuravlev
  *         Date: 11/5/13
  */
-public class ErrorPostponingMethodVisitor extends MethodVisitor {
+public class ErrorPostponingMethodVisitor extends FailSafeMethodVisitor {
 
   private final PatternInstrumenter myInstrumenter;
   private final String myMethodName;
 
   public ErrorPostponingMethodVisitor(@NotNull PatternInstrumenter instrumenter, String methodName, @Nullable MethodVisitor methodvisitor) {
-    super(Opcodes.ASM4, methodvisitor);
+    super(Opcodes.ASM5, methodvisitor);
     myInstrumenter = instrumenter;
     myMethodName = methodName;
   }

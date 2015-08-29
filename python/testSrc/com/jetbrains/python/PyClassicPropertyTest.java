@@ -37,8 +37,8 @@ public class PyClassicPropertyTest extends PyTestCase {
 
   public void testV1() throws Exception {
     Property p;
-    Maybe<Callable> accessor;
-    p = myClass.findProperty("v1");
+    Maybe<PyCallable> accessor;
+    p = myClass.findProperty("v1", true, null);
     assertNotNull(p);
     assertNull(p.getDoc());
     PyTargetExpression site = p.getDefinitionSite();
@@ -61,8 +61,8 @@ public class PyClassicPropertyTest extends PyTestCase {
 
   public void testV2() throws Exception {
     Property p;
-    Maybe<Callable> accessor;
-    p = myClass.findProperty("v2");
+    Maybe<PyCallable> accessor;
+    p = myClass.findProperty("v2", true, null);
     assertNotNull(p);
     assertEquals("doc of v2", p.getDoc());
     PyTargetExpression site = p.getDefinitionSite();
@@ -85,8 +85,8 @@ public class PyClassicPropertyTest extends PyTestCase {
   }
 
   public void testV3() throws Exception {
-    Maybe<Callable> accessor;
-    Property p = myClass.findProperty("v3");
+    Maybe<PyCallable> accessor;
+    Property p = myClass.findProperty("v3", true, null);
     assertNotNull(p);
     assertNull(p.getDoc());
     PyTargetExpression site = p.getDefinitionSite();
@@ -95,7 +95,7 @@ public class PyClassicPropertyTest extends PyTestCase {
     accessor = p.getGetter();
     assertFalse(accessor.isDefined());
 
-    final PyType codeInsightType = p.getType(TypeEvalContext.codeInsightFallback());
+    final PyType codeInsightType = p.getType(TypeEvalContext.codeInsightFallback(myClass.getProject()));
     assertNull(codeInsightType);
 
     accessor = p.getSetter();
@@ -111,7 +111,7 @@ public class PyClassicPropertyTest extends PyTestCase {
   /* NOTE: we don't support this yet
   public void testV4() throws Exception {
     Property p;
-    Maybe<Callable> accessor;
+    Maybe<PyCallable> accessor;
     p = myClass.findProperty("v4");
     assertNotNull(p);
     assertEquals("otherworldly", p.getDoc());

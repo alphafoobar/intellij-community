@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.psi.impl.source.resolve;
 
 import com.intellij.openapi.util.Key;
+import com.intellij.psi.PsiAnchor;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.ResolveState;
@@ -43,15 +44,15 @@ public class SymbolCollectingProcessor extends BaseScopeProcessor implements Ele
   }
 
   @Override
-  public void handleEvent(PsiScopeProcessor.Event event, Object associated) {
+  public void handleEvent(@NotNull PsiScopeProcessor.Event event, Object associated) {
     if (event == JavaScopeProcessorEvent.SET_CURRENT_FILE_CONTEXT) {
       myCurrentFileContext = (PsiElement)associated;
     }
   }
 
   @Override
-  public boolean execute(@NotNull PsiElement element, ResolveState state) {
-    if (element instanceof PsiNamedElement) {
+  public boolean execute(@NotNull PsiElement element, @NotNull ResolveState state) {
+    if (element instanceof PsiNamedElement && element.isValid()) {
       PsiNamedElement named = (PsiNamedElement)element;
       String name = named.getName();
       if (name != null) {
@@ -71,21 +72,30 @@ public class SymbolCollectingProcessor extends BaseScopeProcessor implements Ele
   }
 
   public static class ResultWithContext {
-    private final PsiNamedElement myElement;
-    private final PsiElement myFileContext;
+    private final PsiAnchor myElement;
+    private final PsiAnchor myFileContext;
 
     public ResultWithContext(@NotNull PsiNamedElement element, PsiElement fileContext) {
-      myElement = element;
-      myFileContext = fileContext;
+      myElement = PsiAnchor.create(element);
+      myFileContext = fileContext == null ? null : PsiAnchor.create(fileContext);
     }
 
     @NotNull
     public PsiNamedElement getElement() {
-      return myElement;
+      PsiElement element = myElement.retrieve();
+      if (element == null) {
+        String message = "Anchor hasn't survived: " + myElement;
+        if (myElement instanceof PsiAnchor.StubIndexReference) {
+          message += "; diagnostics=" + ((PsiAnchor.StubIndexReference)myElement).diagnoseNull();
+        }
+        throw new AssertionError(message);
+      }
+
+      return (PsiNamedElement)element;
     }
 
     public PsiElement getFileContext() {
-      return myFileContext;
+      return myFileContext == null ? null : myFileContext.retrieve();
     }
 
     @Override

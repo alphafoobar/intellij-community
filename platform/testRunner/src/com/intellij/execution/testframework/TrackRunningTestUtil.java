@@ -20,6 +20,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pass;
 import com.intellij.ui.ClickListener;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -40,7 +41,7 @@ public class TrackRunningTestUtil {
   public static void installStopListeners(final JTree tree, final Disposable parentDisposable, final Pass<AbstractTestProxy> setSelection) {
     final ClickListener userSelectionListener = new ClickListener() {
       @Override
-      public boolean onClick(MouseEvent e, int clickCount) {
+      public boolean onClick(@NotNull MouseEvent e, int clickCount) {
         setSelection.pass(setUserSelection(tree.getPathForLocation(e.getX(), e.getY())));
         return true;
       }
@@ -50,7 +51,9 @@ public class TrackRunningTestUtil {
       @Override
       public void keyPressed(KeyEvent e) {
         final int keyCode = e.getKeyCode();
-        if (keyCode == KeyEvent.VK_DOWN || keyCode == KeyEvent.VK_LEFT || keyCode == KeyEvent.VK_UP || keyCode == KeyEvent.VK_RIGHT) {
+        if (keyCode == KeyEvent.VK_DOWN || keyCode == KeyEvent.VK_UP ||
+            keyCode == KeyEvent.VK_LEFT || keyCode == KeyEvent.VK_RIGHT ||
+            keyCode == KeyEvent.VK_PAGE_DOWN || keyCode == KeyEvent.VK_PAGE_UP) {
           setSelection.pass(setUserSelection(tree.getSelectionPath()));
         }
       }

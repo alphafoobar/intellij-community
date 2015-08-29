@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import com.intellij.openapi.vcs.impl.BackgroundableActionEnabledHandler;
 import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
 import com.intellij.openapi.vcs.impl.VcsBackgroundableActions;
 import com.intellij.openapi.vcs.impl.VcsBackgroundableComputable;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
 import com.intellij.vcsUtil.VcsUtil;
@@ -157,9 +158,8 @@ public class VcsHistoryProviderBackgroundableProxy {
     ProgressManager.getInstance().run(new Task.Backgroundable(myProject, VcsBundle.message("loading.file.history.progress"),
                                                               true, BackgroundFromStartOption.getInstance()) {
       public void run(@NotNull ProgressIndicator indicator) {
-        if (indicator != null) {
-          indicator.setText(VcsUtil.getPathForProgressPresentation(filePath.getIOFile()));
-        }
+        indicator.setText(VcsUtil.getPathForProgressPresentation(filePath.getIOFile()));
+        indicator.setIndeterminate(true);
         try {
           VcsHistorySession cachedSession = null;
           if (canUseLastRevisionCheck && myCachesHistory && ((cachedSession = getSessionFromCacheWithLastRevisionCheck(filePath, vcsKey))) != null) {
@@ -311,8 +311,10 @@ public class VcsHistoryProviderBackgroundableProxy {
 
     if (VcsType.distributed.equals(myType)) {
       final FilePath path = correctedFilePath != null ? correctedFilePath : filePath;
-      path.hardRefresh();
-      final VirtualFile virtualFile = path.getVirtualFile();
+      VirtualFile virtualFile = path.getVirtualFile();
+      if (virtualFile == null) {
+        virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(path.getPath());
+      }
       if (virtualFile != null) {
         final VcsRevisionNumber currentRevision = myDiffProvider.getCurrentRevision(virtualFile);
         final List<VcsFileRevision> revisionList = cached.getRevisionList();

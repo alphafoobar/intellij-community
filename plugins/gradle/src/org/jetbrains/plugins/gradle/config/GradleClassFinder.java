@@ -16,33 +16,74 @@
 
 package org.jetbrains.plugins.gradle.config;
 
+import com.intellij.ide.highlighter.JavaFileType;
+import com.intellij.openapi.externalSystem.psi.search.ExternalModuleBuildGlobalSearchScope;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.roots.impl.PackageDirectoryCache;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.NonClasspathClassFinder;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.search.EverythingGlobalScope;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.containers.ConcurrentFactoryMap;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.plugins.gradle.service.GradleInstallationManager;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.gradle.service.GradleBuildClasspathManager;
+import org.jetbrains.plugins.groovy.GroovyFileType;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author peter
  */
 public class GradleClassFinder extends NonClasspathClassFinder {
 
-  @NotNull private final GradleInstallationManager myLibraryManager;
+  @NotNull private final GradleBuildClasspathManager myBuildClasspathManager;
+  private final Map<String, PackageDirectoryCache> myCaches = new ConcurrentFactoryMap<String, PackageDirectoryCache>() {
+    @Nullable
+    @Override
+    protected PackageDirectoryCache create(String path) {
+      return createCache(myBuildClasspathManager.getModuleClasspathEntries(path));
+    }
+  };
 
-  public GradleClassFinder(Project project, @NotNull GradleInstallationManager manager) {
-    super(project, true, true);
-    myLibraryManager = manager;
+  public GradleClassFinder(Project project, @NotNull GradleBuildClasspathManager buildClasspathManager) {
+    super(project, JavaFileType.DEFAULT_EXTENSION, GroovyFileType.DEFAULT_EXTENSION);
+    myBuildClasspathManager = buildClasspathManager;
   }
 
   @Override
   protected List<VirtualFile> calcClassRoots() {
-    final List<VirtualFile> roots = myLibraryManager.getClassRoots(myProject);
-    if (roots != null) {
-      return roots;
+    return myBuildClasspathManager.getAllClasspathEntries();
+  }
+
+  @NotNull
+  @Override
+  protected PackageDirectoryCache getCache(@Nullable GlobalSearchScope scope) {
+    if (scope instanceof ExternalModuleBuildGlobalSearchScope) {
+      return myCaches.get(((ExternalModuleBuildGlobalSearchScope)scope).getExternalModulePath());
     }
-    return Collections.emptyList();
+    return super.getCache(scope);
+  }
+
+  @Override
+  public void clearCache() {
+    super.clearCache();
+    myCaches.clear();
+  }
+
+  @Override
+  public PsiClass findClass(@NotNull String qualifiedName, @NotNull GlobalSearchScope scope) {
+    PsiClass aClass = super.findClass(qualifiedName, scope);
+    if (aClass == null || scope instanceof ExternalModuleBuildGlobalSearchScope || scope instanceof EverythingGlobalScope) {
+      return aClass;
+    }
+
+    PsiFile containingFile = aClass.getContainingFile();
+    VirtualFile file = containingFile != null ? containingFile.getVirtualFile() : null;
+    return (file != null && !ProjectFileIndex.SERVICE.getInstance(myProject).isInContent(file)) ? aClass : null;
   }
 }

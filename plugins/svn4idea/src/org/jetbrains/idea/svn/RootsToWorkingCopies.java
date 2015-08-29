@@ -20,23 +20,18 @@ import com.intellij.openapi.progress.BackgroundTaskQueue;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vcs.CalledInBackground;
+import com.intellij.openapi.util.ZipperUpdater;
+import org.jetbrains.annotations.CalledInBackground;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsListener;
-import com.intellij.openapi.vcs.ZipperUpdater;
 import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Alarm;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.tmatesoft.svn.core.SVNException;
+import org.jetbrains.idea.svn.info.Info;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.util.SVNURLUtil;
-import org.tmatesoft.svn.core.internal.wc.admin.SVNEntry;
-import org.tmatesoft.svn.core.internal.wc.admin.SVNWCAccess;
-import org.tmatesoft.svn.core.wc.SVNInfo;
-import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNWCUtil;
 
 import java.io.File;
 import java.util.HashMap;
@@ -110,7 +105,7 @@ public class RootsToWorkingCopies implements VcsListener {
 
   @CalledInBackground
   @Nullable
-  public WorkingCopy getWcRoot(final VirtualFile root) {
+  public WorkingCopy getWcRoot(@NotNull VirtualFile root) {
     assert (! ApplicationManager.getApplication().isDispatchThread()) || ApplicationManager.getApplication().isUnitTestMode();
 
     synchronized (myLock) {
@@ -122,12 +117,12 @@ public class RootsToWorkingCopies implements VcsListener {
   }
 
   @Nullable
-  private WorkingCopy calculateRoot(final VirtualFile root) {
+  private WorkingCopy calculateRoot(@NotNull VirtualFile root) {
     File workingCopyRoot = SvnUtil.getWorkingCopyRootNew(new File(root.getPath()));
     WorkingCopy workingCopy = null;
 
     if (workingCopyRoot != null) {
-      final SVNInfo svnInfo = myVcs.getInfo(workingCopyRoot);
+      final Info svnInfo = myVcs.getInfo(workingCopyRoot);
 
       if (svnInfo != null && svnInfo.getURL() != null) {
         workingCopy = new WorkingCopy(workingCopyRoot, svnInfo.getURL(), true);

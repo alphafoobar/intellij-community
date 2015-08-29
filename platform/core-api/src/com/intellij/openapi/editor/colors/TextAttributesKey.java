@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,17 @@ package com.intellij.openapi.editor.colors;
 
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.openapi.util.*;
-import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.openapi.util.JDOMExternalizerUtil;
+import com.intellij.openapi.util.NullableLazyValue;
+import com.intellij.openapi.util.VolatileNullableLazyValue;
+import com.intellij.util.ConcurrencyUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.concurrent.ConcurrentMap;
 
 
 /**
@@ -30,7 +35,7 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class TextAttributesKey implements Comparable<TextAttributesKey> {
   private static final TextAttributes NULL_ATTRIBUTES = new TextAttributes();
-  private static final ConcurrentHashMap<String, TextAttributesKey> ourRegistry = new ConcurrentHashMap<String, TextAttributesKey>();
+  private static final ConcurrentMap<String, TextAttributesKey> ourRegistry = ContainerUtil.newConcurrentMap();
   private static final NullableLazyValue<TextAttributeKeyDefaultsProvider> ourDefaultsProvider = new VolatileNullableLazyValue<TextAttributeKeyDefaultsProvider>() {
     @Nullable
     @Override
@@ -48,7 +53,7 @@ public final class TextAttributesKey implements Comparable<TextAttributesKey> {
   }
 
   //read external only
-  public TextAttributesKey(@NotNull Element element) throws InvalidDataException {
+  public TextAttributesKey(@NotNull Element element) {
     this(JDOMExternalizerUtil.readField(element, "myExternalName"));
     Element myDefaultAttributesElement = JDOMExternalizerUtil.getOption(element, "myDefaultAttributes");
     if (myDefaultAttributesElement != null) {
@@ -58,7 +63,7 @@ public final class TextAttributesKey implements Comparable<TextAttributesKey> {
 
   @NotNull
   public static TextAttributesKey find(@NotNull @NonNls String externalName) {
-    return ourRegistry.cacheOrGet(externalName, new TextAttributesKey(externalName));
+    return ConcurrencyUtil.cacheOrGet(ourRegistry, externalName, new TextAttributesKey(externalName));
   }
 
   public String toString() {
@@ -85,7 +90,7 @@ public final class TextAttributesKey implements Comparable<TextAttributesKey> {
     return find(externalName);
   }
 
-  public void writeExternal(Element element) throws WriteExternalException {
+  public void writeExternal(Element element) {
     JDOMExternalizerUtil.writeField(element, "myExternalName", myExternalName);
 
     if (myDefaultAttributes != NULL_ATTRIBUTES) {
@@ -93,7 +98,6 @@ public final class TextAttributesKey implements Comparable<TextAttributesKey> {
       myDefaultAttributes.writeExternal(option);
     }
   }
-
 
   public boolean equals(final Object o) {
     if (this == o) return true;

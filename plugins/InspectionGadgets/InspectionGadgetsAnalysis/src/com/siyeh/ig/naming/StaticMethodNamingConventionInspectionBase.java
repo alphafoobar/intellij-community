@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,6 +80,9 @@ public class StaticMethodNamingConventionInspectionBase extends ConventionInspec
     public void visitMethod(@NotNull PsiMethod method) {
       super.visitMethod(method);
       if (!method.hasModifierProperty(PsiModifier.STATIC)) {
+        return;
+      }
+      if (method.hasModifierProperty(PsiModifier.NATIVE) && isInspectionEnabled("NativeMethodNamingConvention", method)) {
         return;
       }
       final String name = method.getName();

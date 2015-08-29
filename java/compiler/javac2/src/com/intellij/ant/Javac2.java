@@ -15,6 +15,7 @@
  */
 package com.intellij.ant;
 
+import com.intellij.compiler.instrumentation.FailSafeClassReader;
 import com.intellij.compiler.instrumentation.InstrumentationClassFinder;
 import com.intellij.compiler.instrumentation.InstrumenterClassWriter;
 import com.intellij.compiler.notNullVerification.NotNullVerifyingInstrumenter;
@@ -25,10 +26,8 @@ import org.apache.tools.ant.BuildException;
 import org.apache.tools.ant.Project;
 import org.apache.tools.ant.taskdefs.Javac;
 import org.apache.tools.ant.types.Path;
-import org.jetbrains.asm4.ClassReader;
-import org.jetbrains.asm4.ClassVisitor;
-import org.jetbrains.asm4.ClassWriter;
-import org.jetbrains.asm4.Opcodes;
+import org.apache.tools.ant.util.regexp.Regexp;
+import org.jetbrains.org.objectweb.asm.*;
 
 import java.io.*;
 import java.net.MalformedURLException;
@@ -40,6 +39,7 @@ public class Javac2 extends Javac {
   private ArrayList myFormFiles;
   private List myNestedFormPathList;
   private boolean instrumentNotNull = true;
+  private List<Regexp> myClassFilterAnnotationRegexpList = new ArrayList<Regexp>(0);
 
   public Javac2() {
   }
@@ -73,6 +73,16 @@ public class Javac2 extends Javac {
 
   public void setInstrumentNotNull(boolean instrumentNotNull) {
     this.instrumentNotNull = instrumentNotNull;
+  }
+
+  /**
+   * Allows to specify patterns of annotation class names to skip NotNull instrumentation on classes which have at least one
+   * annotation matching at least one of the given patterns
+   *
+   * @param regexp the regular expression for JVM internal name (slash-separated) of annotations
+   */
+  public void add(final ClassFilterAnnotationRegexp regexp) {
+    myClassFilterAnnotationRegexpList.add(regexp.getRegexp(getProject()));
   }
 
   /**
@@ -422,11 +432,11 @@ public class Javac2 extends Javac {
         try {
           final FileInputStream inputStream = new FileInputStream(file);
           try {
-            ClassReader reader = new ClassReader(inputStream);
+            ClassReader reader = new FailSafeClassReader(inputStream);
 
             int version = getClassFileVersion(reader);
-
-            if (version >= Opcodes.V1_5) {
+            
+            if (version >= Opcodes.V1_5 && !shouldBeSkippedByAnnotationPattern(reader)) {
               ClassWriter writer = new InstrumenterClassWriter(getAsmClassWriterFlags(version), finder);
 
               if (NotNullVerifyingInstrumenter.processClassFile(reader, writer)) {
@@ -462,13 +472,37 @@ public class Javac2 extends Javac {
 
   private static int getClassFileVersion(ClassReader reader) {
     final int[] classfileVersion = new int[1];
-    reader.accept(new ClassVisitor(Opcodes.ASM4) {
+    reader.accept(new ClassVisitor(Opcodes.ASM5) {
       public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
         classfileVersion[0] = version;
       }
-    }, 0);
+    }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
     return classfileVersion[0];
+  }
+
+  private boolean shouldBeSkippedByAnnotationPattern(ClassReader reader) {
+    if (myClassFilterAnnotationRegexpList.isEmpty()) {
+      return false;
+    }
+
+    final boolean[] result = new boolean[]{false};
+    reader.accept(new ClassVisitor(Opcodes.ASM5) {
+      public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+        if (!result[0]) {
+          String internalName = Type.getType(desc).getInternalName();
+          for (Regexp regexp : myClassFilterAnnotationRegexpList) {
+            if (regexp.matches(internalName)) {
+              result[0] = true;
+              break;
+            }
+          }
+        }
+        return null;
+      }
+    }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+    return result[0];
   }
 
   private void fireError(final String message) {

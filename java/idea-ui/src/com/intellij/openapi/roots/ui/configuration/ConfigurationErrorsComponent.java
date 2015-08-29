@@ -29,6 +29,7 @@ import com.intellij.ui.components.labels.LinkListener;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.BaseButtonBehavior;
+import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.TimedDeadzone;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
@@ -350,28 +351,29 @@ public class ConfigurationErrorsComponent extends JPanel implements Disposable, 
 
     @Override
     public Dimension getMinimumSize() {
-      final Insets insets = getInsets();
-      return new Dimension(myIcon.getIconWidth() + insets.left + insets.right, myIcon.getIconHeight() + insets.top + insets.bottom);
+      Dimension size = new Dimension(myIcon.getIconWidth(), myIcon.getIconHeight());
+      JBInsets.addTo(size, getInsets());
+      return size;
     }
 
     @Override
     public void paint(final Graphics g) {
-      final Insets insets = getInsets();
-      final Dimension d = getSize();
+      Rectangle bounds = new Rectangle(getWidth(), getHeight());
+      JBInsets.removeFrom(bounds, getInsets());
 
-      int x = (d.width - myIcon.getIconWidth() - insets.left - insets.right) / 2;
-      int y = (d.height - myIcon.getIconHeight() - insets.top - insets.bottom) / 2;
+      bounds.x += (bounds.width - myIcon.getIconWidth()) / 2;
+      bounds.y += (bounds.height - myIcon.getIconHeight()) / 2;
 
       if (myBehavior.isHovered()) {
         // todo
       }
 
       if (myBehavior.isPressedByMouse()) {
-        x += 1;
-        y += 1;
+        bounds.x++;
+        bounds.y++;
       }
 
-      myIcon.paintIcon(this, g, x + insets.left, y + insets.top);
+      myIcon.paintIcon(this, g, bounds.x, bounds.y);
     }
   }
 
@@ -692,9 +694,9 @@ public class ConfigurationErrorsComponent extends JPanel implements Disposable, 
 
   private static class ConfigurationErrorsListModel extends AbstractListModel implements ConfigurationErrors, Disposable {
     private MessageBusConnection myConnection;
-    private List<ConfigurationError> myNotIgnoredErrors = new ArrayList<ConfigurationError>();
+    private ArrayList<ConfigurationError> myNotIgnoredErrors = new ArrayList<ConfigurationError>();
     private List<ConfigurationError> myAllErrors;
-    private List<ConfigurationError> myIgnoredErrors = new ArrayList<ConfigurationError>();
+    private ArrayList<ConfigurationError> myIgnoredErrors = new ArrayList<ConfigurationError>();
 
     private ConfigurationErrorsListModel(@NotNull final Project project) {
       setFilter(true, true);
@@ -726,19 +728,23 @@ public class ConfigurationErrorsComponent extends JPanel implements Disposable, 
     
     @Override
     public void addError(@NotNull ConfigurationError error) {
-      if (!myAllErrors.contains(error)) {
-        List<ConfigurationError> targetList = error.isIgnored() ? myIgnoredErrors : myNotIgnoredErrors;
-        if (targetList.size() < MAX_ERRORS_TO_SHOW) {
-          targetList.add(0, error);
-        }
-        else {
-          targetList.add(error);
-        }
+      if (myAllErrors.contains(error)) {
+        return;
+      }
 
-        int i = myAllErrors.indexOf(error);
-        if (i != -1 && i < MAX_ERRORS_TO_SHOW) {
-          fireIntervalAdded(this, i, i);
-        }
+      ArrayList<ConfigurationError> targetList = error.isIgnored() ? myIgnoredErrors : myNotIgnoredErrors;
+
+      if (targetList.size() < MAX_ERRORS_TO_SHOW) {
+        targetList.add(0, error);
+        fireIntervalAdded(this, 0, 0);
+        return;
+      }
+
+      int listSize = targetList.size();
+      targetList.ensureCapacity(listSize+1);
+      targetList.add(listSize, error);
+      if (listSize < MAX_ERRORS_TO_SHOW) {
+        fireIntervalAdded(this, listSize, listSize);
       }
     }
 

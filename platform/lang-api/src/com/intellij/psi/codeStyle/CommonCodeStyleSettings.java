@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,14 @@
 package com.intellij.psi.codeStyle;
 
 import com.intellij.lang.Language;
-import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.util.*;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.arrangement.ArrangementSettings;
 import com.intellij.psi.codeStyle.arrangement.ArrangementUtil;
-import com.intellij.util.containers.HashSet;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializer;
 import org.intellij.lang.annotations.MagicConstant;
@@ -31,8 +33,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
 import java.util.Set;
 
 /**
@@ -42,6 +42,10 @@ import java.util.Set;
  * @author Rustam Vishnyakov
  */
 public class CommonCodeStyleSettings {
+  // Dev. notes:
+  // - Do not add language-specific options here, use CustomCodeStyleSettings instead.
+  // - A new options should be added to CodeStyleSettingsCustomizable as well.
+  // - Covered by CodeStyleConfigurationsTest.
 
   @NonNls private static final String ARRANGEMENT_ELEMENT_NAME = "arrangement";
 
@@ -72,38 +76,11 @@ public class CommonCodeStyleSettings {
     return myLanguage;
   }
 
-  void importOldIndentOptions(@NotNull CodeStyleSettings rootSettings) {
-    if (myFileType != null && myIndentOptions != null) {
-      if (getFileTypeIndentOptionsProvider() == null) {
-        IndentOptions fileTypeIdentOptions = rootSettings.getAdditionalIndentOptions(myFileType);
-        if (fileTypeIdentOptions != null) {
-          myIndentOptions.copyFrom(fileTypeIdentOptions);
-          rootSettings.unregisterAdditionalIndentOptions(myFileType);
-        }
-        else if (rootSettings.USE_SAME_INDENTS && !rootSettings.IGNORE_SAME_INDENTS_FOR_LANGUAGES) {
-          myIndentOptions.copyFrom(rootSettings.OTHER_INDENT_OPTIONS);
-        }
-      }
-    }
-  }
-
   @NotNull
   public IndentOptions initIndentOptions() {
     myIndentOptions = new IndentOptions();
     return myIndentOptions;
   }
-
-  @Nullable
-  private FileTypeIndentOptionsProvider getFileTypeIndentOptionsProvider() {
-    final FileTypeIndentOptionsProvider[] providers = Extensions.getExtensions(FileTypeIndentOptionsProvider.EP_NAME);
-    for (FileTypeIndentOptionsProvider provider : providers) {
-      if (provider.getFileType().equals(myFileType)) {
-        return provider;
-      }
-    }
-    return null;
-  }
-
 
   @Nullable
   public FileType getFileType() {
@@ -148,64 +125,27 @@ public class CommonCodeStyleSettings {
       targetIndentOptions.copyFrom(myIndentOptions);
     }
     if (myArrangementSettings != null) {
-      rootSettings.setArrangementSettings(myArrangementSettings);
+      commonSettings.setArrangementSettings(myArrangementSettings.clone());
     }
     return commonSettings;
   }
 
   protected static void copyPublicFields(Object from, Object to) {
     assert from != to;
-    copyFields(to.getClass().getFields(), from, to);
+    ReflectionUtil.copyFields(to.getClass().getFields(), from, to);
   }
 
   void copyNonDefaultValuesFrom(CommonCodeStyleSettings from) {
     CommonCodeStyleSettings defaultSettings = new CommonCodeStyleSettings(null);
     PARENT_SETTINGS_INSTALLED =
-      copyFields(getClass().getFields(), from, this, new SupportedFieldsDiffFilter(from, getSupportedFields(), defaultSettings));
-  }
-
-  private static void copyFields(Field[] fields, Object from, Object to) {
-    copyFields(fields, from, to, null);
-  }
-
-  private static boolean copyFields(Field[] fields, Object from, Object to, @Nullable DifferenceFilter diffFilter) {
-    Set<Field> sourceFields = new HashSet<Field>(Arrays.asList(from.getClass().getFields()));
-    boolean valuesChanged = false;
-    for (Field field : fields) {
-      if (sourceFields.contains(field)) {
-        if (isPublic(field) && !isFinal(field)) {
-          try {
-            if (diffFilter == null || diffFilter.isAccept(field)) {
-              copyFieldValue(from, to, field);
-              valuesChanged = true;
-            }
+      ReflectionUtil
+        .copyFields(getClass().getFields(), from, this, new SupportedFieldsDiffFilter(from, getSupportedFields(), defaultSettings) {
+          @Override
+          public boolean isAccept(@NotNull Field field) {
+            if ("RIGHT_MARGIN".equals(field.getName())) return false; // Never copy RIGHT_MARGIN, it is inherited automatically if -1
+            return super.isAccept(field);
           }
-          catch (Exception e) {
-            throw new RuntimeException(e);
-          }
-        }
-      }
-    }
-    return valuesChanged;
-  }
-
-  private static void copyFieldValue(final Object from, Object to, final Field field)
-    throws IllegalAccessException {
-    Class<?> fieldType = field.getType();
-    if (fieldType.isPrimitive() || fieldType.equals(String.class)) {
-      field.set(to, field.get(from));
-    }
-    else {
-      throw new RuntimeException("Field not copied " + field.getName());
-    }
-  }
-
-  private static boolean isPublic(final Field field) {
-    return (field.getModifiers() & Modifier.PUBLIC) != 0;
-  }
-
-  private static boolean isFinal(final Field field) {
-    return (field.getModifiers() & Modifier.FINAL) != 0;
+        });
   }
 
   @Nullable
@@ -280,6 +220,7 @@ public class CommonCodeStyleSettings {
   }
 
 //----------------- GENERAL --------------------
+  public int RIGHT_MARGIN = -1;
 
   public boolean LINE_COMMENT_AT_FIRST_COLUMN = true;
   public boolean BLOCK_COMMENT_AT_FIRST_COLUMN = true;
@@ -447,6 +388,15 @@ public class CommonCodeStyleSettings {
 
   public boolean INDENT_CASE_FROM_SWITCH = true;
 
+  /**
+   * Controls "break" position realtive to "case".
+   * <pre>
+   * case 0:
+   * <--->break;
+   * </pre>
+   */
+  public boolean INDENT_BREAK_FROM_CASE = true;
+
   public boolean SPECIAL_ELSE_IF_TREATMENT = true;
 
   /**
@@ -487,6 +437,7 @@ public class CommonCodeStyleSettings {
    * int end   = 10;
    */
   public boolean ALIGN_GROUP_FIELD_DECLARATIONS = false;
+  public boolean ALIGN_CONSECUTIVE_VARIABLE_DECLARATIONS = false;
 
 //----------------- SPACES --------------------
 
@@ -652,6 +603,13 @@ public class CommonCodeStyleSettings {
    * "int X[] {1, 3, 5}"
    */
   public boolean SPACE_WITHIN_ARRAY_INITIALIZER_BRACES = false;
+
+  /**
+   * "int X[] { }"
+   * or
+   * "int X[] {}"
+   */
+  public boolean SPACE_WITHIN_EMPTY_ARRAY_INITIALIZER_BRACES = false;
 
   public boolean SPACE_AFTER_TYPE_CAST = true;
 
@@ -854,6 +812,7 @@ public class CommonCodeStyleSettings {
   public int THROWS_KEYWORD_WRAP = DO_NOT_WRAP;
 
   public int METHOD_CALL_CHAIN_WRAP = DO_NOT_WRAP;
+  public boolean WRAP_FIRST_METHOD_IN_CALL_CHAIN = false;
 
   public boolean PARENTHESES_EXPRESSION_LPAREN_WRAP = false;
   public boolean PARENTHESES_EXPRESSION_RPAREN_WRAP = false;
@@ -931,6 +890,23 @@ public class CommonCodeStyleSettings {
 
   public int FORCE_REARRANGE_MODE = REARRANGE_ACCORDIND_TO_DIALOG;
 
+  public enum WrapOnTyping {
+    DEFAULT(-1),
+    NO_WRAP (0),
+    WRAP (1);
+
+    public int intValue;
+
+    WrapOnTyping(int i) {
+      this.intValue = i;
+    }
+  }
+
+  /**
+   * Defines if wrapping should occur when typing reaches right margin. <b>Do not use a value of this field directly, call
+   * {@link CodeStyleSettings#isWrapOnTyping(Language)} method instead</b>.
+   */
+  public int WRAP_ON_TYPING = WrapOnTyping.DEFAULT.intValue;
 
   //-------------------------Indent options-------------------------------------------------
   public static class IndentOptions implements JDOMExternalizable, Cloneable {
@@ -942,6 +918,11 @@ public class CommonCodeStyleSettings {
     public int LABEL_INDENT_SIZE = 0;
     public boolean LABEL_INDENT_ABSOLUTE = false;
     public boolean USE_RELATIVE_INDENTS = false;
+    public boolean KEEP_INDENTS_ON_EMPTY_LINES = false;
+
+    private FileIndentOptionsProvider myFileIndentOptionsProvider;
+    private static final Key<CommonCodeStyleSettings.IndentOptions> INDENT_OPTIONS_KEY = Key.create("INDENT_OPTIONS_KEY");
+    private boolean myInaccurate;
 
     @Override
     public void readExternal(Element element) throws InvalidDataException {
@@ -950,13 +931,21 @@ public class CommonCodeStyleSettings {
 
     @Override
     public void writeExternal(Element element) throws WriteExternalException {
-      DefaultJDOMExternalizer.writeExternal(this, element);
+      DefaultJDOMExternalizer.writeExternal(this, element, new DefaultJDOMExternalizer.JDOMFilter() {
+        @Override
+        public boolean isAccept(@NotNull Field field) {
+          if ("KEEP_INDENTS_ON_EMPTY_LINES".equals(field.getName())) {
+            return KEEP_INDENTS_ON_EMPTY_LINES;
+          }
+          return true;
+        }
+      });
     }
 
     public void serialize(Element indentOptionsElement, final IndentOptions defaultOptions) {
       XmlSerializer.serializeInto(this, indentOptionsElement, new SkipDefaultValuesSerializationFilters() {
         @Override
-        protected void configure(Object o) {
+        protected void configure(@NotNull Object o) {
           if (o instanceof IndentOptions && defaultOptions != null) {
             ((IndentOptions)o).copyFrom(defaultOptions);
           }
@@ -1013,6 +1002,33 @@ public class CommonCodeStyleSettings {
 
     public void copyFrom(IndentOptions other) {
       copyPublicFields(other, this);
+    }
+
+    @Nullable
+    FileIndentOptionsProvider getFileIndentOptionsProvider() {
+      return myFileIndentOptionsProvider;
+    }
+
+    void setFileIndentOptionsProvider(@NotNull FileIndentOptionsProvider provider) {
+      myFileIndentOptionsProvider = provider;
+    }
+
+    void associateWithDocument(@NotNull Document document) {
+      document.putUserData(INDENT_OPTIONS_KEY, this);
+    }
+
+    @Nullable
+    static IndentOptions retrieveFromAssociatedDocument(@NotNull PsiFile file) {
+      Document document = PsiDocumentManager.getInstance(file.getProject()).getDocument(file);
+      return document != null ? document.getUserData(INDENT_OPTIONS_KEY) : null;
+    }
+
+    boolean isRecalculateForCommittedDocument() {
+      return myInaccurate;
+    }
+
+    void setRecalculateForCommittedDocument(boolean value) {
+      myInaccurate = value;
     }
   }
 }

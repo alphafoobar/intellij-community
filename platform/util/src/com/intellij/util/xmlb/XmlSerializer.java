@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,12 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.net.URL;
+import java.util.Set;
 
 public class XmlSerializer {
   private static final SerializationFilter TRUE_FILTER = new SerializationFilter() {
     @Override
-    public boolean accepts(Accessor accessor, Object bean) {
+    public boolean accepts(@NotNull Accessor accessor, @NotNull Object bean) {
       return true;
     }
   };
@@ -45,8 +46,14 @@ public class XmlSerializer {
     return serialize(object, TRUE_FILTER);
   }
 
+  @NotNull
   public static Element serialize(@NotNull Object object, @Nullable SerializationFilter filter) throws XmlSerializationException {
-    return new XmlSerializerImpl(filter == null ? TRUE_FILTER : filter).serialize(object);
+    return XmlSerializerImpl.serialize(object, filter == null ? TRUE_FILTER : filter);
+  }
+
+  @Nullable
+  public static Element serializeIfNotDefault(@NotNull Object object, @Nullable SerializationFilter filter) {
+    return XmlSerializerImpl.serializeIfNotDefault(object, filter == null ? TRUE_FILTER : filter);
   }
 
   @Nullable
@@ -64,7 +71,7 @@ public class XmlSerializer {
       throw e;
     }
     catch (Exception e) {
-      throw new XmlSerializationException(e);
+      throw new XmlSerializationException("Cannot deserialize class " + aClass.getName(), e);
     }
   }
 
@@ -80,7 +87,7 @@ public class XmlSerializer {
   }
 
   @Nullable
-  public static <T> T deserialize(URL url, Class<T> aClass) throws XmlSerializationException {
+  public static <T> T deserialize(@NotNull URL url, Class<T> aClass) throws XmlSerializationException {
     try {
       Document document = JDOMUtil.loadDocument(url);
       document = JDOMXIncluder.resolve(document, url.toExternalForm());
@@ -95,11 +102,12 @@ public class XmlSerializer {
   }
 
   public static void deserializeInto(@NotNull Object bean, @NotNull Element element) {
-    try {
-      final Binding binding = XmlSerializerImpl.getBinding(bean.getClass());
-      assert binding instanceof BeanBinding;
+    deserializeInto(bean, element, null);
+  }
 
-      ((BeanBinding)binding).deserializeInto(bean, element);
+  public static void deserializeInto(@NotNull Object bean, @NotNull Element element, @Nullable Set<String> accessorNameTracker) {
+    try {
+      ((BeanBinding)XmlSerializerImpl.getBinding(bean.getClass())).deserializeInto(bean, element, accessorNameTracker);
     }
     catch (XmlSerializationException e) {
       throw e;
@@ -113,14 +121,13 @@ public class XmlSerializer {
     serializeInto(bean, element, null);
   }
 
-  public static void serializeInto(final Object bean, final Element element, @Nullable SerializationFilter filter) {
+  public static void serializeInto(@NotNull Object bean, @NotNull Element element, @Nullable SerializationFilter filter) {
     if (filter == null) {
       filter = TRUE_FILTER;
     }
     try {
-      final Binding binding = XmlSerializerImpl.getBinding(bean.getClass());
+      Binding binding = XmlSerializerImpl.getBinding(bean.getClass());
       assert binding instanceof BeanBinding;
-
       ((BeanBinding)binding).serializeInto(bean, element, filter);
     }
     catch (XmlSerializationException e) {

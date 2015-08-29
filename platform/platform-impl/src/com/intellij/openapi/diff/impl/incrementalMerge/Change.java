@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import java.util.Comparator;
  * Change can be applied, then its sides would be equal.
  */
 public abstract class Change {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.diff.impl.incrementalMerge.Change");
+  private static final Logger LOG = Logger.getInstance(Change.class);
 
   public abstract ChangeSide getChangeSide(FragmentSide side);
 
@@ -63,20 +63,18 @@ public abstract class Change {
 
   /**
    * Apply the change, i.e. change the "Merge result" document and update range markers, highlighting, gutters, etc.
-   * @param source The source side of the change, which is being applied.
+   * @param original The source side of the change, which is being applied.
    */
   private void apply(@NotNull FragmentSide original) {
     FragmentSide targetSide = original.otherSide();
     RangeMarker originalRangeMarker = getRangeMarker(original);
     RangeMarker rangeMarker = getRangeMarker(targetSide);
 
-    if (originalRangeMarker != null && rangeMarker != null) {
-      TextRange textRange = modifyDocument(getProject(), originalRangeMarker, rangeMarker);
-      if (textRange != null && isValid()) {
-        updateTargetRangeMarker(targetSide, textRange);
-      }
-      onApplied();
+    TextRange textRange = modifyDocument(getProject(), originalRangeMarker, rangeMarker);
+    if (textRange != null && isValid()) {
+      updateTargetRangeMarker(targetSide, textRange);
     }
+    onApplied();
   }
 
   /**
@@ -104,14 +102,16 @@ public abstract class Change {
    * @return the resulting TextRange from the target document, or null if the document if not writable.
    */
   @Nullable
-  private static TextRange modifyDocument(@NotNull Project project, @NotNull RangeMarker original, @NotNull RangeMarker target) {
+  private static TextRange modifyDocument(@Nullable Project project, @NotNull RangeMarker original, @NotNull RangeMarker target) {
     Document document = target.getDocument();
-    if (!ReadonlyStatusHandler.ensureDocumentWritable(project, document)) { return null; }
+    if (project != null && !ReadonlyStatusHandler.ensureDocumentWritable(project, document)) {
+      return null;
+    }
     if (DocumentUtil.isEmpty(original)) {
       int offset = target.getStartOffset();
       document.deleteString(offset, target.getEndOffset());
     }
-    String text = DocumentUtil.getText(original);
+    CharSequence text = original.getDocument().getImmutableCharSequence().subSequence(original.getStartOffset(), original.getEndOffset());
     int startOffset = target.getStartOffset();
     if (DocumentUtil.isEmpty(target)) {
       document.insertString(startOffset, text);
@@ -135,12 +135,17 @@ public abstract class Change {
     getHighlighterHolder(side).updateHighlighter(getChangeSide(side), getType());
   }
 
-  private Project getProject() { return getChangeList().getProject(); }
+  @Nullable
+  private Project getProject() {
+    return getChangeList().getProject();
+  }
 
+  @NotNull
   private ChangeHighlighterHolder getHighlighterHolder(FragmentSide side) {
     return getChangeSide(side).getHighlighterHolder();
   }
 
+  @NotNull
   private RangeMarker getRangeMarker(FragmentSide side) {
     ChangeSide changeSide = getChangeSide(side);
     LOG.assertTrue(changeSide != null);
@@ -149,8 +154,10 @@ public abstract class Change {
 
   public static void apply(final Change change, final FragmentSide fromSide) {
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      @Override
       public void run() {
         CommandProcessor.getInstance().executeCommand(change.getProject(), new Runnable() {
+          @Override
           public void run() {
             change.apply(fromSide);
           }
@@ -179,7 +186,8 @@ public abstract class Change {
       myMainSide = mainSide;
     }
 
-    public int compare(Change change, Change change1) {
+    @Override
+    public int compare(@NotNull Change change, @NotNull Change change1) {
       int result1 = compareSide(change, change1, myMainSide);
       if (result1 != 0) return result1;
       return compareSide(change, change1, myMainSide.otherSide());
@@ -201,20 +209,25 @@ public abstract class Change {
       myHighlighterHolder = new ChangeHighlighterHolder();
     }
 
-    public SimpleChangeSide(ChangeSide originalSide, DiffRangeMarker newRange) {
+    public SimpleChangeSide(@NotNull ChangeSide originalSide, @NotNull DiffRangeMarker newRange) {
       mySide = ((SimpleChangeSide)originalSide).getFragmentSide();
       myRange = newRange;
       myHighlighterHolder = originalSide.getHighlighterHolder();
     }
 
+    @NotNull
     public FragmentSide getFragmentSide() {
       return mySide;
     }
 
+    @Override
+    @NotNull
     public DiffRangeMarker getRange() {
       return myRange;
     }
 
+    @NotNull
+    @Override
     public ChangeHighlighterHolder getHighlighterHolder() {
       return myHighlighterHolder;
     }

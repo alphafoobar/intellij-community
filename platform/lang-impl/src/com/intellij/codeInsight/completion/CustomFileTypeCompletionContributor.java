@@ -19,13 +19,16 @@ import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.ide.highlighter.custom.SyntaxTable;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.impl.CustomSyntaxTableFileType;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.psi.CustomHighlighterTokenType;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.util.ProcessingContext;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Collections;
 import java.util.Set;
 
 import static com.intellij.patterns.PlatformPatterns.psiElement;
@@ -35,7 +38,7 @@ import static com.intellij.patterns.StandardPatterns.instanceOf;
 /**
  * @author yole
  */
-public class CustomFileTypeCompletionContributor extends CompletionContributor {
+public class CustomFileTypeCompletionContributor extends CompletionContributor implements DumbAware {
   public CustomFileTypeCompletionContributor() {
     extend(CompletionType.BASIC, psiElement().inFile(psiFile().withFileType(instanceOf(CustomSyntaxTableFileType.class))),
            new CompletionProvider<CompletionParameters>() {
@@ -47,8 +50,12 @@ public class CustomFileTypeCompletionContributor extends CompletionContributor {
                  return;
                }
 
-               CustomSyntaxTableFileType fileType = (CustomSyntaxTableFileType)parameters.getOriginalFile().getFileType();
-               SyntaxTable syntaxTable = fileType.getSyntaxTable();
+               FileType fileType = parameters.getOriginalFile().getFileType();
+               if (!(fileType instanceof CustomSyntaxTableFileType)) {
+                 return;
+               }
+
+               SyntaxTable syntaxTable = ((CustomSyntaxTableFileType)fileType).getSyntaxTable();
                String prefix = findPrefix(parameters.getPosition(), parameters.getOffset());
                CompletionResultSet resultSetWithPrefix = result.withPrefixMatcher(prefix);
 
@@ -56,6 +63,8 @@ public class CustomFileTypeCompletionContributor extends CompletionContributor {
                addVariants(resultSetWithPrefix, syntaxTable.getKeywords2());
                addVariants(resultSetWithPrefix, syntaxTable.getKeywords3());
                addVariants(resultSetWithPrefix, syntaxTable.getKeywords4());
+               
+               WordCompletionContributor.addWordCompletionVariants(resultSetWithPrefix, parameters, Collections.<String>emptySet());
              }
            });
   }
@@ -75,7 +84,7 @@ public class CustomFileTypeCompletionContributor extends CompletionContributor {
 
   private static void addVariants(CompletionResultSet resultSet, Set<String> keywords) {
     for (String keyword : keywords) {
-      resultSet.addElement(LookupElementBuilder.create(keyword));
+      resultSet.addElement(LookupElementBuilder.create(keyword).bold());
     }
   }
 

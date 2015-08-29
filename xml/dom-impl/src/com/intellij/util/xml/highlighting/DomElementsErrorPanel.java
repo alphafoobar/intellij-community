@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.psi.PsiDocumentManager;
-import com.intellij.psi.PsiFile;
+import com.intellij.psi.xml.XmlFile;
 import com.intellij.util.Alarm;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.DomChangeAdapter;
@@ -34,6 +34,7 @@ import com.intellij.util.xml.DomManager;
 import com.intellij.util.xml.DomUtil;
 import com.intellij.util.xml.ui.CommittablePanel;
 import com.intellij.util.xml.ui.Highlightable;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
@@ -68,12 +69,14 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
 
     addUpdateRequest();
     domManager.addDomEventListener(new DomChangeAdapter() {
+      @Override
       protected void elementChanged(DomElement element) {
         addUpdateRequest();
       }
     }, this);
   }
 
+  @Override
   public void updateHighlighting() {
     updatePanel();
   }
@@ -105,8 +108,10 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
   private void addUpdateRequest() {
     ApplicationManager.getApplication().invokeLater(new Runnable() {
 
+      @Override
       public void run() {
         myAlarm.addRequest(new Runnable() {
+          @Override
           public void run() {
             if (myProject.isOpen() && !myProject.isDisposed()) {
               updatePanel();
@@ -117,23 +122,28 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
     });
   }
 
+  @Override
   protected void paintComponent(Graphics g) {
     super.paintComponent(g);
 
     myErrorStripeRenderer.paint(this, g, new Rectangle(0, 0, getWidth(), getHeight()));
   }
 
+  @Override
   public void dispose() {
     myAlarm.cancelAllRequests();
   }
 
+  @Override
   public JComponent getComponent() {
     return this;
   }
 
+  @Override
   public void commit() {
   }
 
+  @Override
   public void reset() {
     updatePanel();
   }
@@ -143,24 +153,24 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
   }
 
   private class DomElementsTrafficLightRenderer extends TrafficLightRenderer {
-
-    public DomElementsTrafficLightRenderer(final PsiFile xmlFile) {
+    public DomElementsTrafficLightRenderer(@NotNull XmlFile xmlFile) {
       super(xmlFile.getProject(),
             PsiDocumentManager.getInstance(xmlFile.getProject()).getDocument(xmlFile), xmlFile);
     }
 
-    protected DaemonCodeAnalyzerStatus getDaemonCodeAnalyzerStatus(boolean fillErrorsCount, SeverityRegistrar severityRegistrar) {
-      final DaemonCodeAnalyzerStatus status = super.getDaemonCodeAnalyzerStatus(fillErrorsCount, severityRegistrar);
-      if (status != null && isInspectionCompleted()) {
+    @NotNull
+    @Override
+    protected DaemonCodeAnalyzerStatus getDaemonCodeAnalyzerStatus(@NotNull SeverityRegistrar severityRegistrar) {
+      final DaemonCodeAnalyzerStatus status = super.getDaemonCodeAnalyzerStatus(severityRegistrar);
+      if (isInspectionCompleted()) {
         status.errorAnalyzingFinished = true;
       }
       return status;
     }
 
     @Override
-    protected void fillDaemonCodeAnalyzerErrorsStatus(DaemonCodeAnalyzerStatus status,
-                                                      boolean fillErrorsCount,
-                                                      SeverityRegistrar severityRegistrar) {
+    protected void fillDaemonCodeAnalyzerErrorsStatus(@NotNull DaemonCodeAnalyzerStatus status,
+                                                      @NotNull SeverityRegistrar severityRegistrar) {
       for (int i = 0; i < status.errorCount.length; i++) {
         final HighlightSeverity minSeverity = severityRegistrar.getSeverityByIndex(i);
         if (minSeverity == null) {
@@ -179,6 +189,7 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
 
     protected boolean isInspectionCompleted() {
       return ContainerUtil.and(myDomElements, new Condition<DomElement>() {
+        @Override
         public boolean value(final DomElement element) {
           return myAnnotationsManager.getHighlightStatus(element) == DomHighlightStatus.INSPECTIONS_FINISHED;
         }
@@ -187,6 +198,7 @@ public class DomElementsErrorPanel extends JPanel implements CommittablePanel, H
 
     protected boolean isErrorAnalyzingFinished() {
       return ContainerUtil.and(myDomElements, new Condition<DomElement>() {
+        @Override
         public boolean value(final DomElement element) {
           return myAnnotationsManager.getHighlightStatus(element).compareTo(DomHighlightStatus.ANNOTATORS_FINISHED) >= 0;
         }

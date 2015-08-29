@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
  */
 package com.intellij.codeInsight.completion;
 
+import com.intellij.application.options.editor.WebEditorOptions;
 import com.intellij.codeInsight.AutoPopupController;
 import com.intellij.codeInsight.lookup.LookupElement;
-import com.intellij.lang.html.HTMLLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -34,7 +34,6 @@ import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.text.CharArrayUtil;
 import com.intellij.xml.XmlNamespaceHelper;
-import com.intellij.xml.util.HtmlUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -58,26 +57,27 @@ public class XmlAttributeInsertHandler implements InsertHandler<LookupElement> {
     myNamespaceToInsert = namespaceToInsert;
   }
 
+  @Override
   public void handleInsert(final InsertionContext context, final LookupElement item) {
     final Editor editor = context.getEditor();
 
     final Document document = editor.getDocument();
     final int caretOffset = editor.getCaretModel().getOffset();
     final PsiFile file = context.getFile();
-    if (file.getLanguage() == HTMLLanguage.INSTANCE &&
-        HtmlUtil.isSingleHtmlAttribute((String)item.getObject())) {
-      return;
-    }
 
     final CharSequence chars = document.getCharsSequence();
-    if (!CharArrayUtil.regionMatches(chars, caretOffset, "=\"") && !CharArrayUtil.regionMatches(chars, caretOffset, "='")) {
+    final boolean insertQuotes = WebEditorOptions.getInstance().isInsertQuotesForAttributeValue();
+    final boolean hasQuotes = CharArrayUtil.regionMatches(chars, caretOffset, "=\"");
+    if (!hasQuotes && !CharArrayUtil.regionMatches(chars, caretOffset, "='")) {
       PsiElement fileContext = file.getContext();
       String toInsert= "=\"\"";
 
       if(fileContext != null) {
         if (fileContext.getText().startsWith("\"")) toInsert = "=''";
       }
-      
+
+      if (!insertQuotes) toInsert = "=";
+
       if (caretOffset >= document.getTextLength() || "/> \n\t\r".indexOf(document.getCharsSequence().charAt(caretOffset)) < 0) {
         document.insertString(caretOffset, toInsert + " ");
       }
@@ -90,7 +90,7 @@ public class XmlAttributeInsertHandler implements InsertHandler<LookupElement> {
       }
     }
 
-    editor.getCaretModel().moveToOffset(caretOffset + 2);
+    editor.getCaretModel().moveToOffset(caretOffset + (insertQuotes || hasQuotes ? 2 : 1));
     editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
     editor.getSelectionModel().removeSelection();
     AutoPopupController.getInstance(editor.getProject()).scheduleAutoPopup(editor);

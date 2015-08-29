@@ -83,6 +83,7 @@ public class JavaRefactoringSettings implements PersistentStateComponent<JavaRef
   public boolean INLINE_METHOD_THIS;
   public boolean INLINE_SUPER_CLASS_THIS;
   public boolean INLINE_FIELD_THIS;
+  public boolean INLINE_LOCAL_THIS;
   //public boolean INHERITANCE_TO_DELEGATION_PREVIEW_USAGES;
   public boolean INHERITANCE_TO_DELEGATION_DELEGATE_OTHER;
   //public boolean REPLACE_CONSTRUCTOR_WITH_FACTORY_PREVIEW_USAGES;
@@ -100,6 +101,7 @@ public class JavaRefactoringSettings implements PersistentStateComponent<JavaRef
   @SuppressWarnings({"WeakerAccess"}) public boolean RENAME_PARAMETER_IN_HIERARCHY = true;
   @SuppressWarnings({"WeakerAccess"}) public boolean RENAME_VARIABLES = true;
   @SuppressWarnings({"WeakerAccess"}) public boolean RENAME_TESTS = true;
+  @SuppressWarnings({"WeakerAccess"}) public boolean RENAME_OVERLOADS = true;
 
   public static JavaRefactoringSettings getInstance() {
     return ServiceManager.getService(JavaRefactoringSettings.class);
@@ -143,5 +145,13 @@ public class JavaRefactoringSettings implements PersistentStateComponent<JavaRef
 
   public void setRenameTests(boolean renameTests) {
     this.RENAME_TESTS = renameTests;
+  }
+
+  public void setRenameOverloads(boolean renameOverloads) {
+    RENAME_OVERLOADS = renameOverloads;
+  }
+
+  public boolean isRenameOverloads() {
+    return RENAME_OVERLOADS;
   }
 }

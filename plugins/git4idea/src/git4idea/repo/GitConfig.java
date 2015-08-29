@@ -15,8 +15,7 @@
  */
 package git4idea.repo;
 
-  import com.intellij.dvcs.repo.RepoStateException;
-import com.intellij.ide.plugins.IdeaPluginDescriptor;
+  import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
@@ -27,7 +26,6 @@ import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitLocalBranch;
 import git4idea.GitPlatformFacade;
 import git4idea.GitRemoteBranch;
-import git4idea.GitSvnRemoteBranch;
 import git4idea.branch.GitBranchUtil;
 import org.ini4j.Ini;
 import org.ini4j.Profile;
@@ -41,28 +39,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * <p>Reads information from the {@code .git/config} file, and parses it to actual objects.</p>
- *
- * <p>Currently doesn't read all the information: general information about remotes and branch tracking</p>
- *
- * <p>Parsing is performed with the help of <a href="http://ini4j.sourceforge.net/">ini4j</a> library.</p>
+ * Reads information from the {@code .git/config} file, and parses it to actual objects.
+ * <p/>
+ * Currently doesn't read all the information: just general information about remotes and branch tracking.
+ * <p/>
+ * Parsing is performed with the help of <a href="http://ini4j.sourceforge.net/">ini4j</a> library.
  *
  * TODO: note, that other git configuration files (such as ~/.gitconfig) are not handled yet.
- * 
- * @author Kirill Likhodedov
  */
 public class GitConfig {
-
-  /**
-   * Special remote typical for git-svn configuration:
-   * <pre>[branch "trunk]
-   *   remote = .
-   *   merge = refs/remotes/trunk
-   * </pre>
-   * @deprecated Use {@link GitSvnRemoteBranch}
-   */
-  @Deprecated
-  public static final String DOT_REMOTE = ".";
 
   private static final Logger LOG = Logger.getInstance(GitConfig.class);
 
@@ -108,7 +93,7 @@ public class GitConfig {
   private static GitRemote convertRemoteToGitRemote(@NotNull Collection<Url> urls, @NotNull Remote remote) {
     UrlsAndPushUrls substitutedUrls = substituteUrls(urls, remote);
     return new GitRemote(remote.myName, substitutedUrls.getUrls(), substitutedUrls.getPushUrls(),
-                         remote.getFetchSpecs(), computePushSpec(remote));
+                         remote.getFetchSpecs(), remote.getPushSpec());
   }
 
   /**
@@ -130,11 +115,18 @@ public class GitConfig {
 
   /**
    * Creates an instance of GitConfig by reading information from the specified {@code .git/config} file.
-   * @throws RepoStateException if {@code .git/config} couldn't be read or has invalid format.<br/>
-   *         If in general it has valid format, but some sections are invalid, it skips invalid sections, but reports an error.
+   * <p/>
+   * If some section is invalid, it is skipped, and a warning is reported.
    */
   @NotNull
   static GitConfig read(@NotNull GitPlatformFacade platformFacade, @NotNull File configFile) {
+    GitConfig emptyConfig = new GitConfig(Collections.<Remote>emptyList(), Collections.<Url>emptyList(),
+                                          Collections.<BranchConfig>emptyList());
+    if (!configFile.exists()) {
+      LOG.info("No .git/config file at " + configFile.getPath());
+      return emptyConfig;
+    }
+
     Ini ini = new Ini();
     ini.getConfig().setMultiOption(true);  // duplicate keys (e.g. url in [remote])
     ini.getConfig().setTree(false);        // don't need tree structure: it corrupts url in section name (e.g. [url "http://github.com/"]
@@ -142,21 +134,23 @@ public class GitConfig {
       ini.load(configFile);
     }
     catch (IOException e) {
-      LOG.error(new RepoStateException("Couldn't load .git/config file at " + configFile.getPath(), e));
-      return new GitConfig(Collections.<Remote>emptyList(), Collections.<Url>emptyList(), Collections.<BranchConfig>emptyList());
+      LOG.warn("Couldn't load .git/config file at " + configFile.getPath(), e);
+      return emptyConfig;
     }
 
     IdeaPluginDescriptor plugin = platformFacade.getPluginByClassName(GitConfig.class.getName());
-    ClassLoader classLoader = plugin == null ? null : plugin.getPluginClassLoader(); // null if IDEA is started from IDEA
+    ClassLoader classLoader = plugin == null ?
+                              GitConfig.class.getClassLoader() :   // null e.g. if IDEA is started from IDEA
+                              plugin.getPluginClassLoader();
 
     Pair<Collection<Remote>, Collection<Url>> remotesAndUrls = parseRemotes(ini, classLoader);
     Collection<BranchConfig> trackedInfos = parseTrackedInfos(ini, classLoader);
-    
+
     return new GitConfig(remotesAndUrls.getFirst(), remotesAndUrls.getSecond(), trackedInfos);
   }
 
   @NotNull
-  private static Collection<BranchConfig> parseTrackedInfos(@NotNull Ini ini, @Nullable ClassLoader classLoader) {
+  private static Collection<BranchConfig> parseTrackedInfos(@NotNull Ini ini, @NotNull ClassLoader classLoader) {
     Collection<BranchConfig> configs = new ArrayList<BranchConfig>();
     for (Map.Entry<String, Profile.Section> stringSectionEntry : ini.entrySet()) {
       String sectionName = stringSectionEntry.getKey();
@@ -193,13 +187,13 @@ public class GitConfig {
     }
 
     boolean merge = mergeName != null;
-    final String remoteBranchName = (merge ? mergeName : rebaseName);
-    assert remoteName != null;
-    assert remoteBranchName != null;
+    final String remoteBranchName = StringUtil.unquoteString(merge ? mergeName : rebaseName);
 
     GitLocalBranch localBranch = findLocalBranch(branchName, localBranches);
-    GitRemoteBranch remoteBranch = GitBranchUtil.findRemoteBranchByName(remoteBranchName, remoteName, remoteBranches);
+    GitRemoteBranch remoteBranch = findRemoteBranch(remoteBranchName, remoteName, remoteBranches);
     if (localBranch == null || remoteBranch == null) {
+      // obsolete record in .git/config: local or remote branch doesn't exist, but the tracking information wasn't removed
+      LOG.debug("localBranch: " + localBranch + ", remoteBranch: " + remoteBranch);
       return null;
     }
     return new GitBranchTrackInfo(localBranch, remoteBranch, merge);
@@ -208,23 +202,29 @@ public class GitConfig {
   @Nullable
   private static GitLocalBranch findLocalBranch(@NotNull String branchName, @NotNull Collection<GitLocalBranch> localBranches) {
     final String name = GitBranchUtil.stripRefsPrefix(branchName);
-    try {
-      return ContainerUtil.find(localBranches, new Condition<GitLocalBranch>() {
-        @Override
-        public boolean value(@Nullable GitLocalBranch input) {
-          assert input != null;
-          return input.getName().equals(name);
-        }
-      });
-    }
-    catch (NoSuchElementException e) {
-      LOG.info("Couldn't find branch with name " + name);
-      return null;
-    }
+    return ContainerUtil.find(localBranches, new Condition<GitLocalBranch>() {
+      @Override
+      public boolean value(@Nullable GitLocalBranch input) {
+        assert input != null;
+        return input.getName().equals(name);
+      }
+    });
   }
 
   @Nullable
-  private static BranchConfig parseBranchSection(String sectionName, Profile.Section section, @Nullable ClassLoader classLoader) {
+  public static GitRemoteBranch findRemoteBranch(@NotNull String remoteBranchName, @NotNull final String remoteName,
+                                                 @NotNull final Collection<GitRemoteBranch> remoteBranches) {
+    final String branchName = GitBranchUtil.stripRefsPrefix(remoteBranchName);
+    return ContainerUtil.find(remoteBranches, new Condition<GitRemoteBranch>() {
+      @Override
+      public boolean value(GitRemoteBranch branch) {
+        return branch.getNameForRemoteOperations().equals(branchName) && branch.getRemote().getName().equals(remoteName);
+      }
+    });
+  }
+
+  @Nullable
+  private static BranchConfig parseBranchSection(String sectionName, Profile.Section section, @NotNull ClassLoader classLoader) {
     BranchBean branchBean = section.as(BranchBean.class, classLoader);
     Matcher matcher = BRANCH_INFO_SECTION.matcher(sectionName);
     if (matcher.matches()) {
@@ -239,20 +239,18 @@ public class GitConfig {
   }
 
   @NotNull
-  private static Pair<Collection<Remote>, Collection<Url>> parseRemotes(@NotNull Ini ini, @Nullable ClassLoader classLoader) {
+  private static Pair<Collection<Remote>, Collection<Url>> parseRemotes(@NotNull Ini ini, @NotNull ClassLoader classLoader) {
     Collection<Remote> remotes = new ArrayList<Remote>();
     Collection<Url> urls = new ArrayList<Url>();
     for (Map.Entry<String, Profile.Section> stringSectionEntry : ini.entrySet()) {
       String sectionName = stringSectionEntry.getKey();
       Profile.Section section = stringSectionEntry.getValue();
 
-      if (sectionName.startsWith("remote") || sectionName.startsWith("svn-remote")) {
-        Remote remote = parseRemoteSection(sectionName, section, classLoader);
-        if (remote != null) {
-          remotes.add(remote);
-        }
+      Remote remote = parseRemoteSection(sectionName, section, classLoader);
+      if (remote != null) {
+        remotes.add(remote);
       }
-      else if (sectionName.startsWith("url")) {
+      else {
         Url url = parseUrlSection(sectionName, section, classLoader);
         if (url != null) {
           urls.add(url);
@@ -260,12 +258,6 @@ public class GitConfig {
       }
     }
     return Pair.create(remotes, urls);
-  }
-
-  @NotNull
-  private static List<String> computePushSpec(@NotNull Remote remote) {
-    List<String> pushSpec = remote.getPushSpec();
-    return pushSpec == null ? remote.getFetchSpecs() : pushSpec;
   }
 
   /**
@@ -375,24 +367,22 @@ public class GitConfig {
   }
 
   @Nullable
-  private static Remote parseRemoteSection(@NotNull String sectionName, @NotNull Profile.Section section, @Nullable ClassLoader classLoader) {
-    RemoteBean remoteBean = section.as(RemoteBean.class, classLoader);
+  private static Remote parseRemoteSection(@NotNull String sectionName,
+                                           @NotNull Profile.Section section,
+                                           @NotNull ClassLoader classLoader) {
     Matcher matcher = REMOTE_SECTION.matcher(sectionName);
-    if (matcher.matches()) {
-      return new Remote(matcher.group(1), remoteBean);
+    if (matcher.matches() && matcher.groupCount() == 1) {
+      return new Remote(matcher.group(1), section.as(RemoteBean.class, classLoader));
     }
-    LOG.error(String.format("Invalid remote section format in .git/config. sectionName: %s section: %s", sectionName, section));
     return null;
   }
 
   @Nullable
-  private static Url parseUrlSection(@NotNull String sectionName, @NotNull Profile.Section section, @Nullable ClassLoader classLoader) {
-    UrlBean urlBean = section.as(UrlBean.class, classLoader);
+  private static Url parseUrlSection(@NotNull String sectionName, @NotNull Profile.Section section, @NotNull ClassLoader classLoader) {
     Matcher matcher = URL_SECTION.matcher(sectionName);
-    if (matcher.matches()) {
-      return new Url(matcher.group(1), urlBean);
+    if (matcher.matches() && matcher.groupCount() == 1) {
+      return new Url(matcher.group(1), section.as(UrlBean.class, classLoader));
     }
-    LOG.error(String.format("Invalid url section format in .git/config. sectionName: %s section: %s", sectionName, section));
     return null;
   }
 
@@ -416,11 +406,10 @@ public class GitConfig {
       return nonNullCollection(myRemoteBean.getPushUrl());
     }
 
-    @Nullable
-    // no need in wrapping null here - we check for it in #computePushSpec 
+    @NotNull
     private List<String> getPushSpec() {
       String[] push = myRemoteBean.getPush();
-      return push == null ? null : Arrays.asList(push);
+      return push == null ? Collections.<String>emptyList() : Arrays.asList(push);
     }
 
     @NotNull

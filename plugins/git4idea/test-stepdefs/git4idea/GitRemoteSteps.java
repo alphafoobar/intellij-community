@@ -15,9 +15,8 @@
  */
 package git4idea;
 
-import com.intellij.openapi.progress.EmptyProgressIndicator;
-import cucumber.annotation.en.Then;
-import cucumber.annotation.en.When;
+import cucumber.api.java.en.Then;
+import cucumber.api.java.en.When;
 import git4idea.checkout.GitCheckoutProvider;
 import git4idea.commands.GitHttpAuthenticator;
 import org.jetbrains.annotations.NotNull;
@@ -48,7 +47,7 @@ public class GitRemoteSteps {
       @Override
       public void run() {
         String projectName = url.substring(url.lastIndexOf('/') + 1).replace(".git", "");
-        GitCheckoutProvider.doClone(myProject, new EmptyProgressIndicator(), myGit, projectName, myTestRoot, url);
+        GitCheckoutProvider.doClone(myProject, myGit, projectName, myTestRoot, url);
         myCloneCompleted.countDown();
       }
     });
@@ -159,6 +158,11 @@ public class GitRemoteSteps {
 
     @Override
     public void forgetPassword() {
+    }
+
+    @Override
+    public boolean wasCancelled() {
+      return false;
     }
 
     boolean wasPasswordAsked() {

@@ -21,6 +21,7 @@ import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.actionSystem.DataSink;
 import com.intellij.openapi.actionSystem.TypeSafeDataProvider;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.FileStatusManager;
@@ -43,7 +44,7 @@ import java.io.File;
 /**
  * @author yole
  */
-public class DirectoryGroupingRule implements UsageGroupingRule {
+public class DirectoryGroupingRule implements UsageGroupingRule, DumbAware {
   public static DirectoryGroupingRule getInstance(Project project) {
     return ServiceManager.getService(project, DirectoryGroupingRule.class);
   }
@@ -72,7 +73,7 @@ public class DirectoryGroupingRule implements UsageGroupingRule {
     return null;
   }
 
-  protected UsageGroup getGroupForFile(VirtualFile dir) {
+  protected UsageGroup getGroupForFile(@NotNull VirtualFile dir) {
     return new DirectoryGroup(dir);
   }
 
@@ -87,7 +88,7 @@ public class DirectoryGroupingRule implements UsageGroupingRule {
     public void update() {
     }
 
-    private DirectoryGroup(VirtualFile dir) {
+    private DirectoryGroup(@NotNull VirtualFile dir) {
       myDir = dir;
     }
 
@@ -99,8 +100,9 @@ public class DirectoryGroupingRule implements UsageGroupingRule {
     @Override
     @NotNull
     public String getText(UsageView view) {
-      String relativePath = VfsUtilCore.getRelativePath(myDir, myProject.getBaseDir(), File.separatorChar);
-      return relativePath != null ? relativePath : myDir.getPresentableUrl();
+      VirtualFile baseDir = myProject.getBaseDir();
+      String relativePath = baseDir == null ? null : VfsUtilCore.getRelativePath(myDir, baseDir, File.separatorChar);
+      return relativePath == null ? myDir.getPresentableUrl() : relativePath;
     }
 
     @Override

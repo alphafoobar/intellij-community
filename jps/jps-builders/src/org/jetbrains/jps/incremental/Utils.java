@@ -17,17 +17,20 @@ package org.jetbrains.jps.incremental;
 
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.PathUtilRt;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.builders.BuildTarget;
-import org.jetbrains.jps.model.module.JpsModule;
 import org.jetbrains.jps.model.serialization.JpsProjectLoader;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
 
 import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * @author Eugene Zhuravlev
@@ -85,7 +88,7 @@ public class Utils {
       if (directoryBased == null) {
         return null;
       }
-      name = JpsProjectLoader.getDirectoryBaseProjectName(directoryBased);
+      name = PathUtilRt.suggestFileName(JpsProjectLoader.getDirectoryBaseProjectName(directoryBased));
       locationHash = directoryBased.getPath().hashCode();
     }
 
@@ -94,11 +97,11 @@ public class Utils {
 
   public static URI toURI(String localPath) {
     try {
-      String p = FileUtil.toSystemIndependentName(localPath);
+      String p = FileUtilRt.toSystemIndependentName(localPath);
       if (!p.startsWith("/")) {
         p = "/" + p;
       }
-      if (p.startsWith("//")) {
+      if (!p.startsWith("//")) {
         p = "//" + p;
       }
       return new URI("file", null, p, null);
@@ -118,13 +121,6 @@ public class Utils {
       return null;
     }
     return new File(toURI(path));
-  }
-
-  public static boolean intersects(Set<JpsModule> set1, Set<JpsModule> set2) {
-    if (set1.size() < set2.size()) {
-      return new HashSet<JpsModule>(set1).removeAll(set2);
-    }
-    return new HashSet<JpsModule>(set2).removeAll(set1);
   }
 
   public static boolean errorsDetected(CompileContext context) {

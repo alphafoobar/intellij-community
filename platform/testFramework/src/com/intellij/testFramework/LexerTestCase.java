@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,9 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.TokenSet;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -37,13 +39,33 @@ public abstract class LexerTestCase extends UsefulTestCase {
   }
 
   protected void doTest(@NonNls String text, @Nullable String expected) {
-    String result = printTokens(text, 0);
+    doTest(text, expected, createLexer());
+  }
+
+  protected void doTest(@NonNls String text, @Nullable String expected, @NotNull Lexer lexer) {
+    String result = printTokens(text, 0, lexer);
 
     if (expected != null) {
       assertSameLines(expected, result);
     }
     else {
       assertSameLinesWithFile(PathManager.getHomePath() + "/" + getDirPath() + "/" + getTestName(true) + ".txt", result);
+    }
+  }
+
+  protected void checkZeroState(String text, TokenSet tokenTypes) {
+    Lexer lexer = createLexer();
+    lexer.start(text);
+
+    while (true) {
+      IElementType type = lexer.getTokenType();
+      if (type == null) {
+        break;
+      }
+      if (tokenTypes.contains(type) && lexer.getState() != 0) {
+        fail("Non-zero lexer state on token \"" + lexer.getTokenText() + "\" (" + type + ") at " + lexer.getTokenStart());
+      }
+      lexer.advance();
     }
   }
 

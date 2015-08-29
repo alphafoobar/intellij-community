@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,9 @@ public class JavaTreeGenerator implements TreeGenerator {
       final LanguageLevel level = PsiUtil.getLanguageLevel(original);
       final DummyHolder holder = DummyHolderFactory.createHolder(original.getManager(), new JavaDummyElement(text, MOD_LIST, level), null);
       final TreeElement modifierListElement = holder.getTreeElement().getFirstChildNode();
+      if (modifierListElement == null) {
+        throw new AssertionError("No modifier list for \"" + text + '\"');
+      }
       return markGeneratedIfNeeded(original, modifierListElement);
     }
 
@@ -85,7 +88,7 @@ public class JavaTreeGenerator implements TreeGenerator {
 
         boolean isFQ = false;
         if (original instanceof PsiJavaCodeReferenceElementImpl) {
-          int kind = ((PsiJavaCodeReferenceElementImpl)original).getKind();
+          int kind = ((PsiJavaCodeReferenceElementImpl)original).getKind(original.getContainingFile());
           switch (kind) {
             case PsiJavaCodeReferenceElementImpl.CLASS_OR_PACKAGE_NAME_KIND:
             case PsiJavaCodeReferenceElementImpl.CLASS_NAME_KIND:
@@ -131,7 +134,7 @@ public class JavaTreeGenerator implements TreeGenerator {
         type = PsiType.getJavaLangObject(manager, GlobalSearchScope.projectScope(manager.getProject()));
       }
 
-      String text = type.getPresentableText();
+      String text = type.getCanonicalText(true);
       PsiJavaParserFacade parserFacade = JavaPsiFacade.getInstance(original.getProject()).getParserFacade();
       PsiTypeElement element = parserFacade.createTypeElementFromText(text, original);
 
@@ -148,7 +151,7 @@ public class JavaTreeGenerator implements TreeGenerator {
     return Factory.createSingleLeafElement(type, text, 0, text.length(), table, manager, CodeEditUtil.isNodeGenerated(original.getNode()));
   }
 
-  private static TreeElement markGeneratedIfNeeded(PsiElement original, TreeElement copy) {
+  private static TreeElement markGeneratedIfNeeded(@NotNull PsiElement original, @NotNull TreeElement copy) {
     if (CodeEditUtil.isNodeGenerated(original.getNode())) {
       copy.acceptTree(new GeneratedMarkerVisitor());
     }

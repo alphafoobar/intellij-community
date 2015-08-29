@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.openapi.vcs.changes.actions;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.impl.patch.BinaryFilePatch;
 import com.intellij.openapi.diff.impl.patch.FilePatch;
@@ -73,9 +72,10 @@ abstract class RevertCommittedStuffAbstractAction extends AnAction implements Du
     }
 
     final ChangeListChooser chooser = new ChangeListChooser(project, ChangeListManager.getInstance(project).getChangeListsCopy(), null,
-                                                      "Select Target Changelist", defaultName);
-    chooser.show();
-    if (!chooser.isOK()) return;
+                                                            "Select Target Changelist", defaultName);
+    if (!chooser.showAndGet()) {
+      return;
+    }
 
     final List<FilePatch> patches = new ArrayList<FilePatch>();
     ProgressManager.getInstance().run(new Task.Backgroundable(project, VcsBundle.message("revert.changes.title"), true,
@@ -104,9 +104,14 @@ abstract class RevertCommittedStuffAbstractAction extends AnAction implements Du
     });
   }
 
-  public void update(final AnActionEvent e) {
-    final Project project = e.getData(CommonDataKeys.PROJECT);
-    final Change[] changes = myForUpdateConvertor.convert(e);
-    e.getPresentation().setEnabled(project != null && changes != null && changes.length > 0);
+  public void update(@NotNull AnActionEvent e) {
+    e.getPresentation().setEnabled(isEnabled(e));
+  }
+
+  protected boolean isEnabled(@NotNull AnActionEvent e) {
+    Project project = e.getData(CommonDataKeys.PROJECT);
+    Change[] changes = myForUpdateConvertor.convert(e);
+
+    return project != null && changes != null && changes.length > 0;
   }
 }

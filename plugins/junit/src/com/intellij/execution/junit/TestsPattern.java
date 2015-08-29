@@ -21,17 +21,13 @@
 package com.intellij.execution.junit;
 
 import com.intellij.execution.CantRunException;
+import com.intellij.execution.ExecutionException;
 import com.intellij.execution.JavaExecutionUtil;
-import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.configurations.RuntimeConfigurationWarning;
 import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.execution.util.JavaParametersUtil;
+import com.intellij.execution.testframework.SearchForTestsTask;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.progress.impl.BackgroundableProcessIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -40,24 +36,19 @@ import com.intellij.refactoring.listeners.RefactoringElementListener;
 import com.intellij.refactoring.listeners.RefactoringElementListenerComposite;
 import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 public class TestsPattern extends TestPackage {
-  public TestsPattern(final Project project,
-                      final JUnitConfiguration configuration,
-                      ExecutionEnvironment environment) {
-    super(project, configuration, environment);
+  public TestsPattern(JUnitConfiguration configuration, ExecutionEnvironment environment) {
+    super(configuration, environment);
   }
 
   @Override
   protected TestClassFilter getClassFilter(JUnitConfiguration.Data data) throws CantRunException {
-    return TestClassFilter.create(getSourceScope(), myConfiguration.getConfigurationModule().getModule(), data.getPatternPresentation());
+    return TestClassFilter.create(getSourceScope(), getConfiguration().getConfigurationModule().getModule(), data.getPatternPresentation());
   }
 
   @Override
@@ -66,10 +57,10 @@ public class TestsPattern extends TestPackage {
   }
 
   @Override
-  public Task findTests() {
-    final JUnitConfiguration.Data data = myConfiguration.getPersistentData();
-    final Project project = myConfiguration.getProject();
-    final Set<String> classNames = new HashSet<String>();
+  public SearchForTestsTask createSearchingForTestsTask() {
+    final JUnitConfiguration.Data data = getConfiguration().getPersistentData();
+    final Project project = getConfiguration().getProject();
+    final Set<String> classNames = new LinkedHashSet<String>();
     for (String className : data.getPatterns()) {
       final PsiClass psiClass = getTestClass(project, className);
       if (psiClass != null&& JUnitUtil.isTestClass(psiClass)) {
@@ -78,40 +69,26 @@ public class TestsPattern extends TestPackage {
     }
 
     if (classNames.size() == data.getPatterns().size()) {
-      final SearchForTestsTask task = new SearchForTestsTask(project, "Searching for tests...", true) {
+      return new SearchForTestsTask(project, myServerSocket) {
         @Override
-        public void run(@NotNull ProgressIndicator indicator) {
-          try {
-            mySocket = myServerSocket.accept();
-            addClassesListToJavaParameters(classNames,
-                                           StringUtil.isEmpty(data.METHOD_NAME)
-                                           ? FunctionUtil.<String>id()
-                                           : new Function<String, String>() {
-                                             @Override
-                                             public String fun(String className) {
-                                               return className;
-                                             }
-                                           }, "", false, true);
-          }
-          catch (IOException e) {
-            LOG.info(e);
-          }
-          catch (Throwable e) {
-            LOG.error(e);
-          }
+        protected void search() throws ExecutionException {
+          final Function<String, String> nameFunction = StringUtil.isEmpty(data.METHOD_NAME)
+                                                        ? FunctionUtil.<String>id()
+                                                        : new Function<String, String>() {
+                                                          @Override
+                                                          public String fun(String className) {
+                                                            return className;
+                                                          }
+                                                        };
+          addClassesListToJavaParameters(classNames, nameFunction, "", false, getJavaParameters());
         }
 
         @Override
-        public void onSuccess() {
-          finish();
-        }
+        protected void onFound() {}
       };
-      mySearchForTestsIndicator = new BackgroundableProcessIndicator(task);
-      ProgressManager.getInstance().runProcessWithProgressAsynchronously(task, mySearchForTestsIndicator);
-      return task;
     }
 
-    return super.findTests();
+    return super.createSearchingForTestsTask();
   }
 
   private static PsiClass getTestClass(Project project, String className) {
@@ -120,19 +97,10 @@ public class TestsPattern extends TestPackage {
                                            ? className.substring(0, className.indexOf(','))
                                            : className).trim(), GlobalSearchScope.allScope(project));
   }
-  
-  protected void configureClasspath() throws CantRunException {
-    final String jreHome = myConfiguration.isAlternativeJrePathEnabled() ? myConfiguration.getAlternativeJrePath() : null;
 
-    final Module module = myConfiguration.getConfigurationModule().getModule();
-
-    if (module != null) {
-      JavaParametersUtil.configureModule(module, myJavaParameters, JavaParameters.JDK_AND_CLASSES_AND_TESTS, jreHome);
-    }
-    else {
-      JavaParametersUtil
-        .configureProject(myConfiguration.getProject(), myJavaParameters, JavaParameters.JDK_AND_CLASSES_AND_TESTS, jreHome);
-    }
+  @Override
+  protected boolean configureByModule(Module module) {
+    return module != null;
   }
 
   @Override
@@ -201,15 +169,15 @@ public class TestsPattern extends TestPackage {
 
   @Override
   public void checkConfiguration() throws RuntimeConfigurationException {
-    final JUnitConfiguration.Data data = myConfiguration.getPersistentData();
+    final JUnitConfiguration.Data data = getConfiguration().getPersistentData();
     final Set<String> patterns = data.getPatterns();
     if (patterns.isEmpty()) {
       throw new RuntimeConfigurationWarning("No pattern selected");
     }
-    final GlobalSearchScope searchScope = GlobalSearchScope.allScope(myConfiguration.getProject());
+    final GlobalSearchScope searchScope = GlobalSearchScope.allScope(getConfiguration().getProject());
     for (String pattern : patterns) {
       final String className = pattern.contains(",") ? StringUtil.getPackageName(pattern, ',') : pattern;
-      final PsiClass psiClass = JavaExecutionUtil.findMainClass(myConfiguration.getProject(), className, searchScope);
+      final PsiClass psiClass = JavaExecutionUtil.findMainClass(getConfiguration().getProject(), className, searchScope);
       if (psiClass != null && !JUnitUtil.isTestClass(psiClass)) {
         throw new RuntimeConfigurationWarning("Class " + className + " not a test");
       }

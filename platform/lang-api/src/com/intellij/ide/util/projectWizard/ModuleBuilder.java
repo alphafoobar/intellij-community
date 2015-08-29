@@ -18,7 +18,6 @@ package com.intellij.ide.util.projectWizard;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.ide.util.frameworkSupport.FrameworkRole;
-import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
@@ -26,6 +25,8 @@ import com.intellij.openapi.module.*;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectType;
+import com.intellij.openapi.project.ProjectTypeService;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModifiableRootModel;
@@ -33,6 +34,7 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
@@ -40,6 +42,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.EventDispatcher;
+import com.intellij.util.containers.ContainerUtil;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -51,15 +54,16 @@ import java.io.IOException;
 import java.util.*;
 
 public abstract class ModuleBuilder extends AbstractModuleBuilder {
+
   public static final ExtensionPointName<ModuleBuilderFactory> EP_NAME = ExtensionPointName.create("com.intellij.moduleBuilder");
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.util.projectWizard.ModuleBuilder");
+  private final Set<ModuleConfigurationUpdater> myUpdaters = new HashSet<ModuleConfigurationUpdater>();
+  private final EventDispatcher<ModuleBuilderListener> myDispatcher = EventDispatcher.create(ModuleBuilderListener.class);
   protected Sdk myJdk;
   private String myName;
   @NonNls private String myModuleFilePath;
   private String myContentEntryPath;
-  private final Set<ModuleConfigurationUpdater> myUpdaters = new HashSet<ModuleConfigurationUpdater>();
-  private final EventDispatcher<ModuleBuilderListener> myDispatcher = EventDispatcher.create(ModuleBuilderListener.class);
 
   @NotNull
   public static List<ModuleBuilder> getAllBuilders() {
@@ -70,7 +74,28 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
     for (ModuleBuilderFactory factory : EP_NAME.getExtensions()) {
       result.add(factory.createBuilder());
     }
-    return result;
+    return ContainerUtil.filter(result, new Condition<ModuleBuilder>() {
+
+      @Override
+      public boolean value(ModuleBuilder moduleBuilder) {
+        return moduleBuilder.isAvailable();
+      }
+    });
+  }
+
+  public static void deleteModuleFile(String moduleFilePath) {
+    final File moduleFile = new File(moduleFilePath);
+    if (moduleFile.exists()) {
+      FileUtil.delete(moduleFile);
+    }
+    final VirtualFile file = LocalFileSystem.getInstance().findFileByIoFile(moduleFile);
+    if (file != null) {
+      file.refresh(false, false);
+    }
+  }
+
+  protected boolean isAvailable() {
+    return true;
   }
 
   @Nullable
@@ -80,6 +105,11 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
 
   public String getName() {
     return myName;
+  }
+
+  @Override
+  public void setName(String name) {
+    myName = acceptParameter(name);
   }
 
   @Override
@@ -106,6 +136,10 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
   @Override
   @Nullable
   public ModuleWizardStep modifySettingsStep(@NotNull SettingsStep settingsStep) {
+    return modifyStep(settingsStep);
+  }
+
+  public ModuleWizardStep modifyStep(SettingsStep settingsStep) {
     ModuleType type = getModuleType();
     if (type == null) {
       return null;
@@ -142,31 +176,26 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
     }
   }
 
-  @Nullable
-  public JComponent getCustomOptionsPanel(Disposable parentDisposable) {
-    return null;
+  public ModuleWizardStep modifyProjectTypeStep(@NotNull SettingsStep settingsStep) {
+    ModuleType type = getModuleType();
+    return type == null ? null : type.modifyProjectTypeStep(settingsStep, this);
   }
 
   protected List<WizardInputField> getAdditionalFields() {
     return Collections.emptyList();
   }
 
-  @Override
-  public void setName(String name) {
-    myName = acceptParameter(name);
-  }
-
   public String getModuleFilePath() {
     return myModuleFilePath;
-  }
-
-  public void addModuleConfigurationUpdater(ModuleConfigurationUpdater updater) {
-    myUpdaters.add(updater);
   }
 
   @Override
   public void setModuleFilePath(@NonNls String path) {
     myModuleFilePath = acceptParameter(path);
+  }
+
+  public void addModuleConfigurationUpdater(ModuleConfigurationUpdater updater) {
+    myUpdaters.add(updater);
   }
 
   @Nullable
@@ -243,6 +272,7 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
       updater.update(module, modifiableModel);
     }
     modifiableModel.commit();
+    setProjectType(module);
   }
 
   private void onModuleInitialized(final Module module) {
@@ -252,6 +282,17 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
   public abstract void setupRootModel(ModifiableRootModel modifiableRootModel) throws ConfigurationException;
 
   public abstract ModuleType getModuleType();
+
+  protected ProjectType getProjectType() {
+    return null;
+  }
+
+  protected void setProjectType(Module module) {
+    ProjectType projectType = getProjectType();
+    if (projectType != null && ProjectTypeService.getProjectType(module.getProject()) == null) {
+      ProjectTypeService.setProjectType(module.getProject(), projectType);
+    }
+  }
 
   @NotNull
   public Module createAndCommitIfNeeded(@NotNull Project project, @Nullable ModifiableModuleModel model, boolean runFromProjectWizard)
@@ -279,7 +320,6 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
     return module;
   }
 
-
   public void addListener(ModuleBuilderListener listener) {
     myDispatcher.addListener(listener);
   }
@@ -294,7 +334,7 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
 
   @Override
   @Nullable
-  public List<Module> commit(final Project project, final ModifiableModuleModel model, final ModulesProvider modulesProvider) {
+  public List<Module> commit(@NotNull final Project project, final ModifiableModuleModel model, final ModulesProvider modulesProvider) {
     final Module module = commitModule(project, model);
     return module != null ? Collections.singletonList(module) : null;
   }
@@ -324,17 +364,6 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
     return null;
   }
 
-  public static void deleteModuleFile(String moduleFilePath) {
-    final File moduleFile = new File(moduleFilePath);
-    if (moduleFile.exists()) {
-      FileUtil.delete(moduleFile);
-    }
-    final VirtualFile file = LocalFileSystem.getInstance().findFileByIoFile(moduleFile);
-    if (file != null) {
-      file.refresh(false, false);
-    }
-  }
-
   public Icon getBigIcon() {
     return getModuleType().getBigIcon();
   }
@@ -348,6 +377,10 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
   }
 
   public String getPresentableName() {
+    return getModuleTypeName();
+  }
+
+  protected String getModuleTypeName() {
     String name = getModuleType().getName();
     return StringUtil.trimEnd(name, " Module");
   }
@@ -356,30 +389,32 @@ public abstract class ModuleBuilder extends AbstractModuleBuilder {
     return getPresentableName().split(" ")[0];
   }
 
+  public String getParentGroup() {
+    return null;
+  }
+
+  public int getWeight() { return 0; }
+
+  public boolean isTemplate() {
+    return false;
+  }
+
+  public boolean isTemplateBased() {
+    return false;
+  }
+
   public void updateFrom(ModuleBuilder from) {
     myName = from.getName();
     myContentEntryPath = from.getContentEntryPath();
     myModuleFilePath = from.getModuleFilePath();
   }
 
-  public void setModuleJdk(Sdk jdk) {
-    myJdk = jdk;
-  }
-
   public Sdk getModuleJdk() {
     return myJdk;
   }
 
-  private Map<String, Boolean> myAvailableFrameworks;
-
-  /** @deprecated will be removed */
-  public Map<String, Boolean> getAvailableFrameworks() {
-    return myAvailableFrameworks;
-  }
-
-  /** @deprecated will be removed */
-  public void setAvailableFrameworks(Map<String, Boolean> availableFrameworks) {
-    myAvailableFrameworks = availableFrameworks;
+  public void setModuleJdk(Sdk jdk) {
+    myJdk = jdk;
   }
 
   @NotNull

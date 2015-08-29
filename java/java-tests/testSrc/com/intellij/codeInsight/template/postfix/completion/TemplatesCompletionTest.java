@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,23 +17,89 @@ package com.intellij.codeInsight.template.postfix.completion;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.completion.CompletionAutoPopupTestCase;
+import com.intellij.codeInsight.completion.CompletionType;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
+import com.intellij.codeInsight.template.impl.LiveTemplateCompletionContributor;
 import com.intellij.codeInsight.template.postfix.settings.PostfixTemplatesSettings;
-import com.intellij.codeInsight.template.postfix.templates.InstanceofExpressionPostfixTemplate;
-import com.intellij.codeInsight.template.postfix.templates.PostfixTemplate;
-import com.intellij.codeInsight.template.postfix.templates.SwitchStatementPostfixTemplate;
+import com.intellij.codeInsight.template.postfix.templates.*;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Set;
+
 public class TemplatesCompletionTest extends CompletionAutoPopupTestCase {
+  @Override
+  public void setUp() {
+    super.setUp();
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(false, getTestRootDisposable());
+  }
+
+  @Override
+  public void tearDown() throws Exception {
+    PostfixTemplatesSettings settings = PostfixTemplatesSettings.getInstance();
+    assertNotNull(settings);
+    settings.setLangDisabledTemplates(ContainerUtil.<String, Set<String>>newHashMap());
+    settings.setPostfixTemplatesEnabled(true);
+    settings.setTemplatesCompletionEnabled(true);
+    super.tearDown();
+  }
+
+  public void testSimpleCompletionList() {
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(true, getTestRootDisposable());
+    doAutoPopupTest("ins", InstanceofExpressionPostfixTemplate.class);
+  }
+
+  public void testAutopopupWithEnabledLiveTemplatesInCompletion() {
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(false, getTestRootDisposable());
+
+    configureByFile();
+    type("instanceof");
+    LookupImpl lookup = getLookup();
+    assertNotNull(lookup);
+    assertEquals(1, lookup.getItems().size());
+    LookupElement item = lookup.getCurrentItem();
+    assertNotNull(item);
+    assertInstanceOf(item, PostfixTemplateLookupElement.class);
+    assertInstanceOf(((PostfixTemplateLookupElement)item).getPostfixTemplate(), InstanceofExpressionPostfixTemplate.class);
+  }
+
   public void testDoNotShowTemplateInInappropriateContext() {
     doAutoPopupTest("instanceof", null);
   }
 
+  // IDEA-119910 Middle matching doesn't work if pattern starts with a digit
+  public void testRestartCompletionForExactMatchOnly() {
+    doCompleteTest(".2", '\n');
+  }
+
+  public void testRestartCompletionForExactMatch() {
+    configureByFile();
+    type("not");
+    LookupElement currentItem = getLookup().getCurrentItem();
+    assertNotNull(currentItem);
+    assertInstanceOf(currentItem, PostfixTemplateLookupElement.class);
+    assertEquals(".not", currentItem.getLookupString());
+
+    type("null");
+    currentItem = getLookup().getCurrentItem();
+    assertNotNull(currentItem);
+    assertInstanceOf(currentItem, PostfixTemplateLookupElement.class);
+    assertEquals(".notnull", currentItem.getLookupString());
+  }
+
   public void testShowTemplateInAutoPopup() {
     doAutoPopupTest("instanceof", InstanceofExpressionPostfixTemplate.class);
+  }
+
+  public void testShowAutoPopupForAliases() {
+    doAutoPopupTest("nn", NotNullCheckPostfixTemplate.class);
+  }
+
+  public void testShowAutoPopupForFloatLiterals() {
+    doAutoPopupTest("fori", ForAscendingPostfixTemplate.class);
   }
 
   public void testDoNotShowTemplateIfPluginIsDisabled() {
@@ -42,12 +108,30 @@ public class TemplatesCompletionTest extends CompletionAutoPopupTestCase {
     settings.setPostfixTemplatesEnabled(false);
     doAutoPopupTest("instanceof", null);
   }
-  
+
   public void testDoNotShowTemplateIfTemplateCompletionIsDisabled() {
     PostfixTemplatesSettings settings = PostfixTemplatesSettings.getInstance();
     assertNotNull(settings);
     settings.setTemplatesCompletionEnabled(false);
     doAutoPopupTest("instanceof", null);
+  }
+
+  public void testDoNotShowTemplateInMultiCaretMode() {
+    doAutoPopupTest("instanceof", null);
+  }
+
+  public void testDoNotAutoCompleteCompletionElementIfTemplateUnique() {
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(true, getTestRootDisposable());
+    configureByFile();
+    myFixture.completeBasic();
+    checkResultByFile();
+  }
+
+  public void testDoNotCompleteTemplateInMultiCaretMode() {
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(true, getTestRootDisposable());
+    configureByFile();
+    assertEmpty(myFixture.complete(CompletionType.BASIC));
+    checkResultByFile();
   }
 
   public void testShowTemplateOnDoubleLiteral() {
@@ -73,7 +157,7 @@ public class TemplatesCompletionTest extends CompletionAutoPopupTestCase {
   public void testDoNotShowDisabledTemplate() {
     PostfixTemplatesSettings settings = PostfixTemplatesSettings.getInstance();
     assertNotNull(settings);
-    settings.disableTemplate(new InstanceofExpressionPostfixTemplate());
+    settings.disableTemplate(new InstanceofExpressionPostfixTemplate(), JavaLanguage.INSTANCE.getID());
     doAutoPopupTest("instanceof", null);
   }
 
@@ -99,14 +183,22 @@ public class TemplatesCompletionTest extends CompletionAutoPopupTestCase {
     myFixture.assertPreferredCompletionItems(selectedIndex, ".par", "parents");
   }
 
-  @Override
-  public void tearDown() throws Exception {
-    PostfixTemplatesSettings settings = PostfixTemplatesSettings.getInstance();
-    assertNotNull(settings);
-    settings.setTemplatesState(ContainerUtil.<String, Boolean>newHashMap());
-    settings.setPostfixTemplatesEnabled(true);
-    settings.setTemplatesCompletionEnabled(true);
-    super.tearDown();
+  public void testTabCompletionWithTemplatesInAutopopup() {
+    LiveTemplateCompletionContributor.setShowTemplatesInTests(true, getTestRootDisposable());
+
+    configureByFile();
+    type(".");
+    myFixture.assertPreferredCompletionItems(0, "parents");
+
+    type("\t");
+    assertNull(getLookup());
+    checkResultByFile();
+  }
+
+  public void testShouldNotExpandInMultiCaretMode() {
+    configureByFile();
+    type(".if\t");
+    checkResultByFile();
   }
 
   @Override

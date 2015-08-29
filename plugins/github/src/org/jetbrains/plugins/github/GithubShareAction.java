@@ -15,6 +15,7 @@
  */
 package org.jetbrains.plugins.github;
 
+import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
@@ -23,14 +24,18 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.Splitter;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.ui.SelectFilesDialog;
 import com.intellij.openapi.vcs.ui.CommitMessage;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.ThrowableConsumer;
+import com.intellij.util.Function;
 import com.intellij.util.ThrowableConvertor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
@@ -42,17 +47,19 @@ import git4idea.actions.BasicAction;
 import git4idea.actions.GitInit;
 import git4idea.commands.*;
 import git4idea.i18n.GitBundle;
+import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
 import git4idea.util.GitFileUtils;
 import git4idea.util.GitUIUtil;
 import icons.GithubIcons;
+import org.apache.http.HttpStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.*;
-import org.jetbrains.plugins.github.exceptions.GithubAuthenticationCanceledException;
+import org.jetbrains.plugins.github.exceptions.GithubStatusCodeException;
 import org.jetbrains.plugins.github.ui.GithubShareDialog;
-import org.jetbrains.plugins.github.util.GithubAuthData;
+import org.jetbrains.plugins.github.util.GithubAuthDataHolder;
 import org.jetbrains.plugins.github.util.GithubNotifications;
 import org.jetbrains.plugins.github.util.GithubUrlUtil;
 import org.jetbrains.plugins.github.util.GithubUtil;
@@ -60,7 +67,6 @@ import org.jetbrains.plugins.github.util.GithubUtil;
 import javax.swing.*;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.jetbrains.plugins.github.util.GithubUtil.setVisibleEnabled;
 
@@ -71,7 +77,7 @@ public class GithubShareAction extends DumbAwareAction {
   private static final Logger LOG = GithubUtil.LOG;
 
   public GithubShareAction() {
-    super("Share project on GitHub", "Easily share project on GitHub", GithubIcons.Github_icon);
+    super("Share Project on GitHub", "Easily share project on GitHub", GithubIcons.Github_icon);
   }
 
   public void update(AnActionEvent e) {
@@ -112,26 +118,33 @@ public class GithubShareAction extends DumbAwareAction {
     final boolean gitDetected = gitRepository != null;
     final VirtualFile root = gitDetected ? gitRepository.getRoot() : project.getBaseDir();
 
+    final GithubAuthDataHolder authHolder = GithubAuthDataHolder.createFromSettings();
+
     // check for existing git repo
-    boolean externalRemoteDetected = false;
+    Set<String> existingRemotes = Collections.emptySet();
     if (gitDetected) {
       final String githubRemote = GithubUtil.findGithubRemoteUrl(gitRepository);
       if (githubRemote != null) {
-        GithubNotifications.showInfoURL(project, "Project is already on GitHub", "GitHub", githubRemote);
-        return;
+        if (!checkExistingRemote(project, authHolder, githubRemote)) return;
       }
-      externalRemoteDetected = !gitRepository.getRemotes().isEmpty();
+
+      existingRemotes = ContainerUtil.map2Set(gitRepository.getRemotes(), new Function<GitRemote, String>() {
+        @Override
+        public String fun(GitRemote remote) {
+          return remote.getName();
+        }
+      });
     }
 
     // get available GitHub repos with modal progress
-    final GithubInfo githubInfo = loadGithubInfoWithModal(project);
+    final GithubInfo githubInfo = loadGithubInfoWithModal(authHolder, project);
     if (githubInfo == null) {
       return;
     }
 
     // Show dialog (window)
     final GithubShareDialog shareDialog =
-      new GithubShareDialog(project, githubInfo.getRepositoryNames(), githubInfo.getUser().canCreatePrivateRepo());
+      new GithubShareDialog(project, githubInfo.getRepositoryNames(), existingRemotes, githubInfo.getUser().canCreatePrivateRepo());
     DialogManager.show(shareDialog);
     if (!shareDialog.isOK()) {
       return;
@@ -139,16 +152,15 @@ public class GithubShareAction extends DumbAwareAction {
     final boolean isPrivate = shareDialog.isPrivate();
     final String name = shareDialog.getRepositoryName();
     final String description = shareDialog.getDescription();
+    final String remoteName = shareDialog.getRemoteName();
 
-    // finish the job in background
-    final boolean finalExternalRemoteDetected = externalRemoteDetected;
     new Task.Backgroundable(project, "Sharing project on GitHub...") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
         // create GitHub repo (network)
         LOG.info("Creating GitHub repository");
         indicator.setText("Creating GitHub repository...");
-        final String url = createGithubRepository(project, githubInfo.getAuthData(), name, description, isPrivate);
+        final String url = createGithubRepository(project, authHolder, indicator, name, description, isPrivate);
         if (url == null) {
           return;
         }
@@ -166,14 +178,12 @@ public class GithubShareAction extends DumbAwareAction {
 
         GitRepositoryManager repositoryManager = GitUtil.getRepositoryManager(project);
         final GitRepository repository = repositoryManager.getRepositoryForRoot(root);
-        LOG.assertTrue(repository != null, "GitRepository is null for root " + root);
         if (repository == null) {
           GithubNotifications.showError(project, "Failed to create GitHub Repository", "Can't find Git repository");
           return;
         }
 
         final String remoteUrl = GithubUrlUtil.getCloneUrl(githubInfo.getUser().getLogin(), name);
-        final String remoteName = finalExternalRemoteDetected ? "github" : "origin";
 
         //git remote add origin git@github.com:login/name.git
         LOG.info("Adding GitHub as a remote host");
@@ -199,52 +209,109 @@ public class GithubShareAction extends DumbAwareAction {
     }.queue();
   }
 
+  private static boolean checkExistingRemote(@NotNull final Project project,
+                                             @NotNull final GithubAuthDataHolder authHolder,
+                                             @NotNull String remote) {
+    final GithubFullPath path = GithubUrlUtil.getUserAndRepositoryFromRemoteUrl(remote);
+    if (path == null) {
+      return GithubNotifications.showYesNoDialog(project,
+                                                 "Project Is Already on GitHub",
+                                                 "Can't connect to repository from configured remote. You could want to check .git config.\n" +
+                                                 "Do you want to proceed anyway?");
+    }
+
+    try {
+      GithubRepo repo =
+        GithubUtil.computeValueInModal(project, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, GithubRepo, IOException>() {
+          @NotNull
+          @Override
+          public GithubRepo convert(ProgressIndicator indicator) throws IOException {
+            return GithubUtil
+              .runTask(project, authHolder, indicator, new ThrowableConvertor<GithubConnection, GithubRepo, IOException>() {
+                @NotNull
+                @Override
+                public GithubRepo convert(@NotNull GithubConnection connection) throws IOException {
+                  return GithubApiUtil.getDetailedRepoInfo(connection, path.getUser(), path.getRepository());
+                }
+              });
+          }
+        });
+      int result = Messages.showDialog(project,
+                                       "Successfully connected to " + repo.getHtmlUrl() + ".\n" +
+                                       "Do you want to proceed anyway?",
+                                       "Project Is Already on GitHub",
+                                       new String[]{"Continue", "Open in Browser", Messages.CANCEL_BUTTON}, 2, Messages.getQuestionIcon());
+      if (result == 0) return true;
+      if (result == 1) {
+        BrowserUtil.browse(repo.getHtmlUrl());
+      }
+      return false;
+    }
+    catch (GithubStatusCodeException e) {
+      if (e.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
+        return GithubNotifications.showYesNoDialog(project,
+                                                   "Project Is Already on GitHub",
+                                                   "Can't connect to repository from configured remote. You could want to check .git config.\n" +
+                                                   "Do you want to proceed anyway?");
+      }
+
+      GithubNotifications.showErrorDialog(project, "Failed to Connect to GitHub", e);
+      return false;
+    }
+    catch (IOException e) {
+      GithubNotifications.showErrorDialog(project, "Failed to Connect to GitHub", e);
+      return false;
+    }
+  }
+
   @Nullable
-  private static GithubInfo loadGithubInfoWithModal(@NotNull final Project project) {
+  private static GithubInfo loadGithubInfoWithModal(@NotNull final GithubAuthDataHolder authHolder, @NotNull final Project project) {
     try {
       return GithubUtil
         .computeValueInModal(project, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, GithubInfo, IOException>() {
+          @NotNull
           @Override
           public GithubInfo convert(ProgressIndicator indicator) throws IOException {
             // get existing github repos (network) and validate auth data
-            final AtomicReference<List<GithubRepo>> availableReposRef = new AtomicReference<List<GithubRepo>>();
-            final GithubAuthData auth =
-              GithubUtil.runAndGetValidAuth(project, indicator, new ThrowableConsumer<GithubAuthData, IOException>() {
-                @Override
-                public void consume(GithubAuthData authData) throws IOException {
-                  availableReposRef.set(GithubApiUtil.getUserRepos(authData));
-                }
-              });
-            final HashSet<String> names = new HashSet<String>();
-            for (GithubRepo info : availableReposRef.get()) {
-              names.add(info.getName());
-            }
+            return GithubUtil.runTask(project, authHolder, indicator, new ThrowableConvertor<GithubConnection, GithubInfo, IOException>() {
+              @NotNull
+              @Override
+              public GithubInfo convert(@NotNull GithubConnection connection) throws IOException {
+                // check access to private repos (network)
+                GithubUserDetailed userInfo = GithubApiUtil.getCurrentUserDetailed(connection);
 
-            // check access to private repos (network)
-            final GithubUserDetailed userInfo = GithubApiUtil.getCurrentUserDetailed(auth);
-            return new GithubInfo(auth, userInfo, names);
+                HashSet<String> names = new HashSet<String>();
+                for (GithubRepo info : GithubApiUtil.getUserRepos(connection)) {
+                  names.add(info.getName());
+                }
+                return new GithubInfo(userInfo, names);
+              }
+            });
           }
         });
     }
-    catch (GithubAuthenticationCanceledException e) {
-      return null;
-    }
     catch (IOException e) {
-      GithubNotifications.showErrorDialog(project, "Failed to connect to GitHub", e);
+      GithubNotifications.showErrorDialog(project, "Failed to Connect to GitHub", e);
       return null;
     }
   }
 
   @Nullable
   private static String createGithubRepository(@NotNull Project project,
-                                               @NotNull GithubAuthData auth,
-                                               @NotNull String name,
-                                               @NotNull String description,
-                                               boolean isPrivate) {
+                                               @NotNull GithubAuthDataHolder authHolder,
+                                               @NotNull ProgressIndicator indicator,
+                                               @NotNull final String name,
+                                               @NotNull final String description,
+                                               final boolean isPrivate) {
 
     try {
-      GithubRepo response = GithubApiUtil.createRepo(auth, name, description, isPrivate);
-      return response.getHtmlUrl();
+      return GithubUtil.runTask(project, authHolder, indicator, new ThrowableConvertor<GithubConnection, GithubRepo, IOException>() {
+        @NotNull
+        @Override
+        public GithubRepo convert(@NotNull GithubConnection connection) throws IOException {
+          return GithubApiUtil.createRepo(connection, name, description, isPrivate);
+        }
+      }).getHtmlUrl();
     }
     catch (IOException e) {
       GithubNotifications.showError(project, "Failed to create GitHub Repository", e);
@@ -256,6 +323,7 @@ public class GithubShareAction extends DumbAwareAction {
                                                   @NotNull VirtualFile root,
                                                   @NotNull ProgressIndicator indicator) {
     final GitLineHandler h = new GitLineHandler(project, root, GitCommand.INIT);
+    h.setStdoutSuppressed(false);
     GitHandlerUtil.runInCurrentThread(h, indicator, true, GitBundle.getString("initializing.title"));
     if (!h.errors().isEmpty()) {
       GitUIUtil.showOperationErrors(project, h.errors(), "git init");
@@ -284,12 +352,15 @@ public class GithubShareAction extends DumbAwareAction {
 
       // ask for files to add
       final List<VirtualFile> trackedFiles = ChangeListManager.getInstance(project).getAffectedFiles();
-      final Collection<VirtualFile> untrackedFiles = repository.getUntrackedFilesHolder().retrieveUntrackedFiles();
+      final Collection<VirtualFile> untrackedFiles =
+        filterOutIgnored(project, repository.getUntrackedFilesHolder().retrieveUntrackedFiles());
+      trackedFiles.removeAll(untrackedFiles); // fix IDEA-119855
+
       final List<VirtualFile> allFiles = new ArrayList<VirtualFile>();
       allFiles.addAll(trackedFiles);
       allFiles.addAll(untrackedFiles);
 
-      final AtomicReference<GithubUntrackedFilesDialog> dialogRef = new AtomicReference<GithubUntrackedFilesDialog>();
+      final Ref<GithubUntrackedFilesDialog> dialogRef = new Ref<GithubUntrackedFilesDialog>();
       ApplicationManager.getApplication().invokeAndWait(new Runnable() {
         @Override
         public void run() {
@@ -321,11 +392,12 @@ public class GithubShareAction extends DumbAwareAction {
       LOG.info("Performing commit");
       indicator.setText("Performing commit...");
       GitSimpleHandler handler = new GitSimpleHandler(project, root, GitCommand.COMMIT);
+      handler.setStdoutSuppressed(false);
       handler.addParameters("-m", dialog.getCommitMessage());
       handler.endOptions();
       handler.run();
 
-      VcsFileUtil.refreshFiles(project, modified);
+      VcsFileUtil.markFilesDirty(project, modified);
     }
     catch (VcsException e) {
       LOG.warn(e);
@@ -335,6 +407,18 @@ public class GithubShareAction extends DumbAwareAction {
     }
     LOG.info("Successfully created initial commit");
     return true;
+  }
+
+  @NotNull
+  private static Collection<VirtualFile> filterOutIgnored(@NotNull Project project, @NotNull Collection<VirtualFile> files) {
+    final ChangeListManager changeListManager = ChangeListManager.getInstance(project);
+    final ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
+    return ContainerUtil.filter(files, new Condition<VirtualFile>() {
+      @Override
+      public boolean value(VirtualFile file) {
+        return !changeListManager.isIgnoredFile(file) && !vcsManager.isIgnored(file);
+      }
+    });
   }
 
   private static boolean pushCurrentBranch(@NotNull Project project,
@@ -412,23 +496,16 @@ public class GithubShareAction extends DumbAwareAction {
 
   private static class GithubInfo {
     @NotNull private final GithubUserDetailed myUser;
-    @NotNull private final GithubAuthData myAuthData;
     @NotNull private final HashSet<String> myRepositoryNames;
 
-    GithubInfo(@NotNull GithubAuthData auth, @NotNull GithubUserDetailed user, @NotNull HashSet<String> repositoryNames) {
+    GithubInfo(@NotNull GithubUserDetailed user, @NotNull HashSet<String> repositoryNames) {
       myUser = user;
-      myAuthData = auth;
       myRepositoryNames = repositoryNames;
     }
 
     @NotNull
     public GithubUserDetailed getUser() {
       return myUser;
-    }
-
-    @NotNull
-    public GithubAuthData getAuthData() {
-      return myAuthData;
     }
 
     @NotNull

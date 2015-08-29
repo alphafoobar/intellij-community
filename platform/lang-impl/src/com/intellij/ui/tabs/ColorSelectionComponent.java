@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.ui.tabs;
 
 import com.intellij.notification.impl.ui.StickyButton;
@@ -7,7 +22,6 @@ import com.intellij.ui.ColorUtil;
 import com.intellij.ui.FileColorManager;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,20 +43,11 @@ public class ColorSelectionComponent extends JPanel {
   private static final String CUSTOM_COLOR_NAME = "Custom";
   private Map<String, ColorButton> myColorToButtonMap = new LinkedHashMap<String, ColorButton>();
   private final ButtonGroup myButtonGroup = new ButtonGroup();
-  private final JPanel myInnerPanel;
   private ChangeListener myChangeListener;
 
   public ColorSelectionComponent() {
-    setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-
-    myInnerPanel = new JPanel();
-    myInnerPanel.setLayout(new BoxLayout(myInnerPanel, BoxLayout.X_AXIS));
-    myInnerPanel.setBorder(
-      BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Color.LIGHT_GRAY, 1), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
-    if (!UIUtil.isUnderDarcula()) {
-      myInnerPanel.setBackground(Color.WHITE);
-    }
-    add(myInnerPanel, BorderLayout.CENTER);
+    super(new GridLayout(1, 0, 5, 5));
+    setOpaque(false);
   }
 
   public void setChangeListener(ChangeListener changeListener) {
@@ -75,17 +80,15 @@ public class ColorSelectionComponent extends JPanel {
   public void addCustomColorButton() {
     CustomColorButton customButton = new CustomColorButton();
     myButtonGroup.add(customButton);
-    myInnerPanel.add(customButton);
+    add(customButton);
     myColorToButtonMap.put(customButton.getText(), customButton);
-    myInnerPanel.add(Box.createHorizontalStrut(5));
   }
 
   public void addColorButton(@NotNull String name, @NotNull Color color) {
     ColorButton colorButton = new ColorButton(name, color);
     myButtonGroup.add(colorButton);
-    myInnerPanel.add(colorButton);
+    add(colorButton);
     myColorToButtonMap.put(name, colorButton);
-    myInnerPanel.add(Box.createHorizontalStrut(5));
   }
 
   public void setCustomButtonColor(@NotNull Color color) {
@@ -96,24 +99,42 @@ public class ColorSelectionComponent extends JPanel {
   }
 
   @Nullable
-  private ColorButton getSelectedButtonInner() {
+  public String getSelectedColorName() {
     for (String name : myColorToButtonMap.keySet()) {
       ColorButton button = myColorToButtonMap.get(name);
-      if (button.isSelected()) return button;
+      if (!button.isSelected()) continue;
+      if (button instanceof CustomColorButton) {
+        final String color = ColorUtil.toHex(button.getColor());
+        String colorName  = findColorName(button.getColor());
+        return colorName == null ? color : colorName;
+      }
+      return name;
     }
     return null;
   }
 
   @Nullable
-  public String getSelectedColorName() {
-    ColorButton button = getSelectedButtonInner();
-    return button == null? null : button instanceof CustomColorButton ? ColorUtil.toHex(button.getColor()) : button.getText();
+  public static String findColorName(Color color) {
+    final String hex = ColorUtil.toHex(color);
+    if ("ffffe4".equals(hex) || "494539".equals(hex)) {
+      return "Yellow";
+    }
+
+    if ("e7fadb".equals(hex) || "2a3b2c".equals(hex)) {
+      return "Green";
+    }
+
+    return null;
   }
 
   @Nullable
   public Color getSelectedColor() {
-    ColorButton button = getSelectedButtonInner();
-    return button == null? null : button.getColor();
+    for (String name : myColorToButtonMap.keySet()) {
+      ColorButton button = myColorToButtonMap.get(name);
+      if (!button.isSelected()) continue;
+      return button.getColor();
+    }
+    return null;
   }
 
   public void initDefault(@NotNull FileColorManager manager, @Nullable String selectedColorName) {
@@ -138,7 +159,7 @@ public class ColorSelectionComponent extends JPanel {
         }
       });
 
-      setBackground(new JBColor(Color.WHITE, UIUtil.getControlColor()));
+      setOpaque(false);
       setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
     }
 
@@ -206,7 +227,7 @@ public class ColorSelectionComponent extends JPanel {
     }
   }
 
-  private class ColorButtonUI extends StickyButtonUI<ColorButton> {
+  private static class ColorButtonUI extends StickyButtonUI<ColorButton> {
 
     @Override
     protected Color getBackgroundColor(final ColorButton button) {

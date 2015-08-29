@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.psi.impl;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
@@ -24,18 +25,13 @@ import com.intellij.openapi.roots.JdkOrderEntry;
 import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.roots.impl.ModuleLibraryOrderEntryImpl;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiFileSystemItem;
-import com.intellij.psi.PsiManager;
+import com.intellij.psi.*;
 import com.jetbrains.python.PyNames;
-import com.jetbrains.python.psi.LanguageLevel;
-import com.jetbrains.python.psi.PyClass;
-import com.jetbrains.python.psi.PyFile;
-import com.jetbrains.python.psi.PySequenceExpression;
+import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.resolve.PythonSdkPathCache;
 import com.jetbrains.python.psi.types.*;
 import com.jetbrains.python.sdk.PythonSdkType;
@@ -132,7 +128,7 @@ public class PyBuiltinCache {
   }
 
   @Nullable
-  public static PyFile getSkeletonFile(@NotNull Project project, @NotNull Sdk sdk, @NotNull String name) {
+  public static PyFile getSkeletonFile(final @NotNull Project project, @NotNull Sdk sdk, @NotNull String name) {
     SdkTypeId sdkType = sdk.getSdkType();
     if (sdkType instanceof PythonSdkType) {
       // dig out the builtins file, create an instance based on it
@@ -142,12 +138,20 @@ public class PyBuiltinCache {
           final String builtins_url = url + "/" + name;
           File builtins = new File(VfsUtilCore.urlToPath(builtins_url));
           if (builtins.isFile() && builtins.canRead()) {
-            VirtualFile builtins_vfile = LocalFileSystem.getInstance().findFileByIoFile(builtins);
+            final VirtualFile builtins_vfile = LocalFileSystem.getInstance().findFileByIoFile(builtins);
             if (builtins_vfile != null) {
-              PsiFile file = PsiManager.getInstance(project).findFile(builtins_vfile);
-              if (file instanceof PyFile) {
-                return (PyFile)file;
-              }
+              final Ref<PyFile> result = Ref.create();
+              ApplicationManager.getApplication().runReadAction(new Runnable() {
+                @Override
+                public void run() {
+                  PsiFile file = PsiManager.getInstance(project).findFile(builtins_vfile);
+                  if (file instanceof PyFile) {
+                    result.set((PyFile)file);
+                  }
+                }
+              });
+              return result.get();
+
             }
           }
         }
@@ -157,13 +161,31 @@ public class PyBuiltinCache {
   }
 
   @Nullable
-  static PyType createLiteralCollectionType(final PySequenceExpression sequence, final String name) {
-    final PyBuiltinCache builtinCache = getInstance(sequence);
-    final PyClass setClass = builtinCache.getClass(name);
-    if (setClass != null) {
-      return new PyLiteralCollectionType(setClass, false, sequence);
+  public PyType createLiteralCollectionType(final PySequenceExpression sequence, final String name, @NotNull TypeEvalContext context) {
+    final PyClass cls = getClass(name);
+    if (cls != null) {
+      return new PyCollectionTypeImpl(cls, false, getSequenceElementType(sequence, context));
     }
     return null;
+  }
+
+  @Nullable
+  private static PyType getSequenceElementType(@NotNull PySequenceExpression sequence, @NotNull TypeEvalContext context) {
+    final PyExpression[] elements = sequence.getElements();
+    if (elements.length == 0 || elements.length > 10 /* performance */) {
+      return null;
+    }
+    final PyType result = context.getType(elements[0]);
+    if (result == null) {
+      return null;
+    }
+    for (int i = 1; i < elements.length; i++) {
+      final PyType elementType = context.getType(elements[i]);
+      if (elementType == null || !elementType.equals(result)) {
+        return null;
+      }
+    }
+    return result;
   }
 
   @Nullable
@@ -172,7 +194,7 @@ public class PyBuiltinCache {
   }
 
   public boolean isValid() {
-    return myBuiltinsFile == null || myBuiltinsFile.isValid();
+    return myBuiltinsFile != null && myBuiltinsFile.isValid();
   }
 
   /**
@@ -183,7 +205,13 @@ public class PyBuiltinCache {
   @Nullable
   public PsiElement getByName(@NonNls String name) {
     if (myBuiltinsFile != null) {
-      return myBuiltinsFile.getElementNamed(name);
+      final PsiElement element = myBuiltinsFile.getElementNamed(name);
+      if (element != null) {
+        return element;
+      }
+    }
+    if (myExceptionsFile != null) {
+      return myExceptionsFile.getElementNamed(name);
     }
     return null;
   }
@@ -337,7 +365,7 @@ public class PyBuiltinCache {
    * @param target an element to check.
    * @return true iff target is inside the __builtins__.py
    */
-  public boolean hasInBuiltins(@Nullable PsiElement target) {
+  public boolean isBuiltin(@Nullable PsiElement target) {
     if (target == null) return false;
     if (! target.isValid()) return false;
     final PsiFile the_file = target.getContainingFile();
@@ -346,5 +374,23 @@ public class PyBuiltinCache {
     }
     // files are singletons, no need to compare URIs
     return the_file == myBuiltinsFile || the_file == myExceptionsFile;
+  }
+
+  public static boolean isInBuiltins(@NotNull PyExpression expression) {
+    if (expression instanceof PyQualifiedExpression && (((PyQualifiedExpression)expression).isQualified())) {
+      return false;
+    }
+    final String name = expression.getName();
+    PsiReference reference = expression.getReference();
+    if (reference != null && name != null) {
+      final PyBuiltinCache cache = getInstance(expression);
+      if (cache.getByName(name) != null) {
+        final PsiElement resolved = reference.resolve();
+        if (resolved != null && cache.isBuiltin(resolved)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ public class BorderEffect {
   private final int myEndOffset;
   private final TextRange myRange;
   private final EditorImpl myEditor;
+  private final ClipDetector myClipDetector;
   private static final Equality<TextAttributes> SAME_COLOR_BOXES = new Equality<TextAttributes>() {
     @Override
     public boolean equals(final TextAttributes attributes1, final TextAttributes attributes2) {
@@ -58,6 +59,7 @@ public class BorderEffect {
     myStartOffset = clipStartOffset;
     myEndOffset = clipEndOffset;
     myRange = new TextRange(myStartOffset, myEndOffset);
+    myClipDetector = new ClipDetector(editor, graphics.getClipBounds());
   }
 
   private static boolean isBorder(TextAttributes textAttributes) {
@@ -86,6 +88,8 @@ public class BorderEffect {
     markupModel.processRangeHighlightersOverlappingWith(myStartOffset, myEndOffset, new Processor<RangeHighlighterEx>() {
       @Override
       public boolean process(RangeHighlighterEx rangeHighlighter) {
+        if (!rangeHighlighter.getEditorFilter().avaliableIn(myEditor)) return true;
+
         TextAttributes textAttributes = rangeHighlighter.getTextAttributes();
         if (isBorder(textAttributes) && intersectsRange(rangeHighlighter)) {
           paintBorder(rangeHighlighter, textAttributes);
@@ -115,26 +119,28 @@ public class BorderEffect {
     return myEditor.getDocument().getLineStartOffset(line);
   }
 
-  private static void paintBorder(Graphics g, EditorImpl editor, int startOffset, int endOffset, Color color, EffectType effectType) {
+  private void paintBorder(Graphics g, EditorImpl editor, int startOffset, int endOffset, Color color, EffectType effectType) {
     Color savedColor = g.getColor();
     g.setColor(color);
     paintBorder(g, editor, startOffset, endOffset, effectType);
     g.setColor(savedColor);
   }
 
-  private static void paintBorder(Graphics g, EditorImpl editor, int startOffset, int endOffset, EffectType effectType) {
+  private void paintBorder(Graphics g, EditorImpl editor, int startOffset, int endOffset, EffectType effectType) {
+    if (!myClipDetector.rangeCanBeVisible(startOffset, endOffset)) return;
     Point startPoint = offsetToXY(editor, startOffset);
     Point endPoint = offsetToXY(editor, endOffset);
     int height = endPoint.y - startPoint.y;
     int startX = startPoint.x;
     int startY = startPoint.y;
     int endX = endPoint.x;
+    int lineHeight = editor.getLineHeight();
     if (height == 0) {
       int width = endX == startX ? 1 : endX - startX - 1;
       if (effectType == EffectType.ROUNDED_BOX) {
-        UIUtil.drawRectPickedOut((Graphics2D)g, startX, startY, width, editor.getLineHeight() - 1);
+        UIUtil.drawRectPickedOut((Graphics2D)g, startX, startY, width, lineHeight - 1);
       } else {
-        g.drawRect(startX, startY, width, editor.getLineHeight() - 1);
+        g.drawRect(startX, startY, width, lineHeight - 1);
       }
       return;
     }
@@ -142,9 +148,14 @@ public class BorderEffect {
     border.horizontalTo(editor.getMaxWidthInRange(startOffset, endOffset) - 1);
     border.verticalRel(height - 1);
     border.horizontalTo(endX);
-    border.verticalRel(editor.getLineHeight());
-    border.horizontalTo(0);
-    border.verticalRel(-height + 1);
+    if (endX > 0) {
+      border.verticalRel(lineHeight);
+      border.horizontalTo(0);
+      border.verticalRel(-height + 1);
+    }
+    else if (height > lineHeight) {
+      border.verticalRel(-height + lineHeight + 1);
+    }
     border.horizontalTo(startX);
     border.verticalTo(startY);
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,8 @@ import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerSession;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
-import com.intellij.debugger.ui.DebuggerPanelsManager;
-import com.intellij.debugger.ui.DebuggerSessionTab;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
@@ -40,6 +39,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.unscramble.ThreadDumpParser;
 import com.intellij.unscramble.ThreadState;
 import com.intellij.util.SmartList;
+import com.intellij.xdebugger.XDebugSession;
 import com.sun.jdi.*;
 import gnu.trove.TIntObjectHashMap;
 
@@ -68,9 +68,9 @@ public class ThreadDumpAction extends AnAction implements AnAction.TransparentUp
             final List<ThreadState> threads = buildThreadStates(vm);
             ApplicationManager.getApplication().invokeLater(new Runnable() {
               public void run() {
-                final DebuggerSessionTab sessionTab = DebuggerPanelsManager.getInstance(project).getSessionTab();
-                if (sessionTab != null) {
-                  sessionTab.addThreadDump(threads);
+                XDebugSession xSession = session.getXDebugSession();
+                if (xSession != null) {
+                  DebuggerUtilsEx.addThreadDump(project, threads, xSession.getUI(), session);
                 }
               }
             }, ModalityState.NON_MODAL);
@@ -83,7 +83,7 @@ public class ThreadDumpAction extends AnAction implements AnAction.TransparentUp
     }
   }
 
-  private static List<ThreadState> buildThreadStates(VirtualMachineProxyImpl vmProxy) {
+  static List<ThreadState> buildThreadStates(VirtualMachineProxyImpl vmProxy) {
     final List<ThreadReference> threads = vmProxy.getVirtualMachine().allThreads();
     final List<ThreadState> result = new ArrayList<ThreadState>();
     final Map<String, ThreadState> nameToThreadMap = new HashMap<String, ThreadState>();

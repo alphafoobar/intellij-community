@@ -18,43 +18,46 @@ package com.intellij.openapi.vcs.history;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
-import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsDataKeys;
-import com.intellij.util.PlatformIcons;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.awt.datatransfer.StringSelection;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
-/**
- * The action that copies a revision number text to clipboard
- */
 public class CopyRevisionNumberAction extends DumbAwareAction {
 
-  public CopyRevisionNumberAction() {
-    super(VcsBundle.getString("history.copy.revision.number"), VcsBundle.getString("history.copy.revision.number"),
-          PlatformIcons.COPY_ICON);
+  @Override
+  public void actionPerformed(@NotNull AnActionEvent e) {
+    List<VcsRevisionNumber> revisions = getRevisionNumbersFromContext(e);
+    revisions = ContainerUtil.reverse(revisions); // we want hashes from old to new, e.g. to be able to pass to native client in terminal
+    CopyPasteManager.getInstance().setContents(new StringSelection(getHashesAsString(revisions)));
   }
 
-  @Override
-  public void actionPerformed(AnActionEvent e) {
-    VcsRevisionNumber revision = e.getData(VcsDataKeys.VCS_REVISION_NUMBER);
-    if (revision == null) {
-      VcsFileRevision fileRevision = e.getData(VcsDataKeys.VCS_FILE_REVISION);
-      if (fileRevision != null) {
-        revision = fileRevision.getRevisionNumber();
+  @NotNull
+  private static List<VcsRevisionNumber> getRevisionNumbersFromContext(@NotNull AnActionEvent e) {
+    VcsRevisionNumber[] revisionNumbers = e.getData(VcsDataKeys.VCS_REVISION_NUMBERS);
+
+    return revisionNumbers != null ? Arrays.asList(revisionNumbers) : Collections.<VcsRevisionNumber>emptyList();
+  }
+
+  @NotNull
+  private static String getHashesAsString(@NotNull List<VcsRevisionNumber> revisions) {
+    return StringUtil.join(revisions, new Function<VcsRevisionNumber, String>() {
+      @Override
+      public String fun(VcsRevisionNumber revision) {
+        return revision.asString();
       }
-    }
-    if (revision == null) {
-      return;
-    }
-
-    String rev = revision instanceof ShortVcsRevisionNumber ? ((ShortVcsRevisionNumber)revision).toShortString() : revision.asString();
-    CopyPasteManager.getInstance().setContents(new StringSelection(rev));
+    }, " ");
   }
 
   @Override
-  public void update(AnActionEvent e) {
+  public void update(@NotNull AnActionEvent e) {
     super.update(e);
-    e.getPresentation().setEnabled((e.getData(VcsDataKeys.VCS_FILE_REVISION) != null
-                                    || e.getData(VcsDataKeys.VCS_REVISION_NUMBER) != null));
+    e.getPresentation().setEnabled(!getRevisionNumbersFromContext(e).isEmpty());
   }
 }

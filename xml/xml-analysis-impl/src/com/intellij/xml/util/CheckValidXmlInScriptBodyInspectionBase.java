@@ -41,8 +41,6 @@ public class CheckValidXmlInScriptBodyInspectionBase extends XmlSuppressableInsp
   protected static final String AMP_ENTITY_REFERENCE = "&amp;";
   @NonNls
   protected static final String LT_ENTITY_REFERENCE = "&lt;";
-  @NonNls
-  private static final String SCRIPT_TAG_NAME = "script";
   private Lexer myXmlLexer;
 
   @Override
@@ -57,8 +55,8 @@ public class CheckValidXmlInScriptBodyInspectionBase extends XmlSuppressableInsp
       @Override public void visitXmlTag(final XmlTag tag) {
         if (HtmlUtil.isHtmlTag(tag)) return;
         
-        if (SCRIPT_TAG_NAME.equals(tag.getName()) ||
-            tag instanceof HtmlTag && SCRIPT_TAG_NAME.equalsIgnoreCase(tag.getName())) {
+        if (HtmlUtil.SCRIPT_TAG_NAME.equals(tag.getName()) ||
+            tag instanceof HtmlTag && HtmlUtil.SCRIPT_TAG_NAME.equalsIgnoreCase(tag.getName())) {
           final PsiFile psiFile = tag.getContainingFile();
           final FileType fileType = psiFile.getFileType();
 
@@ -95,7 +93,7 @@ public class CheckValidXmlInScriptBodyInspectionBase extends XmlSuppressableInsp
                       psiElement,
                       XmlBundle.message("unescaped.xml.character"),
                       ProblemHighlightType.GENERIC_ERROR_OR_WARNING,
-                      createFix(psiFile, psiElement, offsetInElement)
+                      createFix(psiElement, offsetInElement)
                     );
 
                     int endOfElementInScriptTag = elementRange.getEndOffset() - valueStart;
@@ -114,8 +112,8 @@ public class CheckValidXmlInScriptBodyInspectionBase extends XmlSuppressableInsp
     };
   }
 
-  protected LocalQuickFix createFix(PsiFile psiFile, PsiElement psiElement, int offsetInElement) {
-    throw new UnsupportedOperationException();
+  protected LocalQuickFix createFix(PsiElement psiElement, int offsetInElement) {
+    return null;
   }
 
   @Override

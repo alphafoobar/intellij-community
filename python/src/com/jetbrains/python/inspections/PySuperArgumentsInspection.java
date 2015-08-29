@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ public class PySuperArgumentsInspection extends PyInspection {
 
     @Nullable
     private PyClass findClassOf(PyExpression argument) {
-      PsiElement firstElement = ((PyReferenceExpression)argument).followAssignmentsChain(resolveWithoutImplicits()).getElement();
+      PsiElement firstElement = ((PyReferenceExpression)argument).followAssignmentsChain(getResolveContext()).getElement();
       PyClass firstClass = null;
       if (firstElement instanceof PyClass) firstClass = (PyClass)firstElement;
       else if (firstElement instanceof PyExpression) {

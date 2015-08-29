@@ -52,7 +52,6 @@ import static hg4idea.test.HgExecutor.hg;
 public abstract class HgPlatformTest extends UsefulTestCase {
 
   protected Project myProject;
-  protected VirtualFile myProjectRoot;
   protected VirtualFile myRepository;
   protected VirtualFile myChildRepo;
   protected HgVcs myVcs;
@@ -62,36 +61,51 @@ public abstract class HgPlatformTest extends UsefulTestCase {
   private IdeaProjectTestFixture myProjectFixture;
 
 
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  protected HgPlatformTest() {
-    PlatformTestCase.initPlatformLangPrefix();
-  }
-
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    myProjectFixture = IdeaTestFixtureFactory.getFixtureFactory().createFixtureBuilder(getTestName(true)).getFixture();
-    myProjectFixture.setUp();
+    try {
+      myProjectFixture = IdeaTestFixtureFactory.getFixtureFactory().createFixtureBuilder(getTestName(true)).getFixture();
+      myProjectFixture.setUp();
+    }
+    catch (Exception e) {
+      super.tearDown();
+      throw e;
+    }
+    try {
+      myProject = myProjectFixture.getProject();
+      VirtualFile projectRoot = myProject.getBaseDir();
 
-    myProject = myProjectFixture.getProject();
-    myProjectRoot = myProject.getBaseDir();
+      cd(projectRoot);
+      hg("version");
 
-    cd(myProjectRoot);
-    hg("version");
-
-    createRepository(myProjectRoot);
-    myVcs = HgVcs.getInstance(myProject);
-    assertNotNull(myVcs);
-    myVcs.getGlobalSettings().setHgExecutable(HgExecutor.getHgExecutable());
-    myVcs.checkVersion();
-    myRepository = myProjectRoot;
-    setUpHgrc(myRepository);
+      createRepository(projectRoot);
+      myVcs = HgVcs.getInstance(myProject);
+      assertNotNull(myVcs);
+      myVcs.getGlobalSettings().setHgExecutable(HgExecutor.getHgExecutable());
+      myVcs.checkVersion();
+      myRepository = projectRoot;
+      setUpHgrc(myRepository);
+    }
+    catch (Exception e) {
+      tearDown();
+      throw e;
+    }
   }
 
   @Override
   protected void tearDown() throws Exception {
-    myProjectFixture.tearDown();
-    super.tearDown();
+    try {
+      myProjectFixture.tearDown();
+    }
+    finally {
+      try {
+        clearFields(this);
+      }
+      finally {
+        super.tearDown();
+      }
+    }
   }
 
   private static void setUpHgrc(@NotNull VirtualFile repositoryRoot) throws IOException {
@@ -102,6 +116,7 @@ public abstract class HgPlatformTest extends UsefulTestCase {
     File hgrc = new File(new File(repositoryRoot.getPath(), ".hg"), "hgrc");
     FileUtil.appendToFile(hgrc, FileUtil.loadFile(hgrcFile));
     assertTrue(hgrc.exists());
+    repositoryRoot.refresh(false, true);
   }
 
   protected static void appendToHgrc(@NotNull VirtualFile repositoryRoot, @NotNull String text) throws IOException {
@@ -109,7 +124,7 @@ public abstract class HgPlatformTest extends UsefulTestCase {
     File hgrc = new File(new File(repositoryRoot.getPath(), ".hg"), "hgrc");
     FileUtil.appendToFile(hgrc, text);
     assertTrue(hgrc.exists());
-    repositoryRoot.refresh(false,true);
+    repositoryRoot.refresh(false, true);
   }
 
 
@@ -119,11 +134,11 @@ public abstract class HgPlatformTest extends UsefulTestCase {
     hgRepository.updateConfig();
   }
 
-  protected void createRepository(VirtualFile root) {
+  private static void createRepository(VirtualFile root) {
     initRepo(root.getPath());
   }
 
-  private static void initRepo(String repoRoot) {
+  public static void initRepo(String repoRoot) {
     cd(repoRoot);
     hg("init");
     touch("file.txt");

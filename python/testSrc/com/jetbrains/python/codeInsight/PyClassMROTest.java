@@ -15,6 +15,7 @@
  */
 package com.jetbrains.python.codeInsight;
 
+import com.intellij.util.ArrayUtil;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.types.PyClassLikeType;
@@ -35,7 +36,7 @@ public class PyClassMROTest extends PyTestCase {
 
   // TypeError in Python
   public void testMROConflict() {
-    assertMRO(getClass("C"));
+    assertMRO(getClass("C"), "unknown");
   }
 
   public void testCircularInheritance() {
@@ -43,7 +44,7 @@ public class PyClassMROTest extends PyTestCase {
     myFixture.configureByFiles(getPath(testName), getPath(testName + "2"));
     final PyClass cls = myFixture.findElementByText("Foo", PyClass.class);
     assertNotNull(cls);
-    assertMRO(cls);
+    assertMRO(cls, "unknown");
   }
 
   public void testExampleFromDoc1() {
@@ -55,7 +56,7 @@ public class PyClassMROTest extends PyTestCase {
   }
 
   public void testExampleFromDoc3() {
-    assertMRO(getClass("G"));
+    assertMRO(getClass("G"), "unknown");
   }
 
   public void testExampleFromDoc4() {
@@ -71,8 +72,30 @@ public class PyClassMROTest extends PyTestCase {
     assertMRO(getClass("H"), "E", "F", "B", "G", "C", "D", "A", "object");
   }
 
+  public void testTangledInheritance() {
+    final int numClasses = 100;
+
+    final List<String> expectedMRO = new ArrayList<String>();
+    for (int i = numClasses - 1; i >= 1; i--) {
+      expectedMRO.add(String.format("Class%03d", i));
+    }
+    expectedMRO.add("object");
+    final PyClass pyClass = getClass(String.format("Class%03d", numClasses));
+    final long startTime = System.currentTimeMillis();
+    assertMRO(pyClass, ArrayUtil.toStringArray(expectedMRO));
+    final long elapsed = System.currentTimeMillis() - startTime;
+    assertTrue("Calculation of MRO takes too much time: " + elapsed + " ms", elapsed < 1000);
+  }
+
+  // PY-11401
+  public void testUnresolvedClassesImpossibleToBuildMRO() {
+    assertMRO(getClass("ObjectManager"),
+              "CopyContainer", "unknown", "Navigation", "unknown", "Tabs", "unknown", "unknown", "unknown", "Collection", "Resource",
+              "LockableItem", "EtagSupport", "Traversable", "object", "unknown");
+  }
+
   public void assertMRO(@NotNull PyClass cls, @NotNull String... mro) {
-    final List<PyClassLikeType> types = cls.getAncestorTypes(TypeEvalContext.codeInsightFallback());
+    final List<PyClassLikeType> types = cls.getAncestorTypes(TypeEvalContext.codeInsightFallback(cls.getProject()));
     final List<String> classNames = new ArrayList<String>();
     for (PyClassLikeType type : types) {
       if (type != null) {

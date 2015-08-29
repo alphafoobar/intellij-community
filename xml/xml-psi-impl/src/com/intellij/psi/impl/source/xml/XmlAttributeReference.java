@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.meta.PsiMetaOwner;
 import com.intellij.psi.xml.XmlAttribute;
-import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.xml.XmlAttributeDescriptor;
@@ -33,25 +32,23 @@ import org.jetbrains.annotations.Nullable;
 
 public class XmlAttributeReference implements PsiReference {
   private final NullableLazyValue<XmlAttributeDescriptor> myDescriptor = new NullableLazyValue<XmlAttributeDescriptor>() {
+    @Override
     protected XmlAttributeDescriptor compute() {
-      XmlTag parent = myAttribute.getParent();
-      final XmlElementDescriptor descr = parent.getDescriptor();
-      if (descr != null) {
-        return descr.getAttributeDescriptor(myAttribute);
-      }
-      return null;
+      return myAttribute.getDescriptor();
     }
   };
   private final XmlAttributeImpl myAttribute;
 
-  public XmlAttributeReference(XmlAttributeImpl attribute) {
+  public XmlAttributeReference(@NotNull XmlAttributeImpl attribute) {
     myAttribute = attribute;
   }
 
+  @Override
   public XmlAttribute getElement() {
     return myAttribute;
   }
 
+  @Override
   public TextRange getRangeInElement() {
     final int parentOffset = myAttribute.getNameElement().getStartOffsetInParent();
     int nsLen = myAttribute.getNamespacePrefix().length();
@@ -59,16 +56,19 @@ public class XmlAttributeReference implements PsiReference {
     return new TextRange(parentOffset + nsLen, parentOffset + myAttribute.getNameElement().getTextLength());
   }
 
+  @Override
   public PsiElement resolve() {
     final XmlAttributeDescriptor descriptor = getDescriptor();
     return descriptor != null ? descriptor.getDeclaration() : null;
   }
 
+  @Override
   @NotNull
   public String getCanonicalText() {
     return myAttribute.getName();
   }
 
+  @Override
   public PsiElement handleElementRename(String newElementName) throws IncorrectOperationException {
     String newName = newElementName;
     if (getDescriptor() instanceof XmlAttributeDescriptorEx) {
@@ -82,6 +82,7 @@ public class XmlAttributeReference implements PsiReference {
     return myAttribute.setName(newName);
   }
 
+  @Override
   public PsiElement bindToElement(@NotNull PsiElement element) throws IncorrectOperationException {
     if (element instanceof PsiMetaOwner) {
       final PsiMetaOwner owner = (PsiMetaOwner)element;
@@ -92,15 +93,18 @@ public class XmlAttributeReference implements PsiReference {
     throw new IncorrectOperationException("Cant bind to not a xml element definition!");
   }
 
+  @Override
   public boolean isReferenceTo(PsiElement element) {
     return myAttribute.getManager().areElementsEquivalent(element, resolve());
   }
 
+  @Override
   @NotNull
   public Object[] getVariants() {
     return ArrayUtil.EMPTY_OBJECT_ARRAY;  // moved to XmlAttributeReferenceCompletionProvider
   }
 
+  @Override
   public boolean isSoft() {
     return getDescriptor() == null;
   }

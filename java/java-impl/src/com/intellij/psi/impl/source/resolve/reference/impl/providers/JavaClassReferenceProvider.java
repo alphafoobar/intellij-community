@@ -99,6 +99,16 @@ public class JavaClassReferenceProvider extends GenericReferenceProvider impleme
     return null;
   }
 
+  @NotNull
+  public PsiFile getContextFile(@NotNull PsiElement element) {
+    return element.getContainingFile();
+  }
+
+  @Nullable
+  public PsiClass getContextClass(@NotNull PsiElement element) {
+    return null;
+  }
+
   @Override
   @NotNull
   public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull final ProcessingContext context) {
@@ -141,8 +151,8 @@ public class JavaClassReferenceProvider extends GenericReferenceProvider impleme
       @Override
       public PsiPackage fun(final PsiPackage psiPackage) {
         final String packageName = psiPackage.getName();
-        return JavaPsiFacade.getInstance(psiPackage.getProject()).getNameHelper()
-            .isIdentifier(packageName, PsiUtil.getLanguageLevel(psiPackage)) ? psiPackage : null;
+        return PsiNameHelper.getInstance(psiPackage.getProject())
+                 .isIdentifier(packageName, PsiUtil.getLanguageLevel(psiPackage)) ? psiPackage : null;
       }
     });
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -76,15 +77,24 @@ public class LocalQuickFixWrapper extends QuickFixAction {
 
   @Nullable
   protected QuickFix getWorkingQuickFix(@NotNull QuickFix[] fixes) {
+    final QuickFix exactResult = getWorkingQuickFix(fixes, true);
+    return exactResult != null ? exactResult : getWorkingQuickFix(fixes, false);
+  }
+  
+  @Nullable
+  protected QuickFix getWorkingQuickFix(@NotNull QuickFix[] fixes, boolean exact) {
     for (QuickFix fix : fixes) {
-      if (!myFix.getClass().isInstance(fix)) continue;
-      if (myFix instanceof IntentionWrapper && fix instanceof IntentionWrapper &&
-          !((IntentionWrapper)myFix).getAction().getClass().isInstance(((IntentionWrapper)fix).getAction())) {
-        continue;
+      if (!checkFix(exact, myFix, fix)) continue;
+      if (myFix instanceof IntentionWrapper && fix instanceof IntentionWrapper) {
+        if (!checkFix(exact, ((IntentionWrapper)myFix).getAction(), fix)) continue;
       }
       return fix;
     }
     return null;
+  }
+
+  private static <T> boolean checkFix(boolean exact, T thisFix, T fix) {
+    return exact ? thisFix.getClass() == fix.getClass() : thisFix.getClass().isInstance(fix);
   }
 
   @Override
@@ -144,7 +154,7 @@ public class LocalQuickFixWrapper extends QuickFixAction {
     }
   }
 
-  private void ignore(@NotNull Set<PsiElement> ignoredElements,
+  private void ignore(@NotNull Collection<PsiElement> ignoredElements,
                       @NotNull CommonProblemDescriptor descriptor,
                       @Nullable QuickFix fix,
                       @NotNull GlobalInspectionContextImpl context) {
@@ -153,7 +163,10 @@ public class LocalQuickFixWrapper extends QuickFixAction {
       presentation.ignoreProblem(descriptor, fix);
     }
     if (descriptor instanceof ProblemDescriptor) {
-      ignoredElements.add(((ProblemDescriptor)descriptor).getPsiElement());
+      PsiElement element = ((ProblemDescriptor)descriptor).getPsiElement();
+      if (element != null) {
+        ignoredElements.add(element);
+      }
     }
   }
 }

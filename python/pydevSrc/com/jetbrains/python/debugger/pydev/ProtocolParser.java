@@ -122,6 +122,32 @@ public class ProtocolParser {
   }
 
   @NotNull
+  public static List<PyDebugValue> parseReferrers(final String text, final PyFrameAccessor frameAccessor) throws PyDebuggerException {
+    final List<PyDebugValue> values = new LinkedList<PyDebugValue>();
+
+    final XppReader reader = openReader(text, false);
+
+    while (reader.hasMoreChildren()) {
+      reader.moveDown();
+      if (reader.getNodeName().equals("var")) {
+        PyDebugValue value = parseValue(reader, frameAccessor);
+        value.setId(readString(reader, "id", null));
+        values.add(value);
+      }
+      else if (reader.getNodeName().equals("for")) {
+        //TODO
+      }
+      else {
+        throw new PyDebuggerException("Expected <var> or <for>, found " + reader.getNodeName());
+      }
+      reader.moveUp();
+    }
+
+    return values;
+  }
+
+
+  @NotNull
   public static List<PyDebugValue> parseValues(final String text, final PyFrameAccessor frameAccessor) throws PyDebuggerException {
     final List<PyDebugValue> values = new LinkedList<PyDebugValue>();
 
@@ -151,6 +177,78 @@ public class ProtocolParser {
     }
 
     return new PyDebugValue(name, type, value, "True".equals(isContainer), "True".equals(isErrorOnEval), frameAccessor);
+  }
+
+  public static ArrayChunk parseArrayValues(final String text, final PyFrameAccessor frameAccessor) throws PyDebuggerException {
+    final XppReader reader = openReader(text, false);
+    ArrayChunk result = null;
+    if (reader.hasMoreChildren()) {
+      reader.moveDown();
+      if (!"array".equals(reader.getNodeName())) {
+        throw new PyDebuggerException("Expected <array> at first node, found " + reader.getNodeName());
+      }
+      String slice = readString(reader, "slice", null);
+      int rows = readInt(reader, "rows", null);
+      int cols = readInt(reader, "cols", null);
+      String format = "%" + readString(reader, "format", null);
+      String type = readString(reader, "type", null);
+      String max = readString(reader, "max", null);
+      String min = readString(reader, "min", null);
+      result =
+        new ArrayChunk(new PyDebugValue(slice, null, null, false, false, frameAccessor), slice, rows, cols, max, min, format, type, null);
+      reader.moveUp();
+    }
+
+    Object[][] data = parseArrayValues(reader, frameAccessor);
+    return new ArrayChunk(result.getValue(), result.getSlicePresentation(), result.getRows(), result.getColumns(), result.getMax(),
+                          result.getMin(), result.getFormat(), result.getType(), data);
+  }
+
+  public static Object[][] parseArrayValues(final XppReader reader, final PyFrameAccessor frameAccessor) throws PyDebuggerException {
+    int rows = -1;
+    int cols = -1;
+    if (reader.hasMoreChildren()) {
+      reader.moveDown();
+      if (!"arraydata".equals(reader.getNodeName())) {
+        throw new PyDebuggerException("Expected <arraydata> at second node, found " + reader.getNodeName());
+      }
+      rows = readInt(reader, "rows", null);
+      cols = readInt(reader, "cols", null);
+      reader.moveUp();
+    }
+
+    if (rows <= 0 || cols <= 0) {
+      throw new PyDebuggerException("Array xml: bad rows or columns number: (" + rows + ", " + cols + ")");
+    }
+    Object[][] values = new Object[rows][cols];
+
+    int currRow = 0;
+    int currCol = 0;
+    while (reader.hasMoreChildren()) {
+      reader.moveDown();
+      if (!"var".equals(reader.getNodeName()) && !"row".equals(reader.getNodeName())) {
+        throw new PyDebuggerException("Expected <var> or <row>, found " + reader.getNodeName());
+      }
+      if ("row".equals(reader.getNodeName())) {
+        int index = readInt(reader, "index", null);
+        if (currRow != index) {
+          throw new PyDebuggerException("Array xml: expected " + currRow + " row, found " + index);
+        }
+        if (currRow > 0 && currCol != cols) {
+          throw new PyDebuggerException("Array xml: expected " + cols + " filled columns, got " + currCol + " instead.");
+        }
+        currRow += 1;
+        currCol = 0;
+      }
+      else {
+        PyDebugValue value = parseValue(reader, frameAccessor);
+        values[currRow - 1][currCol] = value.getValue();
+        currCol += 1;
+      }
+      reader.moveUp();
+    }
+
+    return values;
   }
 
   private static XppReader openReader(final String text, final boolean checkForContent) throws PyDebuggerException {

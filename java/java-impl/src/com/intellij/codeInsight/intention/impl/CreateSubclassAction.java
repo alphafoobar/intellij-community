@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
     PsiElement element = file.findElementAt(position);
     PsiClass psiClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
     if (psiClass == null || psiClass.isAnnotationType() || psiClass.isEnum() || psiClass instanceof PsiAnonymousClass ||
-        psiClass.hasModifierProperty(PsiModifier.FINAL)) {
+        psiClass.hasModifierProperty(PsiModifier.FINAL) || psiClass.getContainingFile().getContainingDirectory() == null) {
       return false;
     }
     if (!isSupportedLanguage(psiClass)) return false;
@@ -145,7 +145,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
   public static void createInnerClass(final PsiClass aClass) {
     new WriteCommandAction(aClass.getProject(), getTitle(aClass), getTitle(aClass)) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         final PsiClass containingClass = aClass.getContainingClass();
         LOG.assertTrue(containingClass != null);
 
@@ -173,7 +173,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
       psiClass.getProject(), getTitle(psiClass),
       psiClass.getName() + IMPL_SUFFIX,
       aPackage != null ? aPackage.getQualifiedName() : "",
-      CreateClassKind.CLASS, true, ModuleUtilCore.findModuleForPsiElement(psiClass)){
+      CreateClassKind.CLASS, true, ModuleUtilCore.findModuleForPsiElement(psiClass)) {
       @Override
       protected PsiDirectory getBaseDir(String packageName) {
         return sourceDir;
@@ -184,8 +184,9 @@ public class CreateSubclassAction extends BaseIntentionAction {
         return true;
       }
     };
-    dialog.show();
-    if (!dialog.isOK()) return null;
+    if (!dialog.showAndGet()) {
+      return null;
+    }
     final PsiDirectory targetDirectory = dialog.getTargetDirectory();
     if (targetDirectory == null) return null;
     return dialog;
@@ -196,7 +197,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
     final PsiClass[] targetClass = new PsiClass[1];
     new WriteCommandAction(project, getTitle(psiClass), getTitle(psiClass)) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
 
         final PsiTypeParameterList oldTypeParameterList = psiClass.getTypeParameterList();

@@ -23,7 +23,9 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.TextAccessor;
-import com.intellij.ui.TextComponentUndoProvider;
+import com.intellij.ui.components.JBTextField;
+import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -40,18 +42,28 @@ public class TextFieldWithBrowseButton extends ComponentWithBrowseButton<JTextFi
   }
 
   public TextFieldWithBrowseButton(JTextField field, @Nullable ActionListener browseActionListener) {
+    this(field, browseActionListener, null);
+  }
+
+  public TextFieldWithBrowseButton(JTextField field, @Nullable ActionListener browseActionListener, @Nullable Disposable parent) {
     super(field, browseActionListener);
-    if (ApplicationManager.getApplication() != null) {
-      installPathCompletion(FileChooserDescriptorFactory.createSingleLocalFileDescriptor());
-      new TextComponentUndoProvider(getTextField());
+    if (!(field instanceof JBTextField)) {
+      UIUtil.addUndoRedoActions(field);
     }
+    installPathCompletion(FileChooserDescriptorFactory.createSingleLocalFileDescriptor(), parent);
   }
 
   public TextFieldWithBrowseButton(ActionListener browseActionListener) {
-    this(new JTextField(10/* to prevent field to be infinitely resized in grid-box layouts */), browseActionListener);
+    this(browseActionListener, null);
   }
 
-  public void addBrowseFolderListener(@Nullable String title, @Nullable String description, @Nullable Project project, FileChooserDescriptor fileChooserDescriptor) {
+  public TextFieldWithBrowseButton(ActionListener browseActionListener, Disposable parent) {
+    this(new JBTextField(10/* to prevent field to be infinitely resized in grid-box layouts */), browseActionListener, parent);
+  }
+
+  public void addBrowseFolderListener(@Nullable @Nls(capitalization = Nls.Capitalization.Title) String title,
+                                      @Nullable @Nls(capitalization = Nls.Capitalization.Sentence) String description,
+                                      @Nullable Project project, FileChooserDescriptor fileChooserDescriptor) {
     addBrowseFolderListener(title, description, project, fileChooserDescriptor, TextComponentAccessor.TEXT_FIELD_WHOLE_TEXT);
     installPathCompletion(fileChooserDescriptor);
   }
@@ -59,7 +71,7 @@ public class TextFieldWithBrowseButton extends ComponentWithBrowseButton<JTextFi
   public void addBrowseFolderListener(@NotNull TextBrowseFolderListener listener) {
     listener.setOwnerComponent(this);
     addBrowseFolderListener(null, listener, true);
-    installPathCompletion(listener.gFileChooserDescriptor());
+    installPathCompletion(listener.getFileChooserDescriptor());
   }
 
   protected void installPathCompletion(final FileChooserDescriptor fileChooserDescriptor) {
@@ -96,9 +108,7 @@ public class TextFieldWithBrowseButton extends ComponentWithBrowseButton<JTextFi
 
   public void setEditable(boolean b) {
     getTextField().setEditable(b);
-
     getButton().setFocusable(!b);
-    getTextField().setFocusable(b);
   }
 
   public static class NoPathCompletion extends TextFieldWithBrowseButton {

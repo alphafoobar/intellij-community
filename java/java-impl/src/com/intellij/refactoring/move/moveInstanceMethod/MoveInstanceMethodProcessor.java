@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.refactoring.move.moveInstanceMethod;
 
 import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.codeInsight.generation.OverrideImplementUtil;
+import com.intellij.ide.util.EditorHelper;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
@@ -62,16 +63,27 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
   private PsiVariable myTargetVariable;
   private PsiClass myTargetClass;
   private final String myNewVisibility;
+  private final boolean myOpenInEditor;
   private final Map<PsiClass, String> myOldClassParameterNames;
+
+  public MoveInstanceMethodProcessor(final Project project,
+                                   final PsiMethod method,
+                                   final PsiVariable targetVariable,
+                                   final String newVisibility,
+                                   final Map<PsiClass, String> oldClassParameterNames) {
+    this(project, method, targetVariable, newVisibility, false, oldClassParameterNames);
+  }
 
   public MoveInstanceMethodProcessor(final Project project,
                                      final PsiMethod method,
                                      final PsiVariable targetVariable,
                                      final String newVisibility,
+                                     boolean openInEditor, 
                                      final Map<PsiClass, String> oldClassParameterNames) {
     super(project);
     myMethod = method;
     myTargetVariable = targetVariable;
+    myOpenInEditor = openInEditor;
     myOldClassParameterNames = oldClassParameterNames;
     LOG.assertTrue(myTargetVariable instanceof PsiParameter || myTargetVariable instanceof PsiField);
     LOG.assertTrue(myTargetVariable.getType() instanceof PsiClassType);
@@ -82,11 +94,11 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
   }
 
   @NotNull
-  protected UsageViewDescriptor createUsageViewDescriptor(UsageInfo[] usages) {
+  protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new MoveInstanceMethodViewDescriptor(myMethod, myTargetVariable, myTargetClass);
   }
 
-  protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
+  protected boolean preprocessUsages(@NotNull Ref<UsageInfo[]> refUsages) {
     final UsageInfo[] usages = refUsages.get();
     MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
     final Set<PsiMember> members = new HashSet<PsiMember>();
@@ -149,7 +161,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
         usages.add(new MethodCallUsageInfo((PsiReferenceExpression)element, isInternal));
       }
       else if (element instanceof PsiDocTagValue) {
-        usages.add(new JavadocUsageInfo(((PsiDocTagValue)element)));
+        usages.add(new JavadocUsageInfo((PsiDocTagValue)element));
       }
       else {
         throw new UnknownReferenceTypeException(element.getLanguage());
@@ -199,7 +211,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
     }
   }
 
-  protected void refreshElements(PsiElement[] elements) {
+  protected void refreshElements(@NotNull PsiElement[] elements) {
     LOG.assertTrue(elements.length == 3);
     myMethod = (PsiMethod) elements[0];
     myTargetVariable = (PsiVariable) elements[1];
@@ -214,7 +226,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
     return myTargetClass;
   }
 
-  protected void performRefactoring(UsageInfo[] usages) {
+  protected void performRefactoring(@NotNull UsageInfo[] usages) {
     if (!CommonRefactoringUtil.checkReadOnlyStatus(myProject, myTargetClass)) return;
 
     PsiMethod patternMethod = createMethodToAdd();
@@ -247,6 +259,10 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
         reference.bindToElement(method);
       }
       VisibilityUtil.fixVisibility(UsageViewUtil.toElements(usages), method, myNewVisibility);
+
+      if (myOpenInEditor) {
+        EditorHelper.openInEditor(method);
+      }
     }
     catch (IncorrectOperationException e) {
       LOG.error(e);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,36 +15,21 @@
  */
 package com.intellij.codeInsight.template.impl.editorActions;
 
+import com.intellij.codeInsight.editorActions.TypedHandlerDelegate;
 import com.intellij.codeInsight.template.TemplateManager;
-import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
 import com.intellij.codeInsight.template.impl.TemplateSettings;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.actionSystem.TypedActionHandler;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
-import org.jetbrains.annotations.NotNull;
+import com.intellij.psi.PsiFile;
 
-public class SpaceHandler extends TypedActionHandlerBase {
-  public SpaceHandler(TypedActionHandler originalHandler) {
-    super(originalHandler);
-  }
-
+public class SpaceHandler extends TypedHandlerDelegate {
   @Override
-  public void execute(@NotNull Editor editor, char charTyped, @NotNull DataContext dataContext) {
-    if (charTyped == ' ') {
-      Project project = CommonDataKeys.PROJECT.getData(dataContext);
-      if (project != null) {
-        TemplateManagerImpl templateManager = (TemplateManagerImpl)TemplateManager.getInstance(project);
-        if (templateManager != null && templateManager.startTemplate(editor, TemplateSettings.SPACE_CHAR)) {
-          return;
-        }
-      }
+  public Result beforeCharTyped(char charTyped, Project project, Editor editor, PsiFile file, FileType fileType) {
+    if (charTyped == TemplateSettings.SPACE_CHAR && TemplateManager.getInstance(project).startTemplate(editor, TemplateSettings.SPACE_CHAR)) {
+      return Result.STOP;
     }
 
-    if (myOriginalHandler != null) {
-      myOriginalHandler.execute(editor, charTyped, dataContext);
-    }
+    return super.beforeCharTyped(charTyped, project, editor, file, fileType);
   }
 }

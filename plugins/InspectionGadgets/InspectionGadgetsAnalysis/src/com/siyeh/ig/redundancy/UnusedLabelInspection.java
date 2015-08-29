@@ -23,6 +23,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.PsiReplacementUtil;
 import org.jetbrains.annotations.NotNull;
 
 public class UnusedLabelInspection extends BaseInspection {
@@ -81,7 +82,7 @@ public class UnusedLabelInspection extends BaseInspection {
         return;
       }
       final String statementText = statement.getText();
-      replaceStatement(labeledStatement, statementText);
+      PsiReplacementUtil.replaceStatement(labeledStatement, statementText);
     }
   }
 
@@ -106,10 +107,10 @@ public class UnusedLabelInspection extends BaseInspection {
     }
   }
 
-  private static class LabelFinder extends JavaRecursiveElementVisitor {
+  private static class LabelFinder extends JavaRecursiveElementWalkingVisitor {
 
-    private boolean found = false;
-    private String label = null;
+    private boolean found;
+    private final String label;
 
     private LabelFinder(PsiLabeledStatement target) {
       final PsiIdentifier labelIdentifier = target.getLabelIdentifier();
@@ -160,7 +161,7 @@ public class UnusedLabelInspection extends BaseInspection {
       return labelText.equals(label);
     }
 
-    public boolean jumpFound() {
+    boolean jumpFound() {
       return found;
     }
   }

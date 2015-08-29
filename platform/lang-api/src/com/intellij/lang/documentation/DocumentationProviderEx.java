@@ -22,12 +22,14 @@ import com.intellij.psi.PsiManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.awt.*;
 import java.util.List;
 
 /**
  * @author peter
  */
 public class DocumentationProviderEx implements DocumentationProvider {
+  @Nullable
   @Override
   public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
     return null; 
@@ -55,6 +57,11 @@ public class DocumentationProviderEx implements DocumentationProvider {
 
   @Nullable
   public PsiElement getCustomDocumentationElement(@NotNull final Editor editor, @NotNull final PsiFile file, @Nullable PsiElement contextElement) {
+    return null;
+  }
+
+  @Nullable
+  public Image getLocalImageForElement(@NotNull PsiElement element, @NotNull String imageSpec) {
     return null;
   }
 }

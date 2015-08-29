@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,11 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ContentIterator;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileVisitor;
 import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.Consumer;
@@ -41,6 +44,10 @@ import java.util.Set;
  */
 public abstract class FileBasedIndex implements BaseComponent {
   public abstract void iterateIndexableFiles(@NotNull ContentIterator processor, @NotNull Project project, ProgressIndicator indicator);
+
+  public void iterateIndexableFilesConcurrently(@NotNull ContentIterator processor, @NotNull Project project, ProgressIndicator indicator) {
+    iterateIndexableFiles(processor, project, indicator);
+  }
 
   public abstract void registerIndexableSet(@NotNull IndexableFileSet set, @Nullable Project project);
 
@@ -126,8 +133,6 @@ public abstract class FileBasedIndex implements BaseComponent {
 
   public abstract void requestReindex(@NotNull VirtualFile file);
 
-  public abstract void requestReindexExcluded(@NotNull VirtualFile file);
-
   public abstract <K, V> boolean getFilesWithKey(@NotNull ID<K, V> indexId,
                                                  @NotNull Set<K> dataKeys,
                                                  @NotNull Processor<VirtualFile> processor,
@@ -137,10 +142,36 @@ public abstract class FileBasedIndex implements BaseComponent {
    * @param project it is guaranteed to return data which is up-to-date withing the project
    *                Keys obtained from the files which do not belong to the project specified may not be up-to-date or even exist
    */
-  public abstract <K> boolean processAllKeys(@NotNull ID<K, ?> indexId, Processor<K> processor, @Nullable Project project);
+  public abstract <K> boolean processAllKeys(@NotNull ID<K, ?> indexId, @NotNull Processor<K> processor, @Nullable Project project);
 
   public <K> boolean processAllKeys(@NotNull ID<K, ?> indexId, @NotNull Processor<K> processor, @NotNull GlobalSearchScope scope, @Nullable IdFilter idFilter) {
     return processAllKeys(indexId, processor, scope.getProject());
+  }
+
+  public static void iterateRecursively(@Nullable final VirtualFile root,
+                                        @NotNull final ContentIterator processor,
+                                        @Nullable final ProgressIndicator indicator,
+                                        @Nullable final Set<VirtualFile> visitedRoots,
+                                        @Nullable final ProjectFileIndex projectFileIndex) {
+    if (root == null) {
+      return;
+    }
+
+    VfsUtilCore.visitChildrenRecursively(root, new VirtualFileVisitor() {
+      @Override
+      public boolean visitFile(@NotNull VirtualFile file) {
+        if (visitedRoots != null && !root.equals(file) && file.isDirectory() && !visitedRoots.add(file)) {
+          return false; // avoid visiting files more than once, e.g. additional indexed roots intersect sometimes
+        }
+        if (projectFileIndex != null && projectFileIndex.isExcluded(file)) {
+          return false;
+        }
+        if (indicator != null) indicator.checkCanceled();
+
+        processor.processFile(file);
+        return true;
+      }
+    });
   }
 
   public interface ValueProcessor<V> {
@@ -156,7 +187,7 @@ public abstract class FileBasedIndex implements BaseComponent {
   * Author: dmitrylomov
   */
   public interface InputFilter {
-    boolean acceptInput(VirtualFile file);
+    boolean acceptInput(@NotNull VirtualFile file);
   }
 
   public interface FileTypeSpecificInputFilter extends InputFilter {

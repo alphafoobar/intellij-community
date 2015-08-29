@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.fileEditor.UniqueVFilePathBuilder;
 import com.intellij.openapi.fileTypes.FileType;
-import com.intellij.openapi.fileTypes.InternalFileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -34,7 +34,8 @@ import javax.swing.*;
  * @author max
  */
 public class ProjectUtil {
-  private ProjectUtil() { }
+  private ProjectUtil() {
+  }
 
   @Nullable
   public static String getProjectLocationString(@NotNull final Project project) {
@@ -54,7 +55,7 @@ public class ProjectUtil {
                                                  final boolean includeFilePath,
                                                  final boolean includeUniqueFilePath,
                                                  final boolean keepModuleAlwaysOnTheLeft) {
-    if (file instanceof VirtualFilePathWrapper) {
+    if (file instanceof VirtualFilePathWrapper && ((VirtualFilePathWrapper)file).enforcePresentableName()) {
       return includeFilePath ? ((VirtualFilePathWrapper)file).getPresentablePath() : file.getName();
     }
     String url;
@@ -83,9 +84,16 @@ public class ProjectUtil {
   }
 
   @Nullable
-  // guessProjectForFile works incorrectly - even if file is config (idea config file) first opened project will be returned
   public static Project guessProjectForContentFile(@NotNull VirtualFile file) {
-    if (isProjectOrWorkspaceFile(file)) {
+    return guessProjectForContentFile(file, file.getFileType());
+  }
+
+  @Nullable
+  /***
+   * guessProjectForFile works incorrectly - even if file is config (idea config file) first opened project will be returned
+   */
+  public static Project guessProjectForContentFile(@NotNull VirtualFile file, @NotNull FileType fileType) {
+    if (isProjectOrWorkspaceFile(file, fileType)) {
       return null;
     }
 
@@ -99,26 +107,30 @@ public class ProjectUtil {
   }
 
   public static boolean isProjectOrWorkspaceFile(final VirtualFile file) {
-    return isProjectOrWorkspaceFile(file, file.getFileType());
+    // do not use file.getFileType() to avoid autodetection by content loading for arbitrary files
+    return isProjectOrWorkspaceFile(file, FileTypeManager.getInstance().getFileTypeByFileName(file.getName()));
   }
 
-  public static boolean isProjectOrWorkspaceFile(final VirtualFile file,
-                                                 final FileType fileType) {
-    if (fileType instanceof InternalFileType) return true;
-    return file.getPath().contains("/"+ Project.DIRECTORY_STORE_FOLDER +"/");
+  public static boolean isProjectOrWorkspaceFile(@NotNull VirtualFile file, @Nullable FileType fileType) {
+    return ProjectCoreUtil.isProjectOrWorkspaceFile(file, fileType);
   }
 
   @NotNull
-  public static Project guessCurrentProject(JComponent component) {
+  public static Project guessCurrentProject(@Nullable JComponent component) {
     Project project = null;
-    Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
-    if (openProjects.length > 0) project = openProjects[0];
-    if (project == null) {
-      DataContext dataContext = component == null ? DataManager.getInstance().getDataContext() : DataManager.getInstance().getDataContext(component);
-      project = CommonDataKeys.PROJECT.getData(dataContext);
+    if (component != null) {
+      project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(component));
     }
     if (project == null) {
-      project = ProjectManager.getInstance().getDefaultProject();
+      Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
+      if (openProjects.length > 0) project = openProjects[0];
+      if (project == null) {
+        DataContext dataContext = DataManager.getInstance().getDataContext();
+        project = CommonDataKeys.PROJECT.getData(dataContext);
+      }
+      if (project == null) {
+        project = ProjectManager.getInstance().getDefaultProject();
+      }
     }
     return project;
   }

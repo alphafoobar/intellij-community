@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,9 @@
  */
 package com.intellij.lang.ant.config.explorer;
 
-import com.intellij.execution.RunManagerAdapter;
-import com.intellij.execution.RunManagerEx;
+import com.intellij.execution.*;
+import com.intellij.execution.impl.RunDialog;
+import com.intellij.execution.impl.RunManagerImpl;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.CommonActionsManager;
 import com.intellij.ide.DataManager;
@@ -27,6 +28,8 @@ import com.intellij.lang.ant.AntBundle;
 import com.intellij.lang.ant.config.*;
 import com.intellij.lang.ant.config.actions.AntBuildFilePropertiesAction;
 import com.intellij.lang.ant.config.actions.RemoveBuildFileAction;
+import com.intellij.lang.ant.config.execution.AntRunConfiguration;
+import com.intellij.lang.ant.config.execution.AntRunConfigurationType;
 import com.intellij.lang.ant.config.execution.ExecutionHandler;
 import com.intellij.lang.ant.config.impl.*;
 import com.intellij.lang.ant.config.impl.configuration.BuildFilePropertiesPanel;
@@ -47,16 +50,20 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiElement;
 import com.intellij.ui.*;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.Function;
 import com.intellij.util.IconUtil;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.util.xml.DomEventListener;
 import com.intellij.util.xml.DomManager;
 import com.intellij.util.xml.events.DomEvent;
+import icons.AntIcons;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 
@@ -69,8 +76,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.*;
 import java.util.List;
 
 public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, Disposable {
@@ -202,9 +208,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
     group.add(new ContextHelpAction(HelpID.ANT));
 
     final ActionToolbar actionToolBar = ActionManager.getInstance().createActionToolbar(ActionPlaces.ANT_EXPLORER_TOOLBAR, group, true);
-    final JPanel buttonsPanel = new JPanel(new BorderLayout());
-    buttonsPanel.add(actionToolBar.getComponent(), BorderLayout.CENTER);
-    return buttonsPanel;
+    return JBUI.Panels.simplePanel(actionToolBar.getComponent());
   }
 
   private void addBuildFile() {
@@ -398,6 +402,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
     final DefaultActionGroup group = new DefaultActionGroup();
     group.add(new RunAction());
     group.add(new CreateMetaTargetAction());
+    group.add(new MakeAntRunConfigurationAction());
     group.add(new RemoveMetaTargetsOrBuildFileAction());
     group.add(ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE));
     if (userObject instanceof AntBuildFileNodeDescriptor) {
@@ -460,35 +465,59 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
       return myProject != null? myTreeExpander : null;
     }
     else if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) {
-      final TreePath[] paths = myTree.getSelectionPaths();
-      if (paths == null) {
-        return null;
-      }
-      final ArrayList<VirtualFile> result = new ArrayList<VirtualFile>();
-      for (final TreePath path : paths) {
-        for (DefaultMutableTreeNode node = (DefaultMutableTreeNode)path.getLastPathComponent();
-             node != null;
-             node = (DefaultMutableTreeNode)node.getParent()) {
-          final Object userObject = node.getUserObject();
-          if (!(userObject instanceof AntBuildFileNodeDescriptor)) {
-            continue;
+      final List<VirtualFile> virtualFiles = collectAntFiles(new Function<AntBuildFile, VirtualFile>() {
+        @Override
+        public VirtualFile fun(AntBuildFile buildFile) {
+          final VirtualFile virtualFile = buildFile.getVirtualFile();
+          if (virtualFile != null && virtualFile.isValid()) {
+            return virtualFile;
           }
-          final AntBuildFile buildFile = ((AntBuildFileNodeDescriptor)userObject).getBuildFile();
-          if (buildFile != null) {
-            final VirtualFile virtualFile = buildFile.getVirtualFile();
-            if (virtualFile != null && virtualFile.isValid()) {
-              result.add(virtualFile);
-            }
-          }
-          break;
+          return null;
         }
-      }
-      if (result.size() == 0) {
-        return null;
-      }
-      return VfsUtil.toVirtualFileArray(result);
+      });
+      return virtualFiles == null ? null : virtualFiles.toArray(new VirtualFile[virtualFiles.size()]);
     }
+    else if (LangDataKeys.PSI_ELEMENT_ARRAY.is(dataId)) {
+      final List<PsiElement> elements = collectAntFiles(new Function<AntBuildFile, PsiElement>() {
+        @Override
+        public PsiElement fun(AntBuildFile buildFile) {
+          return buildFile.getAntFile();
+        }
+      });
+      return elements == null ? null : elements.toArray(new PsiElement[elements.size()]);
+    } 
     return super.getData(dataId);
+  }
+
+  private <T> List<T> collectAntFiles(final Function<AntBuildFile, T> function) {
+    final TreePath[] paths = myTree.getSelectionPaths();
+    if (paths == null) {
+      return null;
+    }
+    Set<AntBuildFile> antFiles = new LinkedHashSet<AntBuildFile>();
+    for (final TreePath path : paths) {
+      for (DefaultMutableTreeNode node = (DefaultMutableTreeNode)path.getLastPathComponent();
+           node != null;
+           node = (DefaultMutableTreeNode)node.getParent()) {
+        final Object userObject = node.getUserObject();
+        if (!(userObject instanceof AntBuildFileNodeDescriptor)) {
+          continue;
+        }
+        final AntBuildFile buildFile = ((AntBuildFileNodeDescriptor)userObject).getBuildFile();
+        if (buildFile != null) {
+          antFiles.add(buildFile);
+        }
+        break;
+      }
+    }
+    final List<T> result = new ArrayList<T>();
+    ContainerUtil.addAllNotNull(result, ContainerUtil.map(antFiles, new Function<AntBuildFile, T>() {
+      @Override
+      public T fun(AntBuildFile buildFile) {
+        return function.fun(buildFile);
+      }
+    }));
+    return result.isEmpty() ? null : result;
   }
 
   public static FileChooserDescriptor createXmlDescriptor() {
@@ -582,6 +611,59 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
       presentation.setEnabled(canRunSelection());
     }
   }
+  private final class MakeAntRunConfigurationAction extends AnAction {
+    public MakeAntRunConfigurationAction() {
+      super(AntBundle.message("make.ant.runconfiguration.name"), null, AntIcons.Build);
+    }
+
+    @Override
+    public void update(AnActionEvent e) {
+      super.update(e);
+
+      final Presentation presentation = e.getPresentation();
+      presentation.setEnabled(myTree.getSelectionCount() == 1 && canRunSelection());
+    }
+
+    @Override
+    public void actionPerformed(AnActionEvent e) {
+      final AntBuildFile buildFile = getCurrentBuildFile();
+      if (buildFile == null || !buildFile.exists()) {
+        return;
+      }
+
+      TreePath selectionPath = myTree.getSelectionPath();
+      if (selectionPath == null) return;
+      final DefaultMutableTreeNode node = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+      final Object userObject = node.getUserObject();
+      AntBuildTarget target = null;
+      if (userObject instanceof AntTargetNodeDescriptor) {
+        AntTargetNodeDescriptor targetNodeDescriptor = (AntTargetNodeDescriptor)userObject;
+        target = targetNodeDescriptor.getTarget();
+      }
+      else if (userObject instanceof AntBuildFileNodeDescriptor){
+        AntBuildModel model = ((AntBuildFileNodeDescriptor)userObject).getBuildFile().getModel();
+        target = model.findTarget(model.getDefaultTargetName());
+      }
+      String name = target != null ? target.getDisplayName() : null;
+      if (target == null || name == null) {
+        return;
+      }
+
+      RunManagerImpl runManager = (RunManagerImpl)RunManager.getInstance(e.getProject());
+      RunnerAndConfigurationSettings settings =
+        runManager.createRunConfiguration(name, AntRunConfigurationType.getInstance().getFactory());
+      AntRunConfiguration configuration  = (AntRunConfiguration)settings.getConfiguration();
+      configuration.acceptSettings(target);
+      if (RunDialog.editConfiguration(e.getProject(), settings, ExecutionBundle
+        .message("create.run.configuration.for.item.dialog.title", configuration.getName()))) {
+        runManager.addConfiguration(settings,
+                                    runManager.isConfigurationShared(settings),
+                                    runManager.getBeforeRunTasks(settings.getConfiguration()), false);
+        runManager.setSelectedConfiguration(settings);
+      }
+    }
+  }
+
 
   private final class ShowAllTargetsAction extends ToggleAction {
     public ShowAllTargetsAction() {
@@ -669,8 +751,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
       final ExecuteCompositeTargetEvent event = new ExecuteCompositeTargetEvent(targets);
       final SaveMetaTargetDialog dialog = new SaveMetaTargetDialog(myTree, event, AntConfigurationBase.getInstance(myProject), buildFile);
       dialog.setTitle(e.getPresentation().getText());
-      dialog.show();
-      if (dialog.isOK()) {
+      if (dialog.showAndGet()) {
         myBuilder.queueUpdate();
         myTree.repaint();
       }
@@ -686,7 +767,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
 
     public RemoveMetaTargetsOrBuildFileAction() {
       super(AntBundle.message("remove.meta.targets.action.name"), AntBundle.message("remove.meta.targets.action.description"), null);
-      registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0)), myTree);
+      registerCustomShortcutSet(CommonShortcuts.getDelete(), myTree);
       Disposer.register(AntExplorer.this, new Disposable() {
         public void dispose() {
           RemoveMetaTargetsOrBuildFileAction.this.unregisterCustomShortcutSet(myTree);
@@ -809,7 +890,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
       final KeymapManagerEx keymapManager = KeymapManagerEx.getInstanceEx();
       final Keymap activeKeymap = keymapManager.getActiveKeymap();
       listenTo(activeKeymap);
-      keymapManager.addKeymapManagerListener(this);
+      keymapManager.addKeymapManagerListener(this, AntExplorer.this);
     }
 
     public void activeKeymapChanged(Keymap keymap) {
@@ -837,7 +918,6 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
 
     public void stopListen() {
       listenTo(null);
-      KeymapManagerEx.getInstanceEx().removeKeymapManagerListener(this);
     }
   }
 
@@ -854,7 +934,7 @@ public class AntExplorer extends SimpleToolWindowPanel implements DataProvider, 
 
     @Override
     public boolean canImport(final TransferSupport support) {
-      return FileCopyPasteUtil.isFileListFlavorSupported(support.getDataFlavors());
+      return FileCopyPasteUtil.isFileListFlavorAvailable(support.getDataFlavors());
     }
 
     private VirtualFile[] getAntFiles(final TransferSupport support) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.psi.impl.file;
 
 import com.intellij.ide.util.PsiNavigationSupport;
@@ -28,13 +27,9 @@ import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.NonPhysicalFileSystem;
-import com.intellij.openapi.vfs.VfsBundle;
-import com.intellij.openapi.vfs.VfsUtilCore;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.*;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.CheckUtil;
 import com.intellij.psi.impl.PsiElementBase;
@@ -106,15 +101,6 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
   public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
     checkSetName(name);
 
-    /*
-    final String oldName = myFile.getName();
-    PsiTreeChangeEventImpl event = new PsiTreeChangeEventImpl(myManager);
-    event.setElement(this);
-    event.setPropertyName(PsiTreeChangeEvent.PROP_DIRECTORY_NAME);
-    event.setOldValue(oldName);
-    myManager.beforePropertyChange(event);
-    */
-
     try {
       myFile.rename(myManager, name);
     }
@@ -122,26 +108,6 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
       throw new IncorrectOperationException(e.toString());
     }
 
-    /*
-    PsiUndoableAction undoableAction = new PsiUndoableAction(){
-      public void undo() throws IncorrectOperationException {
-        if (!PsiDirectoryImpl.this.isValid()){
-          throw new IncorrectOperationException();
-        }
-        setName(oldName);
-      }
-    };
-    */
-
-    /*
-    event = new PsiTreeChangeEventImpl(myManager);
-    event.setElement(this);
-    event.setPropertyName(PsiTreeChangeEvent.PROP_DIRECTORY_NAME);
-    event.setOldValue(oldName);
-    event.setNewValue(name);
-    event.setUndoableAction(undoableAction);
-    myManager.propertyChanged(event);
-    */
     return this;
   }
 
@@ -151,7 +117,7 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
     CheckUtil.checkWritable(this);
     VirtualFile parentFile = myFile.getParent();
     if (parentFile == null) {
-      throw new IncorrectOperationException(VfsBundle.message("cannot.rename.root.directory"));
+      throw new IncorrectOperationException(VfsBundle.message("cannot.rename.root.directory", myFile.getPath()));
     }
     VirtualFile child = parentFile.findChild(name);
     if (child != null && !child.equals(myFile)) {
@@ -163,6 +129,10 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
   public PsiDirectory getParentDirectory() {
     VirtualFile parentFile = myFile.getParent();
     if (parentFile == null) return null;
+    if (!parentFile.isValid()) {
+      LOG.error("Invalid parent: " + parentFile + " of dir " + myFile + ", dir.valid=" + myFile.isValid());
+      return null;
+    }
     return myManager.findDirectory(parentFile);
   }
 
@@ -206,6 +176,10 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
   public PsiFile findFile(@NotNull String name) {
     VirtualFile childVFile = myFile.findChild(name);
     if (childVFile == null) return null;
+    if (!childVFile.isValid()) {
+      LOG.error("Invalid file: " + childVFile + " in dir " + myFile + ", dir.valid=" + myFile.isValid());
+      return null;
+    }
     return myManager.findFile(childVFile);
   }
 
@@ -216,23 +190,16 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
 
     for (VirtualFile vFile : myFile.getChildren()) {
       boolean isDir = vFile.isDirectory();
-      if (processor instanceof PsiFileSystemItemProcessor &&
-          !((PsiFileSystemItemProcessor)processor).acceptItem(vFile.getName(), isDir)) {
+      if (processor instanceof PsiFileSystemItemProcessor && !((PsiFileSystemItemProcessor)processor).acceptItem(vFile.getName(), isDir)) {
         continue;
       }
-      if (isDir) {
-        PsiDirectory dir = myManager.findDirectory(vFile);
-        if (dir != null) {
-          if (!processor.execute(dir)) return false;
-        }
-      }
-      else {
-        PsiFile file = myManager.findFile(vFile);
-        if (file != null) {
-          if (!processor.execute(file)) return false;
-        }
+
+      PsiFileSystemItem item = isDir ? myManager.findDirectory(vFile) : myManager.findFile(vFile);
+      if (item != null && !processor.execute(item)) {
+        return false;
       }
     }
+
     return true;
   }
 
@@ -323,7 +290,7 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
 
   @Override
   public boolean isPhysical() {
-    return !(myFile.getFileSystem() instanceof NonPhysicalFileSystem) && !(myFile.getFileSystem().getProtocol().equals("temp"));
+    return !(myFile.getFileSystem() instanceof NonPhysicalFileSystem) && !myFile.getFileSystem().getProtocol().equals("temp");
   }
 
   /**
@@ -411,11 +378,11 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
       return copyPsi;
     }
     catch (IOException e) {
-      throw new IncorrectOperationException(e.toString(), e);
+      throw new IncorrectOperationException(e);
     }
   }
 
-  private static void updateAddedFile(PsiFile copyPsi) throws IncorrectOperationException {
+  private static void updateAddedFile(@NotNull PsiFile copyPsi) throws IncorrectOperationException {
     final UpdateAddedFileProcessor processor = UpdateAddedFileProcessor.forElement(copyPsi);
     if (processor != null) {
       final TreeElement tree = (TreeElement)SourceTreeToPsiMap.psiElementToTree(copyPsi);
@@ -489,7 +456,7 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
         return newFile;
       }
       catch (IOException e) {
-        throw new IncorrectOperationException(e.toString(), e);
+        throw new IncorrectOperationException(e);
       }
     }
     else {
@@ -503,24 +470,23 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
     CheckUtil.checkWritable(this);
     if (element instanceof PsiDirectory) {
       String name = ((PsiDirectory)element).getName();
-      PsiDirectory[] subpackages = getSubdirectories();
-      for (PsiDirectory dir : subpackages) {
-        if (Comparing.strEqual(dir.getName(), name)) {
-          throw new IncorrectOperationException(VfsBundle.message("dir.already.exists.error", dir.getVirtualFile().getPresentableUrl()));
-        }
-      }
+      checkName(name, getSubdirectories(), "dir.already.exists.error");
     }
     else if (element instanceof PsiFile) {
       String name = ((PsiFile)element).getName();
-      PsiFile[] files = getFiles();
-      for (PsiFile file : files) {
-        if (Comparing.strEqual(file.getName(), name, SystemInfo.isFileSystemCaseSensitive)) {
-          throw new IncorrectOperationException(VfsBundle.message("file.already.exists.error", file.getVirtualFile().getPresentableUrl()));
-        }
-      }
+      checkName(name, getFiles(), "file.already.exists.error");
     }
     else {
-      throw new IncorrectOperationException();
+      throw new IncorrectOperationException(element.getClass().getName());
+    }
+  }
+
+  private void checkName(String name, PsiFileSystemItem[] items, String key) {
+    boolean caseSensitive = getVirtualFile().getFileSystem().isCaseSensitive();
+    for (PsiFileSystemItem item : items) {
+      if (Comparing.strEqual(item.getName(), name, caseSensitive)) {
+        throw new IncorrectOperationException(VfsBundle.message(key, item.getVirtualFile().getPresentableUrl()));
+      }
     }
   }
 
@@ -550,7 +516,7 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
       myFile.delete(myManager);
     }
     catch (IOException e) {
-      throw new IncorrectOperationException(e.toString(), e);
+      throw new IncorrectOperationException(e);
     }
 
     /*

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 package com.jetbrains.python.psi;
 
 import com.intellij.psi.PsiElement;
+import com.jetbrains.python.FunctionParameter;
+import com.jetbrains.python.nameResolver.FQNamesProvider;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -23,7 +25,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Represents an entire call expression, like <tt>foo()</tt> or <tt>foo.bar[1]('x')</tt>.
  */
-public interface PyCallExpression extends PyExpression {
+public interface PyCallExpression extends PyCallSiteExpression {
 
   /**
    * @return the expression representing the object being called (reference to a function).
@@ -65,9 +67,23 @@ public interface PyCallExpression extends PyExpression {
   @Nullable
   <T extends PsiElement> T getArgument(int index, String keyword, Class<T> argClass);
 
+  /**
+   * Returns the argument if one is present in the list.
+   *
+   * @param parameter parameter
+   * @param argClass argument expected type
+   * @return the argument or null
+   */
+  @Nullable
+  <T extends PsiElement> T getArgument(@NotNull final FunctionParameter parameter, @NotNull Class<T> argClass);
+
   @Nullable
   PyExpression getKeywordArgument(String keyword);
 
+  /**
+   * TODO: Copy/Paste with {@link com.jetbrains.python.psi.PyArgumentList#addArgument(PyExpression)}
+   * @param expression
+   */
   void addArgument(PyExpression expression);
 
   /**
@@ -88,7 +104,7 @@ public interface PyCallExpression extends PyExpression {
    * @param resolveContext the reference resolve context
    */
   @Nullable
-  Callable resolveCalleeFunction(PyResolveContext resolveContext);
+  PyCallable resolveCalleeFunction(PyResolveContext resolveContext);
 
   /**
    *
@@ -106,11 +122,20 @@ public interface PyCallExpression extends PyExpression {
    */
   boolean isCalleeText(@NotNull String... nameCandidates);
 
+
+  /**
+   * Checks if the qualified name of the callee matches any of the specified names provided by provider.
+   * @see com.jetbrains.python.nameResolver
+   * @param name providers that provides one or more names to check
+   * @return true if matches, false otherwise
+   */
+  boolean isCallee(@NotNull FQNamesProvider... name);
+
   /**
    * Couples function with a flag describing the way it is called.
    */
   class PyMarkedCallee {
-    @NotNull final Callable myCallable;
+    @NotNull final PyCallable myCallable;
     PyFunction.Modifier myModifier;
     int myImplicitOffset;
     boolean myImplicitlyResolved;
@@ -123,7 +148,7 @@ public interface PyCallExpression extends PyExpression {
      * @param offset             implicit argument offset; parameters up to this are implicitly filled in the call.
      * @param implicitlyResolved value for {@link #isImplicitlyResolved()}
      */
-    public PyMarkedCallee(@NotNull Callable function, PyFunction.Modifier modifier, int offset, boolean implicitlyResolved) {
+    public PyMarkedCallee(@NotNull PyCallable function, PyFunction.Modifier modifier, int offset, boolean implicitlyResolved) {
       myCallable = function;
       myModifier = modifier;
       myImplicitOffset = offset;
@@ -131,7 +156,7 @@ public interface PyCallExpression extends PyExpression {
     }
 
     @NotNull
-    public Callable getCallable() {
+    public PyCallable getCallable() {
       return myCallable;
     }
 

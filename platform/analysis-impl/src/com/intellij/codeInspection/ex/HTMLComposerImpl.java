@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -151,12 +150,16 @@ public abstract class HTMLComposerImpl extends HTMLComposer {
     while (!(refEntity instanceof RefProject)) {
       if (qName.length() > 0) qName = "." + qName;
 
-      String name = refEntity.getName();
+      String name = null;
       if (refEntity instanceof RefElement) {
         final HTMLComposerExtension extension = getLanguageExtension((RefElement)refEntity);
         if (extension != null) {
           name = extension.getQualifiedName(refEntity);
         }
+      }
+
+      if (name == null) {
+        name = refEntity.getName();
       }
 
       qName = name + qName;
@@ -174,9 +177,9 @@ public abstract class HTMLComposerImpl extends HTMLComposer {
   @Override
   public void appendElementReference(final StringBuffer buf, RefElement refElement, String linkText, @NonNls String frameName) {
     if (myExporter == null) {
-      final URL url = ((RefElementImpl)refElement).getURL();
+      final String url = ((RefElementImpl)refElement).getURL();
       if (url != null) {
-        appendElementReference(buf, url.toString(), linkText, frameName);
+        appendElementReference(buf, url, linkText, frameName);
       }
     }
     else {
@@ -283,7 +286,6 @@ public abstract class HTMLComposerImpl extends HTMLComposer {
   @Override
   public void appendListItem(StringBuffer buf, RefElement refElement) {
     startListItem(buf);
-    buf.append(CLOSE_TAG);
     appendElementReference(buf, refElement, true);
     appendAdditionalListItemInfo(buf, refElement);
     doneListItem(buf);

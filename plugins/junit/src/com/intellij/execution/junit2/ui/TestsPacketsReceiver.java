@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ import com.intellij.execution.junit2.ui.model.JUnitRunningModel;
 import com.intellij.execution.junit2.ui.properties.JUnitConsoleProperties;
 import com.intellij.execution.testframework.AbstractTestProxy;
 import com.intellij.execution.testframework.Printable;
-import com.intellij.execution.testframework.TestStatusListener;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -80,7 +79,7 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
   private final JUnitConsoleProperties myConsoleProperties;
 
 
-  public TestsPacketsReceiver(final JUnitTreeConsoleView consoleView, TestProxy unboundOutput) {
+  public TestsPacketsReceiver(@NotNull JUnitTreeConsoleView consoleView, @NotNull TestProxy unboundOutput) {
     myUnboundOutput = unboundOutput;
     myObjectRegistry = new InputObjectRegistry();
     myConsoleProperties = (JUnitConsoleProperties)consoleView.getProperties();
@@ -153,8 +152,8 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
     final String parentClass = currentTest.getInfo().getComment();
     TestProxy dynamicParent = myKnownDynamicParents.get(parentClass);
     if (dynamicParent == null) {
-      final TestProxy root = model.getRoot();
-      if (Comparing.strEqual(parentClass, StringUtil.getQualifiedName(root.getInfo().getComment(), root.getName()))) {
+      final TestProxy root = findParent(parentClass, model.getRoot());
+      if (root != null) {
         dynamicParent = root;
       }
       else {
@@ -167,18 +166,36 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
           public void readFrom(ObjectReader reader) {
           }
         });
-        root.addChild(dynamicParent);
+        model.getRoot().addChild(dynamicParent);
       }
       myKnownDynamicParents.put(parentClass, dynamicParent);
     }
     return dynamicParent;
   }
 
+  private static TestProxy findParent(String parentClass, TestProxy root) {
+    if (isAccepted(root, parentClass)) {
+      return root;
+    }
+
+    for (TestProxy proxy : root.getChildren()) {
+      if (isAccepted(proxy, parentClass)) {
+        return proxy;
+      }
+    }
+
+    return null;
+  }
+
+  private static boolean isAccepted(TestProxy root, String parentClass) {
+    return Comparing.strEqual(parentClass, StringUtil.getQualifiedName(root.getInfo().getComment(), root.getName()));
+  }
+
   public void notifyTestResult(ObjectReader reader) {
     final TestProxy testProxy = reader.readObject();
 
     if (testProxy.getParent() == null) { //model.getRoot() == testProxy
-      getDynamicParent(myModel, testProxy).addChild(testProxy);
+      getDynamicParent(myModel, testProxy).insertNextRunningChild(testProxy);
     }
 
     final int state = reader.readInt();
@@ -202,7 +219,6 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
     final JUnitRunningModel model = getModel();
     if (model != null) {
       model.getNotifier().fireRunnerStateChanged(new CompletionEvent(true, reader.readInt()));
-      TestStatusListener.notifySuiteFinished(model.getRoot());
       terminateStillRunning(model);
     }
   }

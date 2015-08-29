@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.jetbrains.python.inspections;
 
 import com.intellij.codeInspection.LocalInspectionToolSession;
 import com.intellij.codeInspection.ProblemsHolder;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.psi.PsiReference;
@@ -68,20 +69,19 @@ public class PyMissingConstructorInspection extends PyInspection {
         if (isExceptionClass(node, myTypeEvalContext) || hasConstructorCall(node, initMethod)) {
           return;
         }
-        if (superClasses.length == 1 || node.isNewStyleClass())
+        if (superClasses.length == 1 || node.isNewStyleClass(null))
           registerProblem(initMethod.getNameIdentifier(), PyBundle.message("INSP.missing.super.constructor.message"),
-                          new AddCallSuperQuickFix(node.getSuperClasses()[0], superClasses[0].getText()));
+                          new AddCallSuperQuickFix());
         else
           registerProblem(initMethod.getNameIdentifier(), PyBundle.message("INSP.missing.super.constructor.message"));
       }
     }
 
     private boolean superHasConstructor(@NotNull PyClass cls) {
+      final String className = cls.getName();
       for (PyClass c : cls.getAncestorClasses(myTypeEvalContext)) {
         final String name = c.getName();
-        final String className = cls.getName();
-        if (!OBJECT.equals(name) && !FAKE_OLD_BASE.equals(name) && className != null &&
-            !className.equals(name) && c.findMethodByName(INIT, false) != null) {
+        if (!PyUtil.isObjectClass(c) && !Comparing.equal(className, name) && c.findMethodByName(INIT, false) != null) {
           return true;
         }
       }
@@ -139,7 +139,7 @@ public class PyMissingConstructorInspection extends PyInspection {
                 if (args.length > 0) {
                   String firstArg = args[0].getText();
                   final String qualifiedName = cl.getQualifiedName();
-                  if (firstArg.equals(cl.getName()) || firstArg.equals(CANONICAL_SELF+"."+ CLASS) ||
+                  if (firstArg.equals(cl.getName()) || firstArg.equals(CANONICAL_SELF+"."+ __CLASS__) ||
                       (qualifiedName != null && qualifiedName.endsWith(firstArg)))
                       return true;
                   for (PyClass s : cl.getAncestorClasses(myTypeEvalContext)) {

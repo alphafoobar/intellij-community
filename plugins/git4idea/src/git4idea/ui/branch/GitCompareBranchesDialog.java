@@ -18,37 +18,47 @@ package git4idea.ui.branch;
 import com.intellij.dvcs.DvcsUtil;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.WindowWrapper;
+import com.intellij.openapi.ui.WindowWrapper.Mode;
+import com.intellij.openapi.ui.WindowWrapperBuilder;
 import com.intellij.ui.TabbedPaneImpl;
 import git4idea.GitUtil;
 import git4idea.repo.GitRepository;
 import git4idea.util.GitCommitCompareInfo;
-import icons.Git4ideaIcons;
+import icons.VcsLogIcons;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
 /**
  * Dialog for comparing two Git branches.
- * @author Kirill Likhodedov
  */
-public class GitCompareBranchesDialog extends DialogWrapper {
+public class GitCompareBranchesDialog {
+  @NotNull private final Project myProject;
 
-  private final Project myProject;
-  private final String myBranchName;
-  private final String myCurrentBranchName;
-  private final GitCommitCompareInfo myCompareInfo;
-  private final GitRepository myInitialRepo;
-  private JPanel myLogPanel;
+  @NotNull private final JPanel myLogPanel;
+  @NotNull private final TabbedPaneImpl myTabbedPane;
+  @NotNull private final String myTitle;
 
-  public GitCompareBranchesDialog(@NotNull Project project, @NotNull String branchName, @NotNull String currentBranchName,
-                                  @NotNull GitCommitCompareInfo compareInfo, @NotNull GitRepository initialRepo) {
-    super(project, false);
-    myCurrentBranchName = currentBranchName;
-    myCompareInfo = compareInfo;
+  @NotNull private final Mode myMode;
+
+  private WindowWrapper myWrapper;
+
+  public GitCompareBranchesDialog(@NotNull Project project,
+                                  @NotNull String branchName,
+                                  @NotNull String currentBranchName,
+                                  @NotNull GitCommitCompareInfo compareInfo,
+                                  @NotNull GitRepository initialRepo) {
+    this(project, branchName, currentBranchName, compareInfo, initialRepo, false);
+  }
+
+  public GitCompareBranchesDialog(@NotNull Project project,
+                                  @NotNull String branchName,
+                                  @NotNull String currentBranchName,
+                                  @NotNull GitCommitCompareInfo compareInfo,
+                                  @NotNull GitRepository initialRepo,
+                                  boolean dialog) {
     myProject = project;
-    myBranchName = branchName;
-    myInitialRepo = initialRepo;
 
     String rootString;
     if (compareInfo.getRepositories().size() == 1 && GitUtil.getRepositoryManager(myProject).moreThanOneRoot()) {
@@ -57,37 +67,27 @@ public class GitCompareBranchesDialog extends DialogWrapper {
     else {
       rootString = "";
     }
-    setTitle(String.format("Comparing %s with %s%s", currentBranchName, branchName, rootString));
-    setModal(false);
-    init();
+    myTitle = String.format("Comparing %s with %s%s", currentBranchName, branchName, rootString);
+    myMode = dialog ? Mode.MODAL : Mode.FRAME;
+
+    JPanel diffPanel = new GitCompareBranchesDiffPanel(myProject, branchName, currentBranchName, compareInfo);
+    myLogPanel = new GitCompareBranchesLogPanel(myProject, branchName, currentBranchName, compareInfo, initialRepo);
+
+    myTabbedPane = new TabbedPaneImpl(SwingConstants.TOP);
+    myTabbedPane.addTab("Log", VcsLogIcons.Branch, myLogPanel);
+    myTabbedPane.addTab("Diff", AllIcons.Actions.Diff, diffPanel);
+    myTabbedPane.setKeyboardNavigation(TabbedPaneImpl.DEFAULT_PREV_NEXT_SHORTCUTS);
   }
 
-  @Override
-  protected JComponent createCenterPanel() {
-    myLogPanel = new GitCompareBranchesLogPanel(myProject, myBranchName, myCurrentBranchName, myCompareInfo, myInitialRepo);
-    JPanel diffPanel = new GitCompareBranchesDiffPanel(myProject, myBranchName, myCurrentBranchName, myCompareInfo);
-
-    TabbedPaneImpl tabbedPane = new TabbedPaneImpl(SwingConstants.TOP);
-    tabbedPane.addTab("Log", Git4ideaIcons.Branch, myLogPanel);
-    tabbedPane.addTab("Diff", AllIcons.Actions.Diff, diffPanel);
-    tabbedPane.setKeyboardNavigation(TabbedPaneImpl.DEFAULT_PREV_NEXT_SHORTCUTS);
-    return tabbedPane;
-  }
-
-  // it is information dialog - no need to OK or Cancel. Close the dialog by clicking the cross button or pressing Esc.
-  @NotNull
-  @Override
-  protected Action[] createActions() {
-    return new Action[0];
-  }
-
-  @Override
-  protected String getDimensionServiceKey() {
-    return GitCompareBranchesDialog.class.getName();
-  }
-
-  @Override
-  public JComponent getPreferredFocusedComponent() {
-    return myLogPanel;
+  public void show() {
+    if (myWrapper == null) {
+      myWrapper = new WindowWrapperBuilder(myMode, myTabbedPane)
+        .setProject(myProject)
+        .setTitle(myTitle)
+        .setPreferredFocusedComponent(myLogPanel)
+        .setDimensionServiceKey(GitCompareBranchesDialog.class.getName())
+        .build();
+    }
+    myWrapper.show();
   }
 }

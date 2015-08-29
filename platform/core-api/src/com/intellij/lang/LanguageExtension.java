@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ package com.intellij.lang;
 
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.KeyedExtensionCollector;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,8 +42,9 @@ public class LanguageExtension<T> extends KeyedExtensionCollector<T, Language> {
     IN_LANGUAGE_CACHE = Key.create("EXTENSIONS_IN_LANGUAGE_"+epName);
   }
 
+  @NotNull
   @Override
-  protected String keyToString(final Language key) {
+  protected String keyToString(@NotNull final Language key) {
     return key.getID();
   }
 
@@ -65,8 +67,11 @@ public class LanguageExtension<T> extends KeyedExtensionCollector<T, Language> {
     return result;
   }
 
+  /**
+   *  @see #allForLanguageOrAny(Language)
+   */
   @NotNull
-  public List<T> allForLanguage(Language l) {
+  public List<T> allForLanguage(@NotNull Language l) {
     List<T> list = forKey(l);
     if (list.isEmpty()) {
       Language base = l.getBaseLanguage();
@@ -74,23 +79,21 @@ public class LanguageExtension<T> extends KeyedExtensionCollector<T, Language> {
         return allForLanguage(base);
       }
     }
-    //if (l != Language.ANY) {
-    //  final List<T> all = allForLanguage(Language.ANY);
-    //  if (!all.isEmpty()) {
-    //    if (list.isEmpty()) {
-    //      return all;
-    //    }
-    //    list = new ArrayList<T>(list);
-    //    list.addAll(all);
-    //  }
-    //}
     return list;
+  }
+
+  @NotNull
+  public List<T> allForLanguageOrAny(@NotNull Language l) {
+    List<T> providers = allForLanguage(l);
+    if (l == Language.ANY) return providers;
+    return ContainerUtil.concat(providers, allForLanguage(Language.ANY));
   }
 
   protected T getDefaultImplementation() {
     return myDefaultImplementation;
   }
 
+  @NotNull
   protected Key<T> getLanguageCache() {
     return IN_LANGUAGE_CACHE;
   }

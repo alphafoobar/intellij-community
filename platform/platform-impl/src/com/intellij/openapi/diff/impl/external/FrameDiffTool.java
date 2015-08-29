@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import com.intellij.openapi.ui.DialogBuilder;
 import com.intellij.openapi.ui.FrameWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ex.MessagesEx;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
@@ -40,8 +39,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 
-// Author: dyoma
-
 public class FrameDiffTool implements DiffTool {
   public void show(DiffRequest request) {
     Collection hints = request.getHints();
@@ -52,9 +49,6 @@ public class FrameDiffTool implements DiffTool {
       if (diffPanel == null) {
         Disposer.dispose(builder);
         return;
-      }
-      if (hints.contains(DiffTool.HINT_DIFF_IS_APPROXIMATE)) {
-        diffPanel.setPatchAppliedApproximately(); // todo read only and not variants
       }
       final Runnable onOkRunnable = request.getOnOkRunnable();
       if (onOkRunnable != null){
@@ -87,9 +81,6 @@ public class FrameDiffTool implements DiffTool {
       if (diffPanel == null) {
         Disposer.dispose(frameWrapper);
         return;
-      }
-      if (hints.contains(DiffTool.HINT_DIFF_IS_APPROXIMATE)) {
-        diffPanel.setPatchAppliedApproximately();
       }
       frameWrapper.setTitle(request.getWindowTitle());
       DiffUtil.initDiffFrame(diffPanel.getProject(), frameWrapper, diffPanel, diffPanel.getComponent());
@@ -145,42 +136,47 @@ public class FrameDiffTool implements DiffTool {
   }
 
   protected DiffPanelImpl createDiffPanelImpl(@NotNull DiffRequest request, @Nullable Window window, @NotNull Disposable parentDisposable) {
-    return (DiffPanelImpl) DiffManagerImpl.createDiffPanel(request, window, parentDisposable, this);
+    DiffPanelImpl panel = (DiffPanelImpl)DiffManagerImpl.createDiffPanel(request, window, parentDisposable, this);
+    if (request.getHints().contains(DiffTool.HINT_DIFF_IS_APPROXIMATE)) {
+      panel.setPatchAppliedApproximately(); // todo read only and not variants
+    }
+    return panel;
   }
 
   static void showDiffDialog(DialogBuilder builder, Collection hints) {
     builder.showModal(!hints.contains(DiffTool.HINT_SHOW_NOT_MODAL_DIALOG));
   }
 
-  static boolean shouldOpenDialog(Collection hints) {
+  public static boolean shouldOpenDialog(Collection hints) {
     if (hints.contains(DiffTool.HINT_SHOW_MODAL_DIALOG)) return true;
     if (hints.contains(DiffTool.HINT_SHOW_NOT_MODAL_DIALOG)) return true;
     if (hints.contains(DiffTool.HINT_SHOW_FRAME)) return false;
     return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() instanceof JDialog;
   }
 
+  // TODO remove check?
   private boolean checkNoDifferenceAndNotify(DiffPanel diffPanel, DiffRequest data, final Window window, final boolean showMessage) {
-    if (!diffPanel.hasDifferences() && !data.getHints().contains(HINT_ALLOW_NO_DIFFERENCES)) {
-      DiffManagerImpl manager = (DiffManagerImpl) DiffManager.getInstance();
-      if (!Comparing.equal(manager.getComparisonPolicy(), ComparisonPolicy.DEFAULT)) {
-        ComparisonPolicy oldPolicy = manager.getComparisonPolicy();
-        manager.setComparisonPolicy(ComparisonPolicy.DEFAULT);
-        Disposable parentDisposable = Disposer.newDisposable();
-        DiffPanel maybeDiffPanel = DiffManagerImpl.createDiffPanel(data, window, parentDisposable, this);
-        manager.setComparisonPolicy(oldPolicy);
-
-        boolean hasDiffs = maybeDiffPanel.hasDifferences();
-        Disposer.dispose(parentDisposable);
-
-        if (hasDiffs) return false;
-      }
-
-      if (! showMessage) {
-        return true;
-      }
-      return !askForceOpenDiff(data);
+    if (diffPanel.hasDifferences() || data.getHints().contains(HINT_ALLOW_NO_DIFFERENCES)) {
+      return false;
     }
-    return false;
+
+    DiffManagerImpl manager = (DiffManagerImpl)DiffManager.getInstance();
+    ComparisonPolicy oldPolicy = manager.getComparisonPolicy();
+    if (oldPolicy != ComparisonPolicy.DEFAULT) {
+      manager.setComparisonPolicy(ComparisonPolicy.DEFAULT);
+      Disposable parentDisposable = Disposer.newDisposable();
+      DiffPanel maybeDiffPanel = DiffManagerImpl.createDiffPanel(data, window, parentDisposable, this);
+      manager.setComparisonPolicy(oldPolicy);
+
+      boolean hasDiffs = maybeDiffPanel.hasDifferences();
+      Disposer.dispose(parentDisposable);
+
+      if (hasDiffs) {
+        return false;
+      }
+    }
+
+    return !showMessage || !askForceOpenDiff(data);
   }
 
   private static boolean askForceOpenDiff(DiffRequest data) {
@@ -197,10 +193,8 @@ public class FrameDiffTool implements DiffTool {
     String message = Arrays.equals(bytes1, bytes2)
                      ? DiffBundle.message("diff.contents.are.identical.message.text")
                      : DiffBundle.message("diff.contents.have.differences.only.in.line.separators.message.text");
-    Messages.showInfoMessage(data.getProject(), message, DiffBundle.message("no.differences.dialog.title"));
-    return false;
-    //return Messages.showDialog(data.getProject(), message + "\nShow diff anyway?", "No Differences", new String[]{"Yes", "No"}, 1,
-    //                    Messages.getQuestionIcon()) == 0;
+    return Messages.showYesNoDialog(data.getProject(), message + "\n" + DiffBundle.message("show.diff.anyway.dialog.message"),
+                                    DiffBundle.message("no.differences.dialog.title"), Messages.getQuestionIcon()) == Messages.YES;
   }
 
   public boolean canShow(DiffRequest data) {
@@ -220,6 +214,6 @@ public class FrameDiffTool implements DiffTool {
 
   @Override
   public DiffViewer createComponent(String title, DiffRequest request, Window window, @NotNull Disposable parentDisposable) {
-    return createDiffPanelIfShouldShow(request, window, parentDisposable, false);
+    return createDiffPanelImpl(request, window, parentDisposable);
   }
 }

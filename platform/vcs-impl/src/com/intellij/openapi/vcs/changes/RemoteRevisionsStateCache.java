@@ -20,6 +20,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.MultiMap;
+import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -27,10 +28,14 @@ import java.util.*;
 
 public class RemoteRevisionsStateCache implements ChangesOnServerTracker {
   private final static long DISCRETE = 3600000;
-  // true -> changed
+  // All files that were checked during cache update and were not invalidated.
+  // pair.First - if file is changed (true means changed)
+  // pair.Second - vcs root where file belongs to
   private final Map<String, Pair<Boolean, VcsRoot>> myChanged;
 
+  // All files that needs to be checked during next cache update, grouped by vcs root
   private final MultiMap<VcsRoot, String> myQueries;
+  // All vcs roots for which cache update was performed with update timestamp
   private final Map<VcsRoot, Long> myTs;
   private final Object myLock;
   private final ProjectLevelVcsManager myVcsManager;
@@ -55,7 +60,7 @@ public class RemoteRevisionsStateCache implements ChangesOnServerTracker {
 
   @Nullable
   private VirtualFile getRootForPath(final String s) {
-    return myVcsManager.getVcsRootFor(new FilePathImpl(new File(s), false));
+    return myVcsManager.getVcsRootFor(VcsUtil.getFilePath(s, false));
   }
   
   public boolean isUpToDate(final Change change) {
@@ -104,6 +109,7 @@ public class RemoteRevisionsStateCache implements ChangesOnServerTracker {
                                                         myVcsConfiguration.CHANGED_ON_SERVER_INTERVAL * 60000 : DISCRETE);
 
     synchronized (myLock) {
+      // just copies myQueries MultiMap to dirty MultiMap
       for (VcsRoot root : myQueries.keySet()) {
         final Collection<String> collection = myQueries.get(root);
         for (String s : collection) {
@@ -112,15 +118,23 @@ public class RemoteRevisionsStateCache implements ChangesOnServerTracker {
       }
       myQueries.clear();
 
+      // collect roots for which cache update should be performed (by timestamp)
       final Set<VcsRoot> roots = new HashSet<VcsRoot>();
       for (Map.Entry<VcsRoot, Long> entry : myTs.entrySet()) {
+        // ignore timestamp, as still remote changes checking is required
+        // TODO: why not to add in roots anyway??? - as dirty is still checked when adding myChanged files.
         if (! dirty.get(entry.getKey()).isEmpty()) continue;
 
+        // update only if timeout expired
         final Long ts = entry.getValue();
         if ((ts == null) || (oldPoint > ts)) {
           roots.add(entry.getKey());
         }
       }
+
+      // Add dirty files from those vcs roots, that
+      // - needs to be update by timestamp criteria
+      // - that already contain files for update through manually added requests
       for (Map.Entry<String, Pair<Boolean, VcsRoot>> entry : myChanged.entrySet()) {
         final VcsRoot vcsRoot = entry.getValue().getSecond();
         if ((! dirty.get(vcsRoot).isEmpty()) || roots.contains(vcsRoot)) {
@@ -142,6 +156,8 @@ public class RemoteRevisionsStateCache implements ChangesOnServerTracker {
       final Collection<String> paths = dirty.get(vcsRoot);
       final Collection<String> remotelyChanged = provider.getRemotelyChanged(vcsRoot.getPath(), paths);
       for (String path : paths) {
+        // TODO: Contains invoked for each file - better to use Set (implementations just use List)
+        // TODO: Why to store boolean for changed or not - why not just remove such values from myChanged???
         results.put(path, new Pair<Boolean, VcsRoot>(remotelyChanged.contains(path), vcsRoot));
       }
     }

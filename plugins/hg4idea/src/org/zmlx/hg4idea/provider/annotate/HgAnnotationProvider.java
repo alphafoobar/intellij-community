@@ -16,6 +16,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.annotate.AnnotationProvider;
 import com.intellij.openapi.vcs.annotate.FileAnnotation;
+import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -35,8 +36,6 @@ import java.util.List;
 
 public class HgAnnotationProvider implements AnnotationProvider {
 
-  private static final int DEFAULT_LIMIT = 500;
-
   @NotNull private final Project myProject;
 
   public HgAnnotationProvider(@NotNull Project project) {
@@ -53,12 +52,16 @@ public class HgAnnotationProvider implements AnnotationProvider {
       throw new VcsException("vcs root is null for " + file);
     }
     final HgFile hgFile = new HgFile(vcsRoot, VfsUtilCore.virtualToIoFile(file));
-    HgFile fileToAnnotate = revision instanceof HgFileRevision ? HgUtil
-      .getFileNameInTargetRevision(myProject, ((HgFileRevision)revision).getRevisionNumber(), hgFile) : hgFile;
+    HgFile fileToAnnotate = revision instanceof HgFileRevision
+                            ? HgUtil.getFileNameInTargetRevision(myProject, ((HgFileRevision)revision).getRevisionNumber(), hgFile)
+                            : new HgFile(vcsRoot,
+                                         HgUtil.getOriginalFileName(hgFile.toFilePath(), ChangeListManager.getInstance(myProject)));
     final List<HgAnnotationLine> annotationResult = (new HgAnnotateCommand(myProject)).execute(fileToAnnotate, revision);
     final List<HgFileRevision> logResult;
     try {
-      logResult = (new HgLogCommand(myProject)).execute(fileToAnnotate, DEFAULT_LIMIT, false);
+      HgLogCommand logCommand = new HgLogCommand(myProject);
+      logCommand.setFollowCopies(true);
+      logResult = logCommand.execute(fileToAnnotate, -1, false);
     }
     catch (HgCommandException e) {
       throw new VcsException("Can not annotate, " + HgVcsMessages.message("hg4idea.error.log.command.execution"), e);

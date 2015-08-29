@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.openapi.roots.ui.configuration.projectRoot;
 
 import com.intellij.openapi.actionSystem.AnAction;
@@ -22,9 +21,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.DumbAwareAction;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectBundle;
+import com.intellij.openapi.project.*;
 import com.intellij.openapi.projectRoots.*;
 import com.intellij.openapi.projectRoots.impl.ProjectJdkImpl;
 import com.intellij.openapi.projectRoots.impl.SdkConfigurationUtil;
@@ -36,14 +33,15 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.Consumer;
 import com.intellij.util.EventDispatcher;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.*;
 
 /**
- * User: anna
- * Date: 05-Jun-2006
+ * @author anna
+ * @since 05-Jun-2006
  */
 public class ProjectSdksModel implements SdkModel {
   private static final Logger LOG = Logger.getInstance("com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel");
@@ -112,7 +110,7 @@ public class ProjectSdksModel implements SdkModel {
     return myProjectSdks;
   }
 
-  public boolean isModified(){
+  public boolean isModified() {
     return myModified;
   }
 
@@ -129,13 +127,25 @@ public class ProjectSdksModel implements SdkModel {
     if (!canApply(errorString, configurable, addedOnly)) {
       throw new ConfigurationException(errorString[0]);
     }
-    final Sdk[] allFromTable = ProjectJdkTable.getInstance().getAllJdks();
-    final ArrayList<Sdk> itemsInTable = new ArrayList<Sdk>();
-    // Delete removed and fill itemsInTable
+
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, new Runnable() {
+      @Override
+      public void run() {
+        doApply();
+      }
+    });
+    myModified = false;
+  }
+
+  private void doApply() {
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
       @Override
       public void run() {
+        final ArrayList<Sdk> itemsInTable = new ArrayList<Sdk>();
         final ProjectJdkTable jdkTable = ProjectJdkTable.getInstance();
+        final Sdk[] allFromTable = jdkTable.getAllJdks();
+
+        // Delete removed and fill itemsInTable
         for (final Sdk tableItem : allFromTable) {
           if (myProjectSdks.containsKey(tableItem)) {
             itemsInTable.add(tableItem);
@@ -144,16 +154,12 @@ public class ProjectSdksModel implements SdkModel {
             jdkTable.removeJdk(tableItem);
           }
         }
-      }
-    });
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
+        
         // Now all removed items are deleted from table, itemsInTable contains all items in table
-        final ProjectJdkTable jdkTable = ProjectJdkTable.getInstance();
         for (Sdk originalJdk : itemsInTable) {
           final Sdk modifiedJdk = myProjectSdks.get(originalJdk);
           LOG.assertTrue(modifiedJdk != null);
+          LOG.assertTrue(originalJdk != modifiedJdk);
           jdkTable.updateJdk(originalJdk, modifiedJdk);
         }
         // Add new items to table
@@ -162,11 +168,11 @@ public class ProjectSdksModel implements SdkModel {
           LOG.assertTrue(projectJdk != null);
           if (ArrayUtilRt.find(allJdks, projectJdk) == -1) {
             jdkTable.addJdk(projectJdk);
+            jdkTable.updateJdk(projectJdk, myProjectSdks.get(projectJdk));
           }
         }
       }
     });
-    myModified = false;
   }
 
   private boolean canApply(String[] errorString, @Nullable MasterDetailsComponent rootConfigurable, boolean addedOnly) throws ConfigurationException {
@@ -195,7 +201,7 @@ public class ProjectSdksModel implements SdkModel {
       final SdkAdditionalData sdkAdditionalData = currItem.getSdkAdditionalData();
       if (sdkAdditionalData instanceof ValidatableSdkAdditionalData) {
         try {
-          ((ValidatableSdkAdditionalData) sdkAdditionalData).checkValid(this);
+          ((ValidatableSdkAdditionalData)sdkAdditionalData).checkValid(this);
         }
         catch (ConfigurationException e) {
           if (rootConfigurable != null) {
@@ -243,14 +249,12 @@ public class ProjectSdksModel implements SdkModel {
     final SdkType[] types = SdkType.getAllTypes();
     for (final SdkType type : types) {
       if (filter != null && !filter.value(type)) continue;
-      final AnAction addAction = new DumbAwareAction(type.getPresentableName(),
-                                              null,
-                                              type.getIconForAddAction()) {
-          @Override
-          public void actionPerformed(AnActionEvent e) {
-            doAdd(parent, type, updateTree);
-          }
-        };
+      final AnAction addAction = new DumbAwareAction(type.getPresentableName(), null, type.getIconForAddAction()) {
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+          doAdd(parent, type, updateTree);
+        }
+      };
       group.add(addAction);
     }
   }
@@ -284,8 +288,8 @@ public class ProjectSdksModel implements SdkModel {
     if (!sdkType.setupSdkPaths(newJdk, this)) return;
 
     if (newJdk.getVersionString() == null) {
-       Messages.showMessageDialog(ProjectBundle.message("sdk.java.corrupt.error", home),
-                                  ProjectBundle.message("sdk.java.corrupt.title"), Messages.getErrorIcon());
+      String message = ProjectBundle.message("sdk.java.corrupt.error", home);
+      Messages.showMessageDialog(message, ProjectBundle.message("sdk.java.corrupt.title"), Messages.getErrorIcon());
     }
 
     doAdd(newJdk, callback);
@@ -298,11 +302,17 @@ public class ProjectSdksModel implements SdkModel {
 
   public void doAdd(Sdk newSdk, @Nullable Consumer<Sdk> updateTree) {
     myModified = true;
-    myProjectSdks.put(newSdk, newSdk);
-    if (updateTree != null) {
-      updateTree.consume(newSdk);
+    try {
+      Sdk editableCopy = (Sdk)newSdk.clone();
+      myProjectSdks.put(newSdk, editableCopy);
+      if (updateTree != null) {
+        updateTree.consume(editableCopy);
+      }
+      mySdkEventsDispatcher.getMulticaster().sdkAdded(editableCopy);
     }
-    mySdkEventsDispatcher.getMulticaster().sdkAdded(newSdk);
+    catch (CloneNotSupportedException e) {
+      LOG.error(e);
+    }
   }
 
   @Nullable

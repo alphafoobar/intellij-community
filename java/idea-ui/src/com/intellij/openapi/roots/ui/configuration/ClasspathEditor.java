@@ -28,21 +28,15 @@ import com.intellij.openapi.roots.impl.storage.ClassPathStorageUtil;
 import com.intellij.openapi.roots.impl.storage.ClasspathStorage;
 import com.intellij.openapi.roots.impl.storage.ClasspathStorageProvider;
 import com.intellij.openapi.roots.ui.configuration.classpath.ClasspathPanelImpl;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.ui.OrderPanelListener;
+import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-/**
- * @author Eugene Zhuravlev
- *         Date: Oct 4, 2003
- *         Time: 6:54:57 PM
- */
 public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootListener {
   public static final String NAME = ProjectBundle.message("modules.classpath.title");
 
@@ -77,12 +71,11 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
   @Override
   public void saveData() {
     myPanel.stopEditing();
-    flushChangesToModel();
   }
 
   @Override
-  public void apply () throws ConfigurationException {
-    if(myClasspathFormatPanel!=null) {
+  public void apply() throws ConfigurationException {
+    if (myClasspathFormatPanel != null) {
       myClasspathFormatPanel.apply();
     }
   }
@@ -91,22 +84,16 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
   public void canApply() throws ConfigurationException {
     super.canApply();
     if (myClasspathFormatPanel != null) {
-      final String storageID = myClasspathFormatPanel.getSelectedClasspathFormat();
-      ClasspathStorage.getProvider(storageID).assertCompatible(getModel());
+      ClasspathStorageProvider provider = ClasspathStorage.getProvider(myClasspathFormatPanel.getSelectedClasspathFormat());
+      if (provider != null) {
+        provider.assertCompatible(getModel());
+      }
     }
   }
 
   @Override
   public JComponent createComponentImpl() {
     myPanel = new ClasspathPanelImpl(getState());
-
-    myPanel.addListener(new OrderPanelListener() {
-      @Override
-      public void entryMoved() {
-        flushChangesToModel();
-      }
-    });
-
     final JPanel panel = new JPanel(new BorderLayout());
     panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
     panel.add(myPanel, BorderLayout.CENTER);
@@ -122,18 +109,13 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
     jdkConfigurable.reset();
     registerDisposable(jdkConfigurable);
 
-    List<ClasspathStorageProvider> providers = ClasspathStorage.getProviders();
-    if(providers.size()>1){
+    ClasspathStorageProvider[] providers = ClasspathStorageProvider.EXTENSION_POINT_NAME.getExtensions();
+    if (providers.length > 0) {
       myClasspathFormatPanel = new ClasspathFormatPanel(providers);
       panel.add(myClasspathFormatPanel, BorderLayout.SOUTH);
     }
 
     return panel;
-  }
-
-  public void flushChangesToModel() {
-    List<OrderEntry> entries = myPanel.getEntries();
-    getModel().rearrangeOrderEntries(entries.toArray(new OrderEntry[entries.size()]));
   }
 
   public void selectOrderEntry(@NotNull final OrderEntry entry) {
@@ -170,39 +152,37 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
     if (myPanel != null) {
       myPanel.forceInitFromModel();
     }
-
-    flushChangesToModel();
   }
 
   private class ClasspathFormatPanel extends JPanel {
+    private final JComboBox comboBoxClasspathFormat;
 
-    private final JComboBox cbClasspathFormat;
+    private final Map<String,String> formatIdToDescription = new THashMap<String, String>();
 
-    private final Map<String,String> formatIdToDescr = new HashMap<String, String>();
-
-    private ClasspathFormatPanel(final List<ClasspathStorageProvider> providers) {
+    private ClasspathFormatPanel(@NotNull ClasspathStorageProvider[] providers) {
       super(new GridBagLayout());
-      add(new JLabel(ProjectBundle.message("project.roots.classpath.format.label")),
-                      new GridBagConstraints(0,0,1,1,0.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE, new Insets(10, 6, 6, 0), 0, 0));
 
-      for (ClasspathStorageProvider provider : providers){
-        formatIdToDescr.put ( provider.getID(), provider.getDescription());
+      add(new JLabel(ProjectBundle.message("project.roots.classpath.format.label")),
+          new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE, new Insets(10, 6, 6, 0), 0, 0));
+
+      formatIdToDescription.put(ClassPathStorageUtil.DEFAULT_STORAGE, ProjectBundle.message("project.roots.classpath.format.default.descr"));
+      for (ClasspathStorageProvider provider : providers) {
+        formatIdToDescription.put(provider.getID(), provider.getDescription());
       }
 
-      final Object[] items = formatIdToDescr.values().toArray();
-      cbClasspathFormat = new JComboBox(items);
+      comboBoxClasspathFormat = new ComboBox(formatIdToDescription.values().toArray());
       updateClasspathFormat();
-      add(cbClasspathFormat,
-                      new GridBagConstraints(1,0,1,1,1.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE, new Insets(6, 6, 6, 0), 0, 0));
+      add(comboBoxClasspathFormat,
+          new GridBagConstraints(1, 0, 1, 1, 1.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE, new Insets(6, 6, 6, 0), 0, 0));
     }
 
     private void updateClasspathFormat() {
-      cbClasspathFormat.setSelectedItem(formatIdToDescr.get(getModuleClasspathFormat()));
+      comboBoxClasspathFormat.setSelectedItem(formatIdToDescription.get(getModuleClasspathFormat()));
     }
 
     private String getSelectedClasspathFormat() {
-      final String selected = (String)cbClasspathFormat.getSelectedItem();
-      for ( Map.Entry<String,String> entry : formatIdToDescr.entrySet() ) {
+      final String selected = (String)comboBoxClasspathFormat.getSelectedItem();
+      for ( Map.Entry<String,String> entry : formatIdToDescription.entrySet() ) {
         if ( entry.getValue().equals(selected)) {
           return entry.getKey();
         }
@@ -216,12 +196,15 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
     }
 
     boolean isModified() {
-      return cbClasspathFormat != null && !getSelectedClasspathFormat().equals(getModuleClasspathFormat());
+      return comboBoxClasspathFormat != null && !getSelectedClasspathFormat().equals(getModuleClasspathFormat());
     }
 
     void apply() throws ConfigurationException {
       final String storageID = getSelectedClasspathFormat();
-      ClasspathStorage.getProvider(storageID).assertCompatible(getModel());
+      ClasspathStorageProvider provider = ClasspathStorage.getProvider(storageID);
+      if (provider != null) {
+        provider.assertCompatible(getModel());
+      }
       ClasspathStorage.setStorageType(getModel(), storageID);
     }
   }

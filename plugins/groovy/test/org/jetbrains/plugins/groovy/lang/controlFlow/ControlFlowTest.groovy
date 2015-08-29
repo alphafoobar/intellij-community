@@ -47,6 +47,13 @@ public class ControlFlowTest extends LightCodeInsightFixtureTestCase {
   public void testSwitch3() { doTest(); }
   public void testSwitch4() { doTest(); }
   public void testSwitch5() { doTest(); }
+  public void testNestedSwitch1() { doTest() };
+  public void testNestedSwitch2() { doTest() };
+  public void testNestedSwitch3() { doTest() };
+  public void testNestedSwitch4() { doTest() };
+  public void testSwitchWithinFor() {doTest() };
+  public void testSwitchWithinLabeledFor() { doTest() };
+  public void testForWithinSwitchWithinFor() { doTest() };
   public void testThrow1() { doTest(); }
   public void testThrowInCatch() { doTest(); }
   public void testTry1() { doTest(); }
@@ -81,6 +88,7 @@ public class ControlFlowTest extends LightCodeInsightFixtureTestCase {
   public void testBinaryExpressionInReturn() { doTest() }
   public void testPendingFromIf() { doTest() }
   public void testSwitchWithEmptyCaseBeforeDefault() { doTest() }
+  public void testUnfinishedAssignment() { doTest() }
 
   public void doTest() {
     final List<String> input = TestUtils.readInput(testDataPath + getTestName(true) + ".test");

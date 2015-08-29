@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -170,7 +170,7 @@ public class ManifestFileUtil {
     }
   }
 
-  public static void updateManifest(@NotNull VirtualFile file, final @Nullable String mainClass, final @Nullable List<String> classpath, final boolean replaceValues) {
+  public static void updateManifest(@NotNull final VirtualFile file, final @Nullable String mainClass, final @Nullable List<String> classpath, final boolean replaceValues) {
     final Manifest manifest = readManifest(file);
     final Attributes mainAttributes = manifest.getMainAttributes();
 
@@ -206,18 +206,23 @@ public class ManifestFileUtil {
 
     ManifestBuilder.setVersionAttribute(mainAttributes);
 
-    try {
-      final OutputStream outputStream = file.getOutputStream(ManifestFileUtil.class);
-      try {
-        manifest.write(outputStream);
+    ApplicationManager.getApplication().runWriteAction(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          final OutputStream outputStream = file.getOutputStream(ManifestFileUtil.class);
+          try {
+            manifest.write(outputStream);
+          }
+          finally {
+            outputStream.close();
+          }
+        }
+        catch (IOException e) {
+          LOG.info(e);
+        }
       }
-      finally {
-        outputStream.close();
-      }
-    }
-    catch (IOException e) {
-      LOG.info(e);
-    }
+    });
   }
 
   @NotNull
@@ -275,7 +280,7 @@ public class ManifestFileUtil {
     ApplicationManager.getApplication().assertIsDispatchThread();
     final Ref<IOException> exc = Ref.create(null);
     final VirtualFile file = new WriteAction<VirtualFile>() {
-      protected void run(final Result<VirtualFile> result) {
+      protected void run(@NotNull final Result<VirtualFile> result) {
         VirtualFile dir = directory;
         try {
           if (!dir.getName().equals(MANIFEST_DIR_NAME)) {

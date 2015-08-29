@@ -1,118 +1,123 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.intellij.vcs.log.graph;
 
-import com.intellij.vcs.log.graph.elements.Branch;
-import com.intellij.vcs.log.graph.elements.Edge;
-import com.intellij.vcs.log.graph.elements.Node;
-import com.intellij.vcs.log.graph.elements.NodeRow;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.Function;
+import com.intellij.util.NotNullFunction;
+import com.intellij.vcs.log.graph.api.GraphLayout;
+import com.intellij.vcs.log.graph.api.elements.GraphEdge;
+import com.intellij.vcs.log.graph.api.elements.GraphElement;
+import com.intellij.vcs.log.graph.api.permanent.PermanentCommitsInfo;
+import com.intellij.vcs.log.graph.impl.facade.ReachableNodes;
+import com.intellij.vcs.log.graph.impl.print.EdgesInRowGenerator;
+import com.intellij.vcs.log.graph.impl.print.GraphElementComparatorByLayoutIndex;
+import com.intellij.vcs.log.graph.parser.CommitParser;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
-/**
- * @author erokhins
- */
+import static com.intellij.vcs.log.graph.parser.EdgeNodeCharConverter.toChar;
+
 public class GraphStrUtils {
 
-  public static String toStr(Branch branch) {
-    if (branch.getUpCommitHash() == branch.getDownCommitHash()) {
-      return Integer.toHexString(branch.getUpCommitHash());
-    }
-    else {
-      return Integer.toHexString(branch.getUpCommitHash()) + '#' + Integer.toHexString(branch.getDownCommitHash());
-    }
-  }
+  public static final Comparator<GraphElement> GRAPH_ELEMENT_COMPARATOR =
+    new GraphElementComparatorByLayoutIndex(new NotNullFunction<Integer, Integer>() {
+      @NotNull
+      @Override
+      public Integer fun(Integer nodeIndex) {
+        return 0;
+      }
+    });
 
-  /**
-   * @return example:
-   *         a0:a1:USUAL:a0
-   *         up:down:type:branch
-   */
-  public static String toStr(Edge edge) {
+  public static <CommitId> String commitsInfoToStr(PermanentCommitsInfo<CommitId> commitsInfo, int size, Function<CommitId, String> toStr) {
     StringBuilder s = new StringBuilder();
-    s.append(Integer.toHexString(edge.getUpNode().getCommitIndex())).append(":");
-    s.append(Integer.toHexString(edge.getDownNode().getCommitIndex())).append(":");
-    s.append(edge.getType()).append(":");
-    s.append(toStr(edge.getBranch()));
-    return s.toString();
-  }
+    for (int i = 0; i < size; i++) {
+      if (i != 0) s.append("\n");
 
-  public static String toStr(List<Edge> edges) {
-    StringBuilder s = new StringBuilder();
-    List<String> edgeStrings = new ArrayList<String>();
-    for (Edge edge : edges) {
-      edgeStrings.add(toStr(edge));
-    }
+      CommitId commitId = commitsInfo.getCommitId(i);
+      int commitIndex = commitsInfo.getNodeId(commitId);
+      long timestamp = commitsInfo.getTimestamp(i);
 
-    Collections.sort(edgeStrings);
-    if (edgeStrings.size() > 0) {
-      s.append(edgeStrings.get(0));
-    }
-    for (int i = 1; i < edges.size(); i++) {
-      s.append(" ").append(edgeStrings.get(i));
+      s.append(commitIndex).append(CommitParser.SEPARATOR);
+      s.append(toStr.fun(commitId)).append(CommitParser.SEPARATOR);
+      s.append(timestamp);
     }
     return s.toString();
   }
 
-
-  /**
-   * @return example:
-   *         a0|-|-a0:a1:USUAL:a0|-COMMIT_NODE|-a0|-0
-   *         <p/>
-   *         explanation:
-   *         getCommitHash|-upEdges|-downEdges|-NodeType|-branch|-rowIndex
-   */
-
-  public static String toStr(Node node) {
+  public static String permanentGraphLayoutModelToStr(GraphLayout graphLayout, int nodesCount) {
     StringBuilder s = new StringBuilder();
-    s.append(Integer.toHexString(node.getCommitIndex())).append("|-");
-    s.append(toStr(node.getUpEdges())).append("|-");
-    s.append(toStr(node.getDownEdges())).append("|-");
-    s.append(node.getType()).append("|-");
-    s.append(toStr(node.getBranch())).append("|-");
-    s.append(node.getRowIndex());
-    return s.toString();
-  }
+    for (int nodeIndex = 0; nodeIndex < nodesCount; nodeIndex++) {
+      if (nodeIndex != 0) s.append("\n");
 
-  public static String toStr(NodeRow row) {
-    StringBuilder s = new StringBuilder();
-    List<Node> nodes = row.getNodes();
-    List<String> nodesString = new ArrayList<String>();
-    for (Node node : nodes) {
-      nodesString.add(toStr(node));
-    }
-    Collections.sort(nodesString);
-
-    if (nodesString.size() > 0) {
-      s.append(nodesString.get(0));
-    }
-    for (int i = 1; i < nodesString.size(); i++) {
-      s.append("\n   ").append(nodesString.get(i));
+      s.append(graphLayout.getLayoutIndex(nodeIndex)).append(CommitParser.SEPARATOR).append(graphLayout.getOneOfHeadNodeIndex(nodeIndex));
     }
     return s.toString();
   }
 
-  /**
-   * @return textOfGraph in next format:
-   *         every row in separate line, if in row more that 1 node:
-   *         ...
-   *         first node text row
-   *         next node text row
-   *         next node text row
-   *         next row ...
-   */
-
-  public static String toStr(Graph graph) {
+  public static String containingBranchesGetterToStr(ReachableNodes reachableNodes, Set<Integer> branches, int nodesCount) {
     StringBuilder s = new StringBuilder();
-    List<NodeRow> rows = graph.getNodeRows();
-    if (rows.size() > 0) {
-      s.append(toStr(rows.get(0)));
-    }
-    for (int i = 1; i < rows.size(); i++) {
-      s.append("\n").append(toStr(rows.get(i)));
+    for (int nodeIndex = 0; nodeIndex < nodesCount; nodeIndex++) {
+      if (nodeIndex != 0) s.append("\n");
+
+      List<Integer> branchNodeIndexes = new ArrayList<Integer>(reachableNodes.getContainingBranches(nodeIndex, branches));
+      if (branchNodeIndexes.isEmpty()) {
+        s.append("none");
+        continue;
+      }
+
+      Collections.sort(branchNodeIndexes);
+      boolean first = true;
+      for (int branchNodeIndex : branchNodeIndexes) {
+        if (first) {
+          first = false;
+        }
+        else {
+          s.append(" ");
+        }
+
+        s.append(branchNodeIndex);
+      }
     }
     return s.toString();
   }
 
+  public static String edgesInRowToStr(@NotNull EdgesInRowGenerator edgesInRowGenerator, int nodesCount) {
+    StringBuilder s = new StringBuilder();
+    for (int i = 0; i < nodesCount; i++) {
+      if (i > 0) s.append("\n");
+      Set<GraphEdge> edgesInRow = edgesInRowGenerator.getEdgesInRow(i);
+      s.append(edgesToStr(edgesInRow));
+    }
+    return s.toString();
+  }
 
+  public static String edgesToStr(@NotNull Set<GraphEdge> edges) {
+    if (edges.isEmpty()) return "none";
+
+    List<GraphEdge> sortedEdges = new ArrayList<GraphEdge>(edges);
+    Collections.sort(sortedEdges, GRAPH_ELEMENT_COMPARATOR);
+
+    return StringUtil.join(sortedEdges, new Function<GraphEdge, String>() {
+      @Override
+      public String fun(GraphEdge graphEdge) {
+        return graphEdge.getUpNodeIndex() + "_" + graphEdge.getDownNodeIndex() + "_" + toChar(graphEdge.getType());
+      }
+    }, " ");
+  }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.download.impl;
 
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.AtomicDouble;
+import com.intellij.concurrency.SensitiveProgressWrapper;
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.Result;
@@ -30,7 +30,6 @@ import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.progress.util.AbstractProgressIndicatorBase;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
@@ -42,18 +41,15 @@ import com.intellij.util.concurrency.BoundedTaskExecutor;
 import com.intellij.util.containers.hash.LinkedHashMap;
 import com.intellij.util.download.DownloadableFileDescription;
 import com.intellij.util.download.FileDownloader;
-import com.intellij.util.io.UrlConnectionUtil;
+import com.intellij.util.io.HttpRequests;
 import com.intellij.util.net.IOExceptionDialog;
-import com.intellij.util.net.NetUtils;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.ide.PooledThreadExecutor;
 
 import javax.swing.*;
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -66,18 +62,16 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class FileDownloaderImpl implements FileDownloader {
   private static final Logger LOG = Logger.getInstance(FileDownloaderImpl.class);
-  private static final int CONNECTION_TIMEOUT = 60*1000;
-  private static final int READ_TIMEOUT = 60*1000;
-  @NonNls private static final String LIB_SCHEMA = "lib://";
+  private static final String LIB_SCHEMA = "lib://";
 
   private final List<? extends DownloadableFileDescription> myFileDescriptions;
-  private JComponent myParentComponent;
-  private @Nullable Project myProject;
+  private final JComponent myParentComponent;
+  @Nullable private final Project myProject;
   private String myDirectoryForDownloadedFilesPath;
   private final String myDialogTitle;
 
   public FileDownloaderImpl(@NotNull List<? extends DownloadableFileDescription> fileDescriptions,
-                            final @Nullable Project project,
+                            @Nullable Project project,
                             @Nullable JComponent parentComponent,
                             @NotNull String presentableDownloadName) {
     myProject = project;
@@ -145,7 +139,7 @@ public class FileDownloaderImpl implements FileDownloader {
       return null;
     }
 
-    Exception exception = exceptionRef.get();
+    @SuppressWarnings("ThrowableResultOfMethodCallIgnored") Exception exception = exceptionRef.get();
     if (exception != null) {
       final boolean tryAgain = IOExceptionDialog.showErrorDialog(myDialogTitle, exception.getMessage());
       if (tryAgain) {
@@ -252,9 +246,10 @@ public class FileDownloaderImpl implements FileDownloader {
 
   @Nullable
   private static VirtualFile chooseDirectoryForFiles(Project project, JComponent parentComponent) {
-    final FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
-    descriptor.setTitle(IdeBundle.message("dialog.directory.for.downloaded.files.title"));
-    final VirtualFile baseDir = project != null ? project.getBaseDir() : null;
+    FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
+      .withTitle(IdeBundle.message("dialog.directory.for.downloaded.files.title"))
+      .withDescription(IdeBundle.message("dialog.directory.for.downloaded.files.description"));
+    VirtualFile baseDir = project != null ? project.getBaseDir() : null;
     return FileChooser.chooseFile(descriptor, parentComponent, project, baseDir);
   }
 
@@ -284,7 +279,7 @@ public class FileDownloaderImpl implements FileDownloader {
       final File ioFile = pair.getFirst();
       VirtualFile libraryRootFile = new WriteAction<VirtualFile>() {
         @Override
-        protected void run(final Result<VirtualFile> result) {
+        protected void run(@NotNull Result<VirtualFile> result) {
           final String url = VfsUtil.getUrlForLibraryRoot(ioFile);
           LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile);
           result.setResult(VirtualFileManager.getInstance().refreshAndFindFileByUrl(url));
@@ -305,54 +300,25 @@ public class FileDownloaderImpl implements FileDownloader {
   }
 
   @NotNull
-  private static File downloadFile(final @NotNull DownloadableFileDescription fileDescription, final @NotNull File existingFile,
-                                   final @NotNull ProgressIndicator indicator) throws IOException {
-    final String presentableUrl = fileDescription.getPresentableDownloadUrl();
+  private static File downloadFile(@NotNull final DownloadableFileDescription description,
+                                   @NotNull final File existingFile,
+                                   @NotNull final ProgressIndicator indicator) throws IOException {
+    final String presentableUrl = description.getPresentableDownloadUrl();
     indicator.setText2(IdeBundle.message("progress.connecting.to.download.file.text", presentableUrl));
     indicator.setIndeterminate(true);
-    HttpURLConnection connection = (HttpURLConnection)new URL(fileDescription.getDownloadUrl()).openConnection();
-    connection.setConnectTimeout(CONNECTION_TIMEOUT);
-    connection.setReadTimeout(READ_TIMEOUT);
 
-    InputStream input = null;
-    BufferedOutputStream output = null;
+    return HttpRequests.request(description.getDownloadUrl()).connect(new HttpRequests.RequestProcessor<File>() {
+      @Override
+      public File process(@NotNull HttpRequests.Request request) throws IOException {
+        int size = request.getConnection().getContentLength();
+        if (existingFile.exists() && size == existingFile.length()) {
+          return existingFile;
+        }
 
-    boolean deleteFile = true;
-    File tempFile = null;
-    try {
-      final int responseCode = connection.getResponseCode();
-      if (responseCode != HttpURLConnection.HTTP_OK) {
-        throw new IOException(IdeBundle.message("error.connection.failed.with.http.code.N", responseCode));
+        indicator.setText2(IdeBundle.message("progress.download.file.text", description.getPresentableFileName(), presentableUrl));
+        return request.saveToFile(FileUtil.createTempFile("download.", ".tmp"), indicator);
       }
-
-      final int size = connection.getContentLength();
-      if (existingFile.exists() && size == existingFile.length()) {
-        return existingFile;
-      }
-
-      tempFile = FileUtil.createTempFile("downloaded", "file");
-      input = UrlConnectionUtil.getConnectionInputStreamWithException(connection, indicator);
-      output = new BufferedOutputStream(new FileOutputStream(tempFile));
-      indicator.setText2(IdeBundle.message("progress.download.file.text", fileDescription.getPresentableFileName(), presentableUrl));
-      indicator.setIndeterminate(size == -1);
-
-      NetUtils.copyStreamContent(indicator, input, output, size);
-
-      deleteFile = false;
-      return tempFile;
-    }
-    finally {
-      if (input != null) {
-        input.close();
-      }
-      if (output != null) {
-        output.close();
-      }
-      if (deleteFile && tempFile != null) {
-        FileUtil.delete(tempFile);
-      }
-      connection.disconnect();
-    }
+    });
   }
 
   @NotNull
@@ -379,7 +345,8 @@ public class FileDownloaderImpl implements FileDownloader {
     private final ProgressIndicator myParent;
     private final int myTasksCount;
     private final AtomicDouble myTotalFraction;
-    private LinkedHashMap<SubTaskProgressIndicator, String> myText2Stack = new LinkedHashMap<SubTaskProgressIndicator, String>();
+    private final Object myLock = new Object();
+    private final LinkedHashMap<SubTaskProgressIndicator, String> myText2Stack = new LinkedHashMap<SubTaskProgressIndicator, String>();
 
     private ConcurrentTasksProgressManager(ProgressIndicator parent, int tasksCount) {
       myParent = parent;
@@ -398,12 +365,17 @@ public class FileDownloaderImpl implements FileDownloader {
 
     public void setText2(@NotNull SubTaskProgressIndicator subTask, @Nullable String text) {
       if (text != null) {
-        myText2Stack.put(subTask, text);
+        synchronized (myLock) {
+          myText2Stack.put(subTask, text);
+        }
         myParent.setText2(text);
       }
       else {
-        myText2Stack.remove(subTask);
-        String prev = myText2Stack.getLastValue();
+        String prev;
+        synchronized (myLock) {
+          myText2Stack.remove(subTask);
+          prev = myText2Stack.getLastValue();
+        }
         if (prev != null) {
           myParent.setText2(prev);
         }
@@ -411,11 +383,12 @@ public class FileDownloaderImpl implements FileDownloader {
     }
   }
 
-  private static class SubTaskProgressIndicator extends AbstractProgressIndicatorBase {
+  private static class SubTaskProgressIndicator extends SensitiveProgressWrapper {
     private final AtomicDouble myFraction;
     private final ConcurrentTasksProgressManager myProgressManager;
 
     private SubTaskProgressIndicator(ConcurrentTasksProgressManager progressManager) {
+      super(progressManager.myParent);
       myProgressManager = progressManager;
       myFraction = new AtomicDouble();
     }
@@ -445,11 +418,6 @@ public class FileDownloaderImpl implements FileDownloader {
     public void finished() {
       setFraction(1);
       myProgressManager.setText2(this, null);
-    }
-
-    @Override
-    public boolean isCanceled() {
-      return super.isCanceled() || myProgressManager.myParent.isCanceled();
     }
   }
 }

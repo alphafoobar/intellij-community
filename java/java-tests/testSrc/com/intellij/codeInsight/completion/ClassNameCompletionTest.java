@@ -17,11 +17,15 @@ package com.intellij.codeInsight.completion;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.lookup.LookupManager;
+import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
+import com.intellij.codeInsight.template.impl.TemplateState;
+import com.intellij.lang.java.JavaDocumentationProvider;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.PsiClass;
 import com.intellij.testFramework.TestDataPath;
 
 import java.io.IOException;
@@ -54,6 +58,43 @@ public class ClassNameCompletionTest extends LightFixtureCompletionTestCase {
     configureByFile(path + "/before2.java");
     selectItem(myItems[0]);
     checkResultByFile(path + "/after2.java");
+  }
+
+  public void testDocAfterNew() throws Exception {
+    createClass("public class Time { Time() {} Time(long time) {} }");
+
+    String path = "/docAfterNew";
+
+    configureByFile(path + "/before1.java");
+    assertTrue(myItems != null && myItems.length >= 1);
+    String doc = new JavaDocumentationProvider().generateDoc(
+      (PsiClass)myItems[0].getObject(),
+      myFixture.getFile().findElementAt(myFixture.getEditor().getCaretModel().getOffset())
+    );
+
+    assertEquals(doc,
+                 "<html>Candidates for new <b>Time</b>() are:<br>&nbsp;&nbsp;<a href=\"psi_element://Time#Time()\">Time()</a><br>&nbsp;" +
+                 "&nbsp;<a href=\"psi_element://Time#Time(long)\">Time(long time)</a><br></html>");
+  }
+
+  public void testTypeParametersTemplate() throws Exception {
+    createClass("package pack; public interface Foo<T> {void foo(T t};");
+
+    String path = "/template";
+
+    TemplateManagerImpl.setTemplateTesting(getProject(), getTestRootDisposable());
+    configureByFile(path + "/before1.java");
+    selectItem(myItems[0]);
+    TemplateState state = TemplateManagerImpl.getTemplateState(myFixture.getEditor());
+    type("String");
+    assert state != null;
+    state.gotoEnd(false);
+    checkResultByFile(path + "/after1.java");
+
+    configureByFile(path + "/before2.java");
+    selectItem(myItems[0]);
+    assert TemplateManagerImpl.getTemplateState(myFixture.getEditor()) == null;
+    checkResultByFile(path +"/after2.java");
   }
 
   private void createClass(String text) {

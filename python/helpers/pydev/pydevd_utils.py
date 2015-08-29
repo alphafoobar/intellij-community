@@ -5,8 +5,29 @@ try:
 except:
     from urllib.parse import quote
 
+import os
 import pydevd_constants
+import sys
 import pydev_log
+
+def save_main_module(file, module_name):
+    # patch provided by: Scott Schlesier - when script is run, it does not
+    # use globals from pydevd:
+    # This will prevent the pydevd script from contaminating the namespace for the script to be debugged
+    # pretend pydevd is not the main module, and
+    # convince the file to be debugged that it was loaded as main
+    sys.modules[module_name] = sys.modules['__main__']
+    sys.modules[module_name].__name__ = module_name
+    from imp import new_module
+
+    m = new_module('__main__')
+    sys.modules['__main__'] = m
+    if hasattr(sys.modules[module_name], '__loader__'):
+        setattr(m, '__loader__', getattr(sys.modules[module_name], '__loader__'))
+    m.__file__ = file
+
+    return m
+
 
 def to_number(x):
     if is_string(x):
@@ -93,7 +114,35 @@ def quote_smart(s, safe='/'):
             s =  s.encode('utf-8')
 
         return quote(s, safe)
-        
-        
+
+
+def _get_project_roots(project_roots_cache=[]):
+    # Note: the project_roots_cache is the same instance among the many calls to the method
+    if not project_roots_cache:
+        roots = os.getenv('IDE_PROJECT_ROOTS', '').split(os.pathsep)
+        pydev_log.debug("IDE_PROJECT_ROOTS %s\n" % roots)
+        new_roots = []
+        for root in roots:
+            new_roots.append(os.path.normcase(root))
+        project_roots_cache.append(new_roots)
+    return project_roots_cache[-1] # returns the project roots with case normalized
+
+
+def is_in_project_roots(filename, filename_to_not_in_scope_cache={}):
+    # Note: the filename_to_not_in_scope_cache is the same instance among the many calls to the method
+    try:
+        return filename_to_not_in_scope_cache[filename]
+    except:
+        project_roots = _get_project_roots()
+        filename = os.path.normcase(filename)
+        for root in project_roots:
+            if filename.startswith(root):
+                filename_to_not_in_scope_cache[filename] = False
+                break
+        else: # for else (only called if the break wasn't reached).
+            filename_to_not_in_scope_cache[filename] = True
+
+        # at this point it must be loaded.
+        return filename_to_not_in_scope_cache[filename]
 
 

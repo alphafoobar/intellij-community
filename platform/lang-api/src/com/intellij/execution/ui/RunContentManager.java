@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,67 +18,73 @@ package com.intellij.execution.ui;
 import com.intellij.execution.Executor;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.util.messages.Topic;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
+/**
+ * The manager of tabs in the Run/Debug toolwindows.
+ *
+ * @see com.intellij.execution.ExecutionManager#getContentManager()
+ */
 public interface RunContentManager {
+  Topic<RunContentWithExecutorListener> TOPIC =
+    Topic.create("Run Content", RunContentWithExecutorListener.class);
 
-  DataKey<RunContentDescriptor> RUN_CONTENT_DESCRIPTOR = DataKey.create("RUN_CONTENT_DESCRIPTOR");
+  /** @deprecated Use {@link LangDataKeys#RUN_CONTENT_DESCRIPTOR} instead (to be removed in IDEA 16) */
+  @SuppressWarnings("UnusedDeclaration")
+  DataKey<RunContentDescriptor> RUN_CONTENT_DESCRIPTOR = LangDataKeys.RUN_CONTENT_DESCRIPTOR;
 
+  /**
+   * Returns the content descriptor for the selected run configuration in the last activated Run/Debug toolwindow.
+   *
+   * @return the content descriptor, or null if there are no active run or debug configurations.
+   */
   @Nullable
   RunContentDescriptor getSelectedContent();
 
+  /**
+   * Returns the content descriptor for the selected run configuration in the toolwindow corresponding to the specified executor.
+   *
+   * @param executor the executor (e.g. {@link com.intellij.execution.executors.DefaultRunExecutor#getRunExecutorInstance()} or
+   *                 {@link com.intellij.execution.executors.DefaultDebugExecutor#getDebugExecutorInstance()})
+   * @return the content descriptor, or null if there is no selected run configuration in the specified toolwindow.
+   */
   @Nullable
-  RunContentDescriptor getSelectedContent(Executor runnerInfo);
+  RunContentDescriptor getSelectedContent(Executor executor);
 
+  /**
+   * Returns the list of content descriptors for all currently displayed run/debug configurations.
+   */
   @NotNull
   List<RunContentDescriptor> getAllDescriptors();
-  /**
-   * to reduce number of open contents RunContentManager reuses
-   * some of them during showRunContent (for ex. if a process was stopped) 
-   * @return content that will be reused by showRunContent
-   * @deprecated use {@link #getReuseContent(com.intellij.execution.Executor, ExecutionEnvironment)}
-   */
-  @Nullable
-  RunContentDescriptor getReuseContent(Executor requestor, @Nullable RunContentDescriptor contentToReuse);
 
   /**
-   * @deprecated use {@link #getReuseContent(ExecutionEnvironment)}
+   * To reduce number of open contents RunContentManager reuses
+   * some of them during showRunContent (for ex. if a process was stopped)
    */
-  @Deprecated
-  @Nullable
-  RunContentDescriptor getReuseContent(Executor requestor, @NotNull ExecutionEnvironment executionEnvironment);
-
   @Nullable
   RunContentDescriptor getReuseContent(@NotNull ExecutionEnvironment executionEnvironment);
-
-  /**
-   * @deprecated use {@link #getReuseContent(ExecutionEnvironment)}
-   */
-  @Deprecated
-  @Nullable
-  RunContentDescriptor getReuseContent(Executor requestor, DataContext dataContext);
 
   @Nullable
   RunContentDescriptor findContentDescriptor(Executor requestor, ProcessHandler handler);
 
-  void showRunContent(@NotNull Executor executor, RunContentDescriptor descriptor, RunContentDescriptor contentToReuse);
-  void showRunContent(@NotNull Executor executor, RunContentDescriptor descriptor);
+  void showRunContent(@NotNull Executor executor, @NotNull RunContentDescriptor descriptor, @Nullable RunContentDescriptor contentToReuse);
+
+  void showRunContent(@NotNull Executor executor, @NotNull RunContentDescriptor descriptor);
+
   void hideRunContent(@NotNull Executor executor, RunContentDescriptor descriptor);
+
   boolean removeRunContent(@NotNull Executor executor, RunContentDescriptor descriptor);
 
   void toFrontRunContent(Executor requestor, RunContentDescriptor descriptor);
+
   void toFrontRunContent(Executor requestor, ProcessHandler handler);
-
-  void addRunContentListener(RunContentListener listener);
-  void removeRunContentListener(RunContentListener listener);
-
-  void addRunContentListener(RunContentListener myContentListener, Executor executor);
 
   @Nullable
   ToolWindow getToolWindowByDescriptor(@NotNull RunContentDescriptor descriptor);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPolyVariantReference;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.PyFromImportStatement;
 import com.jetbrains.python.psi.PyImportElement;
 import com.jetbrains.python.psi.impl.PyReferenceExpressionImpl;
@@ -39,9 +38,9 @@ public class PyDocReferenceExpression extends PyReferenceExpressionImpl {
   }
 
   @NotNull
+  @Override
   public PsiPolyVariantReference getReference(PyResolveContext context) {
-    final PyExpression qualifier = getQualifier();
-    if (qualifier != null) {
+    if (isQualified()) {
       return new PyQualifiedReference(this, context);
     }
     final PsiElement importParent = PsiTreeUtil.getParentOfType(this, PyImportElement.class, PyFromImportStatement.class);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,31 @@
 package com.intellij.openapi.options;
 
 import com.intellij.openapi.components.RoamingType;
-import com.intellij.openapi.components.ServiceBean;
 import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.project.Project;
+import org.jetbrains.annotations.NotNull;
 
 public abstract class SchemesManagerFactory {
-  public static ExtensionPointName<ServiceBean> SCHEME_OWNER = ExtensionPointName.create("com.intellij.schemeOwner");  
+  /**
+   * directoryName — like "keymaps".
+   */
+  @NotNull
+  public abstract <T extends Scheme, E extends ExternalizableScheme> SchemesManager<T, E> createSchemesManager(@NotNull String directoryName,
+                                                                                                               @NotNull SchemeProcessor<E> processor,
+                                                                                                               @NotNull RoamingType roamingType);
 
-  public abstract <T extends Scheme, E extends ExternalizableScheme> SchemesManager<T,E> createSchemesManager(String fileSpec, SchemeProcessor<E> processor,
-                                                                            RoamingType roamingType);
+  @NotNull
+  public final <T extends Scheme, E extends ExternalizableScheme> SchemesManager<T, E> create(@NotNull String directoryName, @NotNull SchemeProcessor<E> processor) {
+    return createSchemesManager(directoryName, processor, RoamingType.DEFAULT);
+  }
 
-  public static SchemesManagerFactory getInstance(){
+  @NotNull
+  public static SchemesManagerFactory getInstance() {
     return ServiceManager.getService(SchemesManagerFactory.class);
   }
 
-
-  public abstract void updateConfigFilesFromStreamProviders();
+  @NotNull
+  public static SchemesManagerFactory getInstance(@NotNull Project project) {
+    return ServiceManager.getService(project, SchemesManagerFactory.class);
+  }
 }

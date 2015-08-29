@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.wm.IdeFocusManager;
 
 import javax.swing.*;
 import java.awt.*;
@@ -45,9 +46,11 @@ public class GotoLineNumberDialog extends DialogWrapper {
       try {
         final int offset = Integer.parseInt(myOffsetField.getText());
         if (offset < myEditor.getDocument().getTextLength()) {
+          myEditor.getCaretModel().removeSecondaryCarets();
           myEditor.getCaretModel().moveToOffset(offset);
           myEditor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
           myEditor.getSelectionModel().removeSelection();
+          IdeFocusManager.getGlobalInstance().requestFocus(myEditor.getContentComponent(), true);
           super.doOKAction();
         }
         return;
@@ -60,9 +63,11 @@ public class GotoLineNumberDialog extends DialogWrapper {
     if (lineNumber < 0) return;
 
     int columnNumber = getColumnNumber(currentPosition.column);
+    myEditor.getCaretModel().removeSecondaryCarets();
     myEditor.getCaretModel().moveToLogicalPosition(new LogicalPosition(Math.max(0, lineNumber - 1), Math.max(0, columnNumber - 1)));
     myEditor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
     myEditor.getSelectionModel().removeSelection();
+    IdeFocusManager.getGlobalInstance().requestFocus(myEditor.getContentComponent(), true);
     super.doOKAction();
   }
 

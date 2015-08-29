@@ -27,13 +27,11 @@ import org.zmlx.hg4idea.HgVcs;
 
 import java.io.IOException;
 
-import static com.intellij.openapi.vcs.Executor.*;
-import static hg4idea.test.HgExecutor.hg;
-import static hg4idea.test.HgExecutor.updateProject;
+import static com.intellij.openapi.vcs.Executor.cd;
+import static com.intellij.openapi.vcs.Executor.echo;
+import static com.intellij.openapi.vcs.Executor.touch;
+import static hg4idea.test.HgExecutor.*;
 
-/**
- * @author Nadya Zabrodina
- */
 public class HgMergeProviderTest extends HgPlatformTest {
   protected MergeProvider myMergeProvider;
 
@@ -59,7 +57,8 @@ public class HgMergeProviderTest extends HgPlatformTest {
     touch(aFile, "default");
     hg("add " + aFile);
     hg("commit -m 'create file in default branch'");
-    hg("merge branchA");
+    hgMergeWith("branchA");
+    myRepository.refresh(false, true);
     verifyMergeData(myRepository.findChild(aFile), "", "default", "a");
   }
 
@@ -76,7 +75,8 @@ public class HgMergeProviderTest extends HgPlatformTest {
     hg("up default");
     echo(aFile, " modify with b");
     hg("commit -m 'modify file in default'");
-    hg("merge branchA");
+    hgMergeWith("branchA");
+    myRepository.refresh(false, true);
     verifyMergeData(myRepository.findChild(aFile), "base", "base modify with b", "base modify with a");
   }
 

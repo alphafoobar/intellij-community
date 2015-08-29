@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,17 @@
  */
 package com.intellij.debugger.impl;
 
+import com.intellij.debugger.DebugEnvironment;
+import com.intellij.debugger.DebuggerManagerEx;
+import com.intellij.debugger.DefaultDebugEnvironment;
+import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.DebuggerUtils;
+import com.intellij.debugger.engine.JavaDebugProcess;
 import com.intellij.debugger.settings.DebuggerSettings;
-import com.intellij.debugger.ui.DebuggerPanelsManager;
+import com.intellij.debugger.ui.tree.render.BatchEvaluator;
+import com.intellij.execution.DefaultExecutionResult;
 import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.executors.DefaultDebugExecutor;
@@ -27,8 +34,12 @@ import com.intellij.execution.runners.JavaPatchableProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.options.SettingsEditor;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.xdebugger.XDebugProcess;
+import com.intellij.xdebugger.XDebugProcessStarter;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -46,43 +57,67 @@ public class GenericDebuggerRunner extends JavaPatchableProgramRunner<GenericDeb
   }
 
   @Override
-  protected RunContentDescriptor doExecute(final Project project,
-                                           final RunProfileState state,
-                                           final RunContentDescriptor contentToReuse,
-                                           final ExecutionEnvironment env) throws ExecutionException {
+  protected RunContentDescriptor doExecute(@NotNull RunProfileState state, @NotNull ExecutionEnvironment env) throws ExecutionException {
     FileDocumentManager.getInstance().saveAllDocuments();
-    return createContentDescriptor(project, state, contentToReuse, env);
+    return createContentDescriptor(state, env);
   }
 
   @Nullable
-  protected RunContentDescriptor createContentDescriptor(Project project, RunProfileState state,
-                                                         RunContentDescriptor contentToReuse,
-                                                         ExecutionEnvironment env) throws ExecutionException {
+  protected RunContentDescriptor createContentDescriptor(@NotNull RunProfileState state, @NotNull ExecutionEnvironment environment) throws ExecutionException {
     if (state instanceof JavaCommandLine) {
       final JavaParameters parameters = ((JavaCommandLine)state).getJavaParameters();
-      runCustomPatchers(parameters, env.getExecutor(), env.getRunProfile());
+      runCustomPatchers(parameters, environment.getExecutor(), environment.getRunProfile());
       RemoteConnection connection = DebuggerManagerImpl.createDebugParameters(parameters, true, DebuggerSettings.getInstance().DEBUGGER_TRANSPORT, "", false);
-      return attachVirtualMachine(project, state, contentToReuse, env, connection, true);
+      return attachVirtualMachine(state, environment, connection, true);
     }
     if (state instanceof PatchedRunnableState) {
-      final RemoteConnection connection = doPatch(new JavaParameters(), env.getRunnerSettings());
-      return attachVirtualMachine(project, state, contentToReuse, env, connection, true);
+      final RemoteConnection connection = doPatch(new JavaParameters(), environment.getRunnerSettings());
+      return attachVirtualMachine(state, environment, connection, true);
     }
     if (state instanceof RemoteState) {
-      final RemoteConnection connection = createRemoteDebugConnection((RemoteState)state, env.getRunnerSettings());
-      return attachVirtualMachine(project, state, contentToReuse, env, connection, false);
+      final RemoteConnection connection = createRemoteDebugConnection((RemoteState)state, environment.getRunnerSettings());
+      return attachVirtualMachine(state, environment, connection, false);
     }
 
     return null;
   }
 
   @Nullable
-  protected RunContentDescriptor attachVirtualMachine(Project project, RunProfileState state,
-                                                      RunContentDescriptor contentToReuse,
-                                                      ExecutionEnvironment env, RemoteConnection connection, boolean pollConnection)
-    throws ExecutionException {
-    final DebuggerPanelsManager manager = DebuggerPanelsManager.getInstance(project);
-    return manager.attachVirtualMachine(env.getExecutor(), this, env, state, contentToReuse, connection, pollConnection);
+  protected RunContentDescriptor attachVirtualMachine(RunProfileState state,
+                                                      @NotNull ExecutionEnvironment env,
+                                                      RemoteConnection connection,
+                                                      boolean pollConnection) throws ExecutionException {
+    DebugEnvironment environment = new DefaultDebugEnvironment(env, state, connection, pollConnection);
+    final DebuggerSession debuggerSession = DebuggerManagerEx.getInstanceEx(env.getProject()).attachVirtualMachine(environment);
+    if (debuggerSession == null) {
+      return null;
+    }
+
+    final DebugProcessImpl debugProcess = debuggerSession.getProcess();
+    if (debugProcess.isDetached() || debugProcess.isDetaching()) {
+      debuggerSession.dispose();
+      return null;
+    }
+    if (environment.isRemote()) {
+      // optimization: that way BatchEvaluator will not try to lookup the class file in remote VM
+      // which is an expensive operation when executed first time
+      debugProcess.putUserData(BatchEvaluator.REMOTE_SESSION_KEY, Boolean.TRUE);
+    }
+
+    return XDebuggerManager.getInstance(env.getProject()).startSession(env, new XDebugProcessStarter() {
+      @Override
+      @NotNull
+      public XDebugProcess start(@NotNull XDebugSession session) {
+        XDebugSessionImpl sessionImpl = (XDebugSessionImpl)session;
+        ExecutionResult executionResult = debugProcess.getExecutionResult();
+        sessionImpl.addExtraActions(executionResult.getActions());
+        if (executionResult instanceof DefaultExecutionResult) {
+          sessionImpl.addRestartActions(((DefaultExecutionResult)executionResult).getRestartActions());
+          sessionImpl.addExtraStopActions(((DefaultExecutionResult)executionResult).getAdditionalStopActions());
+        }
+        return JavaDebugProcess.create(session, debuggerSession);
+      }
+    }).getRunContentDescriptor();
   }
 
   private static RemoteConnection createRemoteDebugConnection(RemoteState connection, final RunnerSettings settings) {
@@ -92,7 +127,7 @@ public class GenericDebuggerRunner extends JavaPatchableProgramRunner<GenericDeb
 
     if (debuggerRunnerSettings != null) {
       remoteConnection.setUseSockets(debuggerRunnerSettings.getTransport() == DebuggerSettings.SOCKET_TRANSPORT);
-      remoteConnection.setAddress(debuggerRunnerSettings.DEBUG_PORT);
+      remoteConnection.setAddress(debuggerRunnerSettings.getDebugPort());
     }
 
     return remoteConnection;

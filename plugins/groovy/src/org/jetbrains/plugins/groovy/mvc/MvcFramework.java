@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,7 @@ package org.jetbrains.plugins.groovy.mvc;
 
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.compiler.options.CompileStepBeforeRunNoErrorCheck;
-import com.intellij.execution.CantRunException;
-import com.intellij.execution.ExecutionException;
-import com.intellij.execution.RunManagerEx;
-import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.*;
 import com.intellij.execution.configurations.*;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeView;
@@ -62,8 +59,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.GroovyFileType;
 import org.jetbrains.plugins.groovy.config.GroovyLibraryDescription;
+import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyNamesUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames;
-import org.jetbrains.plugins.groovy.refactoring.GroovyNamesUtil;
 
 import javax.swing.*;
 import java.io.File;
@@ -106,6 +103,8 @@ public abstract class MvcFramework {
     return modules;
   }
 
+  @NonNls
+  @NotNull
   public abstract String getApplicationDirectoryName();
 
   public void syncSdkAndLibrariesInPluginsModule(@NotNull Module module) {
@@ -141,6 +140,7 @@ public abstract class MvcFramework {
       if (commandLine == null) return;
 
       MvcConsole.executeProcess(module, commandLine, new Runnable() {
+        @Override
         public void run() {
           VirtualFile root = findAppRoot(module);
           if (root == null) return;
@@ -179,7 +179,7 @@ public abstract class MvcFramework {
     String appDirName = getApplicationDirectoryName();
 
     for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
-      if (root.findChild(appDirName) != null) return root;
+      if (root.isInLocalFileSystem() && root.findChild(appDirName) != null) return root;
     }
 
     return null;
@@ -227,25 +227,6 @@ public abstract class MvcFramework {
   public abstract String getUserLibraryName();
 
   protected abstract boolean isCoreJar(@NotNull VirtualFile localFile);
-
-  @Nullable
-  protected VirtualFile findCoreJar(@Nullable Module module) {
-    if (module == null) return null;
-
-    JavaPsiFacade javaFacade = JavaPsiFacade.getInstance(module.getProject());
-
-    for (PsiClass aClass : javaFacade.findClasses(getSomeFrameworkClass(), GlobalSearchScope.moduleWithLibrariesScope(module))) {
-      VirtualFile virtualFile = aClass.getContainingFile().getVirtualFile();
-      if (virtualFile != null && virtualFile.getFileSystem() instanceof JarFileSystem) {
-        VirtualFile localFile = PathUtil.getLocalFile(virtualFile);
-        if (isCoreJar(localFile)) {
-          return localFile;
-        }
-      }
-    }
-
-    return null;
-  }
 
   protected List<File> getImplicitClasspathRoots(@NotNull Module module) {
     final List<File> toExclude = new ArrayList<File>();
@@ -344,7 +325,7 @@ public abstract class MvcFramework {
                                                       @NotNull MvcCommand command) throws ExecutionException;
 
   protected static void ensureRunConfigurationExists(Module module, ConfigurationType configurationType, String name) {
-    final RunManagerEx runManager = RunManagerEx.getInstanceEx(module.getProject());
+    final RunManager runManager = RunManager.getInstance(module.getProject());
     for (final RunConfiguration runConfiguration : runManager.getConfigurationsList(configurationType)) {
       if (runConfiguration instanceof MvcRunConfiguration && ((MvcRunConfiguration)runConfiguration).getModule() == module) {
         return;
@@ -357,15 +338,19 @@ public abstract class MvcFramework {
     final MvcRunConfiguration configuration = (MvcRunConfiguration)runSettings.getConfiguration();
     configuration.setModule(module);
     runManager.addConfiguration(runSettings, false);
-    runManager.setActiveConfiguration(runSettings);
+    runManager.setSelectedConfiguration(runSettings);
 
     RunManagerEx.disableTasks(module.getProject(), configuration, CompileStepBeforeRun.ID, CompileStepBeforeRunNoErrorCheck.ID);
   }
 
+  @NonNls
+  @NotNull
   public abstract String getFrameworkName();
+
   public String getDisplayName() {
     return getFrameworkName();
   }
+
   public abstract Icon getIcon(); // 16*16
 
   public abstract Icon getToolWindowIcon(); // 13*13
@@ -425,13 +410,7 @@ public abstract class MvcFramework {
     if (sdk != null && sdk.getSdkType() instanceof JavaSdkType) {
       String path = StringUtil.trimEnd(sdk.getHomePath(), File.separator);
       if (StringUtil.isNotEmpty(path)) {
-        Map<String, String> env = params.getEnv();
-        if (env == null) {
-          env = new HashMap<String, String>();
-          params.setEnv(env);
-        }
-
-        env.put("JAVA_HOME", FileUtil.toSystemDependentName(path));
+        params.addEnv("JAVA_HOME", FileUtil.toSystemDependentName(path));
       }
     }
   }
@@ -634,7 +613,7 @@ public abstract class MvcFramework {
     if (res == null) return null;
 
     res = res.trim();
-    if (res.length() == 0) return null;
+    if (res.isEmpty()) return null;
 
     return res;
   }

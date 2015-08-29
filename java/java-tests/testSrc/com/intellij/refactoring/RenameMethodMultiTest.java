@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,19 @@
 package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.lang.java.JavaLanguage;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiMethod;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.rename.RenameProcessor;
+import com.intellij.refactoring.rename.naming.AutomaticRenamerFactory;
+import org.jetbrains.annotations.NotNull;
 import org.junit.Assert;
 
 /**
@@ -34,6 +40,7 @@ public class RenameMethodMultiTest extends MultiFileTestCase {
     return JavaTestUtil.getJavaTestDataPath();
   }
 
+  @NotNull
   @Override
   protected String getTestRoot() {
     return "/refactoring/renameMethod/multi/";
@@ -77,9 +84,14 @@ public class RenameMethodMultiTest extends MultiFileTestCase {
   }
 
   public void testAlignedMultilineParameters() throws Exception {
-    getCurrentCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS = true;
-    getCurrentCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
+    CommonCodeStyleSettings javaSettings = getCurrentCodeStyleSettings().getCommonSettings(JavaLanguage.INSTANCE);
+    javaSettings.ALIGN_MULTILINE_PARAMETERS = true;
+    javaSettings.ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     doTest("void test123(int i, int j)", "test123asd");
+  }
+
+  public void testAutomaticallyRenamedOverloads() throws Exception {
+    doAutomaticRenameMethod("p.Foo", "void foo()", "bar");
   }
 
   private void doTest(final String methodSignature, final String newName) throws Exception {
@@ -87,20 +99,37 @@ public class RenameMethodMultiTest extends MultiFileTestCase {
   }
 
   private void doTest(final String className, final String methodSignature, final String newName) throws Exception {
-    doTest(new PerformAction() {
-      @Override
-      public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
-        final JavaPsiFacade manager = getJavaFacade();
-        final PsiClass aClass = manager.findClass(className, GlobalSearchScope.moduleScope(myModule));
-        assertNotNull(aClass);
-        final PsiMethod methodBySignature = aClass.findMethodBySignature(manager.getElementFactory().createMethodFromText(
-                  methodSignature + "{}", null), false);
-        assertNotNull(methodBySignature);
-        final RenameProcessor renameProcessor = new RenameProcessor(myProject, methodBySignature, newName, false, false);
-        renameProcessor.run();
-        FileDocumentManager.getInstance().saveAllDocuments();
-      }
+    doTest((rootDir, rootAfter) -> {
+      final JavaPsiFacade manager = getJavaFacade();
+      final PsiClass aClass = manager.findClass(className, GlobalSearchScope.moduleScope(myModule));
+      assertNotNull(aClass);
+      final PsiMethod methodBySignature = aClass.findMethodBySignature(manager.getElementFactory().createMethodFromText(
+                methodSignature + "{}", null), false);
+      assertNotNull(methodBySignature);
+      final RenameProcessor renameProcessor = new RenameProcessor(myProject, methodBySignature, newName, false, false);
+      renameProcessor.run();
+      FileDocumentManager.getInstance().saveAllDocuments();
     });
   }
+
+  private void doAutomaticRenameMethod(final String className, final String methodSignature, final String newName) throws Exception {
+    doTest((rootDir, rootAfter) -> {
+      final JavaPsiFacade manager = getJavaFacade();
+      final PsiClass aClass = manager.findClass(className, GlobalSearchScope.moduleScope(myModule));
+      assertNotNull(aClass);
+      final PsiMethod methodBySignature = aClass.findMethodBySignature(manager.getElementFactory().createMethodFromText(
+        methodSignature + "{}", null), false);
+      assertNotNull(methodBySignature);
+
+      final RenameProcessor processor = new RenameProcessor(myProject, methodBySignature, newName, false, false);
+      for (AutomaticRenamerFactory factory : Extensions.getExtensions(AutomaticRenamerFactory.EP_NAME)) {
+        processor.addRenamerFactory(factory);
+      }
+      processor.run();
+      PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+      FileDocumentManager.getInstance().saveAllDocuments();
+    });
+  }
+
 
 }

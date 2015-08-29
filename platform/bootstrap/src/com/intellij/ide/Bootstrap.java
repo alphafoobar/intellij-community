@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.intellij.ide;
 
-import com.intellij.util.lang.UrlClassLoader;
+import com.intellij.idea.Main;
 
 import java.lang.reflect.Method;
 
@@ -24,13 +24,12 @@ import java.lang.reflect.Method;
  */
 public class Bootstrap {
   private static final String PLUGIN_MANAGER = "com.intellij.ide.plugins.PluginManager";
-  public static final String NO_SPLASH = "nosplash";
 
   private Bootstrap() { }
 
   public static void main(String[] args, String mainClass, String methodName) throws Exception {
-    UrlClassLoader newClassLoader = BootstrapClassLoaderUtil.initClassLoader(args.length == 0 || args.length == 1 &&
-                                                                                                 NO_SPLASH.equals(args[0]));
+    boolean updatePlugins = !Main.isCommandLine();
+    ClassLoader newClassLoader = BootstrapClassLoaderUtil.initClassLoader(updatePlugins);
 
     WindowsCommandLineProcessor.ourMirrorClass = Class.forName(WindowsCommandLineProcessor.class.getName(), true, newClassLoader);
 

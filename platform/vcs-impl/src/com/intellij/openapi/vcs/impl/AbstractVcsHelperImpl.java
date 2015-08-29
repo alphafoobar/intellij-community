@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,10 @@ import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.actions.AnnotateToggleAction;
 import com.intellij.openapi.vcs.annotate.AnnotationProvider;
 import com.intellij.openapi.vcs.annotate.FileAnnotation;
-import com.intellij.openapi.vcs.changes.*;
+import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
+import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.CommitResultHandler;
+import com.intellij.openapi.vcs.changes.LocalChangeList;
 import com.intellij.openapi.vcs.changes.committed.*;
 import com.intellij.openapi.vcs.changes.ui.*;
 import com.intellij.openapi.vcs.history.*;
@@ -73,6 +76,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.ui.ConfirmationDialog;
 import com.intellij.util.ui.ErrorTreeView;
 import com.intellij.util.ui.MessageCategory;
+import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -84,6 +88,10 @@ import java.io.IOException;
 import java.text.MessageFormat;
 import java.util.*;
 import java.util.List;
+
+import static com.intellij.openapi.ui.Messages.getQuestionIcon;
+import static com.intellij.util.ui.ConfirmationDialog.requestForConfirmation;
+import static java.text.MessageFormat.format;
 
 public class AbstractVcsHelperImpl extends AbstractVcsHelper {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vcs.impl.AbstractVcsHelperImpl");
@@ -115,15 +123,20 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
     }, VcsBundle.message("command.name.open.error.message.view"), null);
   }
 
-  public void showFileHistory(final VcsHistoryProvider vcsHistoryProvider, final FilePath path, final AbstractVcs vcs,
-                              final String repositoryPath) {
-    showFileHistory(vcsHistoryProvider, null, path, repositoryPath, vcs);
+  public void showFileHistory(@NotNull VcsHistoryProvider historyProvider,
+                              @NotNull FilePath path,
+                              @NotNull AbstractVcs vcs,
+                              @Nullable String repositoryPath) {
+    showFileHistory(historyProvider, vcs.getAnnotationProvider(), path, repositoryPath, vcs);
   }
 
-  public void showFileHistory(final VcsHistoryProvider vcsHistoryProvider, final AnnotationProvider annotationProvider, final FilePath path,
-                              final String repositoryPath, final AbstractVcs vcs) {
-    final FileHistoryRefresherI refresherI = new FileHistoryRefresher(vcsHistoryProvider, annotationProvider, path, repositoryPath, vcs);
-    refresherI.run(false, true);
+  public void showFileHistory(@NotNull VcsHistoryProvider historyProvider,
+                              @Nullable AnnotationProvider annotationProvider,
+                              @NotNull FilePath path,
+                              @Nullable String repositoryPath,
+                              @NotNull AbstractVcs vcs) {
+    FileHistoryRefresherI refresher = FileHistoryRefresher.findOrCreate(historyProvider, path, vcs);
+    refresher.run(false, true);
   }
 
   public void showRollbackChangesDialog(List<Change> changes) {
@@ -152,15 +165,14 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
 
     SelectFilesDialog dlg = SelectFilesDialog.init(myProject, files, prompt, confirmationOption, true, true, false);
     dlg.setTitle(title);
-    if (! confirmationOption.isPersistent()) {
+    if (!confirmationOption.isPersistent()) {
       dlg.setDoNotAskOption(null);
     }
-    dlg.show();
-    if (dlg.isOK()) {
+    if (dlg.showAndGet()) {
       final Collection<VirtualFile> selection = dlg.getSelectedFiles();
       // return items in the same order as they were passed to us
       final List<VirtualFile> result = new ArrayList<VirtualFile>();
-      for(VirtualFile file: files) {
+      for (VirtualFile file : files) {
         if (selection.contains(file)) {
           result.add(file);
         }
@@ -180,9 +192,9 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
                                                        @Nullable String okActionName,
                                                        @Nullable String cancelActionName) {
     if (files.size() == 1 && singleFilePromptTemplate != null) {
-      final String filePrompt = MessageFormat.format(singleFilePromptTemplate, files.get(0).getPresentableUrl());
-      if (ConfirmationDialog.requestForConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle,
-                                                    Messages.getQuestionIcon(), okActionName, cancelActionName)) {
+      final String filePrompt = format(singleFilePromptTemplate, files.get(0).getPresentableUrl());
+      if (requestForConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle,
+                                 getQuestionIcon(), okActionName, cancelActionName)) {
         return files;
       }
       return null;
@@ -191,11 +203,10 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
     final SelectFilePathsDialog dlg =
       new SelectFilePathsDialog(myProject, files, prompt, confirmationOption, okActionName, cancelActionName, true);
     dlg.setTitle(title);
-    if (! confirmationOption.isPersistent()) {
+    if (!confirmationOption.isPersistent()) {
       dlg.setDoNotAskOption(null);
     }
-    dlg.show();
-    return dlg.isOK() ? dlg.getSelectedFiles() : null;
+    return dlg.showAndGet() ? dlg.getSelectedFiles() : null;
   }
 
   @Nullable
@@ -370,7 +381,11 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
   }
 
   public void showAnnotation(FileAnnotation annotation, VirtualFile file, AbstractVcs vcs) {
-    OpenFileDescriptor openFileDescriptor = new OpenFileDescriptor(myProject, file);
+    showAnnotation(annotation, file, vcs, 0);
+  }
+
+  public void showAnnotation(FileAnnotation annotation, VirtualFile file, AbstractVcs vcs, int line) {
+    OpenFileDescriptor openFileDescriptor = new OpenFileDescriptor(myProject, file, line, 0);
     Editor editor = FileEditorManager.getInstance(myProject).openTextEditor(openFileDescriptor, true);
     if (editor == null) {
       Messages.showMessageDialog(VcsBundle.message("message.text.cannot.open.editor", file.getPresentableUrl()),
@@ -556,9 +571,8 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
     }
     final ChangesBrowserDialog dlg = new ChangesBrowserDialog(myProject, new CommittedChangesTableModel((List<CommittedChangeList>)changes,
                                                                                                         provider.getColumns(), false),
-                                                                         ChangesBrowserDialog.Mode.Choose, null);
-    dlg.show();
-    if (dlg.isOK()) {
+                                                              ChangesBrowserDialog.Mode.Choose, null);
+    if (dlg.showAndGet()) {
       return (T)dlg.getSelectedChangeList();
     }
     else {
@@ -591,8 +605,8 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
                                       final ChangeBrowserSettings settings,
                                       final int maxCount,
                                       String title) {
-    final RepositoryLocation location = CommittedChangesCache.getInstance(myProject).getLocationCache().getLocation(vcs, new FilePathImpl(root),
-                                                                                                                    false);
+    RepositoryLocationCache cache = CommittedChangesCache.getInstance(myProject).getLocationCache();
+    RepositoryLocation location = cache.getLocation(vcs, VcsUtil.getFilePath(root), false);
     openCommittedChangesTab(vcs.getCommittedChangesProvider(), location, settings, maxCount, title);
   }
 

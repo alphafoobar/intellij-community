@@ -19,6 +19,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.io.PersistentStringEnumerator;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.jps.builders.storage.BuildDataCorruptedException;
 
 import java.io.File;
 import java.io.IOException;
@@ -83,7 +84,7 @@ class DependencyContext {
       return myEnumerator.valueOf(s);
     }
     catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new BuildDataCorruptedException(e);
     }
   }
 
@@ -92,7 +93,7 @@ class DependencyContext {
       return StringUtil.isEmpty(s) ? myEmptyName : myEnumerator.enumerate(s);
     }
     catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new BuildDataCorruptedException(e);
     }
   }
 
@@ -101,7 +102,7 @@ class DependencyContext {
       myEnumerator.close();
     }
     catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new BuildDataCorruptedException(e);
     }
   }
 
@@ -111,6 +112,10 @@ class DependencyContext {
 
   public LoggerWrapper<Integer> getLogger(final com.intellij.openapi.diagnostic.Logger log) {
     return new LoggerWrapper<Integer>() {
+      public boolean isDebugEnabled() {
+        return log.isDebugEnabled();
+      }
+
       @Override
       public void debug(String comment, Integer s) {
         if (log.isDebugEnabled()) {

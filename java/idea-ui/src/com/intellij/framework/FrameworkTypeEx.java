@@ -19,7 +19,6 @@ import com.intellij.framework.addSupport.FrameworkSupportInModuleProvider;
 import com.intellij.ide.util.frameworkSupport.FrameworkRole;
 import com.intellij.ide.util.frameworkSupport.FrameworkSupportUtil;
 import com.intellij.openapi.extensions.ExtensionPointName;
-import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,26 +35,29 @@ public abstract class FrameworkTypeEx extends FrameworkType {
     super(id);
   }
 
+  /**
+   * Puts it under another framework.
+   * @see #getUnderlyingFrameworkTypeId()
+   */
   @Nullable
   public FrameworkGroup<?> getParentGroup() {
+    return null;
+  }
+
+  /**
+   * Puts it under framework group.
+   * @see #getParentGroup()
+   */
+  @Nullable
+  public String getUnderlyingFrameworkTypeId() {
     return null;
   }
 
   @NotNull
   public abstract FrameworkSupportInModuleProvider createProvider();
 
-  @Nullable
-  public String getUnderlyingFrameworkTypeId() {
-    return null;
-  }
-
   public <V extends FrameworkVersion> List<V> getVersions() {
     return Collections.emptyList();
-  }
-
-  @NotNull
-  public String[] getProjectCategories() {
-    return ArrayUtil.EMPTY_STRING_ARRAY;
   }
 
   public FrameworkRole[] getRoles() {
@@ -69,7 +71,8 @@ public abstract class FrameworkTypeEx extends FrameworkType {
       return FrameworkRole.UNKNOWN;
     }
     else {
-      return new FrameworkRole[]{parentGroup.getRole()};
+      FrameworkRole role = parentGroup.getRole();
+      return null == role ? FrameworkRole.UNKNOWN : new FrameworkRole[]{role};
     }
   }
 }

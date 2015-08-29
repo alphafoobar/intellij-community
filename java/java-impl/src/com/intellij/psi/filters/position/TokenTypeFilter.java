@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2014 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import com.intellij.psi.filters.ElementFilter;
 import com.intellij.psi.javadoc.PsiDocToken;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.xml.XmlToken;
-import com.intellij.util.ReflectionCache;
+import com.intellij.util.ReflectionUtil;
 
 /**
  * Created by IntelliJ IDEA.
@@ -31,9 +31,7 @@ import com.intellij.util.ReflectionCache;
  * To change this template use Options | File Templates.
  */
 public class TokenTypeFilter implements ElementFilter{
-  private IElementType myType = null;
-
-  public TokenTypeFilter(){}
+  private final IElementType myType;
 
   public TokenTypeFilter(IElementType type){
     myType = type;
@@ -41,7 +39,7 @@ public class TokenTypeFilter implements ElementFilter{
 
   @Override
   public boolean isClassAcceptable(Class hintClass){
-    return ReflectionCache.isAssignable(PsiDocToken.class, hintClass) || ReflectionCache.isAssignable(XmlToken.class, hintClass);
+    return ReflectionUtil.isAssignable(PsiDocToken.class, hintClass) || ReflectionUtil.isAssignable(XmlToken.class, hintClass);
   }
 
   @Override

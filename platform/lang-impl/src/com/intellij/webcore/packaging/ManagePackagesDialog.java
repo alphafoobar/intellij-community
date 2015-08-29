@@ -1,7 +1,22 @@
+/*
+ * Copyright 2000-2014 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.webcore.packaging;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.BrowserUtil;
+import com.intellij.ide.plugins.PluginManagerMain;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -23,17 +38,14 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.event.HyperlinkEvent;
-import javax.swing.event.HyperlinkListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import javax.swing.text.html.HTMLDocument;
-import javax.swing.text.html.HTMLFrameHyperlinkEvent;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
-import java.net.URL;
 import java.util.*;
 import java.util.List;
 
@@ -80,7 +92,7 @@ public class ManagePackagesDialog extends DialogWrapper {
     init();
     setTitle("Available Packages");
     myPackages = new JBList();
-    myNotificationArea = new PackagesNotificationPanel(project);
+    myNotificationArea = new PackagesNotificationPanel();
     myNotificationsAreaPlaceholder.add(myNotificationArea.getComponent(), BorderLayout.CENTER);
 
     final AnActionButton reloadButton = new AnActionButton("Reload List of Packages", AllIcons.Actions.Refresh) {
@@ -93,6 +105,7 @@ public class ManagePackagesDialog extends DialogWrapper {
           public void run() {
             try {
               myController.reloadAllPackages();
+              initModel();
               myPackages.setPaintBusy(false);
             }
             catch (final IOException e) {
@@ -159,7 +172,7 @@ public class ManagePackagesDialog extends DialogWrapper {
       }
     });
     myInstallButton.setEnabled(false);
-    myDescriptionTextArea.addHyperlinkListener(new MyHyperlinkListener());
+    myDescriptionTextArea.addHyperlinkListener(new PluginManagerMain.MyHyperlinkListener());
     addInstallAction();
     myInstalledPackages = new HashSet<String>();
     updateInstalledPackages();
@@ -231,7 +244,8 @@ public class ManagePackagesDialog extends DialogWrapper {
             }
 
             @Override
-            public void operationFinished(final String packageName, @Nullable final String errorDescription) {
+            public void operationFinished(final String packageName,
+                                          @Nullable final PackageManagementService.ErrorDescription errorDescription) {
               if (!ApplicationManager.getApplication().isDispatchThread()) {
                 ApplicationManager.getApplication().invokeLater(new Runnable() {
                   @Override
@@ -261,7 +275,7 @@ public class ManagePackagesDialog extends DialogWrapper {
     myPackages.repaint();
   }
 
-  private void handleInstallationFinished(String packageName, String errorDescription) {
+  private void handleInstallationFinished(String packageName, PackageManagementService.ErrorDescription errorDescription) {
     if (myPackageListener != null) {
       myPackageListener.operationFinished(packageName, errorDescription);
     }
@@ -275,16 +289,26 @@ public class ManagePackagesDialog extends DialogWrapper {
   }
 
   private void updateInstalledPackages() {
-    try {
-      Collection<InstalledPackage> installedPackages = myController.getInstalledPackages();
-      myInstalledPackages.clear();
-      for (InstalledPackage pkg : installedPackages) {
-        myInstalledPackages.add(pkg.getName());
+    ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          final Collection<InstalledPackage> installedPackages = myController.getInstalledPackages();
+          UIUtil.invokeLaterIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+              myInstalledPackages.clear();
+              for (InstalledPackage pkg : installedPackages) {
+                myInstalledPackages.add(pkg.getName());
+              }
+            }
+          });
+        }
+        catch(IOException e) {
+          LOG.info("Error updating list of installed packages:" + e);
+        }
       }
-    }
-    catch(IOException e) {
-      LOG.info("Error updating list of installed packages:" + e);
-    }
+    });
   }
 
   public void initModel() {
@@ -300,6 +324,7 @@ public class ManagePackagesDialog extends DialogWrapper {
             @Override
             public void run() {
               myPackages.setModel(myPackagesModel);
+              ((MyPackageFilter)myFilter).filter();
               doSelectPackage(mySelectedPackageName);
               setDownloadStatus(false);
             }
@@ -346,10 +371,24 @@ public class ManagePackagesDialog extends DialogWrapper {
     myFilter = new MyPackageFilter();
   }
 
-  public class MyPackageFilter extends FilterComponent {
+  public void setOptionsText(@NotNull String optionsText) {
+    myOptionsField.setText(optionsText);
+  }
 
+  private class MyPackageFilter extends FilterComponent {
     public MyPackageFilter() {
       super("PACKAGE_FILTER", 5);
+      getTextEditor().addKeyListener(new KeyAdapter() {
+        public void keyPressed(final KeyEvent e) {
+          if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+            e.consume();
+            filter();
+            myPackages.requestFocus();
+          } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+            onEscape(e);
+          }
+        }
+      });
     }
 
     public void filter() {
@@ -379,23 +418,28 @@ public class ManagePackagesDialog extends DialogWrapper {
 
       final ArrayList<RepoPackage> filtered = new ArrayList<RepoPackage>();
 
+      RepoPackage toSelect = null;
       for (RepoPackage repoPackage : toProcess) {
-        if (StringUtil.containsIgnoreCase(repoPackage.getName(), filter)) {
+        final String packageName = repoPackage.getName();
+        if (StringUtil.containsIgnoreCase(packageName, filter)) {
           filtered.add(repoPackage);
         }
         else {
           myFilteredOut.add(repoPackage);
         }
+        if (StringUtil.equalsIgnoreCase(packageName, filter)) toSelect = repoPackage;
       }
-      filter(filtered);
+      filter(filtered, toSelect);
     }
 
-    public void filter(List<RepoPackage> filtered){
+    public void filter(List<RepoPackage> filtered, @Nullable final RepoPackage toSelect){
       myView.clear();
       myPackages.clearSelection();
       for (RepoPackage repoPackage : filtered) {
         myView.add(repoPackage);
       }
+      if (toSelect != null)
+        myPackages.setSelectedValue(toSelect, true);
       Collections.sort(myView);
       fireContentsChanged(this, 0, myView.size());
     }
@@ -420,26 +464,7 @@ public class ManagePackagesDialog extends DialogWrapper {
     return myFilter;
   }
 
-  public static class MyHyperlinkListener implements HyperlinkListener {
-    public void hyperlinkUpdate(HyperlinkEvent e) {
-      if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
-        JEditorPane pane = (JEditorPane)e.getSource();
-        if (e instanceof HTMLFrameHyperlinkEvent) {
-          HTMLFrameHyperlinkEvent evt = (HTMLFrameHyperlinkEvent)e;
-          HTMLDocument doc = (HTMLDocument)pane.getDocument();
-          doc.processHTMLFrameHyperlinkEvent(evt);
-        }
-        else {
-          URL url = e.getURL();
-          if (url != null) {
-            BrowserUtil.browse(url);
-          }
-        }
-      }
-    }
-  }
-
-  public class MyPackageSelectionListener implements ListSelectionListener {
+  private class MyPackageSelectionListener implements ListSelectionListener {
     @Override
     public void valueChanged(ListSelectionEvent event) {
       myOptionsCheckBox.setEnabled(myPackages.getSelectedIndex() >= 0);
@@ -448,12 +473,11 @@ public class ManagePackagesDialog extends DialogWrapper {
       myVersionCheckBox.setSelected(false);
       myVersionComboBox.setEnabled(false);
       myOptionsField.setEnabled(false);
-      myDescriptionTextArea.setText("");
-
-      setDownloadStatus(true);
+      myDescriptionTextArea.setText("<html><body style='text-align: center;padding-top:20px;'>Loading...</body></html>");
       final Object pyPackage = myPackages.getSelectedValue();
       if (pyPackage instanceof RepoPackage) {
         final String packageName = ((RepoPackage)pyPackage).getName();
+        mySelectedPackageName = packageName;
         myVersionComboBox.removeAllItems();
         if (myVersionCheckBox.isEnabled()) {
           myController.fetchPackageVersions(packageName, new CatchingConsumer<List<String>, Exception>() {
@@ -483,14 +507,17 @@ public class ManagePackagesDialog extends DialogWrapper {
         myController.fetchPackageDetails(packageName, new CatchingConsumer<String, Exception>() {
           @Override
           public void consume(final String details) {
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
+            UIUtil.invokeLaterIfNeeded(new Runnable() {
               @Override
               public void run() {
                 if (myPackages.getSelectedValue() == pyPackage) {
                   myDescriptionTextArea.setText(details);
-                }
+                  myDescriptionTextArea.setCaretPosition(0);
+                }/* else {
+                   do nothing, because other package gets selected
+                }*/
               }
-            }, ModalityState.any());
+            });
           }
 
           @Override
@@ -501,8 +528,8 @@ public class ManagePackagesDialog extends DialogWrapper {
       }
       else {
         myInstallButton.setEnabled(false);
+        myDescriptionTextArea.setText("");
       }
-      setDownloadStatus(false);
     }
   }
 
@@ -537,7 +564,8 @@ public class ManagePackagesDialog extends DialogWrapper {
         RepoPackage repoPackage = (RepoPackage) value;
         String name = repoPackage.getName();
         if (myCurrentlyInstalling.contains(name)) {
-          name += " (installing)";
+          final String colorCode = UIUtil.isUnderDarcula() ? "589df6" : "0000FF";
+          name = "<html><body>" + repoPackage.getName() + " <font color=\"#" + colorCode + "\">(installing)</font></body></html>";
         }
         myNameLabel.setText(name);
         myRepositoryLabel.setText(repoPackage.getRepoUrl());

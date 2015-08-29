@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,32 +15,43 @@
  */
 package com.intellij.unscramble;
 
+import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.DataManager;
+import com.intellij.ide.ExporterToTextFile;
 import com.intellij.notification.NotificationGroup;
-import com.intellij.openapi.actionSystem.ActionManager;
-import com.intellij.openapi.actionSystem.ActionPlaces;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.colors.EditorColors;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Splitter;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.event.ChangeListener;
+import javax.swing.event.DocumentEvent;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
+import java.io.File;
+import java.util.*;
 import java.util.List;
 
 import static com.intellij.icons.AllIcons.Debugger.ThreadStates.*;
@@ -49,7 +60,7 @@ import static com.intellij.icons.AllIcons.Debugger.ThreadStates.*;
  * @author Jeka
  * @author Konstantin Bulenkov
  */
-public class ThreadDumpPanel extends JPanel {
+public class ThreadDumpPanel extends JPanel implements DataProvider {
   private static final Icon PAUSE_ICON_DAEMON = new LayeredIcon(Paused, Daemon_sign);
   private static final Icon LOCKED_ICON_DAEMON = new LayeredIcon(Locked, Daemon_sign);
   private static final Icon RUNNING_ICON_DAEMON = new LayeredIcon(Running, Daemon_sign);
@@ -58,15 +69,29 @@ public class ThreadDumpPanel extends JPanel {
   private static final Icon EDT_BUSY_ICON_DAEMON = new LayeredIcon(EdtBusy, Daemon_sign);
   private static final Icon IO_ICON_DAEMON = new LayeredIcon(IO, Daemon_sign);
   private final JBList myThreadList;
+  private final List<ThreadState> myThreadDump;
+  private final JPanel myFilterPanel;
+  private final SearchTextField myFilterField;
+  private final ExporterToTextFile myExporterToTextFile;
 
-  public ThreadDumpPanel(Project project, final ConsoleView consoleView, final DefaultActionGroup toolbarActions, final List<ThreadState> threadDump) {
+  public ThreadDumpPanel(final Project project, final ConsoleView consoleView, final DefaultActionGroup toolbarActions, final List<ThreadState> threadDump) {
     super(new BorderLayout());
-    final ThreadState[] data = threadDump.toArray(new ThreadState[threadDump.size()]);
-    DefaultListModel model = new DefaultListModel();
-    for (ThreadState threadState : data) {
-      model.addElement(threadState);
-    }
-    myThreadList = new JBList(model);
+    myThreadDump = threadDump;
+
+    myFilterField = new SearchTextField();
+    myFilterField.addDocumentListener(new DocumentAdapter() {
+      @Override
+      protected void textChanged(DocumentEvent e) {
+        updateThreadList();
+      }
+    });
+
+    myFilterPanel = new JPanel(new BorderLayout());
+    myFilterPanel.add(new JLabel("Filter:"), BorderLayout.WEST);
+    myFilterPanel.add(myFilterField);
+    myFilterPanel.setVisible(false);
+
+    myThreadList = new JBList(new DefaultListModel());
     myThreadList.setCellRenderer(new ThreadListCellRenderer());
     myThreadList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     myThreadList.addListSelectionListener(new ListSelectionListener() {
@@ -82,18 +107,85 @@ public class ThreadDumpPanel extends JPanel {
         myThreadList.repaint();
       }
     });
+
+    myExporterToTextFile = createToFileExporter(project, myThreadDump);
+
+    FilterAction filterAction = new FilterAction();
+    filterAction.registerCustomShortcutSet(ActionManager.getInstance().getAction(IdeActions.ACTION_FIND).getShortcutSet(), myThreadList);
+    toolbarActions.add(filterAction);
     toolbarActions.add(new CopyToClipboardAction(threadDump, project));
     toolbarActions.add(new SortThreadsAction());
-    //toolbarActions.add(new ShowRecentlyChanged());
+    toolbarActions.add(ActionManager.getInstance().getAction(IdeActions.ACTION_EXPORT_TO_TEXT_FILE));
     add(ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, toolbarActions, false).getComponent(), BorderLayout.WEST);
 
-    final Splitter splitter = new Splitter(false, 0.3f);
-    splitter.setFirstComponent(ScrollPaneFactory.createScrollPane(myThreadList, SideBorder.LEFT | SideBorder.RIGHT));
-    splitter.setSecondComponent(consoleView.getComponent());
+    JPanel leftPanel = new JPanel(new BorderLayout());
+    leftPanel.add(myFilterPanel, BorderLayout.NORTH);
+    leftPanel.add(ScrollPaneFactory.createScrollPane(myThreadList, SideBorder.LEFT | SideBorder.RIGHT), BorderLayout.CENTER);
 
+    final Splitter splitter = new Splitter(false, 0.3f);
+    splitter.setFirstComponent(leftPanel);
+    splitter.setSecondComponent(consoleView.getComponent());
     add(splitter, BorderLayout.CENTER);
 
     new ListSpeedSearch(myThreadList).setComparator(new SpeedSearchComparator(false, true));
+
+    updateThreadList();
+
+    final Editor editor = CommonDataKeys.EDITOR.getData(DataManager.getInstance().getDataContext(consoleView.getPreferredFocusableComponent()));
+    if (editor != null) {
+      editor.getDocument().addDocumentListener(new com.intellij.openapi.editor.event.DocumentAdapter() {
+        @Override
+        public void documentChanged(com.intellij.openapi.editor.event.DocumentEvent e) {
+          String filter = myFilterField.getText();
+          if (StringUtil.isNotEmpty(filter)) {
+            highlightOccurrences(filter, project, editor);
+          }
+        }
+      }, consoleView);
+    }
+  }
+
+  @Nullable
+  @Override
+  public Object getData(@NonNls String dataId) {
+    if (PlatformDataKeys.EXPORTER_TO_TEXT_FILE.is(dataId)) {
+      return myExporterToTextFile;
+    }
+    return null;
+  }
+
+  private void updateThreadList() {
+    String text = myFilterPanel.isVisible() ? myFilterField.getText() : "";
+    DefaultListModel model = (DefaultListModel)myThreadList.getModel();
+    model.clear();
+    for (ThreadState state : myThreadDump) {
+      if (StringUtil.containsIgnoreCase(state.getStackTrace(), text) || StringUtil.containsIgnoreCase(state.getName(), text)) {
+        //noinspection unchecked
+        model.addElement(state);
+      }
+    }
+    if (!model.isEmpty()) {
+      myThreadList.setSelectedIndex(0);
+    }
+    myThreadList.revalidate();
+    myThreadList.repaint();
+  }
+
+  private static void highlightOccurrences(String filter, Project project, Editor editor) {
+    final HighlightManager highlightManager = HighlightManager.getInstance(project);
+    EditorColorsManager colorManager = EditorColorsManager.getInstance();
+    final TextAttributes attributes = colorManager.getGlobalScheme().getAttributes(EditorColors.TEXT_SEARCH_RESULT_ATTRIBUTES);
+    String documentText = editor.getDocument().getText();
+    int i = -1;
+    while (true) {
+      int nextOccurrence = StringUtil.indexOfIgnoreCase(documentText, filter, i + 1);
+      if (nextOccurrence < 0) {
+        break;
+      }
+      i = nextOccurrence;
+      highlightManager.addOccurrenceHighlight(editor, i, i + filter.length(), attributes,
+                                               HighlightManager.HIDE_BY_TEXT_CHANGE, null, null);
+    }
   }
 
   private static Icon getThreadStateIcon(final ThreadState threadState) {
@@ -119,7 +211,7 @@ public class ThreadDumpPanel extends JPanel {
     return daemon ? RUNNING_ICON_DAEMON : Running;
   }
 
-  private static enum StateCode {RUN, RUN_IO, RUN_SOCKET, PAUSED, LOCKED, EDT, IDLE}
+  private enum StateCode {RUN, RUN_IO, RUN_SOCKET, PAUSED, LOCKED, EDT, IDLE}
   private static StateCode getThreadStateCode(final ThreadState state) {
     if (state.isSleeping()) return StateCode.PAUSED;
     if (state.isWaiting()) return StateCode.LOCKED;
@@ -231,7 +323,7 @@ public class ThreadDumpPanel extends JPanel {
 
     @Override
     public void update(AnActionEvent e) {
-      e.getPresentation().setIcon(COMPARATOR == BY_TYPE ? AllIcons.ObjectBrowser.SortByType : AllIcons.Icons.Inspector.SortByName);
+      e.getPresentation().setIcon(COMPARATOR == BY_TYPE ? AllIcons.ObjectBrowser.SortByType : AllIcons.ObjectBrowser.Sorted);
       e.getPresentation().setText(COMPARATOR == BY_TYPE ? TYPE_LABEL : NAME_LABEL);
     }
   }
@@ -255,6 +347,83 @@ public class ThreadDumpPanel extends JPanel {
       CopyPasteManager.getInstance().setContents(new StringSelection(buf.toString()));
 
       GROUP.createNotification("Full thread dump was successfully copied to clipboard", MessageType.INFO).notify(myProject);
+    }
+  }
+
+  private class FilterAction extends ToggleAction implements DumbAware {
+
+    FilterAction() {
+      super("Filter", "Show only threads containing a specific string", AllIcons.General.Filter);
+    }
+
+    @Override
+    public boolean isSelected(AnActionEvent e) {
+      return myFilterPanel.isVisible();
+    }
+
+    @Override
+    public void setSelected(AnActionEvent e, boolean state) {
+      myFilterPanel.setVisible(state);
+      if (state) {
+        IdeFocusManager.getInstance(getEventProject(e)).requestFocus(myFilterField, true);
+        myFilterField.selectText();
+      }
+      updateThreadList();
+    }
+  }
+
+  public static ExporterToTextFile createToFileExporter(Project project, List<ThreadState> threadStates) {
+    return new MyToFileExporter(project, threadStates);
+  }
+
+  private static class MyToFileExporter implements ExporterToTextFile {
+    private final Project myProject;
+    private final List<ThreadState> myThreadStates;
+
+    public MyToFileExporter(Project project, List<ThreadState> threadStates) {
+      myProject = project;
+      myThreadStates = threadStates;
+    }
+
+    @Override
+    public JComponent getSettingsEditor() {
+      return null;
+    }
+
+    @Override
+    public void addSettingsChangedListener(ChangeListener listener) throws TooManyListenersException {}
+
+    @Override
+    public void removeSettingsChangedListener(ChangeListener listener) {}
+
+    @Override
+    public String getReportText() {
+      StringBuilder sb = new StringBuilder();
+      for (ThreadState state : myThreadStates) {
+        sb.append(state.getStackTrace()).append("\n\n");
+      }
+      return sb.toString();
+    }
+
+    private static final @NonNls String DEFAULT_REPORT_FILE_NAME = "threads_report.txt";
+
+    @Override
+    public String getDefaultFilePath() {
+      final VirtualFile baseDir = myProject.getBaseDir();
+      if (baseDir != null) {
+        return baseDir.getPresentableUrl() + File.separator + DEFAULT_REPORT_FILE_NAME;
+      }
+      return null;
+    }
+
+    @Override
+    public void exportedTo(String filePath) {
+
+    }
+
+    @Override
+    public boolean canExport() {
+      return !myThreadStates.isEmpty();
     }
   }
 }
